@@ -10,7 +10,9 @@
 
 #include "base/rand_util.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/time/time.h"
+#include "cc/base/features.h"
 #include "cc/metrics/event_metrics.h"
 #include "cc/test/event_metrics_test_creator.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -32,6 +34,8 @@ using TraceId = EventMetrics::TraceId;
 using ::testing::ElementsAre;
 using ::testing::IsEmpty;
 
+constexpr uint64_t kResultId = 123456;
+
 }  // namespace
 
 class ScrollJankV4FrameStageTest : public testing::Test {
@@ -49,7 +53,8 @@ class ScrollJankV4FrameStageTest : public testing::Test {
 
 TEST_F(ScrollJankV4FrameStageTest, EmptyEventMetricsList) {
   EventMetrics::List events_metrics;
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(stages, IsEmpty());
 }
 
@@ -63,7 +68,8 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(
       stages,
       ElementsAre(
@@ -78,6 +84,8 @@ TEST_F(ScrollJankV4FrameStageTest,
                   .first_input_trace_id = TraceId(42),
               },
               /* synthetic= */ std::nullopt)}));
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
 }
 
 TEST_F(ScrollJankV4FrameStageTest,
@@ -90,8 +98,11 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(stages, IsEmpty());
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            std::nullopt);
 }
 
 TEST_F(ScrollJankV4FrameStageTest, FirstGestureScrollUpdateWhichDidNotScroll) {
@@ -103,7 +114,8 @@ TEST_F(ScrollJankV4FrameStageTest, FirstGestureScrollUpdateWhichDidNotScroll) {
        .did_scroll = false,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   // Unlike continued GSUs (regular or inertial), scroll jank should be
   // reported for FGSUs even if they didn't cause a scroll.
   EXPECT_THAT(
@@ -118,6 +130,8 @@ TEST_F(ScrollJankV4FrameStageTest, FirstGestureScrollUpdateWhichDidNotScroll) {
                    .max_abs_inertial_raw_delta_pixels = 0,
                    .first_input_trace_id = TraceId(42)},
               /* synthetic= */ std::nullopt)}));
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
 }
 
 TEST_F(ScrollJankV4FrameStageTest,
@@ -132,7 +146,7 @@ TEST_F(ScrollJankV4FrameStageTest,
       .trace_id = TraceId(42),
   }));
   auto stages = ScrollJankV4FrameStage::CalculateStages(
-      events_metrics, /* skip_non_damaging_events= */ false);
+      events_metrics, kResultId, /* skip_non_damaging_events= */ false);
   EXPECT_THAT(
       stages,
       ElementsAre(
@@ -145,6 +159,8 @@ TEST_F(ScrollJankV4FrameStageTest,
                    .max_abs_inertial_raw_delta_pixels = 0,
                    .first_input_trace_id = TraceId(42)},
               /* synthetic= */ std::nullopt)}));
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
 }
 
 TEST_F(ScrollJankV4FrameStageTest, SyntheticFirstGestureScrollUpdate) {
@@ -159,7 +175,8 @@ TEST_F(ScrollJankV4FrameStageTest, SyntheticFirstGestureScrollUpdate) {
       .dispatch_args =
           DispatchBeginFrameArgs{.frame_time = MillisecondsTicks(24)},
   }));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(
       stages,
       ElementsAre(
@@ -170,6 +187,8 @@ TEST_F(ScrollJankV4FrameStageTest, SyntheticFirstGestureScrollUpdate) {
                   .first_input_begin_frame_ts = MillisecondsTicks(24),
                   .first_input_trace_id = TraceId(42),
               })}));
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
 }
 
 TEST_F(ScrollJankV4FrameStageTest,
@@ -182,7 +201,8 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(
       stages,
       ElementsAre(ScrollJankV4FrameStage{ScrollUpdates(
@@ -193,6 +213,8 @@ TEST_F(ScrollJankV4FrameStageTest,
                .max_abs_inertial_raw_delta_pixels = 0,
                .first_input_trace_id = TraceId(42)},
           /* synthetic= */ std::nullopt)}));
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
 }
 
 TEST_F(ScrollJankV4FrameStageTest,
@@ -205,8 +227,11 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(stages, IsEmpty());
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            std::nullopt);
 }
 
 TEST_F(ScrollJankV4FrameStageTest, GestureScrollUpdateWhichDidNotScroll) {
@@ -218,8 +243,11 @@ TEST_F(ScrollJankV4FrameStageTest, GestureScrollUpdateWhichDidNotScroll) {
        .did_scroll = false,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(stages, IsEmpty());
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
 }
 
 TEST_F(ScrollJankV4FrameStageTest,
@@ -233,7 +261,7 @@ TEST_F(ScrollJankV4FrameStageTest,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
   auto stages = ScrollJankV4FrameStage::CalculateStages(
-      events_metrics, /* skip_non_damaging_events= */ false);
+      events_metrics, kResultId, /* skip_non_damaging_events= */ false);
   EXPECT_THAT(
       stages,
       ElementsAre(ScrollJankV4FrameStage{ScrollUpdates(
@@ -246,6 +274,8 @@ TEST_F(ScrollJankV4FrameStageTest,
               .first_input_trace_id = TraceId(42),
           },
           /* synthetic= */ std::nullopt)}));
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
 }
 
 TEST_F(ScrollJankV4FrameStageTest, SyntheticGestureScrollUpdate) {
@@ -259,7 +289,8 @@ TEST_F(ScrollJankV4FrameStageTest, SyntheticGestureScrollUpdate) {
        .trace_id = TraceId(42),
        .dispatch_args =
            DispatchBeginFrameArgs{.frame_time = MillisecondsTicks(24)}}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(
       stages,
       ElementsAre(ScrollJankV4FrameStage{ScrollUpdates(
@@ -268,6 +299,8 @@ TEST_F(ScrollJankV4FrameStageTest, SyntheticGestureScrollUpdate) {
               .first_input_begin_frame_ts = MillisecondsTicks(24),
               .first_input_trace_id = TraceId(42),
           })}));
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
 }
 
 TEST_F(ScrollJankV4FrameStageTest,
@@ -280,7 +313,8 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(
       stages,
       ElementsAre(ScrollJankV4FrameStage{ScrollUpdates(
@@ -293,6 +327,8 @@ TEST_F(ScrollJankV4FrameStageTest,
               .first_input_trace_id = TraceId(42),
           },
           /* synthetic= */ std::nullopt)}));
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
 }
 
 TEST_F(ScrollJankV4FrameStageTest,
@@ -305,8 +341,11 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(stages, IsEmpty());
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            std::nullopt);
 }
 
 TEST_F(ScrollJankV4FrameStageTest,
@@ -319,8 +358,11 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = false,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(stages, IsEmpty());
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
 }
 
 TEST_F(ScrollJankV4FrameStageTest,
@@ -334,7 +376,7 @@ TEST_F(ScrollJankV4FrameStageTest,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
   auto stages = ScrollJankV4FrameStage::CalculateStages(
-      events_metrics, /* skip_non_damaging_events= */ false);
+      events_metrics, kResultId, /* skip_non_damaging_events= */ false);
   EXPECT_THAT(
       stages,
       ElementsAre(ScrollJankV4FrameStage{ScrollUpdates(
@@ -347,22 +389,30 @@ TEST_F(ScrollJankV4FrameStageTest,
               .first_input_trace_id = TraceId(42),
           },
           /* synthetic= */ std::nullopt)}));
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
 }
 
 TEST_F(ScrollJankV4FrameStageTest, GestureScrollEnd) {
   EventMetrics::List events_metrics;
   events_metrics.push_back(metrics_creator_.CreateGestureScrollEnd(
       {.timestamp = MillisecondsTicks(16), .caused_frame_update = false}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(stages, ElementsAre(ScrollJankV4FrameStage{ScrollEnd{}}));
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
 }
 
 TEST_F(ScrollJankV4FrameStageTest, InertialGestureScrollEnd) {
   EventMetrics::List events_metrics;
   events_metrics.push_back(metrics_creator_.CreateInertialGestureScrollEnd(
       {.timestamp = MillisecondsTicks(16), .caused_frame_update = false}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(stages, ElementsAre(ScrollJankV4FrameStage{ScrollEnd{}}));
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
 }
 
 TEST_F(ScrollJankV4FrameStageTest, NonScrollEventType) {
@@ -371,7 +421,8 @@ TEST_F(ScrollJankV4FrameStageTest, NonScrollEventType) {
       metrics_creator_.CreateEventMetrics({.type = ui::EventType::kMouseMoved,
                                            .timestamp = MillisecondsTicks(16),
                                            .caused_frame_update = true}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(stages, IsEmpty());
 }
 
@@ -436,7 +487,8 @@ TEST_F(ScrollJankV4FrameStageTest, MultipleScrollUpdates) {
        .is_synthetic = false,
        .trace_id = TraceId(88)}));
 
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(
       stages,
       ElementsAre(
@@ -451,6 +503,13 @@ TEST_F(ScrollJankV4FrameStageTest, MultipleScrollUpdates) {
                   .first_input_trace_id = TraceId(11),
               },
               /* synthetic= */ std::nullopt)}));
+  for (size_t i = 0; i < 7; ++i) {
+    EXPECT_EQ(events_metrics[i]->AsScroll()->scroll_jank_v4_result_id(),
+              kResultId)
+        << "Index " << i;
+  }
+  EXPECT_EQ(events_metrics[7]->AsScroll()->scroll_jank_v4_result_id(),
+            std::nullopt);
 }
 
 TEST_F(ScrollJankV4FrameStageTest,
@@ -516,7 +575,7 @@ TEST_F(ScrollJankV4FrameStageTest,
        .trace_id = TraceId(88)}));
 
   auto stages = ScrollJankV4FrameStage::CalculateStages(
-      events_metrics, /* skip_non_damaging_events= */ false);
+      events_metrics, kResultId, /* skip_non_damaging_events= */ false);
   EXPECT_THAT(
       stages,
       ElementsAre(
@@ -531,12 +590,15 @@ TEST_F(ScrollJankV4FrameStageTest,
                   .first_input_trace_id = TraceId(11),
               },
               /* synthetic= */ std::nullopt)}));
+  for (const auto& event : events_metrics) {
+    EXPECT_EQ(event->AsScroll()->scroll_jank_v4_result_id(), kResultId);
+  }
 }
 
 TEST_F(ScrollJankV4FrameStageTest, MultipleScrollUpdatesIncludingSynthetic) {
   EventMetrics::List events_metrics;
   // Intentionally in "random" order to make sure that the calculation doesn't
-  // rely on the list being sorted (because the list isn't sorted in general).
+  // rely on the list being sorted (functionality isn't sorted in general).
   events_metrics.push_back(metrics_creator_.CreateGestureScrollUpdate(
       {.timestamp = MillisecondsTicks(4),
        .delta = -8'000,
@@ -599,7 +661,7 @@ TEST_F(ScrollJankV4FrameStageTest, MultipleScrollUpdatesIncludingSynthetic) {
        .trace_id = TraceId(88)}));
 
   auto stages = ScrollJankV4FrameStage::CalculateStages(
-      events_metrics, /* skip_non_damaging_events= */ false);
+      events_metrics, kResultId, /* skip_non_damaging_events= */ false);
   EXPECT_THAT(
       stages,
       ElementsAre(
@@ -617,6 +679,9 @@ TEST_F(ScrollJankV4FrameStageTest, MultipleScrollUpdatesIncludingSynthetic) {
                   .first_input_begin_frame_ts = MillisecondsTicks(24),
                   .first_input_trace_id = TraceId(44),
               })}));
+  for (const auto& event : events_metrics) {
+    EXPECT_EQ(event->AsScroll()->scroll_jank_v4_result_id(), kResultId);
+  }
 }
 
 TEST_F(ScrollJankV4FrameStageTest,
@@ -638,7 +703,8 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(22)}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(
       stages,
       ElementsAre(
@@ -654,6 +720,9 @@ TEST_F(ScrollJankV4FrameStageTest,
                   .first_input_trace_id = TraceId(22),
               },
               /* synthetic= */ std::nullopt)}));
+  for (const auto& event : events_metrics) {
+    EXPECT_EQ(event->AsScroll()->scroll_jank_v4_result_id(), kResultId);
+  }
 }
 
 TEST_F(ScrollJankV4FrameStageTest, ScrollUpdatesThenScrollEndForCurrentScroll) {
@@ -674,7 +743,8 @@ TEST_F(ScrollJankV4FrameStageTest, ScrollUpdatesThenScrollEndForCurrentScroll) {
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(22)}));
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(
       stages,
       ElementsAre(
@@ -689,6 +759,9 @@ TEST_F(ScrollJankV4FrameStageTest, ScrollUpdatesThenScrollEndForCurrentScroll) {
               },
               /* synthetic= */ std::nullopt)},
           ScrollJankV4FrameStage{ScrollEnd{}}));
+  for (const auto& event : events_metrics) {
+    EXPECT_EQ(event->AsScroll()->scroll_jank_v4_result_id(), kResultId);
+  }
 }
 
 TEST_F(ScrollJankV4FrameStageTest,
@@ -723,7 +796,8 @@ TEST_F(ScrollJankV4FrameStageTest,
        .is_synthetic = false,
        .trace_id = TraceId(44)}));
 
-  auto stages = ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
   EXPECT_THAT(
       stages,
       ElementsAre(ScrollJankV4FrameStage{ScrollUpdates(
@@ -736,6 +810,118 @@ TEST_F(ScrollJankV4FrameStageTest,
               .first_input_trace_id = TraceId(22),
           },
           /* synthetic= */ std::nullopt)}));
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            std::nullopt);
+  EXPECT_EQ(events_metrics[1]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
+  EXPECT_EQ(events_metrics[2]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
+  EXPECT_EQ(events_metrics[3]->AsScroll()->scroll_jank_v4_result_id(),
+            std::nullopt);
+}
+
+// Verifies that, when
+// `features::kOrderScrollJankV4EventMetricsByArrivedInRendererCompositor` is
+// disabled, `ScrollJankV4FrameStage::CalculateStages` orders scroll events
+// based on their input generation timestamp.
+//
+// Timestamp                1      2      3      4
+// Inertial scroll update:         IG----AiRC---------...
+// Inertial scroll end:     IG------------------AiRC--...
+// (IG = input generation, AiRC = arrived in renderer compositor)
+//
+// Since the IGSE's input generation timestamp (1 ms) is less than that of the
+// IGSU (2 ms), the expected ordering is [IGSE, IGSU].
+TEST_F(ScrollJankV4FrameStageTest,
+       OrdersEventsByGenerationTimestampWhenFeatureDisabled) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(
+      features::kOrderScrollJankV4EventMetricsByArrivedInRendererCompositor);
+
+  EventMetrics::List events_metrics;
+  events_metrics.push_back(metrics_creator_.CreateInertialGestureScrollUpdate(
+      {.timestamp = MillisecondsTicks(2),
+       .arrived_in_renderer_compositor_timestamp = MillisecondsTicks(3),
+       .delta = 40,
+       .caused_frame_update = true,
+       .did_scroll = true,
+       .is_synthetic = false,
+       .trace_id = TraceId(111)}));
+  events_metrics.push_back(metrics_creator_.CreateInertialGestureScrollEnd(
+      {.timestamp = MillisecondsTicks(1),
+       .arrived_in_renderer_compositor_timestamp = MillisecondsTicks(4),
+       .caused_frame_update = false}));
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
+  EXPECT_THAT(
+      stages,
+      ElementsAre(ScrollJankV4FrameStage{ScrollEnd{}},
+                  ScrollJankV4FrameStage{ScrollUpdates(
+                      Real{
+                          .first_input_generation_ts = MillisecondsTicks(2),
+                          .last_input_generation_ts = MillisecondsTicks(2),
+                          .has_inertial_input = true,
+                          .abs_total_raw_delta_pixels = 40,
+                          .max_abs_inertial_raw_delta_pixels = 40,
+                          .first_input_trace_id = TraceId(111),
+                      },
+                      /* synthetic= */ std::nullopt)}));
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
+  EXPECT_EQ(events_metrics[1]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
+}
+
+// Verifies that, when
+// `features::kOrderScrollJankV4EventMetricsByArrivedInRendererCompositor` is
+// enabled, `ScrollJankV4FrameStage::CalculateStages` orders scroll events
+// based on the timestamps of their arrival in the renderer compositor.
+//
+// Timestamp                1      2      3      4
+// Inertial scroll update:         IG----AiRC---------...
+// Inertial scroll end:     IG------------------AiRC--...
+// (IG = input generation, AiRC = arrived in renderer compositor)
+//
+// Since the IGSE's timestamp of arrival in the renderer compositor (4 ms) is
+// greater than that of the IGSU (3 ms), the expected ordering is [IGSU, IGSE].
+TEST_F(ScrollJankV4FrameStageTest,
+       OrdersEventsByArrivedInRendererCompositorWhenFeatureEnabled) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      features::kOrderScrollJankV4EventMetricsByArrivedInRendererCompositor);
+
+  EventMetrics::List events_metrics;
+  events_metrics.push_back(metrics_creator_.CreateInertialGestureScrollUpdate(
+      {.timestamp = MillisecondsTicks(2),
+       .arrived_in_renderer_compositor_timestamp = MillisecondsTicks(3),
+       .delta = 40,
+       .caused_frame_update = true,
+       .did_scroll = true,
+       .is_synthetic = false,
+       .trace_id = TraceId(111)}));
+  events_metrics.push_back(metrics_creator_.CreateInertialGestureScrollEnd(
+      {.timestamp = MillisecondsTicks(1),
+       .arrived_in_renderer_compositor_timestamp = MillisecondsTicks(4),
+       .caused_frame_update = false}));
+  auto stages =
+      ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
+  EXPECT_THAT(
+      stages,
+      ElementsAre(ScrollJankV4FrameStage{ScrollUpdates(
+                      Real{
+                          .first_input_generation_ts = MillisecondsTicks(2),
+                          .last_input_generation_ts = MillisecondsTicks(2),
+                          .has_inertial_input = true,
+                          .abs_total_raw_delta_pixels = 40,
+                          .max_abs_inertial_raw_delta_pixels = 40,
+                          .first_input_trace_id = TraceId(111),
+                      },
+                      /* synthetic= */ std::nullopt)},
+                  ScrollJankV4FrameStage{ScrollEnd{}}));
+  EXPECT_EQ(events_metrics[0]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
+  EXPECT_EQ(events_metrics[1]->AsScroll()->scroll_jank_v4_result_id(),
+            kResultId);
 }
 
 TEST_F(ScrollJankV4FrameStageTest, EmptyRealScrollUpdatesToOstream) {
@@ -836,7 +1022,7 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
 
   histogram_tester.ExpectUniqueSample(
       "Event.ScrollJank.FrameStageCalculationResult",
@@ -859,7 +1045,7 @@ TEST_F(ScrollJankV4FrameStageTest,
        .trace_id = TraceId(42)}));
   events_metrics.push_back(metrics_creator_.CreateGestureScrollEnd(
       {.timestamp = MillisecondsTicks(2), .caused_frame_update = false}));
-  ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
 
   histogram_tester.ExpectUniqueSample(
       "Event.ScrollJank.FrameStageCalculationResult",
@@ -875,7 +1061,7 @@ TEST_F(ScrollJankV4FrameStageTest, FrameStageCalculationResultScrollEndOnly) {
   EventMetrics::List events_metrics;
   events_metrics.push_back(metrics_creator_.CreateGestureScrollEnd(
       {.timestamp = MillisecondsTicks(1), .caused_frame_update = false}));
-  ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
 
   histogram_tester.ExpectUniqueSample(
       "Event.ScrollJank.FrameStageCalculationResult",
@@ -904,7 +1090,7 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
 
   histogram_tester.ExpectUniqueSample(
       "Event.ScrollJank.FrameStageCalculationResult",
@@ -923,7 +1109,7 @@ TEST_F(ScrollJankV4FrameStageTest,
       {.timestamp = MillisecondsTicks(1), .caused_frame_update = false}));
   events_metrics.push_back(metrics_creator_.CreateGestureScrollEnd(
       {.timestamp = MillisecondsTicks(2), .caused_frame_update = false}));
-  ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
 
   histogram_tester.ExpectUniqueSample(
       "Event.ScrollJank.FrameStageCalculationResult",
@@ -951,7 +1137,7 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
 
   histogram_tester.ExpectUniqueSample(
       "Event.ScrollJank.FrameStageCalculationResult",
@@ -980,7 +1166,7 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
 
   histogram_tester.ExpectUniqueSample(
       "Event.ScrollJank.FrameStageCalculationResult",
@@ -1011,7 +1197,7 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
 
   histogram_tester.ExpectUniqueSample(
       "Event.ScrollJank.FrameStageCalculationResult",
@@ -1035,7 +1221,7 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
 
   histogram_tester.ExpectUniqueSample(
       "Event.ScrollJank.FrameStageCalculationResult",
@@ -1069,7 +1255,7 @@ TEST_F(ScrollJankV4FrameStageTest, FrameStageCalculationResultMultipleIssues) {
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
 
   histogram_tester.ExpectUniqueSample(
       "Event.ScrollJank.FrameStageCalculationResult",
@@ -1096,7 +1282,7 @@ TEST_F(ScrollJankV4FrameStageTest,
        .did_scroll = true,
        .is_synthetic = false,
        .trace_id = TraceId(42)}));
-  ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
 
   histogram_tester.ExpectUniqueSample(
       "Event.ScrollJank.FrameStageCalculationResult",
@@ -1120,7 +1306,7 @@ TEST_F(ScrollJankV4FrameStageTest,
        .trace_id = TraceId(42)}));
   events_metrics.push_back(metrics_creator_.CreateGestureScrollEnd(
       {.timestamp = MillisecondsTicks(2), .caused_frame_update = true}));
-  ScrollJankV4FrameStage::CalculateStages(events_metrics);
+  ScrollJankV4FrameStage::CalculateStages(events_metrics, kResultId);
 
   histogram_tester.ExpectUniqueSample(
       "Event.ScrollJank.FrameStageCalculationResult",

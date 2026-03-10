@@ -85,7 +85,7 @@ class VIEWS_EXPORT BubbleDialogModelHost : public BubbleDialogDelegate,
   // BubbleDialogDelegate::CreateBubble() which returns a Widget that has taken
   // ownership of the bubble. Widget::Show() finally shows the bubble.
   BubbleDialogModelHost(std::unique_ptr<ui::DialogModel> model,
-                        View* anchor_view,
+                        views::BubbleAnchor anchor,
                         BubbleBorder::Arrow arrow,
                         bool autosize = true);
 
@@ -93,7 +93,7 @@ class VIEWS_EXPORT BubbleDialogModelHost : public BubbleDialogDelegate,
   // ::CreateModal().
   BubbleDialogModelHost(base::PassKey<BubbleDialogModelHost>,
                         std::unique_ptr<ui::DialogModel> model,
-                        View* anchor_view,
+                        views::BubbleAnchor anchor,
                         BubbleBorder::Arrow arrow,
                         ui::mojom::ModalType modal_type,
                         bool autosize);
@@ -110,6 +110,7 @@ class VIEWS_EXPORT BubbleDialogModelHost : public BubbleDialogDelegate,
   // GetInitiallyFocusedView().
   View* GetInitiallyFocusedView() override;
   void OnWidgetInitialized() override;
+  bool OnCloseRequested(views::Widget::ClosedReason close_reason) override;
 
   // ui::DialogModelHost:
   void Close() override;

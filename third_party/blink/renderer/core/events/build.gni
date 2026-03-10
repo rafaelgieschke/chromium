@@ -45,8 +45,6 @@ blink_core_sources_events = [
   "mouse_event.h",
   "navigator_events.cc",
   "navigator_events.h",
-  "overscroll_event.cc",
-  "overscroll_event.h",
   "page_transition_event.cc",
   "page_transition_event.h",
   "pointer_event.cc",
@@ -92,6 +90,8 @@ blink_core_sources_events = [
   "visual_viewport_scroll_event.h",
   "web_input_event_conversion.cc",
   "web_input_event_conversion.h",
+  "web_mcp_event.cc",
+  "web_mcp_event.h",
   "wheel_event.cc",
   "wheel_event.h",
 ]

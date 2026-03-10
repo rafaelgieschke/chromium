@@ -9,11 +9,11 @@
 #include <utility>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/no_destructor.h"
+#include "base/scoped_observation.h"
 #include "base/timer/mock_timer.h"
 #include "chromeos/ash/services/device_sync/cryptauth_enrollment_constants.h"
 #include "chromeos/ash/services/device_sync/cryptauth_enrollment_result.h"
@@ -303,12 +303,10 @@ class DeviceSyncCryptAuthV2EnrollerImplTest
     CryptAuthKeyRegistryImpl::RegisterPrefs(pref_service_.registry());
     key_registry_ = CryptAuthKeyRegistryImpl::Factory::Create(&pref_service_);
 
-    client_factory_->AddObserver(this);
+    mock_cryptauth_client_factory_observation_.Observe(client_factory_.get());
   }
 
-  ~DeviceSyncCryptAuthV2EnrollerImplTest() override {
-    client_factory_->RemoveObserver(this);
-  }
+  ~DeviceSyncCryptAuthV2EnrollerImplTest() override = default;
 
   // testing::Test:
   void SetUp() override {
@@ -420,7 +418,7 @@ class DeviceSyncCryptAuthV2EnrollerImplTest
              name_key_pair : expected_new_keys) {
       const CryptAuthKeyBundle::Name& bundle_name = name_key_pair.first;
       const CryptAuthKey& key = *name_key_pair.second;
-      ASSERT_TRUE(base::Contains(key_creator()->keys_to_create(), bundle_name));
+      ASSERT_TRUE(key_creator()->keys_to_create().contains(bundle_name));
       const CryptAuthKeyCreator::CreateKeyData& create_key_data =
           key_creator()->keys_to_create().find(bundle_name)->second;
 
@@ -533,6 +531,10 @@ class DeviceSyncCryptAuthV2EnrollerImplTest
   std::optional<CryptAuthEnrollmentResult> enrollment_result_;
 
   std::unique_ptr<CryptAuthV2Enroller> enroller_;
+
+  base::ScopedObservation<MockCryptAuthClientFactory,
+                          MockCryptAuthClientFactory::Observer>
+      mock_cryptauth_client_factory_observation_{this};
 };
 
 TEST_F(DeviceSyncCryptAuthV2EnrollerImplTest, SuccessfulEnrollment) {

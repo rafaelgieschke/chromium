@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
 #include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/css/cssom/css_numeric_value.h"
+#include "third_party/blink/renderer/core/css/parser/css_parser_local_context.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
 #include "third_party/blink/renderer/core/css/properties/computed_style_utils.h"
 #include "third_party/blink/renderer/core/css/properties/css_parsing_utils.h"
@@ -97,8 +98,14 @@ std::optional<TimelineOffset> TimelineOffset::Create(
   CSSParserTokenStream stream(css_text);
   stream.ConsumeWhitespace();
 
+  // TODO(crbug.com/490153753): CSS Typed OM currently lacks support for the
+  // random() function, preventing its use within the ViewTimeline API. Revisit
+  // once CSS Typed OM support for random() is implemented.
+  CSSParserLocalContext local_context =
+      CSSParserLocalContext::CreateWithoutPropertyForCSSOM();
   const CSSValue* value = css_parsing_utils::ConsumeAnimationRange(
       stream, *document.ElementSheet().Contents()->ParserContext(),
+      local_context,
       /* default_offset_percent */ default_percent, /*allow_auto=*/false);
 
   if (!value || !stream.AtEnd()) {
@@ -252,9 +259,14 @@ CSSValue* TimelineOffset::ParseOffset(Document* document, String css_text) {
   CSSParserTokenStream stream(css_text);
   stream.ConsumeWhitespace();
 
+  // TODO(crbug.com/490153753): CSS Typed OM currently lacks support for the
+  // random() function, preventing its use within the ViewTimeline API. Revisit
+  // once CSS Typed OM support for random() is implemented.
+  CSSParserLocalContext local_context =
+      CSSParserLocalContext::CreateWithoutPropertyForCSSOM();
   CSSValue* value = css_parsing_utils::ConsumeLengthOrPercent(
       stream, *document->ElementSheet().Contents()->ParserContext(),
-      CSSPrimitiveValue::ValueRange::kAll);
+      local_context, CSSPrimitiveValue::ValueRange::kAll);
 
   if (!stream.AtEnd()) {
     return nullptr;

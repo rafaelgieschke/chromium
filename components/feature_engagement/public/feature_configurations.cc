@@ -15,9 +15,6 @@
 #include "base/metrics/field_trial_params.h"
 #include "components/feature_engagement/public/ios_promo_feature_configuration.h"
 #endif  // BUILDFLAG(IS_IOS)
-#if BUILDFLAG(IS_CHROMEOS)
-#include "components/feature_engagement/public/scalable_iph_feature_configurations.h"
-#endif  // BUILDFLAG(IS_CHROMEOS)
 
 namespace {
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
@@ -714,6 +711,24 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
 
 #if BUILDFLAG(IS_ANDROID)
 
+  if (kIPHFuseboxAttachmentFeature.name == feature->name) {
+    // A config that allows measurement for user engagement on the fusebox
+    // attachment button by checking:
+    // * Interacted with attachment popup at least 1 time in 90 days.
+
+    FeatureConfig config;
+    config.valid = true;
+    config.availability = Comparator(ANY, 0);
+    config.session_rate = Comparator(ANY, 0);
+    config.trigger =
+        EventConfig("fusebox_attachment_popup_shown", Comparator(ANY, 0), 0, 0);
+    config.used = EventConfig("fusebox_attachment_popup_interacted_with",
+                              Comparator(ANY, 0), 0, 0);
+    config.event_configs.insert(EventConfig(
+        "fusebox_attachment_popup_used", Comparator(GREATER_THAN, 0), 28, 360));
+    return config;
+  }
+
   if (kIPHAccountSettingsHistorySync.name == feature->name) {
     // A config that allows the history sync opt-in toggle IPH to be shown
     // only once when a user who is signed-in but not syncing history and tabs
@@ -1054,15 +1069,19 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
     return config;
   }
   if (kIPHMostVisitedTilesCustomizationPinFeature.name == feature->name) {
+    // Allows an IPH for the MVT customization "Pin this shortcut" feature.
+    // * Only once in its lifetime.
+    // * (Per trigger logic) Only if the user has no Custom Tiles.
     FeatureConfig config;
     config.valid = true;
     config.availability = Comparator(ANY, 0);
     config.session_rate = Comparator(EQUAL, 0);
     config.trigger =
         EventConfig("most_visited_tiles_customization_pin_triggered",
-                    Comparator(LESS_THAN, 1), 1, 360);
-    config.used = EventConfig("most_visited_tiles_customization_pin_clicked",
-                              Comparator(EQUAL, 0), 90, 360);
+                    Comparator(EQUAL, 0), k10YearsInDays, k10YearsInDays);
+    config.used =
+        EventConfig("most_visited_tiles_customization_pin_clicked",
+                    Comparator(EQUAL, 0), k10YearsInDays, k10YearsInDays);
     return config;
   }
 
@@ -1119,6 +1138,22 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
   // A generic feature that always returns true.
   if (kIPHGenericAlwaysTriggerHelpUiFeature.name == feature->name) {
     return CreateAlwaysTriggerConfig(feature);
+  }
+
+  if (kIPHGlicPromoAndroidFeature.name == feature->name) {
+    // A config that allows the GLIC promo IPH to be shown.
+    // * Only once in its lifetime.
+    // * Only as long as the user hasn't opened the glic feature on Android.
+    FeatureConfig config;
+    config.valid = true;
+    config.availability = Comparator(ANY, 0);
+    config.session_rate = Comparator(EQUAL, 0);
+    config.trigger =
+        EventConfig("glic_promo_android_iph_trigger", Comparator(LESS_THAN, 1),
+                    k10YearsInDays, k10YearsInDays);
+    config.used = EventConfig("glic_android_used", Comparator(EQUAL, 0),
+                              k10YearsInDays, k10YearsInDays);
+    return config;
   }
 
   if (kIPHLowUserEngagementDetectorFeature.name == feature->name) {
@@ -2411,10 +2446,11 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
     // Cooldowns from other default browser promos.
     config.event_configs.insert(EventConfig("default_browser_promo_shown",
                                             Comparator(EQUAL, 0), 14, 360));
-    config.event_configs.insert(EventConfig("default_browser_fre_shown",
+    config.event_configs.insert(EventConfig(events::kIOSDefaultBrowserFREShown,
                                             Comparator(EQUAL, 0), 21, 360));
-    config.event_configs.insert(EventConfig(
-        "default_browser_promos_group_trigger", Comparator(EQUAL, 0), 14, 360));
+    config.event_configs.insert(
+        EventConfig(events::kDefaultBrowserPromosGroupTrigger,
+                    Comparator(EQUAL, 0), 14, 360));
     config.event_configs.insert(
         EventConfig(feature_engagement::events::kChromeOpened,
                     Comparator(GREATER_THAN_OR_EQUAL, 7), 360, 360));
@@ -2885,8 +2921,11 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
     config.availability = Comparator(ANY, 0);
     config.session_rate = Comparator(ANY, 0);
 
-    // This IPH showing does not affect the session count for other IPHs.
-    config.session_rate_impact.type = SessionRateImpact::Type::NONE;
+    // This promo blocks the Gemini Image Remix IPH in the same session.
+    config.session_rate_impact.type = SessionRateImpact::Type::EXPLICIT;
+    config.session_rate_impact.affected_features.emplace();
+    config.session_rate_impact.affected_features->push_back(
+        kIPHiOSGeminiImageRemixFeature.name);
     config.blocked_by.type = BlockedBy::Type::NONE;
     config.blocking.type = Blocking::Type::NONE;
 
@@ -2907,9 +2946,18 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
     config.availability = Comparator(ANY, 0);
     config.session_rate = Comparator(ANY, 0);
 
-    // This badge showing does not affect the session count for other IPHs.
-    config.session_rate_impact.type = SessionRateImpact::Type::NONE;
-    config.blocked_by.type = BlockedBy::Type::NONE;
+    // This promo impacts/blocks the Gemini Image Remix IPH in the same session.
+    config.session_rate_impact.type = SessionRateImpact::Type::EXPLICIT;
+    config.session_rate_impact.affected_features.emplace();
+    config.session_rate_impact.affected_features->push_back(
+        kIPHiOSGeminiImageRemixFeature.name);
+
+    // This promo is blocked by the Gemini Image Remix IPH being shown at the
+    // same time.
+    config.blocked_by.type = BlockedBy::Type::EXPLICIT;
+    config.blocked_by.affected_features.emplace();
+    config.blocked_by.affected_features->push_back(
+        kIPHiOSGeminiImageRemixFeature.name);
     config.blocking.type = Blocking::Type::NONE;
 
     // Feature should show as long as the AI Hub was never used.
@@ -2997,14 +3045,42 @@ std::optional<FeatureConfig> GetClientSideFeatureConfig(
     return config;
   }
 
-#endif  // BUILDFLAG(IS_IOS)
-
-#if BUILDFLAG(IS_CHROMEOS)
-  if (std::optional<FeatureConfig> scalable_iph_feature_config =
-          GetScalableIphFeatureConfig(feature)) {
-    return scalable_iph_feature_config;
+  if (kIPHiOSGeminiImageRemixFeature.name == feature->name) {
+    // Show the entry point once a year, but block it for 3 days if the user has
+    // seen another Gemini-related IPH.
+    FeatureConfig config;
+    config.valid = true;
+    config.availability = Comparator(ANY, 0);
+    config.session_rate = Comparator(EQUAL, 0);
+    config.storage_type = StorageType::DEVICE;
+    config.trigger = EventConfig(events::kIOSGeminiImageRemixIPHTrigger,
+                                 Comparator(LESS_THAN, 1), 365, 365);
+    config.event_configs.insert(EventConfig(
+        events::kIOSPageActionMenuIPHTrigger, Comparator(EQUAL, 0), 3, 365));
+    config.event_configs.insert(
+        EventConfig(events::kIOSGeminiFullscreenPromoTriggered,
+                    Comparator(EQUAL, 0), 3, 365));
+    return config;
   }
-#endif  // BUILDFLAG(IS_CHROMEOS)
+
+  if (kIPHiOSPinMostVisitedSiteFeature.name == feature->name) {
+    // Show the in-product help if 1) it has never been triggered, and 2) user
+    // has not pinned any site to the most visited tile.
+    FeatureConfig config;
+    config.valid = true;
+    config.availability = Comparator(ANY, 0);
+    config.session_rate = Comparator(EQUAL, 0);
+    config.trigger =
+        EventConfig("ios_pin_mvt_site_triggered", Comparator(EQUAL, 0),
+                    feature_engagement::kMaxStoragePeriod,
+                    feature_engagement::kMaxStoragePeriod);
+    config.used = EventConfig(events::kIOSPinMVTSiteUsed, Comparator(EQUAL, 0),
+                              feature_engagement::kMaxStoragePeriod,
+                              feature_engagement::kMaxStoragePeriod);
+    return config;
+  }
+
+#endif  // BUILDFLAG(IS_IOS)
 
 #if BUILDFLAG(IS_CHROMEOS)
   if (kIPHLauncherSearchHelpUiFeature.name == feature->name) {

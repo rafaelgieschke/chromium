@@ -38,17 +38,17 @@ InstalledWebappGeolocationBridge::~InstalledWebappGeolocationBridge() {
 void InstalledWebappGeolocationBridge::StartListeningForUpdates() {
   JNIEnv* env = base::android::AttachCurrentThread();
   if (java_ref_.is_null()) {
-    java_ref_.Reset(Java_InstalledWebappGeolocationBridge_create(
+    java_ref_.Reset(JInstalledWebappGeolocationBridgeClass::create(
         env, reinterpret_cast<intptr_t>(this),
         url::GURLAndroid::FromNativeGURL(env, url_)));
   }
-  Java_InstalledWebappGeolocationBridge_start(env, java_ref_, high_accuracy_);
+  java_ref_->start(env, high_accuracy_);
 }
 
 void InstalledWebappGeolocationBridge::StopUpdates() {
   if (!java_ref_.is_null()) {
     JNIEnv* env = base::android::AttachCurrentThread();
-    Java_InstalledWebappGeolocationBridge_stopAndDestroy(env, java_ref_);
+    java_ref_->stopAndDestroy(env);
     java_ref_.Reset();
   }
 }
@@ -134,19 +134,18 @@ void InstalledWebappGeolocationBridge::ReportCurrentPosition() {
   std::move(position_callback_).Run(std::move(current_position_));
 }
 
-void InstalledWebappGeolocationBridge::OnNewLocationAvailable(
-    JNIEnv* env,
-    jdouble latitude,
-    jdouble longitude,
-    jdouble time_stamp,
-    jboolean has_altitude,
-    jdouble altitude,
-    jboolean has_accuracy,
-    jdouble accuracy,
-    jboolean has_heading,
-    jdouble heading,
-    jboolean has_speed,
-    jdouble speed) {
+void InstalledWebappGeolocationBridge::OnNewLocationAvailable(JNIEnv* env,
+                                                              double latitude,
+                                                              double longitude,
+                                                              double time_stamp,
+                                                              bool has_altitude,
+                                                              double altitude,
+                                                              bool has_accuracy,
+                                                              double accuracy,
+                                                              bool has_heading,
+                                                              double heading,
+                                                              bool has_speed,
+                                                              double speed) {
   auto position = device::mojom::Geoposition::New();
   position->latitude = latitude;
   position->longitude = longitude;
@@ -176,7 +175,7 @@ void InstalledWebappGeolocationBridge::OnNewLocationAvailable(
 
 void InstalledWebappGeolocationBridge::OnNewErrorAvailable(
     JNIEnv* env,
-    std::string& message) {
+    const std::string& message) {
   OnLocationUpdate(device::mojom::GeopositionResult::NewError(
       device::mojom::GeopositionError::New(
           device::mojom::GeopositionErrorCode::kPositionUnavailable, message,

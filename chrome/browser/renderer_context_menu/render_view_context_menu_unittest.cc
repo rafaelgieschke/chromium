@@ -16,7 +16,6 @@
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
-#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
@@ -305,9 +304,9 @@ TEST_F(RenderViewContextMenuExtensionsTest,
                   &MenuManagerFactory::BuildServiceInstanceForTesting))));
 
   const Extension* extension1 = environment().MakeExtension(
-      base::Value::Dict(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+      base::DictValue(), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   const Extension* extension2 = environment().MakeExtension(
-      base::Value::Dict(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+      base::DictValue(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
 
   // Create two items in two extensions with same title.
   ASSERT_TRUE(
@@ -505,6 +504,41 @@ TEST_F(RenderViewContextMenuPrefsTest,
       menu->IsCommandIdEnabled(IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD));
 }
 
+#if BUILDFLAG(ENABLE_PRINT_PREVIEW)
+// Ensure PrintPreviewContextMenuObserver does not intercept "Search the web
+// for…" even when the observer is attached via Init() (i.e., the print preview
+// group is supported). The command should remain unknown to observers and be
+// enabled via the default RenderViewContextMenu path.
+TEST_F(RenderViewContextMenuPrefsTest,
+       SearchWebForNotInterceptedByPrintPreviewObserver) {
+  content::ContextMenuParams params = CreateParams(MenuItem::SELECTION);
+  params.page_url = GURL("https://example.com/");
+  // Avoid triggering AppendSearchProvider in Init() by simulating a
+  // misspelled word; this skips the search provider menu item construction
+  // while still attaching observers (including
+  // PrintPreviewContextMenuObserver).
+  params.misspelled_word = u"x";
+  auto menu = std::make_unique<TestRenderViewContextMenu>(
+      *web_contents()->GetPrimaryMainFrame(), params);
+
+  // Ensure a default search provider exists to avoid null deref in
+  // AppendSearchProvider during Init().
+  SetUserSelectedDefaultSearchProvider("https://search.example/",
+                                       /*supports_image_search=*/true);
+
+  // Attach all standard observers, including PrintPreviewContextMenuObserver.
+  menu->Init();
+
+  bool enabled_by_observer = true;
+  EXPECT_FALSE(menu->IsCommandIdKnown(IDC_CONTENT_CONTEXT_SEARCHWEBFOR,
+                                      &enabled_by_observer));
+
+  // Default path should still enable the command when navigation is allowed.
+  menu->set_selection_navigation_url(GURL("https://search.example/"));
+  EXPECT_TRUE(menu->IsCommandIdEnabled(IDC_CONTENT_CONTEXT_SEARCHWEBFOR));
+}
+#endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
+
 #if BUILDFLAG(IS_CHROMEOS)
 class RenderViewContextMenuDlpPrefsTest
     : public RenderViewContextMenuPrefsTest {
@@ -523,7 +557,7 @@ class RenderViewContextMenuDlpPrefsTest
         .AddRestriction(data_controls::kRestrictionClipboard,
                         data_controls::kLevelBlock);
 
-    base::Value::List rules;
+    base::ListValue rules;
     rules.Append(rule.Create());
     TestingBrowserProcess::GetGlobal()->local_state()->SetList(
         policy::policy_prefs::kDlpRulesList, std::move(rules));
@@ -1334,11 +1368,12 @@ TEST_F(RenderViewContextMenuPrefsTest, TranslateContextMenuHasIcon) {
                                  params);
   menu.SetBrowser(GetBrowser());
   menu.Init();
-  size_t index = 0;
-  raw_ptr<ui::MenuModel> model = nullptr;
   EXPECT_TRUE(menu.IsItemPresent(IDC_CONTENT_CONTEXT_TRANSLATE));
-  ASSERT_TRUE(menu.GetMenuModelAndItemIndex(IDC_CONTENT_CONTEXT_TRANSLATE,
-                                            &model, &index));
+  std::optional<std::pair<ui::MenuModel*, size_t>> model_and_index =
+      menu.GetMenuModelAndItemIndex(IDC_CONTENT_CONTEXT_TRANSLATE);
+  ASSERT_TRUE(model_and_index);
+  ui::MenuModel* model = model_and_index->first;
+  size_t index = model_and_index->second;
 // Context menu items typically do not have icons on Mac.
 #if BUILDFLAG(IS_MAC)
   EXPECT_TRUE(model->GetIconAt(index).IsEmpty());
@@ -1364,11 +1399,9 @@ TEST_F(RenderViewContextMenuPrefsTest,
   menu.SetBrowser(GetBrowser());
   menu.Init();
 
-  size_t index = 0;
-  raw_ptr<ui::MenuModel> model = nullptr;
-
-  ASSERT_TRUE(menu.GetMenuModelAndItemIndex(
-      IDC_CONTENT_CONTEXT_SEARCHLENSFORIMAGE, &model, &index));
+  std::optional<std::pair<ui::MenuModel*, size_t>> model_and_index =
+      menu.GetMenuModelAndItemIndex(IDC_CONTENT_CONTEXT_SEARCHLENSFORIMAGE);
+  ASSERT_TRUE(model_and_index);
 
   base::RunLoop run_loop;
   preresolved_finished_closure() = run_loop.QuitClosure();
@@ -1393,11 +1426,9 @@ TEST_F(RenderViewContextMenuPrefsTest,
   menu.SetBrowser(GetBrowser());
   menu.Init();
 
-  size_t index = 0;
-  raw_ptr<ui::MenuModel> model = nullptr;
-
-  ASSERT_TRUE(menu.GetMenuModelAndItemIndex(
-      IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH, &model, &index));
+  std::optional<std::pair<ui::MenuModel*, size_t>> model_and_index =
+      menu.GetMenuModelAndItemIndex(IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH);
+  ASSERT_TRUE(model_and_index);
   EXPECT_TRUE(menu.IsItemPresent(IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH));
 
   base::RunLoop run_loop;
@@ -1423,10 +1454,9 @@ TEST_F(RenderViewContextMenuPrefsTest, LensImageSearchIssuesProcessPrewarming) {
   menu.SetBrowser(GetBrowser());
   menu.Init();
 
-  size_t index = 0;
-  raw_ptr<ui::MenuModel> model = nullptr;
-  ASSERT_TRUE(menu.GetMenuModelAndItemIndex(
-      IDC_CONTENT_CONTEXT_SEARCHLENSFORIMAGE, &model, &index));
+  std::optional<std::pair<ui::MenuModel*, size_t>> model_and_index =
+      menu.GetMenuModelAndItemIndex(IDC_CONTENT_CONTEXT_SEARCHLENSFORIMAGE);
+  ASSERT_TRUE(model_and_index);
 
   ASSERT_EQ(initial_num_processes + 1,
             mock_rph_factory().GetProcesses()->size());
@@ -1449,10 +1479,9 @@ TEST_F(RenderViewContextMenuPrefsTest,
   menu.SetBrowser(GetBrowser());
   menu.Init();
 
-  size_t index = 0;
-  raw_ptr<ui::MenuModel> model = nullptr;
-  ASSERT_TRUE(menu.GetMenuModelAndItemIndex(
-      IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH, &model, &index));
+  std::optional<std::pair<ui::MenuModel*, size_t>> model_and_index =
+      menu.GetMenuModelAndItemIndex(IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH);
+  ASSERT_TRUE(model_and_index);
 
   ASSERT_EQ(initial_num_processes + 1,
             mock_rph_factory().GetProcesses()->size());
@@ -1495,10 +1524,9 @@ TEST_F(RenderViewContextMenuPrefsTest,
   menu.SetBrowser(GetBrowser());
   menu.Init();
 
-  size_t index = 0;
-  raw_ptr<ui::MenuModel> model = nullptr;
-  ASSERT_TRUE(menu.GetMenuModelAndItemIndex(
-      IDC_CONTENT_CONTEXT_SEARCHLENSFORIMAGE, &model, &index));
+  std::optional<std::pair<ui::MenuModel*, size_t>> model_and_index =
+      menu.GetMenuModelAndItemIndex(IDC_CONTENT_CONTEXT_SEARCHLENSFORIMAGE);
+  ASSERT_TRUE(model_and_index);
 
   ASSERT_EQ(initial_num_processes, mock_rph_factory().GetProcesses()->size());
 }

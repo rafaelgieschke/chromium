@@ -289,7 +289,8 @@ class CORE_EXPORT WebFrameWidgetImpl
                       const Vector<ui::ImeTextSpan>& ime_text_spans,
                       const gfx::Range& replacement_range,
                       int selection_start,
-                      int selection_end) override;
+                      int selection_end,
+                      mojom::blink::ImeState ime_state) override;
   void CommitText(const String& text,
                   const Vector<ui::ImeTextSpan>& ime_text_spans,
                   const gfx::Range& replacement_range,
@@ -332,6 +333,8 @@ class CORE_EXPORT WebFrameWidgetImpl
   void SetLayerTreeDebugState(const cc::LayerTreeDebugState& state) override;
   void SetMayThrottleIfUndrawnFrames(
       bool may_throttle_if_undrawn_frames) override;
+  std::unique_ptr<cc::ScopedRequestHighFramerate> RequestHighFramerate()
+      override;
   int GetVirtualKeyboardResizeHeight() const override;
 
   void OnTaskCompletedForFrame(base::TimeTicks start_time,
@@ -459,6 +462,7 @@ class CORE_EXPORT WebFrameWidgetImpl
 
   // WidgetBaseClient overrides:
   void OnCommitRequested() override;
+  void WillBeginImplCommit() override;
   void BeginMainFrame(const viz::BeginFrameArgs& args) override;
   void UpdateLifecycle(WebLifecycleUpdate requested_update,
                        DocumentUpdateReason reason) override;
@@ -914,6 +918,9 @@ class CORE_EXPORT WebFrameWidgetImpl
   void CenterSelection() override;
   void Paste() override;
   void PasteAndMatchStyle() override;
+  void PasteFromImageBytes(mojo_base::BigBuffer image_bytes,
+                           const String& media_format,
+                           PasteFromImageBytesCallback callback) override;
   void Delete() override;
   void SelectAll() override;
   void CollapseSelection() override;
@@ -966,8 +973,6 @@ class CORE_EXPORT WebFrameWidgetImpl
   void ForEachRemoteFrameControlledByWidget(
       base::FunctionRef<void(RemoteFrame*)> callback);
 
-  void SendOverscrollEventFromImplSide(const gfx::Vector2dF& overscroll_delta,
-                                       cc::ElementId scroll_latched_element_id);
   void SendEndOfScrollEvents(const cc::CompositorCommitData& commit_data);
   void SendScrollSnapChangingEventIfNeeded(
       const cc::CompositorCommitData& commit_data);

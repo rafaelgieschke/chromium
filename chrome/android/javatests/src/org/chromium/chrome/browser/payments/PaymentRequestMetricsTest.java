@@ -16,6 +16,7 @@ import org.junit.runner.RunWith;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.autofill.AutofillTestHelper;
@@ -29,12 +30,14 @@ import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.components.autofill.AutofillProfile;
 import org.chromium.components.payments.Event2;
 import org.chromium.components.payments.PaymentFeatureList;
+import org.chromium.ui.base.DeviceFormFactor;
 
 import java.util.concurrent.TimeoutException;
 
 /** A payment integration test to validate the logging of Payment Request metrics. */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+@DisableIf.Device(DeviceFormFactor.DESKTOP) // https://crbug.com/376100658
 public class PaymentRequestMetricsTest {
     @Rule
     public PaymentRequestTestRule mPaymentRequestTestRule =
@@ -42,10 +45,10 @@ public class PaymentRequestMetricsTest {
 
     @Before
     public void setUp() throws TimeoutException {
-        AutofillTestHelper mHelper = new AutofillTestHelper();
+        AutofillTestHelper helper = new AutofillTestHelper();
         // The user has a shipping address and a credit card associated with that address on disk.
-        String mBillingAddressId =
-                mHelper.setProfile(
+        String billingAddressId =
+                helper.setProfile(
                         AutofillProfile.builder()
                                 .setFullName("Jon Doe")
                                 .setCompanyName("Google")
@@ -57,7 +60,7 @@ public class PaymentRequestMetricsTest {
                                 .setPhoneNumber("650-253-0000")
                                 .setLanguageCode("en-US")
                                 .build());
-        mHelper.setCreditCard(
+        helper.setCreditCard(
                 new CreditCard(
                         "",
                         "https://example.test",
@@ -69,7 +72,7 @@ public class PaymentRequestMetricsTest {
                         "2050",
                         "visa",
                         R.drawable.visa_card,
-                        mBillingAddressId,
+                        billingAddressId,
                         /* serverId= */ ""));
     }
 

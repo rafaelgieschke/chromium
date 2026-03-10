@@ -35,10 +35,12 @@ namespace tabs {
 enum class TabAlert;
 }
 
-class Tab;
 class TabStyle;
 class FadeLabelView;
-struct TabRendererData;
+class HoverCardAnchorTarget;
+namespace tabs {
+struct TabData;
+}
 
 // Dialog that displays an informational hover card containing page information.
 class TabHoverCardBubbleView : public views::BubbleDialogDelegateView {
@@ -62,17 +64,18 @@ class TabHoverCardBubbleView : public views::BubbleDialogDelegateView {
     bool show_memory_usage = true;
   };
 
-  explicit TabHoverCardBubbleView(Tab* tab, const InitParams& params);
+  explicit TabHoverCardBubbleView(HoverCardAnchorTarget* anchor_target,
+                                  const InitParams& params);
   TabHoverCardBubbleView(const TabHoverCardBubbleView&) = delete;
   TabHoverCardBubbleView& operator=(const TabHoverCardBubbleView&) = delete;
   ~TabHoverCardBubbleView() override;
 
-  // Create the CollaborationMessagingRowData from TabRendererData.
+  // Create the CollaborationMessagingRowData from tabs::TabData.
   CollaborationMessagingRowData GetCollaborationMessagingData(
-      const TabRendererData& tab_data);
+      const tabs::TabData& tab_data);
 
   // Updates and formats title, alert state, domain, and preview image.
-  void UpdateCardContent(const Tab* tab);
+  void UpdateCardContent(const HoverCardAnchorTarget* anchor_target);
 
   // Update the text fade to the given percent, which should be between 0 and 1.
   void SetTextFade(double percent);
@@ -83,6 +86,12 @@ class TabHoverCardBubbleView : public views::BubbleDialogDelegateView {
   // Specifies that the hover card should display a placeholder image
   // specifying that no preview for the tab is available (yet).
   void SetPlaceholderImage();
+
+  // Specifies that the hover card should display a crashed image
+  // specifying that the tab has crashed.
+  void SetCrashedImage();
+
+  void SetSliding(bool sliding) { sliding_ = sliding; }
 
   // Accessors used by tests.
   std::u16string_view GetTitleTextForTesting() const;
@@ -107,6 +116,11 @@ class TabHoverCardBubbleView : public views::BubbleDialogDelegateView {
   // views::BubbleDialogDelegateView:
   gfx::Size CalculatePreferredSize(
       const views::SizeBounds& available_size) const override;
+
+  // BubbleDialogDelegate:
+  void OnAnchorBoundsChanged() override;
+
+  bool sliding_ = false;
 
   raw_ptr<FadeLabelView> title_label_ = nullptr;
   raw_ptr<FadeLabelView> domain_label_ = nullptr;

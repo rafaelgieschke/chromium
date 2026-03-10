@@ -5,14 +5,27 @@
 #import "ios/chrome/browser/app_bar/coordinator/app_bar_coordinator.h"
 
 #import "ios/chrome/browser/app_bar/coordinator/app_bar_mediator.h"
+#import "ios/chrome/browser/app_bar/ui/app_bar_container_view_controller.h"
 #import "ios/chrome/browser/app_bar/ui/app_bar_view_controller.h"
+#import "ios/chrome/browser/menu/ui_bundled/browser_action_factory.h"
 #import "ios/chrome/browser/shared/coordinator/layout_guide/layout_guide_util.h"
+#import "ios/chrome/browser/shared/coordinator/scene/scene_state.h"
+#import "ios/chrome/browser/shared/coordinator/scene/state/tab_grid_state.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
+#import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
-#import "ios/chrome/browser/tab_switcher/tab_grid/base_grid/coordinator/tab_grid_scene_agent.h"
+#import "ios/chrome/browser/shared/public/commands/guided_tour_commands.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
+#import "ios/chrome/browser/shared/public/commands/tab_grid_commands.h"
+#import "ios/chrome/browser/shared/public/commands/tab_groups_commands.h"
+#import "ios/chrome/browser/shared/public/features/features.h"
+#import "ios/chrome/browser/url_loading/model/url_loading_browser_agent.h"
+
+@interface AppBarCoordinator () <GuidedTourCommands>
+@end
 
 @implementation AppBarCoordinator {
+  AppBarContainerViewController* _containerViewController;
   AppBarViewController* _viewController;
   AppBarMediator* _mediator;
   raw_ptr<Browser> _incognitoBrowser;
@@ -30,22 +43,52 @@
 }
 
 - (void)start {
-  _viewController = [[AppBarViewController alloc] init];
-  // It is ok to use the regular browser here as the Application commands are
+  CommandDispatcher* regularDispatcher =
+      _regularBrowser->GetCommandDispatcher();
+  // It is ok to use the regular browser here as the Scene commands are
   // handled by the same object for both modes.
-  _viewController.applicationHandler = HandlerForProtocol(
-      _regularBrowser->GetCommandDispatcher(), ApplicationCommands);
+  id<SceneCommands> sceneHandler =
+      HandlerForProtocol(regularDispatcher, SceneCommands);
+  id<TabGridCommands> tabGridHandler =
+      HandlerForProtocol(regularDispatcher, TabGridCommands);
+
+  _viewController = [[AppBarViewController alloc] init];
+  _viewController.sceneHandler = sceneHandler;
+  _viewController.tabGridHandler = tabGridHandler;
   _viewController.layoutGuideCenter = LayoutGuideCenterForBrowser(nil);
+
+  SceneState* sceneState = _regularBrowser->GetSceneState();
 
   _mediator = [[AppBarMediator alloc]
       initWithRegularWebStateList:_regularBrowser->GetWebStateList()
-            incognitoWebStateList:_incognitoBrowser->GetWebStateList()];
+            incognitoWebStateList:_incognitoBrowser->GetWebStateList()
+                      prefService:_regularBrowser->GetProfile()->GetPrefs()
+                        URLLoader:UrlLoadingBrowserAgent::FromBrowser(
+                                      _regularBrowser)
+                     tabGridState:sceneState.tabGridState
+                   incognitoState:sceneState.incognitoState];
+  _mediator.regularActionFactory = [[BrowserActionFactory alloc]
+      initWithBrowser:_regularBrowser.get()
+             scenario:kMenuScenarioHistogramToolbarMenu];
+  _mediator.incognitoActionFactory = [[BrowserActionFactory alloc]
+      initWithBrowser:_incognitoBrowser.get()
+             scenario:kMenuScenarioHistogramToolbarMenu];
+  _mediator.sceneHandler = sceneHandler;
+  _mediator.tabGridHandler = tabGridHandler;
+  _mediator.regularTabGroupsCommands =
+      HandlerForProtocol(regularDispatcher, TabGroupsCommands);
+
   _mediator.consumer = _viewController;
-
-  SceneState* sceneState = _regularBrowser->GetSceneState();
-  [[TabGridSceneAgent agentFromScene:sceneState] addObserver:_mediator];
-
   _viewController.mutator = _mediator;
+
+  _containerViewController = [[AppBarContainerViewController alloc] init];
+  [_containerViewController setAppBar:_viewController];
+
+  if (IsBestOfAppGuidedTourEnabled()) {
+    [_regularBrowser->GetCommandDispatcher()
+        startDispatchingToTarget:self
+                     forProtocol:@protocol(GuidedTourCommands)];
+  }
 }
 
 - (void)stop {
@@ -59,11 +102,28 @@
 #pragma mark - Properties
 
 - (UIViewController*)viewController {
-  return _viewController;
+  return _containerViewController;
 }
 
 - (void)setIncognitoBrowser:(Browser*)incognitoBrowser {
   _incognitoBrowser = incognitoBrowser;
+  [_mediator setIncognitoWebStateList:incognitoBrowser
+                                          ? incognitoBrowser->GetWebStateList()
+                                          : nullptr];
+}
+
+#pragma mark - GuidedTourCommands
+
+- (void)highlightViewInStep:(GuidedTourStep)step {
+  if (step == GuidedTourStep::kNTP) {
+    [_viewController toggleSpotlightView:YES];
+  }
+}
+
+- (void)stepCompleted:(GuidedTourStep)step {
+  if (step == GuidedTourStep::kNTP) {
+    [_viewController toggleSpotlightView:NO];
+  }
 }
 
 @end

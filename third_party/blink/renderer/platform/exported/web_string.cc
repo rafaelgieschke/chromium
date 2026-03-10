@@ -30,7 +30,6 @@
 
 #include "third_party/blink/public/platform/web_string.h"
 
-#include "base/strings/latin1_string_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/string_view_util.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
@@ -121,7 +120,7 @@ std::string WebString::Ascii() const {
 }
 
 bool WebString::ContainsOnlyASCII() const {
-  return String(impl_).ContainsOnlyASCIIOrEmpty();
+  return String(impl_).ContainsOnlyAsciiOrEmpty();
 }
 
 WebString WebString::FromASCII(std::string_view s) {

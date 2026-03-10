@@ -658,8 +658,7 @@ void PhysicalFragment::CheckType() const {
       DCHECK_EQ(IsFloating(), layout_object_->IsFloating());
       DCHECK_EQ(IsOutOfFlowPositioned(),
                 layout_object_->IsOutOfFlowPositioned());
-      DCHECK_EQ(IsAtomicInline(), layout_object_->IsInline() &&
-                                      layout_object_->IsAtomicInlineLevel());
+      DCHECK_EQ(IsAtomicInline(), layout_object_->IsAtomicInline());
       break;
     case kFragmentLineBox:
       DCHECK(layout_object_->IsLayoutBlockFlow());
@@ -732,6 +731,18 @@ void PhysicalFragment::TraceAfterDispatch(Visitor* visitor) const {
   visitor->Trace(propagated_data_);
   visitor->Trace(break_token_);
   visitor->Trace(oof_data_);
+}
+
+const GCedHeapVector<SplitAxisItem<LayoutBoxModelObject>>&
+PhysicalFragment::StickyDescendants() const {
+  if (propagated_data_ && propagated_data_->sticky_descendants) {
+    return *propagated_data_->sticky_descendants;
+  }
+  DEFINE_STATIC_LOCAL(
+      Persistent<GCedHeapVector<SplitAxisItem<LayoutBoxModelObject>>>, empty,
+      (MakeGarbageCollected<
+          GCedHeapVector<SplitAxisItem<LayoutBoxModelObject>>>()));
+  return *empty;
 }
 
 bool PhysicalFragment::DependsOnPercentageBlockSize(

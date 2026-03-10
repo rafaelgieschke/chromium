@@ -10,6 +10,8 @@
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/actor/ui/actor_overlay_ui.h"
 #include "chrome/browser/devtools/devtools_window.h"
+#include "chrome/browser/glic/public/glic_enabling.h"
+#include "chrome/browser/glic/public/glic_keyed_service.h"
 #include "chrome/browser/profiles/profile.h"
 #import "chrome/browser/renderer_host/chrome_render_widget_host_view_mac_history_swiper.h"
 #include "chrome/browser/ui/browser.h"
@@ -17,8 +19,8 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/inactive_window_mouse_event_controller.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
-#include "chrome/browser/ui/webui/top_chrome/webui_url_utils.h"
 #include "chrome/common/url_constants.h"
+#include "chrome/common/webui_url_utils.h"
 #include "components/prefs/pref_service.h"
 #include "components/spellcheck/browser/pref_names.h"
 #include "components/spellcheck/browser/spellcheck_platform.h"
@@ -35,11 +37,6 @@
 #include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
-
-#if BUILDFLAG(ENABLE_GLIC)
-#include "chrome/browser/glic/public/glic_enabling.h"
-#include "chrome/browser/glic/public/glic_keyed_service.h"
-#endif
 
 @interface ChromeRenderWidgetHostViewMacDelegate () <HistorySwiperDelegate>
 
@@ -94,6 +91,16 @@
   }
 
   return content::WebContents::FromRenderViewHost(renderViewHost);
+}
+
+- (BOOL)shouldRefuseBecomingKeyView {
+  content::WebContents* webContents = self.webContents;
+  if (webContents && ShouldRefuseBecomingKeyViewForTopChromeWebUI(
+                         webContents->GetLastCommittedURL())) {
+    return YES;
+  }
+
+  return NO;
 }
 
 - (NSView*)nsView {
@@ -444,7 +451,6 @@
     return AcceptMouseEvents::kWhenInActiveApp;
   }
 
-#if BUILDFLAG(ENABLE_GLIC)
   // WebContents managed by glic should be allowed to accept mouse events while
   // inactive, aligning with the expected behavior of native chrome dialogs.
   // TODO(crbug.com/399119513): Consider making this a single WebContents
@@ -454,7 +460,6 @@
   if (glic_service && glic_service->IsActiveWebContents(webContents)) {
     return AcceptMouseEvents::kWhenInActiveApp;
   }
-#endif
 
   // If the WebContents are from the ActorOverlayUI WebUIController, we should
   // accept mouse events when any part of the application is active.

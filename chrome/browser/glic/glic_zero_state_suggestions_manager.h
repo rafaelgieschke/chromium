@@ -15,15 +15,13 @@
 
 namespace contextual_cueing {
 class ContextualCueingService;
-class CachingZeroStateSuggestionsManager;
 }  // namespace contextual_cueing
 
 namespace glic {
+class CachingZeroStateSuggestionsManager;
 class GlicSharingManager;
 class GlicInstance;
 class Host;
-
-#if !BUILDFLAG(IS_ANDROID)
 
 // A class for managing sending zero state suggestions through the mojo api.
 class GlicZeroStateSuggestionsManager {
@@ -65,6 +63,7 @@ class GlicZeroStateSuggestionsManager {
   void Reset();
 
  private:
+  bool WasAutoOpenedForPdf();
   void FilterTabs(std::vector<content::WebContents*>& tabs);
 
   // A helper function to route GetZeroStateSuggestionsForFocusedTabCallback
@@ -92,7 +91,7 @@ class GlicZeroStateSuggestionsManager {
   // A caching wrapper around `contextual_cueing_service_`. Set only when
   // kCacheZeroStateSuggestions is enabled. Should always be used if present,
   // instead of `contextual_cueing_service_`.
-  std::unique_ptr<contextual_cueing::CachingZeroStateSuggestionsManager>
+  std::unique_ptr<CachingZeroStateSuggestionsManager>
       caching_zero_state_manager_;
 
   // This passed by the glic_keyed_service.
@@ -113,20 +112,6 @@ class GlicZeroStateSuggestionsManager {
 
   base::WeakPtrFactory<GlicZeroStateSuggestionsManager> weak_ptr_factory_{this};
 };
-#else
-
-// Not yet implemented on Android. This always returns an empty list.
-class GlicZeroStateSuggestionsManager {
- public:
-  void ObserveZeroStateSuggestions(
-      bool is_notifying,
-      bool is_first_run,
-      const std::vector<std::string>& supported_tools,
-      glic::mojom::WebClientHandler::GetZeroStateSuggestionsAndSubscribeCallback
-          callback);
-};
-
-#endif
 
 }  // namespace glic
 

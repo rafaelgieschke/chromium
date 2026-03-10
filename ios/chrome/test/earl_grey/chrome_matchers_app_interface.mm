@@ -29,13 +29,13 @@
 #import "ios/chrome/browser/omnibox/ui/omnibox_text_view_ios.h"
 #import "ios/chrome/browser/popup_menu/public/popup_menu_constants.h"
 #import "ios/chrome/browser/recent_tabs/public/recent_tabs_constants.h"
+#import "ios/chrome/browser/settings/google_services/manage_accounts/public/manage_accounts_table_view_controller_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/autofill/autofill_add_credit_card_view_controller.h"
 #import "ios/chrome/browser/settings/ui_bundled/autofill/autofill_credit_card_table_view_controller.h"
 #import "ios/chrome/browser/settings/ui_bundled/autofill/autofill_profile_table_view_controller.h"
 #import "ios/chrome/browser/settings/ui_bundled/autofill/autofill_settings_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/public/quick_delete_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/google_services/google_services_settings_constants.h"
-#import "ios/chrome/browser/settings/ui_bundled/google_services/manage_accounts/manage_accounts_table_view_controller_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/notifications/notifications_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/notifications/tracking_price/tracking_price_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/password/password_settings/password_settings_constants.h"
@@ -575,7 +575,7 @@ UIWindow* WindowWithAccessibilityIdentifier(NSString* accessibility_id) {
 }
 
 + (id<GREYMatcher>)omniboxText:(NSString*)text {
-  GREYElementMatcherBlock* omniboxTextInputMatcher = [GREYElementMatcherBlock
+  GREYElementMatcherBlock* matcher = [GREYElementMatcherBlock
       matcherWithMatchesBlock:^BOOL(id element) {
         id<OmniboxTextInput> omnibox =
             base::apple::ObjCCast<OmniboxTextFieldIOS>(element)
@@ -587,17 +587,7 @@ UIWindow* WindowWithAccessibilityIdentifier(NSString* accessibility_id) {
             appendText:[NSString stringWithFormat:@"Omnibox contains text '%@'",
                                                   text]];
       }];
-
-  // Transitioning from OmniboxText to waitForWebStateVisibleURL for URL
-  // verification. As an interim solution during test migration, we are matching
-  // against a hidden label that mirrors the omnibox text. crbug.com/465394669.
-  // TODO(crbug.com/465030009): Remove the hidden omnibox text label.
-  id<GREYMatcher> omniboxTextHiddenLabelMatcher =
-      grey_allOf(grey_accessibilityID(kOmniboxTextHiddenLabelIdentifier),
-                 grey_accessibilityLabel(text), nil);
-
-  return grey_anyOf(omniboxTextHiddenLabelMatcher,
-                    omniboxTextInputMatcher, nil);
+  return matcher;
 }
 
 + (id<GREYMatcher>)omniboxContainingText:(NSString*)text {
@@ -628,7 +618,7 @@ UIWindow* WindowWithAccessibilityIdentifier(NSString* accessibility_id) {
                 ?: base::apple::ObjCCast<OmniboxTextViewIOS>(element);
 
         NSArray* textComponents =
-            [omnibox.accessibilityValue componentsSeparatedByString:@"||||"];
+            [omnibox.textValueForTesting componentsSeparatedByString:@"||||"];
 
         return textComponents.count >= 2 &&
                [textComponents[1] isEqualToString:text];
@@ -669,8 +659,9 @@ UIWindow* WindowWithAccessibilityIdentifier(NSString* accessibility_id) {
 }
 
 + (id<GREYMatcher>)toolsMenuButton {
-  return grey_allOf(grey_accessibilityID(kToolbarToolsMenuButtonIdentifier),
-                    grey_sufficientlyVisible(), nil);
+  return grey_allOf(
+      grey_accessibilityID(kLegacyToolbarToolsMenuButtonIdentifier),
+      grey_sufficientlyVisible(), nil);
 }
 
 + (id<GREYMatcher>)openNewTabButton {
@@ -704,7 +695,7 @@ UIWindow* WindowWithAccessibilityIdentifier(NSString* accessibility_id) {
 
 + (id<GREYMatcher>)tabShareButton {
   return grey_allOf(
-      grey_anyOf(grey_accessibilityID(kToolbarShareButtonIdentifier),
+      grey_anyOf(grey_accessibilityID(kLegacyToolbarShareButtonIdentifier),
                  grey_accessibilityID(kOmniboxShareButtonIdentifier), nil),
       grey_sufficientlyVisible(), nil);
 }
@@ -907,8 +898,14 @@ UIWindow* WindowWithAccessibilityIdentifier(NSString* accessibility_id) {
       [ChromeMatchersAppInterface staticTextWithAccessibilityLabel:string]);
   id<GREYMatcher> popupRow =
       grey_allOf([ChromeMatchersAppInterface omniboxPopupRow], textMatcher,
-                 grey_sufficientlyVisible(), nil);
+                 grey_notNil(), nil);
   return popupRow;
+}
+
++ (id<GREYMatcher>)omniboxPopupRowVisibleWithString:(NSString*)string {
+  return grey_allOf(
+      [ChromeMatchersAppInterface omniboxPopupRowWithString:string],
+      grey_sufficientlyVisible(), nil);
 }
 
 + (id<GREYMatcher>)omniboxPopupList {
@@ -995,13 +992,9 @@ UIWindow* WindowWithAccessibilityIdentifier(NSString* accessibility_id) {
 }
 
 + (id<GREYMatcher>)tabsSettingsButton {
-  if (IsAutoOpenRemoteTabGroupsSettingsFeatureEnabled()) {
-    return [ChromeMatchersAppInterface
-        buttonWithAccessibilityLabelID:
-            (IDS_IOS_TABS_AND_TAB_GROUPS_MANAGEMENT_SETTINGS)];
-  }
   return [ChromeMatchersAppInterface
-      buttonWithAccessibilityLabelID:(IDS_IOS_TABS_MANAGEMENT_SETTINGS)];
+      buttonWithAccessibilityLabelID:
+          (IDS_IOS_TABS_AND_TAB_GROUPS_MANAGEMENT_SETTINGS)];
 }
 
 + (id<GREYMatcher>)googleServicesSettingsView {
@@ -1095,6 +1088,10 @@ UIWindow* WindowWithAccessibilityIdentifier(NSString* accessibility_id) {
 
 + (id<GREYMatcher>)browsingDataConfirmButtonMatcher {
   return grey_accessibilityID(kQuickDeleteBrowsingDataConfirmButtonIdentifier);
+}
+
++ (id<GREYMatcher>)browsingDataDoneButtonMatcher {
+  return grey_accessibilityID(kQuickDeleteBrowsingDataDoneButtonIdentifier);
 }
 
 + (id<GREYMatcher>)clearBrowsingHistoryButton {

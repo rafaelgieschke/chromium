@@ -9,7 +9,6 @@
 <translation id="101823271612280837">Die Aufzeichnung wurde beendet. Das Dashboard für Spiele kann im Tabletmodus nicht verwendet werden.</translation>
 <translation id="1024364763893396229"><ph name="NAME" /> speichern</translation>
 <translation id="1032891413405719768">Die Batterie des Eingabestifts ist schwach</translation>
-<translation id="1036073649888683237">Benachrichtigungen unter Einstellungen verwalten</translation>
 <translation id="1036348656032585052">Deaktivieren</translation>
 <translation id="1037492556044956303"><ph name="DEVICE_NAME" /> hinzugefügt</translation>
 <translation id="1038106730571050514">Vorschläge anzeigen</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">Vor Kurzem aufgenommenes Foto <ph name="INDEX" /> von <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Google Tasks minimieren</translation>
 <translation id="2208323208084708176">Unified Desktop-Modus</translation>
-<translation id="2210311543574621570">Die Zwischenablage wird angezeigt, wenn du Strg + V gedrückt hältst. Du kannst diese Tastenkombination deaktivieren, indem du unter „chrome://flags“ das Flag „#clipboard-history-longpress“ deaktivierst.</translation>
 <translation id="2215920961700443347">Kein Internet. Stell eine Internetverbindung her und versuche es noch einmal.</translation>
 <translation id="2222841058024245321">Desktop 7</translation>
 <translation id="2223384056430485343">In einem Splitscreen</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">App installieren</translation>
 <translation id="2482878487686419369">Benachrichtigungen</translation>
 <translation id="2484513351006226581">Drücke <ph name="KEYBOARD_SHORTCUT" />, um das Tastaturlayout zu ändern.</translation>
+<translation id="2485422356828889247">Deinstallieren</translation>
 <translation id="2486214324139475545">Vorschau für <ph name="DESK_NAME" />. Aktiver Desktop.</translation>
 <translation id="2486405091093637109">Die Auflösung von „<ph name="DISPLAY_NAME" />“ wurde in <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz) geändert. Wenn du nicht bestätigst, werden in <ph name="TIMEOUT_SECONDS" /> die vorherigen Einstellungen wiederhergestellt.</translation>
 <translation id="2487915095798731898">Teilnehmen</translation>
@@ -1371,7 +1370,7 @@ Keine Geräte verbunden.</translation>
 <translation id="5556459405103347317">Neu laden</translation>
 <translation id="5558091555391176027">Hohe Sichtbarkeit bei Nearby Share aktivieren/deaktivieren</translation>
 <translation id="5558314826121965174">Kreativität</translation>
-<translation id="556042886152191864">Schaltfläche</translation>
+<translation id="556042886152191864">Button</translation>
 <translation id="5570122939431135380">Neuen Tab in neuem Inkognitofenster öffnen</translation>
 <translation id="5571066253365925590">Bluetooth aktiviert</translation>
 <translation id="5572632238877308040">Essentials</translation>
@@ -2149,7 +2148,7 @@ Halte zum Herunterfahren des Geräts die Ein-/Aus-Taste noch einmal gedrückt.</
 <translation id="8098591350844501178">Streamen von Bildschirm an <ph name="RECEIVER_NAME" /> beenden</translation>
 <translation id="810637681351706236">App von Ablage loslösen</translation>
 <translation id="8113423164597455979">An: alle Apps</translation>
-<translation id="8113515504791187892">Vorlesen-Schaltfläche</translation>
+<translation id="8113515504791187892">Vorlesen-Button</translation>
 <translation id="8120151603115102514">Dein Smartphone hat keinen Sperrbildschirm. Gib zum Entsperren das Passwort ein.</translation>
 <translation id="8120249852906205273">Neu starten</translation>
 <translation id="8127095419621171197">Rechner App öffnen</translation>
@@ -2195,7 +2194,6 @@ Halte zum Herunterfahren des Geräts die Ein-/Aus-Taste noch einmal gedrückt.</
 <translation id="8241650983304689286">Tab zu neuer geteilter Ansicht hinzufügen</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, Signalstärke bei <ph name="SIGNAL_STRENGTH" />, Smartphone-Akku bei <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Alle Google Drive-Inhalte anzeigen</translation>
-<translation id="8257510091797044096">Gerät einrichten</translation>
 <translation id="8261506727792406068">Löschen</translation>
 <translation id="8262312463845990408">Wiedergabe aktivieren/deaktivieren</translation>
 <translation id="8268302343625273732">Alle Aufgaben in Google Classroom ansehen</translation>
@@ -2261,7 +2259,7 @@ Halte zum Herunterfahren des Geräts die Ein-/Aus-Taste noch einmal gedrückt.</
 <translation id="851458219935658693">Fenster des aktuellen Desktops werden angezeigt, Optionsfeld ausgewählt</translation>
 <translation id="851660987304951246">Mit „Erstelle einen Überblick für mich“ kannst du Inhalte schnell zusammenfassen lassen oder Fragen stellen</translation>
 <translation id="8517041960877371778">Dein <ph name="DEVICE_TYPE" /> wird möglicherweise nicht aufgeladen, wenn es eingeschaltet ist.</translation>
-<translation id="8519329096920173967">Mit Google Lens auf dem Bildschirm suchen</translation>
+<translation id="8519329096920173967">Mit Google Lens anhand von Bildschirminhalt suchen</translation>
 <translation id="8535393432370007982">Sortierung nach Farbe rückgängig machen</translation>
 <translation id="8536886494750559755">Quick Share-Einstellungen anzeigen. Für alle <ph name="TIME_REMAINING" /> lang sichtbar.</translation>
 <translation id="8539803091108018926">Text in Zwischenablage kopiert</translation>
@@ -2305,7 +2303,7 @@ Halte zum Herunterfahren des Geräts die Ein-/Aus-Taste noch einmal gedrückt.</
 <translation id="8676770494376880701">Leistungsschwaches Ladegerät angeschlossen</translation>
 <translation id="8679158879996532670">Einstellungen für den Konzentrationsmodus anzeigen. Konzentrationsmodus ist aktiviert, noch <ph name="REMAINING_TIME" />.</translation>
 <translation id="8683506306463609433">Leistungsverfolgung ist aktiv</translation>
-<translation id="8703634754197148428">Aufnahme starten. Wenn die Aufnahme gestartet ist, kannst du Alt + Umschalttaste + L verwenden, um zur Ablage zu gehen – dort findest du die Schaltfläche zum Beenden der Aufnahme.</translation>
+<translation id="8703634754197148428">Aufnahme starten. Wenn die Aufnahme gestartet ist, kannst du Alt + Umschalttaste + L verwenden, um zur Ablage zu gehen – dort findest du den Button zum Beenden der Aufnahme.</translation>
 <translation id="8704155109538237473">Fokus auf das Bild-im-Bild-Fenster verschieben</translation>
 <translation id="870917907284186124">Spracheingabe aktivieren/deaktivieren</translation>
 <translation id="8711169534266271368">Optionen für das Dashboard für Spiele</translation>

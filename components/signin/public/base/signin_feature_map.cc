@@ -20,19 +20,29 @@ namespace {
 // Array of features exposed through the Java SigninFeatures API.
 const base::Feature* const kFeaturesExposedToJava[] = {
     &switches::kCctSignInPrompt,
+    &switches::kEnableActivitylessSigninAllEntryPoint,
     &switches::kEnableAddSessionRedirect,
     &switches::kEnableSeamlessSignin,
     &switches::kForceStartupSigninPromo,
     &switches::kForceHistoryOptInScreen,
     &switches::kSkipCheckForAccountManagementOnSignin,
     &switches::kSyncEnableBookmarksInTransportMode,
-    &switches::kHistoryOptInEducationalTip,
+    &switches::kMakeIdentityManagerSourceOfAccounts,
     &switches::kMigrateAccountManagerDelegate,
     &switches::kFullscreenSignInPromoUseDate,
     &switches::kSmartEmailLineBreaking,
     &switches::kSupportWebSigninAddSession,
     &switches::kSkipRefreshTokenCheckInIdentityManager,
     &switches::kFRESignInAlternativeSecondaryButtonText,
+    &switches::kChromeAndroidIdentitySurveyFirstRun,
+    &switches::kChromeAndroidIdentitySurveyWeb,
+    &switches::kChromeAndroidIdentitySurveyNtpSigninButton,
+    &switches::kChromeAndroidIdentitySurveyNtpAccountAvatarTap,
+    &switches::kChromeAndroidIdentitySurveyNtpPromo,
+    &switches::kChromeAndroidIdentitySurveyBookmarkPromo,
+    &switches::kSigninLevelUpButton,
+    &switches::kSigninManagerSeedingFix,
+    &switches::kSupportForcedSigninPolicy,
 };
 
 // static
@@ -44,8 +54,8 @@ base::android::FeatureMap* GetFeatureMap() {
 
 }  // namespace
 
-static jlong JNI_SigninFeatureMap_GetNativeMap(JNIEnv* env) {
-  return reinterpret_cast<jlong>(GetFeatureMap());
+static int64_t JNI_SigninFeatureMap_GetNativeMap(JNIEnv* env) {
+  return reinterpret_cast<int64_t>(GetFeatureMap());
 }
 
 }  // namespace signin

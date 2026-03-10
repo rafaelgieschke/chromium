@@ -1,6 +1,7 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="is">
+<translation id="1035560095760914532">Settu Chrome á neðsta svæðið til að hafa það ávallt við höndina</translation>
 <translation id="1076643793026027628">Chrome opnar YouTube-huliðstengla sjálfkrafa í huliðsstillingu.</translation>
 <translation id="1081114897601629648">Eftirfarandi aðgangsorð voru ekki flutt inn í Google-aðgangsorðastjórnun því þau uppfylla ekki skilyrðin.</translation>
 <translation id="1086486568852410168">Leita með Google linsu</translation>
@@ -86,6 +87,10 @@ Prófaðu að bíða í nokkrar mínútur áður en þú skráir þig út. Ef þ
 <translation id="2767464022270041271">Engin vistuð aðgangsorð. Google-aðgangsorðastjórnun getur athugað aðgangsorðin þín þegar þú vistar þau.</translation>
 <translation id="2788811701191021538">Opnar stillingasíðu greiðslumáta í Chrome.</translation>
 <translation id="2876628302275096482">Nánar um <ph name="BEGIN_LINK" />hvernig Chrome heldur gögnunum þínum leyndum<ph name="END_LINK" /></translation>
+<translation id="288992067439702510">Þú náðir hámarksfjölda bókamerkja í Chrome (<ph name="LIMIT" />) og því hafa sum bókamerkin þín ekki verið vistuð á Google-reikningnum enn sem komið er.
+
+Ekki er hægt að vista ný bókamerki á reikningnum þínum fyrr en þú eyðir einhverjum. Ef þú skráir þig út núna verður óvistuðum bókamerkjum eytt.</translation>
+<translation id="2901621928549457170">Opnaðu Chrome samstundis þegar þú ert í iPad</translation>
 <translation id="2922914028977213693">Ýttu hér til að fá sem mest út úr Chrome í iPad.</translation>
 <translation id="292371311537977079">Stillingar Chrome</translation>
 <translation id="2923827943290349720">Læsa huliðsflipum um leið og þú lokar Chrome</translation>
@@ -170,6 +175,8 @@ Prófaðu að bíða í nokkrar mínútur áður en þú skráir þig út. Ef þ
 <translation id="5119391094379141756">Veldu Chrome</translation>
 <translation id="5123188916260706415">Leita með röddinni í Chrome</translation>
 <translation id="5162467219239570114">Chrome er úrelt. Ef engin uppfærsla er til staðar í <ph name="BEGIN_LINK" />App Store<ph name="END_LINK" /> getur verið að tækið þitt styðji ekki lengur nýjar útgáfur af Chrome.</translation>
+<translation id="5172049865623113551">Opnaðu Chrome samstundis þegar þú ert í iPhone</translation>
+<translation id="5179095426828744632">Opnaðu Chrome hraðar úr dokkunni</translation>
 <translation id="5184329579814168207">Opna í Chrome</translation>
 <translation id="5190139289262548459">Fyrirtækið þitt, <ph name="DOMAIN" />, stjórnar reikningnum sem þú ert innskráð(ur) á og hvernig Chrome er notað.</translation>
 <translation id="5209238444239954363">Chrome gat ekki leitað að uppfærslum. Reyndu aftur síðar.</translation>
@@ -308,7 +315,6 @@ Til að skoða fleiri stillingar sem nota gögn til að bæta Chrome-upplifunina
 <translation id="787226752901403048">Skráðu þig inn í Chrome til að deila og taka þátt í flipahópum og vinna að hugmyndum ásamt öðrum</translation>
 <translation id="7897703007638178753">Sjá nýlega flipa Chrome</translation>
 <translation id="7948283758957877064">Nýjungar í Chrome</translation>
-<translation id="7996707498590516621">Búðu til mynd með Gemini í Chrome</translation>
 <translation id="8000174216052461231">Ábending frá Chrome: Fáðu hámarksöryggi Chrome</translation>
 <translation id="8006014511203279255">Notaðu Chrome þegar þú ýtir á tengla í skilaboðum eða öðrum forritum.</translation>
 <translation id="8014670471808569312">Chrome býðst til að vista aðgangsorðið þitt.</translation>
@@ -320,6 +326,7 @@ Til að skoða fleiri stillingar sem nota gögn til að bæta Chrome-upplifunina
 <translation id="8136856065410661948">Þetta verður notað til að búa til viðburði í Apple Calendar frá Chrome og Google-linsu.</translation>
 <translation id="8154120522323162874">Haltu uppsetningu vafrans áfram til að fá sem mest út úr Chrome.</translation>
 <translation id="8160472928944011082">Ekki er hægt að uppfæra Chrome</translation>
+<translation id="8213550501565480896">Stilla Chrome sem sjálfgefinn vafra</translation>
 <translation id="8245080522851805544">Haltu þinni vefskoðun leydnri með sannvottun tækis þegar þú lokar Chrome</translation>
 <translation id="8248887045858762645">Chrome ábending</translation>
 <translation id="8265730590513812063">Opnaðu Chrome-valmyndina</translation>
@@ -351,6 +358,7 @@ Gögnin þín voru dulkóðuð með aðgangsorði <ph name="TIME" />. Sláðu þ
 <translation id="8788269841521769222">Þú þarft ekki að muna þetta aðgangsorð. Það verður vistað í aðgangsorðastjórnun Google fyrir <ph name="EMAIL" /></translation>
 <translation id="8796490717897731471"><ph name="EMAIL" />. Chrome er stýrt.</translation>
 <translation id="880967149107462122">Opnaðu stillingar Chrome</translation>
+<translation id="8840947648682778034">Chrome-þema fyrir iPhone og iPad</translation>
 <translation id="8842132678697187091">Hér geturðu opnað Google-linsu.</translation>
 <translation id="8850736900032787670">Til að fá sérsniðið innihald byggt á þínum áhugamálum skaltu skrá þig inn á Chrome.</translation>
 <translation id="8855781063981781621">Til að slökkva á Lockdown Mode í Chrome þarftu að slökkva á því í iPad-tækinu þínu.</translation>

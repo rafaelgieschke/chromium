@@ -13,9 +13,9 @@
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_handle_util.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/sandboxed_process_launcher_delegate.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "content/utility/sandbox_delegate_data.mojom.h"
 #include "sandbox/policy/features.h"
 #include "sandbox/policy/mojom/sandbox.mojom.h"
@@ -94,7 +94,7 @@ bool NetworkInitializeConfig(sandbox::TargetConfig* config) {
   if (!app_container) {
     return false;
   }
-  app_container->AddCapability(lpac_capability.c_str());
+  app_container->AddCapability(lpac_capability);
 
   // Add capability SID for 'network_service' for loopback access for testing.
   // Run 'checkNetIsolation.exe loopbackExempt -a -n=network_service' while

@@ -8,7 +8,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -17,6 +16,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/bad_message.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+#include "chrome/browser/glic/host/guest_util.h"
 #include "chrome/browser/media/capture_access_handler_base.h"
 #include "chrome/browser/media/webrtc/capture_policy_utils.h"
 #include "chrome/browser/media/webrtc/desktop_capture_devices_util.h"
@@ -39,7 +39,6 @@
 #include "content/public/common/url_constants.h"
 #include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom.h"
 #include "third_party/blink/public/common/features.h"
-#include "third_party/blink/public/mojom/mediastream/media_stream.mojom-shared.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom.h"
 
 #if defined(TOOLKIT_VIEWS)
@@ -59,11 +58,6 @@
 #include "chrome/browser/safe_browsing/user_interaction_observer.h"
 #endif
 
-#if BUILDFLAG(ENABLE_GLIC)
-#include "chrome/browser/glic/host/guest_util.h"
-#endif
-
-BASE_FEATURE(kDisplayMediaRejectLongDomains, base::FEATURE_DISABLED_BY_DEFAULT);
 
 namespace {
 using ::blink::mojom::MediaStreamRequestResult;
@@ -95,11 +89,7 @@ std::u16string GetApplicationTitle(WebContents* web_contents) {
 #if !BUILDFLAG(IS_ANDROID)
 
 bool IsGlicWebUI(const WebContents* web_contents) {
-#if BUILDFLAG(ENABLE_GLIC)
   return glic::IsGlicWebUI(web_contents);
-#else
-  return false;
-#endif
 }
 
 // If bypassing the media selection dialog is allowed for this request, this
@@ -392,6 +382,7 @@ void DisplayMediaAccessHandler::BypassMediaSelectionDialog(
     const content::MediaStreamRequest& request,
     const DesktopMediaID& media_id,
     content::MediaResponseCallback callback) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (web_contents->GetLastCommittedURL().GetScheme() !=
       content::kChromeUIScheme) {
     std::move(callback).Run(blink::mojom::StreamDevicesSet(),
@@ -400,9 +391,6 @@ void DisplayMediaAccessHandler::BypassMediaSelectionDialog(
     return;
   }
 
-  // base::Unretained(this) is safe because DisplayMediaAccessHandler is owned
-  // by MediaCaptureDevicesDispatcher, which is a lazy singleton which is
-  // destroyed when the browser process terminates.
   GetDevicesForDesktopCapture(
       web_contents, media_id, request.video_type, request.audio_type,
       request.security_origin, media_id.audio_share, request.disable_local_echo,
@@ -412,7 +400,7 @@ void DisplayMediaAccessHandler::BypassMediaSelectionDialog(
       base::BindOnce(
           &DisplayMediaAccessHandler::
               OnDesktopCaptureDevicesObtainedAfterBypassMediaSelectionDialog,
-          base::Unretained(this), web_contents->GetWeakPtr(), request,
+          weak_factory_.GetWeakPtr(), web_contents->GetWeakPtr(), request,
           std::move(callback)));
 }
 
@@ -499,8 +487,7 @@ void DisplayMediaAccessHandler::ProcessQueuedPickerRequest(
   // Note, this check does not fully account for international characters, but
   // since the puny-encodings of international domains are limited to 255 bytes,
   // it is unlikely that valid domains are excluded by this check.
-  if (base::FeatureList::IsEnabled(kDisplayMediaRejectLongDomains) &&
-      GetApplicationTitle(web_contents).size() > 255u) {
+  if (GetApplicationTitle(web_contents).size() > 255u) {
     RejectRequest(
         web_contents,
         MediaStreamRequestResult::CAPTURE_NOT_ALLOWED_FOR_LONG_DOMAINS);

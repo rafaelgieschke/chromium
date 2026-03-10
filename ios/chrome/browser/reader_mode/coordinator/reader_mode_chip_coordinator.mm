@@ -16,6 +16,9 @@
 #import "ios/chrome/browser/shared/public/commands/reader_mode_chip_commands.h"
 #import "ios/chrome/browser/shared/public/commands/reader_mode_options_commands.h"
 
+@interface ReaderModeChipCoordinator () <ReaderModeChipCommands>
+@end
+
 @implementation ReaderModeChipCoordinator {
   // Observer that updates ReaderModeChipViewController for fullscreen events.
   std::unique_ptr<FullscreenUIUpdater> _readerModeChipFullscreenUIUpdater;
@@ -26,12 +29,12 @@
 - (void)start {
   _viewController = [[ReaderModeChipViewController alloc] init];
   [self.baseViewController addChildViewController:_viewController];
-  [self.viewController didMoveToParentViewController:_viewController];
+  [_viewController didMoveToParentViewController:self.baseViewController];
   [self.browser->GetCommandDispatcher()
       startDispatchingToTarget:self
                    forProtocol:@protocol(ReaderModeChipCommands)];
   _readerModeChipFullscreenUIUpdater = std::make_unique<FullscreenUIUpdater>(
-      FullscreenController::FromBrowser(self.browser), self.viewController);
+      FullscreenController::FromBrowser(self.browser), _viewController);
   _helpCommandsHandler =
       HandlerForProtocol(self.browser->GetCommandDispatcher(), HelpCommands);
 }

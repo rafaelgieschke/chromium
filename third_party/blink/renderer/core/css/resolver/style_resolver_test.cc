@@ -366,6 +366,36 @@ TEST_F(StyleResolverTest, AnimationMaskedByImportant) {
   EXPECT_FALSE(StyleResolver::CanReuseBaseComputedStyle(state));
 }
 
+TEST_F(StyleResolverTest, AnimationWithRevertRuleVoidsBase) {
+  GetDocument().documentElement()->SetInnerHTMLWithoutTrustedTypes(R"HTML(
+    <style>
+      div {
+        height: 10px;
+      }
+    </style>
+    <div id=div></div>
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+  Element* div = GetDocument().getElementById(AtomicString("div"));
+
+  auto* effect = CreateSimpleKeyframeEffectForTest(div, CSSPropertyID::kHeight,
+                                                   "revert-rule", "100px");
+  GetDocument().Timeline().Play(effect);
+  UpdateAllLifecyclePhasesForTest();
+
+  EXPECT_EQ("10px", ComputedValue("height", *StyleForId("div")));
+
+  div->SetNeedsAnimationStyleRecalc();
+  GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kInStyleRecalc);
+  const ComputedStyle* style = StyleForId("div");
+  ASSERT_TRUE(style);
+  EXPECT_TRUE(style->GetBaseComputedStyle());
+
+  StyleResolverState state(GetDocument(), *div);
+  // We cannot use the base style due to a revert-rule-dependent animation.
+  EXPECT_FALSE(StyleResolver::CanReuseBaseComputedStyle(state));
+}
+
 TEST_F(StyleResolverTest,
        TransitionRetargetRelativeFontSizeOnParentlessElement) {
   GetDocument().documentElement()->SetInnerHTMLWithoutTrustedTypes(R"HTML(
@@ -421,8 +451,8 @@ class StyleResolverFontRelativeUnitTest
 
 TEST_P(StyleResolverFontRelativeUnitTest,
        BaseNotReusableIfFontRelativeUnitPresent) {
-  GetDocument().documentElement()->SetInnerHTMLWithoutTrustedTypes(
-      String::Format("<div id=div style='width:1%s'>Test</div>", GetParam()));
+  GetDocument().documentElement()->SetInnerHTMLWithoutTrustedTypes(UNSAFE_TODO(
+      String::Format("<div id=div style='width:1%s'>Test</div>", GetParam())));
   UpdateAllLifecyclePhasesForTest();
 
   Element* div = GetDocument().getElementById(AtomicString("div"));
@@ -445,8 +475,8 @@ TEST_P(StyleResolverFontRelativeUnitTest,
 
 TEST_P(StyleResolverFontRelativeUnitTest,
        BaseReusableIfNoFontAffectingAnimation) {
-  GetDocument().documentElement()->SetInnerHTMLWithoutTrustedTypes(
-      String::Format("<div id=div style='width:1%s'>Test</div>", GetParam()));
+  GetDocument().documentElement()->SetInnerHTMLWithoutTrustedTypes(UNSAFE_TODO(
+      String::Format("<div id=div style='width:1%s'>Test</div>", GetParam())));
   UpdateAllLifecyclePhasesForTest();
 
   Element* div = GetDocument().getElementById(AtomicString("div"));
@@ -677,6 +707,32 @@ TEST_F(StyleResolverTest, FetchForAtPage) {
 
   const CSSValueList* bg_img_list = To<CSSValueList>(computed_value);
   EXPECT_FALSE(To<CSSImageValue>(bg_img_list->Item(0)).IsCachePending());
+}
+
+TEST_F(StyleResolverTest, SingleAxisAdjustOverflow) {
+  auto run_test = [&](String overflow_style, EOverflow expected_x,
+                      EOverflow expected_y) {
+    StringBuilder builder;
+    builder.Append("<div id='target' style='overflow-x: ");
+    builder.Append(overflow_style);
+    builder.Append("; overflow-y: scroll;'></div>");
+    SetBodyInnerHTML(builder.ToString());
+    const auto* style = StyleForId("target");
+    EXPECT_EQ(expected_x, style->OverflowX());
+    EXPECT_EQ(expected_y, style->OverflowY());
+  };
+
+  {
+    ScopedSingleAxisScrollContainersForTest single_axis_feature(false);
+    run_test("clip", EOverflow::kHidden, EOverflow::kScroll);
+    run_test("visible", EOverflow::kAuto, EOverflow::kScroll);
+  }
+
+  {
+    ScopedSingleAxisScrollContainersForTest single_axis_feature(true);
+    run_test("clip", EOverflow::kClip, EOverflow::kScroll);
+    run_test("visible", EOverflow::kVisible, EOverflow::kScroll);
+  }
 }
 
 TEST_F(StyleResolverTest, NoFetchForAtPage) {
@@ -1295,7 +1351,8 @@ const CSSValue* ParseCustomProperty(Document& document,
                                     const CustomProperty& property,
                                     const String& value) {
   const auto* context = MakeGarbageCollected<CSSParserContext>(document);
-  CSSParserLocalContext local_context;
+  CSSParserLocalContext local_context =
+      CSSParserLocalContext::CreateWithoutPropertyForTest();
 
   return property.Parse(value, *context, local_context);
 }
@@ -2274,17 +2331,29 @@ TEST_F(StyleResolverTest, AnchorQueriesMPC) {
         width: 100px;
         height: 100px;
       }
-      #anchor1 { left: 100px; }
-      #anchor2 { left: 150px; }
+      #anchor1 {
+        anchor-name: --anchor1;
+        left: 100px;
+      }
+      #anchor2 {
+        anchor-name: --anchor2;
+        left: 150px;
+      }
       .anchored {
         position: absolute;
         left: anchor(left);
       }
+      #a {
+        position-anchor: --anchor1;
+      }
+      #b {
+        position-anchor: --anchor2;
+      }
     </style>
     <div class=anchor id=anchor1>X</div>
     <div class=anchor id=anchor2>Y</div>
-    <div class=anchored id=a anchor=anchor1>A</div>
-    <div class=anchored id=b anchor=anchor2>B</div>
+    <div class=anchored id=a>A</div>
+    <div class=anchored id=b>B</div>
   )HTML");
 
   UpdateAllLifecyclePhasesForTest();
@@ -3193,8 +3262,6 @@ TEST_F(StyleResolverTestCQ, StyleRulesForElementContainerQuery) {
 }
 
 TEST_F(StyleResolverTest, StyleRulesForSVGUseInstanceElement) {
-  ScopedSvg2CascadeForTest enabled(true);
-
   SetBodyInnerHTML(R"HTML(
       <style>
         rect { fill: green; }
@@ -4648,11 +4715,7 @@ TEST_F(StyleResolverTest, UseCountPseudoElementImplicitAnchor) {
       left: anchor(right);
     }
   )HTML");
-  if (RuntimeEnabledFeatures::CSSPositionAnchorNoneEnabled()) {
-    EXPECT_FALSE(IsUseCounted(WebFeature::kCSSPseudoElementUsesImplicitAnchor));
-  } else {
-    EXPECT_TRUE(IsUseCounted(WebFeature::kCSSPseudoElementUsesImplicitAnchor));
-  }
+  EXPECT_FALSE(IsUseCounted(WebFeature::kCSSPseudoElementUsesImplicitAnchor));
 }
 
 TEST_F(StyleResolverTest, FindContainerForElement_LayoutSiblings) {

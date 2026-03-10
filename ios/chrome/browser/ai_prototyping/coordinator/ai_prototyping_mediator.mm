@@ -6,14 +6,18 @@
 
 #import <string>
 
+#import "base/base64.h"
 #import "base/functional/bind.h"
+#import "base/json/json_reader.h"
 #import "base/logging.h"
 #import "base/strings/string_number_conversions.h"
 #import "base/strings/stringprintf.h"
 #import "base/strings/sys_string_conversions.h"
 #import "base/strings/utf_string_conversions.h"
+#import "base/task/thread_pool.h"
 #import "base/values.h"
 #import "components/optimization_guide/optimization_guide_buildflags.h"
+#import "components/optimization_guide/proto/features/actions_data.pb.h"
 #import "components/optimization_guide/proto/features/bling_prototyping.pb.h"
 #import "components/optimization_guide/proto/features/common_quality_data.pb.h"
 #import "components/optimization_guide/proto/features/enhanced_calendar.pb.h"
@@ -25,10 +29,15 @@
 #import "ios/chrome/browser/ai_prototyping/model/tab_organization_service_impl.h"
 #import "ios/chrome/browser/ai_prototyping/ui/ai_prototyping_consumer.h"
 #import "ios/chrome/browser/ai_prototyping/utils/ai_prototyping_constants.h"
+#import "ios/chrome/browser/ai_prototyping/utils/json_action_parser.h"
 #import "ios/chrome/browser/ai_prototyping/utils/page_context_util.h"
+#import "ios/chrome/browser/intelligence/actuation/model/actuation_error.h"
+#import "ios/chrome/browser/intelligence/actuation/model/actuation_service.h"
+#import "ios/chrome/browser/intelligence/actuation/model/actuation_service_factory.h"
 #import "ios/chrome/browser/intelligence/enhanced_calendar/model/enhanced_calendar_service_impl.h"
 #import "ios/chrome/browser/intelligence/proto_wrappers/ios_smart_tab_grouping_request_wrapper.h"
 #import "ios/chrome/browser/intelligence/proto_wrappers/page_context_wrapper.h"
+#import "ios/chrome/browser/intelligence/proto_wrappers/page_context_wrapper_config.h"
 #import "ios/chrome/browser/intelligence/proto_wrappers/tab_organization_request_wrapper.h"
 #import "ios/chrome/browser/intelligence/smart_tab_grouping/model/smart_tab_grouping_service_impl.h"
 #import "ios/chrome/browser/intelligence/smart_tab_grouping/utils/smart_tab_grouping_utils.h"
@@ -143,6 +152,7 @@
 - (void)executeFreeformServerQuery:(NSString*)query
                 systemInstructions:(NSString*)systemInstructions
                 includePageContext:(BOOL)includePageContext
+                    richExtraction:(BOOL)richExtraction
                       uploadToMQLS:(BOOL)uploadToMQLS
                   storePageContext:(BOOL)storePageContext
                        temperature:(float)temperature
@@ -206,9 +216,9 @@
           });
 
   // Populate the PageContext proto and then execute the query.
-  _pageContextWrapper =
-      CreatePageContextWrapper(_webStateList->GetActiveWebState(),
-                               std::move(page_context_completion_callback));
+  _pageContextWrapper = CreatePageContextWrapper(
+      _webStateList->GetActiveWebState(), richExtraction,
+      std::move(page_context_completion_callback));
   PopulatePageContext(_pageContextWrapper, _webStateList->GetActiveWebState());
 }
 
@@ -531,6 +541,166 @@
           @"to: %@",
           base::SysUTF8ToNSString(result.file_path.value()));
   }
+}
+
+- (void)executeActuationWithParams:(NSDictionary*)params {
+  ActuationService* actuationService =
+      ActuationServiceFactory::GetForProfile(ProfileIOS::FromBrowserState(
+          _webStateList->GetActiveWebState()->GetBrowserState()));
+
+  if (!actuationService) {
+    [self.consumer updateQueryResult:@"Error: ActuationService not available."
+                          forFeature:AIPrototypingFeature::kActuationTools];
+    return;
+  }
+
+  optimization_guide::proto::Action action;
+  NSString* jsonString = params[@"json"];
+  if (jsonString.length == 0) {
+    [self.consumer updateQueryResult:@"Error: No JSON provided."
+                          forFeature:AIPrototypingFeature::kActuationTools];
+    return;
+  }
+  std::optional<base::Value> jsonVal = base::JSONReader::Read(
+      base::SysNSStringToUTF8(jsonString), base::JSON_PARSE_RFC);
+
+  if (!jsonVal || !jsonVal->is_dict()) {
+    [self.consumer updateQueryResult:@"Error: Invalid JSON."
+                          forFeature:AIPrototypingFeature::kActuationTools];
+    return;
+  }
+
+  // Try to parse the JSON to a known action optimization_guide::proto::Action.
+  if (!ai_prototyping::ParseActionFromDict(jsonVal->GetDict(), &action)) {
+    [self.consumer updateQueryResult:@"Error: Unknown action type in JSON."
+                          forFeature:AIPrototypingFeature::kActuationTools];
+    return;
+  }
+
+  __weak __typeof(self) weakSelf = self;
+  actuationService->ExecuteAction(
+      action, base::BindOnce(^(ActuationTool::ActuationResult result) {
+        NSLog(@"[AIPrototypingMediator] Actuation callback executed.");
+        if (result.has_value()) {
+          [weakSelf.consumer
+              updateQueryResult:@"Action executed successfully."
+                     forFeature:AIPrototypingFeature::kActuationTools];
+        } else {
+          NSString* errorMsg = base::SysUTF8ToNSString(base::StringPrintf(
+              "Action failed: %s", GetActuationErrorMessage(result.error())));
+          NSLog(@"[AIPrototypingMediator] %@", errorMsg);
+          [weakSelf.consumer
+              updateQueryResult:errorMsg
+                     forFeature:AIPrototypingFeature::kActuationTools];
+        }
+      }));
+}
+
+- (void)listTabs {
+  NSMutableArray<NSDictionary*>* tabs = [NSMutableArray array];
+  web::WebState* activeWebState = _webStateList->GetActiveWebState();
+  if (!activeWebState) {
+    return;
+  }
+
+  for (int i = 0; i < _webStateList->count(); ++i) {
+    web::WebState* webState = _webStateList->GetWebStateAt(i);
+    NSString* title = base::SysUTF16ToNSString(webState->GetTitle());
+    int32_t tabID = webState->GetUniqueIdentifier().identifier();
+    NSString* url = base::SysUTF8ToNSString(webState->GetVisibleURL().spec());
+    [tabs addObject:@{
+      @"id" : @(tabID),
+      @"title" : title ?: @"",
+      @"url" : url ?: @"",
+      @"active" : @(webState == activeWebState)
+    }];
+  }
+
+  if ([self.consumer respondsToSelector:@selector(updateTabList:)]) {
+    [self.consumer updateTabList:tabs];
+  }
+}
+
+// Executes the APC extraction for the active WebState using
+// `PageContextWrapper`. The resulting `PageContext` proto is serialized to disk
+// in a background thread, and the file path is displayed in the prototyping
+// menu.
+- (void)executeAPCExtractionWithRichExtraction:(BOOL)useRichExtraction {
+  web::WebState* activeWebState = _webStateList->GetActiveWebState();
+  if (!activeWebState) {
+    [self.consumer updateQueryResult:@"Error: No active web state."
+                          forFeature:AIPrototypingFeature::kAPC];
+    return;
+  }
+
+  PageContextWrapperConfig config = PageContextWrapperConfigBuilder()
+                                        .SetUseRichExtraction(useRichExtraction)
+                                        .Build();
+
+  __weak __typeof(self) weakSelf = self;
+  auto completion = base::BindOnce(^(
+      PageContextWrapperCallbackResponse response) {
+    if (!response.has_value()) {
+      [weakSelf.consumer
+          updateQueryResult:@"Error: Failed to populate PageContext."
+                 forFeature:AIPrototypingFeature::kAPC];
+      return;
+    }
+
+    std::unique_ptr<optimization_guide::proto::PageContext> page_context =
+        std::move(response.value());
+
+    std::string serialized_proto = page_context->SerializeAsString();
+
+    auto write_to_disk_task = base::BindOnce(
+        [](std::unique_ptr<optimization_guide::proto::PageContext> context) {
+          return SaveSerializedPageContextToDisk(*context);
+        },
+        std::move(page_context));
+
+    auto save_to_disk_callback =
+        base::BindOnce(^(SavePageContextResult result) {
+          NSMutableString* outputStr = [NSMutableString string];
+          if (result.success) {
+            [outputStr
+                appendString:@"Instructions:\nFollow the directions at "
+                             @"go/readableapc to view the extracted APC.\n\n"];
+            [outputStr
+                appendFormat:@"Proto saved to:\n%@\n\n",
+                             base::SysUTF8ToNSString(result.file_path.value())];
+          } else {
+            [outputStr appendString:@"Warning: Failed to save to disk.\n\n"];
+          }
+
+          [outputStr appendString:@"Proto Base64 Bytes:\n"];
+
+          // Encode the serialized proto to base64 to prevent corruption when
+          // displayed in the UI.
+          std::string base64_encoded = base::Base64Encode(serialized_proto);
+          NSString* base64Str = base::SysUTF8ToNSString(base64_encoded);
+          [outputStr appendString:base64Str];
+
+          [weakSelf.consumer updateQueryResult:outputStr
+                                    forFeature:AIPrototypingFeature::kAPC];
+          if ([weakSelf.consumer
+                  respondsToSelector:@selector(updateRawBytes:forFeature:)]) {
+            [weakSelf.consumer updateRawBytes:base64Str
+                                   forFeature:AIPrototypingFeature::kAPC];
+          }
+        });
+
+    base::ThreadPool::PostTaskAndReplyWithResult(
+        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
+        std::move(write_to_disk_task), std::move(save_to_disk_callback));
+  });
+
+  _pageContextWrapper =
+      [[PageContextWrapper alloc] initWithWebState:activeWebState
+                                            config:config
+                                completionCallback:std::move(completion)];
+
+  _pageContextWrapper.shouldGetAnnotatedPageContent = YES;
+  [_pageContextWrapper populatePageContextFieldsAsync];
 }
 
 @end

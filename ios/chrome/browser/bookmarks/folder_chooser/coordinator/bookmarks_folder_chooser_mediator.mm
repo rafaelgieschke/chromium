@@ -4,7 +4,6 @@
 
 #import "ios/chrome/browser/bookmarks/folder_chooser/coordinator/bookmarks_folder_chooser_mediator.h"
 
-#import "base/containers/contains.h"
 #import "base/memory/raw_ptr.h"
 #import "components/bookmarks/browser/bookmark_model.h"
 #import "components/bookmarks/browser/bookmark_node.h"
@@ -46,6 +45,8 @@ using bookmarks::BookmarkNode;
   // Observer for sync service status changes.
   std::unique_ptr<SyncObserverBridge> _syncObserverBridge;
 }
+
+@synthesize UIDisabled = _UIDisabled;
 
 - (instancetype)initWithBookmarkModel:(bookmarks::BookmarkModel*)model
                           editedNodes:(std::set<const BookmarkNode*>)editedNodes
@@ -130,7 +131,7 @@ using bookmarks::BookmarkNode;
 - (void)bookmarkNodeDeleted:(const BookmarkNode*)bookmarkNode {
   // Remove node from `_editedNodes` if it is already deleted (possibly remotely
   // by another sync device).
-  if (base::Contains(_editedNodes, bookmarkNode)) {
+  if (_editedNodes.contains(bookmarkNode)) {
     _editedNodes.erase(bookmarkNode);
     // if `_editedNodes` becomes empty, nothing to move.  Exit the folder
     // chooser.

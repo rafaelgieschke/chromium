@@ -65,7 +65,6 @@ class TestSheetModel : public AuthenticatorRequestSheetModel {
   void OnBack() override {}
   void OnAccept() override {}
   void OnCancel() override {}
-  void OnManageDevices() override {}
 };
 
 class TestSheetView : public AuthenticatorRequestSheetView {
@@ -137,6 +136,14 @@ class AuthenticatorDialogViewTest : public DialogBrowserTest {
           view_controller_.get(),
           std::make_unique<TestSheetView>(std::make_unique<TestSheetModel>()));
       EXPECT_EQ(step_transition_observer.step_transition_count(), 0);
+    } else if (name == "ReplaceSheet") {
+      test::AuthenticatorRequestDialogViewTestApi::SetSheetTo(
+          view_controller_.get(),
+          std::make_unique<TestSheetView>(std::make_unique<TestSheetModel>()));
+      // Replace it immediately to trigger the dangling pointer scenario
+      test::AuthenticatorRequestDialogViewTestApi::SetSheetTo(
+          view_controller_.get(),
+          std::make_unique<TestSheetView>(std::make_unique<TestSheetModel>()));
     }
 
     dialog_model_->RemoveObserver(&step_transition_observer);
@@ -151,5 +158,9 @@ class AuthenticatorDialogViewTest : public DialogBrowserTest {
 
 // Test the dialog with a custom delegate.
 IN_PROC_BROWSER_TEST_F(AuthenticatorDialogViewTest, InvokeUi_default) {
+  ShowAndVerifyUi();
+}
+
+IN_PROC_BROWSER_TEST_F(AuthenticatorDialogViewTest, InvokeUi_ReplaceSheet) {
   ShowAndVerifyUi();
 }

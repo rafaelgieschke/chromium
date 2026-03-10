@@ -18,12 +18,12 @@
 #include "chrome/browser/ui/tabs/alert/tab_alert_icon.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/tabs/split_tab_menu_model.h"
-#include "chrome/browser/ui/tabs/tab_renderer_data.h"
+#include "chrome/browser/ui/tabs/tab_data.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/contents_container_outline.h"
 #include "chrome/browser/ui/views/frame/contents_web_view.h"
-#include "chrome/browser/ui/views/frame/top_container_background.h"
+#include "chrome/browser/ui/views/frame/themed_background.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/tabs/public/tab_interface.h"
@@ -134,7 +134,7 @@ MultiContentsViewMiniToolbar::MultiContentsViewMiniToolbar(
   views::InstallCircleHighlightPathGenerator(image_button_);
 
   // Update minitoolbar contents.
-  std::optional<TabRendererData> tab_data = GetTabData();
+  std::optional<tabs::TabData> tab_data = GetTabData();
   if (tab_data.has_value()) {
     UpdateContents(tab_data.value());
   }
@@ -187,7 +187,7 @@ void MultiContentsViewMiniToolbar::UpdateState(bool is_active,
 }
 
 void MultiContentsViewMiniToolbar::UpdateContents() {
-  std::optional<TabRendererData> tab_data = GetTabData();
+  std::optional<tabs::TabData> tab_data = GetTabData();
   if (tab_data.has_value()) {
     UpdateContents(tab_data.value());
   }
@@ -197,7 +197,7 @@ void MultiContentsViewMiniToolbar::UpdateWebContents(views::WebView* web_view) {
   tab_alert_status_subscription_.reset();
   web_contents_ = web_view->web_contents();
   RegisterTabAlertSubscription();
-  std::optional<TabRendererData> tab_data = GetTabData();
+  std::optional<tabs::TabData> tab_data = GetTabData();
   if (tab_data.has_value()) {
     UpdateContents(tab_data.value());
   }
@@ -215,19 +215,17 @@ void MultiContentsViewMiniToolbar::OnTabChangedAt(tabs::TabInterface* tab,
   if (!web_contents_ || tab->GetContents() != web_contents_) {
     return;
   }
-  TabStripModel* model = browser_view_->browser()->tab_strip_model();
-  TabRendererData tab_data = TabRendererData::FromTabInModel(model, index);
-  UpdateContents(tab_data);
+  UpdateContents(tabs::TabData::FromTabInterface(tab));
 }
 
 void MultiContentsViewMiniToolbar::OnPaint(gfx::Canvas* canvas) {
   // Paint the mini toolbar background to match the toolbar.
-  TopContainerBackground::PaintBackground(canvas, this, browser_view_);
+  ThemedBackground::PaintBackground(canvas, this, browser_view_);
 }
 
 void MultiContentsViewMiniToolbar::OnThemeChanged() {
   views::View::OnThemeChanged();
-  std::optional<TabRendererData> tab_data = GetTabData();
+  std::optional<tabs::TabData> tab_data = GetTabData();
   if (tab_data.has_value()) {
     UpdateFavicon(tab_data.value());
   }
@@ -266,19 +264,24 @@ void MultiContentsViewMiniToolbar::OnAlertStatusIndicatorChanged(
   }
 }
 
-std::optional<TabRendererData> MultiContentsViewMiniToolbar::GetTabData() {
+std::optional<tabs::TabData> MultiContentsViewMiniToolbar::GetTabData() {
   if (!web_contents_) {
     return std::nullopt;
   }
-  TabStripModel* model = browser_view_->browser()->tab_strip_model();
-  int tab_index = model->GetIndexOfWebContents(web_contents_);
+
+  TabStripModel* const model = browser_view_->browser()->tab_strip_model();
+  const int tab_index = model->GetIndexOfWebContents(web_contents_);
   if (tab_index == TabStripModel::kNoTab) {
     return std::nullopt;
   }
-  return TabRendererData::FromTabInModel(model, tab_index);
+
+  tabs::TabInterface* const tab_interface = GetTabInterface(web_contents_);
+  return tab_interface ? std::make_optional(
+                             tabs::TabData::FromTabInterface(tab_interface))
+                       : std::nullopt;
 }
 
-void MultiContentsViewMiniToolbar::UpdateContents(TabRendererData tab_data) {
+void MultiContentsViewMiniToolbar::UpdateContents(tabs::TabData tab_data) {
   GURL domain_url = tab_data.visible_url;
   if (tab_data.last_committed_url.is_valid()) {
     domain_url = tab_data.last_committed_url;
@@ -291,6 +294,8 @@ void MultiContentsViewMiniToolbar::UpdateContents(TabRendererData tab_data) {
     domain = l10n_util::GetStringUTF16(IDS_HOVER_CARD_FILE_URL_SOURCE);
   } else if (domain_url.SchemeIsBlob()) {
     domain = l10n_util::GetStringUTF16(IDS_HOVER_CARD_BLOB_URL_SOURCE);
+  } else if (domain_url.SchemeIs(url::kViewSourceScheme)) {
+    domain = l10n_util::GetStringUTF16(IDS_HOVER_CARD_VIEW_SOURCE_URL_SOURCE);
   } else if (tab_data.should_display_url) {
     domain = url_formatter::FormatUrl(
         domain_url,
@@ -311,7 +316,7 @@ void MultiContentsViewMiniToolbar::UpdateContents(TabRendererData tab_data) {
   UpdateFavicon(tab_data);
 }
 
-void MultiContentsViewMiniToolbar::UpdateFavicon(TabRendererData tab_data) {
+void MultiContentsViewMiniToolbar::UpdateFavicon(tabs::TabData tab_data) {
   // Theme the favicon similar to how favicons are themed in the bookmarks bar.
   ui::ImageModel favicon = tab_data.favicon;
   bool themify_favicon = tab_data.should_themify_favicon;

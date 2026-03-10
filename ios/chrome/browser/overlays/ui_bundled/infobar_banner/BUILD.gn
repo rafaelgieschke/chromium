@@ -42,6 +42,7 @@ source_set("coordinators") {
     "//ios/chrome/browser/shared/public/commands",
     "//ios/chrome/browser/shared/public/features",
     "//ios/chrome/browser/shared/ui/util",
+    "//ios/chrome/browser/shared/ui/util:omnibox_util",
     "//ios/chrome/browser/shared/ui/util:util_swift",
   ]
 
@@ -81,7 +82,6 @@ source_set("unit_tests") {
     "//ios/chrome/browser/overlays/model",
     "//ios/chrome/browser/overlays/model/public/infobar_banner",
     "//ios/chrome/browser/overlays/model/test",
-    "//ios/chrome/browser/overlays/ui_bundled/test",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/ocmock",

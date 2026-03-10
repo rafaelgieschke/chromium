@@ -98,8 +98,8 @@ class AutocompleteResult {
   // AutocompleteResult is correct.
   bool VerifyCoherency(JNIEnv* env,
                        const base::android::JavaRef<jlongArray>& matches,
-                       jint match_index,
-                       jint verification_point);
+                       int32_t match_index,
+                       int32_t verification_point);
 #endif
 
   // Moves matches from |old_matches| to provide a consistent result set.
@@ -188,18 +188,14 @@ class AutocompleteResult {
   void AttachPedalsToMatches(const AutocompleteInput& input,
                              const AutocompleteProviderClient& client);
 
-#if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
-  // Attaches AIM action to the highest-scoring eligible match in the result
-  // set, if no other actions are present.
-  void AttachAimAction(TemplateURLService* template_url_service,
-                       AutocompleteProviderClient* client);
-#endif
-
   // Sets a takeover action on all matches to issue a contextual search.
   void AttachContextualSearchFulfillmentActionToMatches();
 
   // Sets a takeover action on all matches to open Lens.
   void AttachContextualSearchOpenLensActionToMatches();
+
+  // Sets |action| in matches that have associated keywords.
+  void AttachSiteSearchActionToMatches(const TemplateURLService* service);
 
   // Sets a smart compose inline hint.
   void set_smart_compose_inline_hint(
@@ -434,6 +430,9 @@ class AutocompleteResult {
     return std::erase_if(matches_, predicate);
   }
 
+  // Read-only access to `sequence_id_` for async use verification.
+  uint32_t sequence_id() const { return sequence_id_; }
+
   // This method implements a stateful stable partition. Matches which are
   // search types, and their submatches regardless of type, are shifted
   // earlier in the range, while non-search types and their submatches
@@ -557,6 +556,10 @@ class AutocompleteResult {
   // autocomplete session to start when the omnibox is focused and to end when
   // the popup closes.
   SessionData session_;
+
+  // A simple mechanism to measure and prevent use of stale data while
+  // interoperating asynchronously with the webui omnibox popup.
+  uint32_t sequence_id_;
 
 #if BUILDFLAG(IS_ANDROID)
   // Corresponding Java object.

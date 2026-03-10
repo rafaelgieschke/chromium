@@ -3,7 +3,9 @@
 // found in the LICENSE file.
 #include "chrome/browser/ui/tabs/tab_strip_api/tab_strip_service_mojo_handler.h"
 
+#include "base/strings/string_number_conversions.h"
 #include "base/types/expected.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tabs/tab_strip_api/adapters/tab_strip_model_adapter_impl.h"
 #include "chrome/browser/ui/tabs/tab_strip_api/event_broadcaster.h"
 #include "chrome/browser/ui/tabs/tab_strip_api/tab_strip_service.h"
@@ -17,7 +19,8 @@ TabStripServiceMojoHandler::TabStripServiceMojoHandler(
           std::make_unique<tabs_api::TabStripServiceImpl>(browser,
                                                           tab_strip_model),
           std::make_unique<tabs_api::TabStripModelAdapterImpl>(
-              tab_strip_model)) {}
+              tab_strip_model,
+              base::NumberToString(browser->GetSessionID().id()))) {}
 
 TabStripServiceMojoHandler::TabStripServiceMojoHandler(
     std::unique_ptr<tabs_api::TabStripService> service,
@@ -105,6 +108,11 @@ void TabStripServiceMojoHandler::ShowTabContextMenu(
       tab_strip_service_->ShowTabContextMenu(tab_id, location));
 }
 
+void TabStripServiceMojoHandler::GetAllTabsForProfile(
+    GetAllTabsForProfileCallback callback) {
+  std::move(callback).Run(tab_strip_service_->GetAllTabsForProfile());
+}
+
 void TabStripServiceMojoHandler::OnTabEvents(
     const std::vector<tabs_api::mojom::TabsEventPtr>& events) {
   for (auto& observer : observers_) {
@@ -129,4 +137,12 @@ void TabStripServiceMojoHandler::Accept(
 void TabStripServiceMojoHandler::AcceptExperimental(
     mojo::PendingReceiver<tabs_api::mojom::TabStripExperimentService> client) {
   experiment_clients_.Add(this, std::move(client));
+}
+
+void TabStripServiceMojoHandler::ReplaceTabInSplit(
+    const tabs_api::NodeId& tab_to_replace,
+    const tabs_api::NodeId& tab_to_insert,
+    ReplaceTabInSplitCallback callback) {
+  std::move(callback).Run(
+      tab_strip_service_->ReplaceTabInSplit(tab_to_replace, tab_to_insert));
 }

@@ -11,6 +11,7 @@
 #import "base/functional/callback_helpers.h"
 #import "base/metrics/user_metrics.h"
 #import "base/metrics/user_metrics_action.h"
+#import "base/not_fatal_until.h"
 #import "base/notreached.h"
 #import "base/strings/sys_string_conversions.h"
 #import "base/strings/utf_string_conversions.h"
@@ -26,8 +27,6 @@
 #import "ios/chrome/browser/bookmarks/editor/coordinator/bookmarks_editor_coordinator_delegate.h"
 #import "ios/chrome/browser/bookmarks/folder_chooser/coordinator/bookmarks_folder_chooser_coordinator.h"
 #import "ios/chrome/browser/bookmarks/folder_chooser/coordinator/bookmarks_folder_chooser_coordinator_delegate.h"
-#import "ios/chrome/browser/bookmarks/folder_editor/coordinator/bookmarks_folder_editor_coordinator.h"
-#import "ios/chrome/browser/bookmarks/folder_editor/coordinator/bookmarks_folder_editor_coordinator_delegate.h"
 #import "ios/chrome/browser/bookmarks/model/bookmark_model_factory.h"
 #import "ios/chrome/browser/bookmarks/model/bookmarks_utils.h"
 #import "ios/chrome/browser/bookmarks/ui_bundled/bookmark_mediator.h"
@@ -44,9 +43,9 @@
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/shared/model/url/chrome_url_constants.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/non_modal_signin_promo_commands.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/settings_commands.h"
 #import "ios/chrome/browser/shared/public/commands/snackbar_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
@@ -73,14 +72,12 @@ enum class PresentedState {
   NONE,
   BOOKMARK_BROWSER,
   BOOKMARK_EDITOR,
-  FOLDER_EDITOR,
   FOLDER_SELECTION,
 };
 
 }  // namespace
 
 @interface BookmarksCoordinator () <BookmarksEditorCoordinatorDelegate,
-                                    BookmarksFolderEditorCoordinatorDelegate,
                                     BookmarksFolderChooserCoordinatorDelegate,
                                     BookmarksHomeViewControllerDelegate,
                                     UIAdaptivePresentationControllerDelegate,
@@ -103,11 +100,6 @@ enum class PresentedState {
 // non-nil when `currentPresentedState` is BOOKMARK_BROWSER.
 @property(nonatomic, strong) BookmarksHomeViewController* bookmarkBrowser;
 
-// A reference to the potentially presented folder editor. This will be non-nil
-// when `currentPresentedState` is FOLDER_EDITOR.
-@property(nonatomic, strong)
-    BookmarksFolderEditorCoordinator* folderEditorCoordinator;
-
 // A reference to the potentially presented folder chooser. This will be
 // non-nil when `currentPresentedState` is FOLDER_SELECTION.
 @property(nonatomic, strong)
@@ -118,9 +110,8 @@ enum class PresentedState {
 
 @property(nonatomic, strong) BookmarkMediator* mediator;
 
-// Handler for Application Commands.
-@property(nonatomic, readonly, weak) id<ApplicationCommands>
-    applicationCommandsHandler;
+// Handler for Scene Commands.
+@property(nonatomic, readonly, weak) id<SceneCommands> sceneHandler;
 
 // Handler for Snackbar Commands.
 @property(nonatomic, readonly, weak) id<SnackbarCommands>
@@ -142,7 +133,7 @@ enum class PresentedState {
   ReminderNotificationsCoordinator* _reminderNotificationsCoordinator;
 }
 
-@synthesize applicationCommandsHandler = _applicationCommandsHandler;
+@synthesize sceneHandler = _sceneHandler;
 @synthesize baseViewController = _baseViewController;
 @synthesize snackbarCommandsHandler = _snackbarCommandsHandler;
 
@@ -186,9 +177,6 @@ enum class PresentedState {
     case PresentedState::BOOKMARK_EDITOR:
       [self stopBookmarksEditorCoordinator];
       break;
-    case PresentedState::FOLDER_EDITOR:
-      [self stopBookmarksFolderEditorCoordinator];
-      break;
     case PresentedState::FOLDER_SELECTION:
       [self stopBookmarksFolderChooserCoordinator];
       break;
@@ -203,8 +191,6 @@ enum class PresentedState {
            base::NotFatalUntil::M152);
   CHECK(!self.bookmarkEditorCoordinator, base::NotFatalUntil::M152)
       << [self description];
-  CHECK(!self.folderEditorCoordinator, base::NotFatalUntil::M152)
-      << [self description];
   CHECK(!self.folderChooserCoordinator, base::NotFatalUntil::M152)
       << [self description];
   CHECK(!self.bookmarkNavigationController, base::NotFatalUntil::M152)
@@ -212,14 +198,14 @@ enum class PresentedState {
   [super stop];
 }
 
-- (id<ApplicationCommands>)applicationCommandsHandler {
-  // Using lazy loading here to avoid potential crashes with ApplicationCommands
+- (id<SceneCommands>)sceneHandler {
+  // Using lazy loading here to avoid potential crashes with SceneCommands
   // not being yet dispatched.
-  if (!_applicationCommandsHandler) {
-    _applicationCommandsHandler = HandlerForProtocol(
-        self.browser->GetCommandDispatcher(), ApplicationCommands);
+  if (!_sceneHandler) {
+    _sceneHandler =
+        HandlerForProtocol(self.browser->GetCommandDispatcher(), SceneCommands);
   }
-  return _applicationCommandsHandler;
+  return _sceneHandler;
 }
 
 - (id<SnackbarCommands>)snackbarCommandsHandler {
@@ -305,6 +291,7 @@ enum class PresentedState {
   [self.folderChooserCoordinator start];
 }
 
+// Presents the bookmark editor for the given URL `node`.
 - (void)presentEditorForURLNode:(const bookmarks::BookmarkNode*)node {
   CHECK_EQ(PresentedState::NONE, self.currentPresentedState,
            base::NotFatalUntil::M152)
@@ -325,28 +312,6 @@ enum class PresentedState {
          snackbarCommandsHandler:self.snackbarCommandsHandler];
   self.bookmarkEditorCoordinator.delegate = self;
   [self.bookmarkEditorCoordinator start];
-}
-
-- (void)presentEditorForFolderNode:(const bookmarks::BookmarkNode*)node {
-  CHECK_EQ(PresentedState::NONE, self.currentPresentedState,
-           base::NotFatalUntil::M152)
-      << [self description];
-  CHECK(!self.bookmarkNavigationController, base::NotFatalUntil::M152)
-      << [self description];
-  CHECK(node, base::NotFatalUntil::M152) << [self description];
-  CHECK_EQ(node->type(), BookmarkNode::FOLDER, base::NotFatalUntil::M152)
-      << [self description];
-  [self dismissSnackbar];
-  self.currentPresentedState = PresentedState::FOLDER_EDITOR;
-  // `self.baseViewController` is part of a navigation view controller.
-  // Therefore, the bookmark folder view needs to be presented by
-  // `self.baseViewController.navigationController`.
-  self.folderEditorCoordinator = [[BookmarksFolderEditorCoordinator alloc]
-      initWithBaseViewController:self.baseViewController.navigationController
-                         browser:self.browser
-                      folderNode:node];
-  self.folderEditorCoordinator.delegate = self;
-  [self.folderEditorCoordinator start];
 }
 
 - (void)dismissBookmarkBrowserAnimated:(BOOL)animated
@@ -424,10 +389,8 @@ enum class PresentedState {
 }
 
 - (void)dismissBookmarksEditorAnimated:(BOOL)animated {
-  if (self.currentPresentedState != PresentedState::BOOKMARK_EDITOR) {
-    // TODO(crbug.com/40062447): This test should be turned into a DCHECK().
-    return;
-  }
+  CHECK_EQ(PresentedState::BOOKMARK_EDITOR, self.currentPresentedState,
+           base::NotFatalUntil::M154);
   self.bookmarkEditorCoordinator.animatedDismissal = animated;
   [self stopBookmarksEditorCoordinator];
 }
@@ -438,7 +401,9 @@ enum class PresentedState {
                             urlsToOpen:std::vector<GURL>()
                            inIncognito:NO
                                 newTab:NO];
-  [self dismissBookmarksEditorAnimated:animated];
+  if (self.currentPresentedState == PresentedState::BOOKMARK_EDITOR) {
+    [self dismissBookmarksEditorAnimated:animated];
+  }
 }
 
 - (void)dismissSnackbar {
@@ -456,8 +421,6 @@ enum class PresentedState {
       return [self.bookmarkEditorCoordinator canDismiss];
     case PresentedState::FOLDER_SELECTION:
       return [self.folderChooserCoordinator canDismiss];
-    case PresentedState::FOLDER_EDITOR:
-      return [self.folderEditorCoordinator canDismiss];
   }
 }
 
@@ -476,26 +439,6 @@ enum class PresentedState {
 
 - (void)bookmarkEditorWillCommitTitleOrURLChange:
     (BookmarksEditorCoordinator*)coordinator {
-  [self.delegate bookmarksCoordinatorWillCommitTitleOrURLChange:self];
-}
-
-#pragma mark - BookmarksFolderEditorCoordinatorDelegate
-
-- (void)bookmarksFolderEditorCoordinator:
-            (BookmarksFolderEditorCoordinator*)folderEditor
-              didFinishEditingFolderNode:
-                  (const bookmarks::BookmarkNode*)folder {
-  CHECK(folder, base::NotFatalUntil::M152) << [self description];
-  [self stopBookmarksFolderEditorCoordinator];
-}
-
-- (void)bookmarksFolderEditorCoordinatorShouldStop:
-    (BookmarksFolderEditorCoordinator*)coordinator {
-  [self stopBookmarksFolderEditorCoordinator];
-}
-
-- (void)bookmarksFolderEditorWillCommitTitleChange:
-    (BookmarksFolderEditorCoordinator*)coordinator {
   [self.delegate bookmarksCoordinatorWillCommitTitleOrURLChange:self];
 }
 
@@ -596,8 +539,7 @@ enum class PresentedState {
 
 - (void)bookmarkHomeViewController:(BookmarksHomeViewController*)controller
     wantsToShowSetTabReminderUIForNode:(const bookmarks::BookmarkNode*)node {
-  CHECK(
-      send_tab_to_self::IsSendTabIOSPushNotificationsEnabledWithTabReminders());
+  CHECK(send_tab_to_self::AreIOSTabRemindersEnabled());
   CHECK(node && node->is_url());
   CHECK(self.bookmarkNavigationController);
 
@@ -698,22 +640,6 @@ enum class PresentedState {
   self.currentPresentedState = PresentedState::NONE;
 }
 
-// Stops `self.folderEditorCoordinator` and sets `currentPresentedState` to
-// `NONE.
-- (void)stopBookmarksFolderEditorCoordinator {
-  CHECK_EQ(PresentedState::FOLDER_EDITOR, self.currentPresentedState,
-           base::NotFatalUntil::M152)
-      << [self description];
-  CHECK(!self.bookmarkNavigationController, base::NotFatalUntil::M152)
-      << [self description];
-  CHECK(self.folderEditorCoordinator, base::NotFatalUntil::M152)
-      << [self description];
-  [self.folderEditorCoordinator stop];
-  self.folderEditorCoordinator.delegate = nil;
-  self.folderEditorCoordinator = nil;
-  self.currentPresentedState = PresentedState::NONE;
-}
-
 // Stops `self.bookmarkEditorCoordinator` and sets `currentPresentedState` to
 // `NONE.
 - (void)stopBookmarksEditorCoordinator {
@@ -804,8 +730,7 @@ enum class PresentedState {
   self.bookmarkBrowser =
       [[BookmarksHomeViewController alloc] initWithBrowser:self.browser];
   self.bookmarkBrowser.homeDelegate = self;
-  self.bookmarkBrowser.applicationCommandsHandler =
-      self.applicationCommandsHandler;
+  self.bookmarkBrowser.sceneHandler = self.sceneHandler;
   self.bookmarkBrowser.snackbarCommandsHandler = self.snackbarCommandsHandler;
 
   NSArray<BookmarksHomeViewController*>* replacementViewControllers = nil;
@@ -879,17 +804,16 @@ enum class PresentedState {
 
 - (NSString*)description {
   return [NSString
-      stringWithFormat:
-          @"<%@: %p, state=%d bookmarkEditorCoordinator=%p, "
-          @"bookmarkNavigationController=%p (presented: %@), "
-          @"folderEditorCoordinator=%p, folderChooserCoordinator=%p "
-          @"bookmarkModel=%p",
-          NSStringFromClass([self class]), self,
-          static_cast<int>(self.currentPresentedState),
-          self.bookmarkEditorCoordinator, self.bookmarkNavigationController,
-          self.bookmarkNavigationController ? @"YES" : @"NO",
-          self.folderEditorCoordinator, self.folderChooserCoordinator,
-          _bookmarkModel.get()];
+      stringWithFormat:@"<%@: %p, state=%d bookmarkEditorCoordinator=%p, "
+                       @"bookmarkNavigationController=%p (presented: %@), "
+                       @"folderChooserCoordinator=%p "
+                       @"bookmarkModel=%p",
+                       NSStringFromClass([self class]), self,
+                       static_cast<int>(self.currentPresentedState),
+                       self.bookmarkEditorCoordinator,
+                       self.bookmarkNavigationController,
+                       self.bookmarkNavigationController ? @"YES" : @"NO",
+                       self.folderChooserCoordinator, _bookmarkModel.get()];
 }
 
 @end

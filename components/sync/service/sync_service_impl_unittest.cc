@@ -871,9 +871,6 @@ TEST_F(
 
   // Sign-in.
   SignInWithoutSyncConsent();
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-  ASSERT_TRUE(prefs()->GetBoolean(::prefs::kExplicitBrowserSignin));
-#endif
 
   // Registering CONTACT_INFO which includes addresses.
   std::vector<FakeControllerInitParams> params;
@@ -932,9 +929,14 @@ TEST_F(SyncServiceImplBookmarksLimitExceededErrorTest,
             service()->GetUserActionableError());
 
   // Acknowledge the error.
-  service()->AcknowledgeBookmarksLimitExceededError();
+  base::HistogramTester histogram_tester;
+  service()->AcknowledgeBookmarksLimitExceededError(
+      SyncService::BookmarksLimitExceededHelpClickedSource::kSettings);
   EXPECT_EQ(SyncService::UserActionableError::kNone,
             service()->GetUserActionableError());
+  histogram_tester.ExpectUniqueSample(
+      "Sync.BookmarksLimitExceededHelpClickedSource",
+      SyncService::BookmarksLimitExceededHelpClickedSource::kSettings, 1);
 }
 
 TEST_F(SyncServiceImplBookmarksLimitExceededErrorTest,

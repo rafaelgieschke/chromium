@@ -38,7 +38,6 @@ import org.chromium.chrome.browser.tabmodel.TabGroupMetadata;
 import org.chromium.chrome.browser.tabmodel.TabGroupModelFilter.MergeNotificationType;
 import org.chromium.chrome.browser.tasks.tab_management.TabDragHandlerBase;
 import org.chromium.ui.dragdrop.DragDropGlobalState;
-import org.chromium.ui.dragdrop.DragDropGlobalState.TrackerToken;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -290,7 +289,6 @@ public class ExternalViewDragDropReorderStrategyTest extends ReorderStrategyTest
         // Group tabs.
         mockTabGroup(
                 GROUP_ID1,
-                INTERACTING_VIEW_ID,
                 mModel.getTabById(INTERACTING_VIEW_ID),
                 mModel.getTabById(TAB_ID2));
         float initialBottomIndicatorWidth = mInteractingGroupTitle.getBottomIndicatorWidth();
@@ -490,7 +488,7 @@ public class ExternalViewDragDropReorderStrategyTest extends ReorderStrategyTest
 
     private void mockTabInGroup(int id) {
         Tab tab = mModel.getTabById(id);
-        mockTabGroup(GROUP_ID1, tab.getId(), tab);
+        mockTabGroup(GROUP_ID1, tab);
     }
 
     private void setupDragDropState(boolean isGroupDrag) {
@@ -517,9 +515,9 @@ public class ExternalViewDragDropReorderStrategyTest extends ReorderStrategyTest
         } else {
             dropData = new ChromeTabDropDataAndroid.Builder().withTab(tab).build();
         }
-        TrackerToken dragTrackerToken =
+        Token dragToken =
                 DragDropGlobalState.store(
                         /* dragSourceInstanceId= */ 1, dropData, /* dragShadowBuilder= */ null);
-        TabDragHandlerBase.setDragTrackerTokenForTesting(dragTrackerToken);
+        TabDragHandlerBase.setDragTokenForTesting(dragToken);
     }
 }

@@ -314,11 +314,11 @@ void LoadingPredictor::OnNavigationFinished(NavigationId navigation_id,
 
   loading_data_collector()->RecordFinishNavigation(
       navigation_id, new_main_frame_url, is_error_page);
-  if (active_urls_to_navigations_.find(old_main_frame_url) !=
-      active_urls_to_navigations_.end()) {
-    active_urls_to_navigations_[old_main_frame_url].erase(navigation_id);
-    if (active_urls_to_navigations_[old_main_frame_url].empty()) {
-      active_urls_to_navigations_.erase(old_main_frame_url);
+  if (auto it = active_urls_to_navigations_.find(old_main_frame_url);
+      it != active_urls_to_navigations_.end()) {
+    it->second.erase(navigation_id);
+    if (it->second.empty()) {
+      active_urls_to_navigations_.erase(it);
     }
   }
   active_navigations_.erase(navigation_id);
@@ -420,10 +420,14 @@ bool LoadingPredictor::HandleHintByOrigin(const GURL& url,
     if (is_new_origin || now - preconnect_data.last_preconnect_time_ >=
                              kMinDelayBetweenPreconnectRequests) {
       preconnect_data.last_preconnect_time_ = now;
+
+      // TODO(crbug.com/447954811): pass the `network_restrictions_id` from the
+      // caller.
       preconnect_manager()->StartPreconnectUrl(
           url, true, network_anonymization_key,
           kLoadingPredictorPreconnectTrafficAnnotation,
           /*storage_partition_config=*/nullptr,
+          /*network_restrictions_id=*/std::nullopt,
           /*keepalive_config=*/std::nullopt, mojo::NullRemote());
     }
     return true;
@@ -435,7 +439,8 @@ bool LoadingPredictor::HandleHintByOrigin(const GURL& url,
     preconnect_manager()->StartPreresolveHost(
         url, network_anonymization_key,
         kLoadingPredictorPreconnectTrafficAnnotation,
-        /*storage_partition_config=*/nullptr);
+        /*storage_partition_config=*/nullptr,
+        /*network_restrictions_id=*/std::nullopt);
     return true;
   }
 
@@ -502,10 +507,12 @@ void LoadingPredictor::PreconnectURLIfAllowed(
     return;
   }
 
+  // TODO(crbug.com/447954811): pass the `network_restrictions_id` from the
+  // caller.
   preconnect_manager()->StartPreconnectUrl(
       url, allow_credentials, network_anonymization_key, traffic_annotation,
-      storage_partition_config, /*keepalive_config=*/std::nullopt,
-      mojo::NullRemote());
+      storage_partition_config, /*network_restrictions_id=*/std::nullopt,
+      /*keepalive_config=*/std::nullopt, mojo::NullRemote());
 }
 
 void LoadingPredictor::MaybePrewarmResources(

@@ -7,12 +7,12 @@
 #include <memory>
 #include <string>
 
+#include "ash/constants/webui_url_constants.h"
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/prefs/pref_change_registrar.h"
@@ -39,8 +39,8 @@ const char kJsApiLoadComplete[] = "loadComplete";
 namespace ash {
 
 void CreateAndAddSlowUIHTMLSource(Profile* profile) {
-  content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
-      profile, chrome::kChromeUISlowHost);
+  content::WebUIDataSource* source =
+      content::WebUIDataSource::CreateAndAdd(profile, ash::kChromeUISlowHost);
 
   static constexpr webui::LocalizedString kStrings[] = {
       {"slowDisable", IDS_SLOW_DISABLE},
@@ -74,9 +74,9 @@ class SlowHandler : public WebUIMessageHandler {
   void UpdatePage();
 
   // Handlers for JS WebUI messages.
-  void HandleDisable(const base::Value::List& args);
-  void HandleEnable(const base::Value::List& args);
-  void LoadComplete(const base::Value::List& args);
+  void HandleDisable(const base::ListValue& args);
+  void HandleEnable(const base::ListValue& args);
+  void LoadComplete(const base::ListValue& args);
 
   raw_ptr<Profile> profile_;
   std::unique_ptr<PrefChangeRegistrar> user_pref_registrar_;
@@ -113,17 +113,17 @@ void SlowHandler::OnJavascriptDisallowed() {
   user_pref_registrar_->RemoveAll();
 }
 
-void SlowHandler::HandleDisable(const base::Value::List& args) {
+void SlowHandler::HandleDisable(const base::ListValue& args) {
   PrefService* pref_service = profile_->GetPrefs();
   pref_service->SetBoolean(prefs::kPerformanceTracingEnabled, false);
 }
 
-void SlowHandler::HandleEnable(const base::Value::List& args) {
+void SlowHandler::HandleEnable(const base::ListValue& args) {
   PrefService* pref_service = profile_->GetPrefs();
   pref_service->SetBoolean(prefs::kPerformanceTracingEnabled, true);
 }
 
-void SlowHandler::LoadComplete(const base::Value::List& args) {
+void SlowHandler::LoadComplete(const base::ListValue& args) {
   AllowJavascript();
   UpdatePage();
 }

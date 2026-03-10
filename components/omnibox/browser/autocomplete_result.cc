@@ -9,6 +9,7 @@
 #include <iterator>
 #include <optional>
 #include <ostream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -19,7 +20,6 @@
 #include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/containers/adapters.h"
-#include "base/containers/contains.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/not_fatal_until.h"
@@ -33,6 +33,7 @@
 #include "components/omnibox/browser/actions/contextual_search_action.h"
 #include "components/omnibox/browser/actions/omnibox_action_concepts.h"
 #include "components/omnibox/browser/actions/omnibox_action_in_suggest.h"
+#include "components/omnibox/browser/actions/omnibox_action_site_search.h"
 #include "components/omnibox/browser/actions/omnibox_pedal.h"
 #include "components/omnibox/browser/actions/omnibox_pedal_provider.h"
 #include "components/omnibox/browser/actions/tab_switch_action.h"
@@ -95,17 +96,6 @@ constexpr size_t kMaxPedalCount =
 // Maximum index of a match in a result for which the pedal should be displayed.
 constexpr size_t kMaxPedalMatchIndex =
     is_ios ? 3 : std::numeric_limits<size_t>::max();
-
-#if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
-// The entrypoint id associated with aim being invoked from the AIM shortcut of
-// typed state. Used for logging purposes.
-// Do not change without changing the IDs in chrome_aim_entry_point.proto
-omnibox::ChromeAimEntryPoint GetAimActionEntrypointID() {
-  return is_android
-             ? omnibox::ANDROID_CHROME_AIM_SHORTCUT_TYPED_STATE_ENTRY_POINT
-             : omnibox::IOS_CHROME_OMNIBOX_SEARCH_ENTRY_POINT;
-}
-#endif
 
 }  // namespace
 
@@ -179,6 +169,10 @@ size_t AutocompleteResult::GetDynamicMaxMatches() {
 AutocompleteResult::AutocompleteResult()
     : max_url_matches_(is_android || is_ios ? 5 : 7) {
   matches_.reserve(kMaxAutocompletePositionValue);
+
+  static uint32_t next_sequence_id = 1;
+  sequence_id_ = next_sequence_id;
+  next_sequence_id++;
 }
 
 AutocompleteResult::~AutocompleteResult() {
@@ -635,8 +629,7 @@ void AutocompleteResult::SortAndCull(
                 suggestion_groups_map_));
             break;
           default:
-            // kLensOverlayNotFatalUntil update after launch.
-            NOTREACHED(base::NotFatalUntil::M200);
+            NOTREACHED();
         }
       } else if (omnibox::IsNTPPage(page_classification)) {
         sections.push_back(std::make_unique<IOSNTPZpsSection>(
@@ -673,10 +666,7 @@ void AutocompleteResult::SortAndCull(
       if (omnibox::IsAndroidHub(page_classification)) {
         sections.push_back(
             std::make_unique<AndroidHubNonZPSSection>(suggestion_groups_map_));
-      } else if (omnibox::IsComposebox(page_classification) &&
-                 (input.lens_overlay_suggest_inputs() ||
-                  input.aim_tool_mode() ==
-                      omnibox::ChromeAimToolsAndModels::TOOL_MODE_IMAGE_GEN)) {
+      } else if (omnibox::IsComposebox(page_classification)) {
         sections.push_back(std::make_unique<AndroidComposeboxNonZPSSection>(
             suggestion_groups_map_));
       } else {
@@ -839,7 +829,7 @@ void AutocompleteResult::GroupAndDemoteMatchesInGroups() {
     }
 
     const omnibox::GroupId group_id = match.suggestion_group_id.value();
-    if (!base::Contains(suggestion_groups_map(), group_id)) {
+    if (!suggestion_groups_map().contains(group_id)) {
       // Strip group IDs from the matches for which there is no suggestion
       // group information. These matches should instead be treated as
       // ordinary matches with no group IDs.
@@ -967,40 +957,6 @@ void AutocompleteResult::AttachPedalsToMatches(
   }
 }
 
-#if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
-void AutocompleteResult::AttachAimAction(
-    TemplateURLService* template_url_service,
-    AutocompleteProviderClient* client) {
-  if (!OmniboxFieldTrial::IsDeterministicAimActionInTypedStateEnabled(client)) {
-    return;
-  }
-
-  for (AutocompleteMatch& match : matches_) {
-    if (!match.actions.empty()) {
-      continue;
-    }
-    if (match.allowed_to_be_default_match &&
-        AutocompleteMatch::IsSearchType(match.type) &&
-        match.contents.length() >=
-            static_cast<size_t>(
-                OmniboxFieldTrial::kMinimumTypedCharactersToInvokeAimShortcut
-                    .Get())) {
-      omnibox::SuggestTemplateInfo::TemplateAction template_action;
-      template_action.set_action_type(
-          omnibox::SuggestTemplateInfo_TemplateAction_ActionType_CHROME_AIM);
-      template_action.set_action_uri(
-          GetUrlForAim(template_url_service, GetAimActionEntrypointID(),
-                       /*query_start_time=*/base::Time::Now(), match.contents)
-              .spec());
-      match.actions.emplace_back(base::MakeRefCounted<OmniboxActionInSuggest>(
-          std::move(template_action), std::nullopt));
-      // Only attach to the first eligible match.
-      return;
-    }
-  }
-}
-#endif
-
 void AutocompleteResult::AttachContextualSearchFulfillmentActionToMatches() {
   for (AutocompleteMatch& match : matches_) {
     if (match.IsContextualSearchSuggestion() && !match.HasLensSearchAction()) {
@@ -1018,6 +974,28 @@ void AutocompleteResult::AttachContextualSearchOpenLensActionToMatches() {
       match.takeover_action =
           base::MakeRefCounted<ContextualSearchOpenLensAction>();
     }
+  }
+}
+
+void AutocompleteResult::AttachSiteSearchActionToMatches(
+    const TemplateURLService* service) {
+  std::set<std::u16string> seen;
+  for (AutocompleteMatch& match : matches_) {
+    if (match.associated_keyword.empty()) {
+      continue;
+    }
+    if (seen.contains(match.associated_keyword)) {
+      continue;
+    }
+    seen.insert(match.associated_keyword);
+
+    const TemplateURL* template_url =
+        service->GetTemplateURLForKeyword(match.associated_keyword);
+    if (!template_url) {
+      continue;
+    }
+    match.actions.push_back(
+        base::MakeRefCounted<OmniboxActionSiteSearch>(template_url));
   }
 }
 
@@ -1356,7 +1334,8 @@ void AutocompleteResult::SwapMatchesWith(AutocompleteResult* other) {
   matches_.swap(other->matches_);
   suggestion_groups_map_.swap(other->suggestion_groups_map_);
   smart_compose_inline_hint_.swap(other->smart_compose_inline_hint_);
-  has_contextual_chips_ = other->has_contextual_chips();
+  std::swap(has_contextual_chips_, other->has_contextual_chips_);
+  std::swap(sequence_id_, other->sequence_id_);
 
 #if BUILDFLAG(IS_ANDROID)
   DestroyJavaObject();

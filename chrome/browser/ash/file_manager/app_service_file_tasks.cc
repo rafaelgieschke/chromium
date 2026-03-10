@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "ash/constants/ash_features.h"
+#include "ash/constants/ash_pref_names.h"
 #include "ash/constants/web_app_id_constants.h"
 #include "ash/webui/file_manager/url_constants.h"
 #include "base/feature_list.h"
@@ -39,11 +40,8 @@
 #include "chrome/browser/chromeos/upload_office_to_cloud/upload_office_to_cloud.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/ash/cloud_upload/hats_office_trigger.h"
-#include "chrome/browser/web_applications/os_integration/os_integration_manager.h"
-#include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/extensions/api/file_manager_private.h"
-#include "chrome/common/pref_names.h"
 #include "chromeos/ash/components/file_manager/app_id.h"
 #include "components/prefs/pref_service.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
@@ -247,33 +245,15 @@ void FindAppServiceTasks(Profile* profile,
       proxy->GetAppsForFiles(std::move(intent_files));
 
   std::vector<apps::AppType> supported_app_types = {
-      apps::AppType::kArc,
-      apps::AppType::kWeb,
-      apps::AppType::kSystemWeb,
-      apps::AppType::kChromeApp,
-      apps::AppType::kExtension,
-      apps::AppType::kBruschetta,
-      apps::AppType::kCrostini,
-      apps::AppType::kPluginVm,
+      apps::AppType::kArc,       apps::AppType::kWeb,
+      apps::AppType::kSystemWeb, apps::AppType::kChromeApp,
+      apps::AppType::kExtension, apps::AppType::kBruschetta,
+      apps::AppType::kCrostini,  apps::AppType::kPluginVm,
   };
   for (auto& launch_entry : intent_launch_info) {
     auto app_type = proxy->AppRegistryCache().GetAppType(launch_entry.app_id);
-    if (!base::Contains(supported_app_types, app_type)) {
+    if (!std::ranges::contains(supported_app_types, app_type)) {
       continue;
-    }
-
-    if (app_type == apps::AppType::kWeb ||
-        app_type == apps::AppType::kSystemWeb) {
-      // Check the origin trial and feature flag for file handling in web apps.
-      // TODO(crbug.com/255838199): Remove when this feature is fully launched.
-      web_app::WebAppProvider* provider =
-          web_app::WebAppProvider::GetDeprecated(profile_with_app_service);
-      web_app::OsIntegrationManager& os_integration_manager =
-          provider->os_integration_manager();
-      if (!os_integration_manager.IsFileHandlingAPIAvailable(
-              launch_entry.app_id)) {
-        continue;
-      }
     }
 
     if (app_type == apps::AppType::kChromeApp ||
@@ -404,8 +384,8 @@ bool ChooseAndSetDefaultTaskFromPolicyPrefs(
     Profile* profile,
     const std::vector<extensions::EntryInfo>& entries,
     ResultingTasks* resulting_tasks) {
-  const auto& policy_default_handlers =
-      profile->GetPrefs()->GetDict(prefs::kDefaultHandlersForFileExtensions);
+  const auto& policy_default_handlers = profile->GetPrefs()->GetDict(
+      ash::prefs::kDefaultHandlersForFileExtensions);
 
   // Check that there are no conflicting assignments for the given set of
   // entries.
@@ -448,7 +428,7 @@ bool ChooseAndSetDefaultTaskFromPolicyPrefs(
         apps_util::GetAppIdsFromPolicyId(profile, policy_id);
     for (auto& task : resulting_tasks->tasks) {
       const auto& td = task.task_descriptor;
-      if (base::Contains(app_ids, td.app_id)) {
+      if (std::ranges::contains(app_ids, td.app_id)) {
         filtered_tasks.push_back(&task);
       }
     }

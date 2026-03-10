@@ -30,7 +30,6 @@
 #include "chrome/browser/resource_coordinator/tab_manager_resource_coordinator_signal_observer.h"
 #include "chrome/browser/resource_coordinator/time.h"
 #include "chrome/browser/resource_coordinator/utils.h"
-#include "chrome/browser/sessions/tab_loader.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_ui_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -113,8 +112,8 @@ TEST_F(TabManagerTest, IsInternalPage) {
       GURL(chrome::kChromeUISettingsURL).ReplaceComponents(replace_fake_path)));
 }
 
-// Data race on Linux. http://crbug.com/787842
-// Flaky on Mac and Windows: https://crbug.com/995682
+// Data race on Linux. http://crbug.com/41357022
+// Flaky on Mac and Windows: https://crbug.com/41477172
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC) || \
     BUILDFLAG(IS_WIN)
 #define MAYBE_DiscardTabWithNonVisibleTabs DISABLED_DiscardTabWithNonVisibleTabs

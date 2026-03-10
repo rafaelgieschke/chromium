@@ -4,8 +4,6 @@
 
 import {html} from '//resources/lit/v3_0/lit.rollup.js';
 
-import {SettingsOption} from '../content/read_anything_types.js';
-
 import {SettingsItemType, type SettingsMenuElement} from './settings_menu.js';
 
 
@@ -13,25 +11,39 @@ export function getHtml(this: SettingsMenuElement) {
   // clang-format off
   return html`
 <cr-lazy-render-lit id="lazyMenu" .template='${() => html`
-  <cr-action-menu id="settings-menu-dialog" non-modal>
+  <cr-action-menu id="settings-menu-dialog" @close="${this.onClose_}" non-modal>
     ${this.options_.map((item, index) => html`
-      <button class="menu-row ${item.className || ''}"
+      ${item.showSeparator ? html`<hr class="separator" aria-hidden="true">` : ``}
+      <button class="menu-row dropdown-item"
+          id="${item.id}"
           role="menuitem"
           data-index="${index}"
+          title="${item.ariaLabel || item.title}"
+          aria-label="${item.ariaLabel || item.title}"
+          aria-haspopup="${item.itemType === SettingsItemType.MENU ?
+             'menu' : 'false'}"
+          aria-expanded="${this.getAriaExpanded_(item)}"
+          @pointerenter="${this.onPointerenter_}"
+          @pointerleave="${this.onPointerleave_}"
           @click="${this.onMenuItemClick_}">
 
+        <div class="start-container">
+          ${item.icon ? html`
+            <cr-icon class="start-icon" icon="${item.icon}"></cr-icon>
+          ` : ''}
 
-        ${item.icon ? html`
-          <cr-icon class="start-icon" icon="${item.icon}"></cr-icon>
-        ` : ''}
+          <div class="label">${item.title}</div>
+        </div>
 
-        <div class="label">${item.ariaLabel}</div>
-
-        <!-- TODO(crbug.com/471212662): Add a designated toggle menu and delete
-        this SettingsOption.VIEW check -->
         ${item.itemType === SettingsItemType.TOGGLE ? html`
-            <cr-toggle></cr-toggle>
-        ` : item.id === SettingsOption.VIEW ? '' : html`
+            <cr-toggle
+              title="${item.ariaLabel || item.title}"
+              aria-label="${item.ariaLabel || item.title}"
+              @click="${this.onMenuItemClick_}"
+              ?checked="${item.enabled || false}"
+              data-index="${index}">
+            </cr-toggle>
+        ` : html`
             <cr-icon class="end-icon" icon="cr:chevron-right"></cr-icon>
         `}
       </button>

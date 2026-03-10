@@ -42,7 +42,7 @@ suite('MicrosoftAuthModule', () => {
   });
 
   async function createMicrosoftAuthElement() {
-    handler.setResultFor('shouldShowModule', Promise.resolve({show: true}));
+    handler.setPromiseResolveFor('shouldShowModule', {show: true});
     microsoftAuthModule = await microsoftAuthModuleDescriptor.initialize(0) as
         MicrosoftAuthModuleElement;
     assertTrue(!!microsoftAuthModule);
@@ -56,7 +56,7 @@ suite('MicrosoftAuthModule', () => {
 
     // Act.
     const whenFired = eventToPromise('disable-module', microsoftAuthModule);
-    const disableButton = microsoftAuthModule.$.moduleHeaderElementV2.shadowRoot
+    const disableButton = microsoftAuthModule.$.moduleHeader.shadowRoot
                               .querySelector<HTMLElement>('#disable');
     assertTrue(!!disableButton);
     disableButton.click();
@@ -75,7 +75,7 @@ suite('MicrosoftAuthModule', () => {
     // Act.
     const whenFired =
         eventToPromise('dismiss-module-instance', microsoftAuthModule);
-    microsoftAuthModule.$.moduleHeaderElementV2.dispatchEvent(
+    microsoftAuthModule.$.moduleHeader.dispatchEvent(
         new Event('dismiss-button-click'));
 
     // Assert.
@@ -107,7 +107,7 @@ suite('MicrosoftAuthModule', () => {
 
   test('does not populate module if handler says not to', async () => {
     // Arrange/Act.
-    handler.setResultFor('shouldShowModule', Promise.resolve({show: false}));
+    handler.setPromiseResolveFor('shouldShowModule', {show: false});
     microsoftAuthModule = await microsoftAuthModuleDescriptor.initialize(0) as
         MicrosoftAuthModuleElement;
 

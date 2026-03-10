@@ -22,17 +22,16 @@
 #include "base/test/test_future.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
-#include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/app_menu_model.h"
@@ -56,6 +55,7 @@
 #include "chrome/browser/web_applications/web_app_tab_helper.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/security_interstitials/content/security_interstitial_tab_helper.h"
+#include "components/services/app_service/public/cpp/app_launch_params.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "components/tabs/public/tab_interface.h"
 #include "components/user_education/views/help_bubble_view.h"
@@ -63,6 +63,7 @@
 #include "components/webapps/browser/installable/installable_metrics.h"
 #include "components/webapps/browser/test/service_worker_registration_waiter.h"
 #include "components/webapps/browser/uninstall_result_code.h"
+#include "content/public/browser/page.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/test/browser_test_utils.h"
@@ -102,22 +103,39 @@ void AutoAcceptDialogCallback(
           /*user_accepted=*/true, std::move(web_app_info));
 }
 
-// An utility that observes a `WebContents` instance to either finish loading or
-// for it to be destroyed. Useful for ensuring that the observed `WebContents`
-// has reached an end state.
-class WebContentsLoadOrDestroyedWaiter final
+// An utility that observes a `WebContents` instance to either finish loading
+// (with possible waiting for manifest changes to be propagated) or for it to be
+// destroyed. Useful for ensuring that the observed `WebContents` has reached an
+// end state.
+class WebContentsLoadAndManifestWaiter final
     : public content::WebContentsObserver {
  public:
-  explicit WebContentsLoadOrDestroyedWaiter(content::WebContents* web_contents)
+  explicit WebContentsLoadAndManifestWaiter(content::WebContents* web_contents)
       : WebContentsObserver(web_contents) {
     CHECK(web_contents);
   }
-  ~WebContentsLoadOrDestroyedWaiter() override = default;
+  ~WebContentsLoadAndManifestWaiter() override = default;
 
-  void Wait() { run_loop_.Run(); }
+  void Wait() {
+    manifest_url_specified_ =
+        web_contents()->GetPrimaryPage().GetManifestUrl().has_value();
+    loaded_ = web_contents()->IsDocumentOnLoadCompletedInPrimaryMainFrame();
+    if (loaded_ && manifest_url_specified_) {
+      SubscribeToManifest();
+    }
+    MaybeQuit();
+    run_loop_.Run();
+  }
 
   void DocumentOnLoadCompletedInPrimaryMainFrame() override {
-    run_loop_.Quit();
+    manifest_url_specified_ =
+        web_contents()->GetPrimaryPage().GetManifestUrl().has_value();
+    loaded_ = true;
+    if (!manifest_found_ && manifest_url_specified_ &&
+        !manifest_subscription_) {
+      SubscribeToManifest();
+    }
+    MaybeQuit();
   }
 
   void WebContentsDestroyed() override {
@@ -126,6 +144,37 @@ class WebContentsLoadOrDestroyedWaiter final
   }
 
  private:
+  void SubscribeToManifest() {
+    manifest_subscription_ =
+        content::PageManifestManager::GetOrCreate(
+            web_contents()->GetPrimaryPage())
+            ->GetSpecifiedManifest(
+                base::IgnoreArgs<
+                    const content::PageManifestManager::ManifestResult&>(
+                    base::BindOnce(
+                        &WebContentsLoadAndManifestWaiter::OnManifestSpecified,
+                        base::Unretained(this))));
+  }
+
+  void OnManifestSpecified() {
+    manifest_found_ = true;
+    MaybeQuit();
+  }
+
+  void MaybeQuit() {
+    if (!loaded_) {
+      return;
+    }
+    if (!manifest_url_specified_ || manifest_found_) {
+      run_loop_.Quit();
+    }
+  }
+
+  bool loaded_ = false;
+  bool manifest_url_specified_ = false;
+  bool manifest_found_ = false;
+
+  base::CallbackListSubscription manifest_subscription_;
   base::RunLoop run_loop_;
 };
 
@@ -155,6 +204,22 @@ webapps::AppId InstallWebAppFromPage(Browser* browser, const GURL& app_url) {
             webapps::InstallResultCode::kSuccessNewInstall);
 
   return install_future.Get<webapps::AppId>();
+}
+
+Browser* InstallWebAppFromPageGetBrowser(Browser* browser,
+                                         const GURL& app_url) {
+  // Create new tab to navigate, install, automatically pop out and then
+  // close. This sequence avoids altering the browser window state it started
+  // with.
+  chrome::AddTabAt(browser, app_url, /*index=*/-1,
+                   /*foreground=*/true);
+  ui_test_utils::BrowserCreatedObserver browser_created_observer;
+  webapps::AppId app_id = InstallWebAppFromPage(browser, app_url);
+
+  Browser* app_browser = browser_created_observer.Wait();
+  CHECK_NE(app_browser, browser);
+  CHECK(AppBrowserController::IsForWebApp(app_browser, app_id));
+  return app_browser;
 }
 
 webapps::AppId InstallWebAppFromPageAndCloseAppBrowser(Browser* browser,
@@ -509,12 +574,10 @@ std::optional<webapps::AppId> ForceInstallWebApp(Profile* profile, GURL url) {
 }
 
 BrowserWaiter::BrowserWaiter(BrowserWindowInterface* filter) : filter_(filter) {
-  BrowserList::AddObserver(this);
+  observation_.Observe(GlobalBrowserCollection::GetInstance());
 }
 
-BrowserWaiter::~BrowserWaiter() {
-  BrowserList::RemoveObserver(this);
-}
+BrowserWaiter::~BrowserWaiter() = default;
 
 Browser* BrowserWaiter::AwaitAdded(const base::Location& location) {
   added_run_loop_.Run(location);
@@ -528,18 +591,18 @@ Browser* BrowserWaiter::AwaitRemoved(const base::Location& location) {
   return removed_browser_;
 }
 
-void BrowserWaiter::OnBrowserAdded(Browser* browser) {
+void BrowserWaiter::OnBrowserCreated(BrowserWindowInterface* browser) {
   if (filter_ && browser != filter_) {
     return;
   }
-  added_browser_ = browser;
+  added_browser_ = browser->GetBrowserForMigrationOnly();
   added_run_loop_.Quit();
 }
-void BrowserWaiter::OnBrowserRemoved(Browser* browser) {
+void BrowserWaiter::OnBrowserClosed(BrowserWindowInterface* browser) {
   if (filter_ && browser != filter_) {
     return;
   }
-  removed_browser_ = browser;
+  removed_browser_ = browser->GetBrowserForMigrationOnly();
   removed_run_loop_.Quit();
 }
 
@@ -621,11 +684,13 @@ void RunForAllTabs(
   });
 }
 
+void WaitForLoadCompleteAndMaybeManifestSeen(content::WebContents& contents) {
+  WebContentsLoadAndManifestWaiter(&contents).Wait();
+}
+
 void CompletePageLoadForAllWebContents() {
   RunForAllTabs(base::BindRepeating([](content::WebContents& web_contents) {
-    if (!web_contents.IsDocumentOnLoadCompletedInPrimaryMainFrame()) {
-      WebContentsLoadOrDestroyedWaiter(&web_contents).Wait();
-    }
+    WebContentsLoadAndManifestWaiter(&web_contents).Wait();
   }));
 }
 

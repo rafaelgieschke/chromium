@@ -10,7 +10,6 @@
 #include <string_view>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/containers/fixed_flat_set.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
@@ -220,27 +219,6 @@ base::expected<void, CorsErrorStatus> CheckAccess(
   return base::ok();
 }
 
-base::expected<void, CorsErrorStatus> CheckAccessAndReportMetrics(
-    const GURL& response_url,
-    const std::optional<std::string>& allow_origin_header,
-    const std::optional<std::string>& allow_credentials_header,
-    mojom::CredentialsMode credentials_mode,
-    const url::Origin& origin) {
-  auto check_result =
-      CheckAccess(response_url, allow_origin_header, allow_credentials_header,
-                  credentials_mode, origin);
-  cors::AccessCheckResult result = check_result.has_value()
-                                       ? cors::AccessCheckResult::kPermitted
-                                       : cors::AccessCheckResult::kNotPermitted;
-
-  base::UmaHistogramEnumeration("Net.Cors.AccessCheckResult", result);
-  if (!IsOriginPotentiallyTrustworthy(origin)) {
-    base::UmaHistogramEnumeration(
-        "Net.Cors.AccessCheckResult.NotSecureRequestor", result);
-  }
-  return check_result;
-}
-
 bool ShouldCheckCors(const GURL& request_url,
                      const std::optional<url::Origin>& request_initiator,
                      mojom::RequestMode request_mode) {
@@ -375,7 +353,7 @@ bool IsCorsSafelistedHeader(const std::string& name, const std::string& value) {
   });
 
   // Check if the name of the header to send is safe.
-  if (!base::Contains(safe_names, lower_name))
+  if (!safe_names.contains(lower_name))
     return false;
 
   // Verify the values of all non-secure headers (except `intervention`).

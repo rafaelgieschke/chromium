@@ -17,7 +17,6 @@
 #include "chrome/browser/net/nss_service_factory.h"
 #include "chrome/browser/net/server_certificate_database_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/chrome_features.h"
 #include "chromeos/ash/components/network/onc/network_onc_utils.h"
 #include "chromeos/ash/components/network/onc/onc_certificate_importer_impl.h"
 #include "chromeos/components/onc/onc_parsed_certificates.h"
@@ -64,13 +63,13 @@ void OncImportMessageHandler::RegisterMessages() {
 void OncImportMessageHandler::Respond(const std::string& callback_id,
                                       const std::string& result,
                                       bool is_error) {
-  base::Value::List response;
+  base::ListValue response;
   response.Append(result);
   response.Append(is_error);
   ResolveJavascriptCallback(base::Value(callback_id), response);
 }
 
-void OncImportMessageHandler::OnImportONC(const base::Value::List& list) {
+void OncImportMessageHandler::OnImportONC(const base::ListValue& list) {
   CHECK_EQ(2u, list.size());
   const std::string& callback_id = list[0].GetString();
   const std::string& onc_blob = list[1].GetString();
@@ -104,9 +103,9 @@ void OncImportMessageHandler::ImportONCToNSSDB(const std::string& callback_id,
   bool has_error = false;
 
   ::onc::ONCSource onc_source = ::onc::ONC_SOURCE_USER_IMPORT;
-  base::Value::List network_configs;
-  base::Value::Dict global_network_config;
-  base::Value::List certificates;
+  base::ListValue network_configs;
+  base::DictValue global_network_config;
+  base::ListValue certificates;
   if (!chromeos::onc::ParseAndValidateOncForImport(
           onc_blob, onc_source, &network_configs, &global_network_config,
           &certificates)) {

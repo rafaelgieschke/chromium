@@ -120,14 +120,14 @@ const char kSilentPushUnsupportedMessage[] =
 // have been blocked, and an exception will be thrown as well.
 const char kSenderIdRegistrationDisallowedMessage[] =
     "The provided application server key is not a VAPID key. Only VAPID keys "
-    "are supported. For more information check https://crbug.com/979235.";
+    "are supported. For more information check https://crbug.com/41468162.";
 
 // Message displayed in the console (as a warning) when a GCM Sender ID is used
 // to create a subscription, which will soon be unsupported.
 const char kSenderIdRegistrationDeprecatedMessage[] =
     "The provided application server key is not a VAPID key. Only VAPID keys "
     "will be supported in the future. For more information check "
-    "https://crbug.com/979235.";
+    "https://crbug.com/41468162.";
 
 #if BUILDFLAG(IS_ANDROID)
 // The serialized base::Time used for Notifications permission revocation grace
@@ -344,7 +344,7 @@ void PushMessagingServiceImpl::OnMessage(const std::string& app_id,
                                          const gcm::IncomingMessage& message) {
   // We won't have time to process and act on the message.
   // TODO(peter) This should be checked at the level of the GCMDriver, so that
-  // the message is not consumed. See https://crbug.com/612815
+  // the message is not consumed. See https://crbug.com/41254465
   if (g_browser_process->IsShuttingDown() || shutdown_started_) {
     return;
   }
@@ -389,8 +389,8 @@ void PushMessagingServiceImpl::OnMessage(const std::string& app_id,
       message.decrypted ? message.raw_data : std::string());
 
   bool user_visible =
-      !base::Contains(origins_requesting_user_visible_requirement_bypass,
-                      app_identifier.origin());
+      !origins_requesting_user_visible_requirement_bypass.contains(
+          app_identifier.origin());
   if (IsPermissionSet(app_identifier.origin(), user_visible)) {
     messages_pending_permission_check_.emplace(app_id, message);
     // Start abusive and disruptive origin verifications only if no other
@@ -447,8 +447,8 @@ void PushMessagingServiceImpl::OnCheckedOrigin(
   int64_t service_worker_registration_id =
       app_identifier.service_worker_registration_id();
 
-  bool user_visible = !base::Contains(
-      origins_requesting_user_visible_requirement_bypass, origin);
+  bool user_visible =
+      !origins_requesting_user_visible_requirement_bypass.contains(origin);
 
   // It is possible that Notifications permission has been revoked by a user
   // during abusive origin verification.
@@ -515,8 +515,8 @@ void PushMessagingServiceImpl::
       weak_factory_.GetWeakPtr(), app_id, origin,
       service_worker_registration_id, message, /*did_enqueue_message=*/true);
 
-  bool user_visible = !base::Contains(
-      origins_requesting_user_visible_requirement_bypass, origin);
+  bool user_visible =
+      !origins_requesting_user_visible_requirement_bypass.contains(origin);
 
   // It is possible that Notification permissions have been revoked by a user
   // while handling previous messages for |origin|.
@@ -598,7 +598,7 @@ void PushMessagingServiceImpl::DeliverMessageCallback(
 
   // TODO(mvanouwerkerk): Show a warning in the developer console of the
   // Service Worker corresponding to app_id (and/or on an internals page).
-  // See https://crbug.com/508516 for options.
+  // See https://crbug.com/40426050 for options.
   if (!push_messaging::WasPushSuccessful(status, unsubscribe_reason)) {
     base::ScopedClosureRunner completion_closure_runner(
         base::BindOnce(std::move(message_handled_callback),
@@ -651,8 +651,9 @@ void PushMessagingServiceImpl::DeliverMessageCallback(
         .Run(false /* did_show_generic_notification */);
   } else {
     // Defaults to true since that is the more restrictive option.
-    bool user_visible_only = base::Contains(
-        origins_requesting_user_visible_requirement_bypass, requesting_origin);
+    bool user_visible_only =
+        origins_requesting_user_visible_requirement_bypass.contains(
+            requesting_origin);
     notification_manager_.EnforceUserVisibleOnlyRequirements(
         requesting_origin, service_worker_registration_id,
         std::move(message_handled_callback), user_visible_only);
@@ -937,9 +938,9 @@ void PushMessagingServiceImpl::RegisterPrefs(PrefRegistrySimple* registry) {
 static void
 JNI_PushMessagingServiceBridge_VerifyAndRevokeNotificationsPermission(
     JNIEnv* env,
-    std::string& origin,
-    std::string& profile_id,
-    jboolean app_level_notifications_enabled) {
+    const std::string& origin,
+    const std::string& profile_id,
+    bool app_level_notifications_enabled) {
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   DCHECK(profile_manager);
 
@@ -1295,7 +1296,8 @@ void PushMessagingServiceImpl::DidClearPushSubscriptionId(
   // Delete the mapping for this app_id, to guarantee that no messages get
   // delivered in future (even if unregistration fails).
   // TODO(johnme): Instead of deleting these app ids, store them elsewhere, and
-  // retry unregistration if it fails due to network errors (crbug.com/465399).
+  // retry unregistration if it fails due to network errors
+  // (crbug.com/40408777).
   push_messaging::AppIdentifier app_identifier =
       PushMessagingAppIdentifier::FindByAppId(profile_, app_id);
   bool was_subscribed = !app_identifier.is_null();
@@ -1510,8 +1512,8 @@ void PushMessagingServiceImpl::OnContentSettingChanged(
     }
 
     bool user_visible =
-        !base::Contains(origins_requesting_user_visible_requirement_bypass,
-                        app_identifier.origin());
+        !origins_requesting_user_visible_requirement_bypass.contains(
+            app_identifier.origin());
 
     if (IsPermissionSet(app_identifier.origin(), user_visible)) {
       barrier_closure.Run();
@@ -1541,8 +1543,8 @@ void PushMessagingServiceImpl::OnContentSettingChanged(
     }
 
     bool user_visible =
-        !base::Contains(origins_requesting_user_visible_requirement_bypass,
-                        unsubscribed_entry.origin());
+        !origins_requesting_user_visible_requirement_bypass.contains(
+            unsubscribed_entry.origin());
 
     if (!IsPermissionSet(unsubscribed_entry.origin(), user_visible)) {
       barrier_closure.Run();
@@ -1682,7 +1684,7 @@ void PushMessagingServiceImpl::DidGetSenderIdUnexpectedUnsubscribe(
   // are cleared for the origin. In that case for legacy GCM registrations on
   // Android, Unsubscribe will just delete the app identifier to block future
   // messages.
-  // TODO(johnme): Auto-unregister before SW DB is cleared (crbug.com/402458).
+  // TODO(johnme): Auto-unregister before SW DB is cleared (crbug.com/40378791).
   UnsubscribeInternal(reason, app_identifier.origin(),
                       app_identifier.service_worker_registration_id(),
                       app_identifier.app_id(), sender_id, std::move(callback));

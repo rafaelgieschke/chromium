@@ -119,7 +119,8 @@ class MODULES_EXPORT BaseAudioContext
   float sampleRate() const { return destination_handler_->SampleRate(); }
   double currentTime() const { return destination_handler_->CurrentTime(); }
   AudioListener* listener() { return listener_.Get(); }
-  V8AudioContextState state() const;
+  // Virtual so AudioContext::state() can add UseCounters.
+  virtual V8AudioContextState state() const;
   uint32_t renderQuantumSize() const {
     return deferred_task_handler_->RenderQuantumFrames();
   }
@@ -205,6 +206,9 @@ class MODULES_EXPORT BaseAudioContext
   // Warn user when connecting two nodes on a closed context. The connection
   // does nothing useful because the context is closed.
   void WarnForConnectionIfContextClosed() const;
+
+  void SetAllocationFailed() { has_allocation_failed_ = true; }
+  bool HasAllocationFailed() const { return has_allocation_failed_; }
 
   // Return true if the destination is pulling on the audio graph.  Otherwise
   // return false.
@@ -405,6 +409,9 @@ class MODULES_EXPORT BaseAudioContext
   // perform delayed state sync'ing updates that needs to be done on the main
   // thread. Cleared by the main thread task once it has run.
   bool has_posted_cleanup_task_ = false;
+
+  // Set to `true` if initial memory allocation for the context fails.
+  bool has_allocation_failed_ = false;
 
   // Graph locking.
   scoped_refptr<DeferredTaskHandler> deferred_task_handler_;

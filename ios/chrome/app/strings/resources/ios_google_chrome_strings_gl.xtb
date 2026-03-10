@@ -1,6 +1,7 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="gl">
+<translation id="1035560095760914532">Coloca Chrome na parte inferior para acceder a el en calquera momento</translation>
 <translation id="1076643793026027628">Chrome abre automaticamente as ligazóns de incógnito de YouTube no modo de incógnito.</translation>
 <translation id="1081114897601629648">Non se importaron os seguintes contrasinais ao xestor de contrasinais de Google porque non cumpren os requisitos.</translation>
 <translation id="1086486568852410168">Buscar con Google Lens</translation>
@@ -86,6 +87,10 @@ Espera uns minutiños antes de pechar a sesión. Se a pechas agora, estes datos 
 <translation id="2767464022270041271">Non hai contrasinais gardados. O xestor de contrasinais de Google poderá comprobar os teus contrasinais cando os gardes.</translation>
 <translation id="2788811701191021538">Abre a páxina de configuración de métodos de pago en Chrome.</translation>
 <translation id="2876628302275096482">Máis información sobre <ph name="BEGIN_LINK" />como protexe Chrome a privacidade dos teus datos<ph name="END_LINK" /></translation>
+<translation id="288992067439702510">Alcanzaches o límite de <ph name="LIMIT" /> marcadores de Chrome, polo que algúns aínda non se gardaron na túa Conta de Google.
+
+Non poderás gardar máis ata que elimines uns cantos. Se pechas a sesión agora, eliminaranse os marcadores sen gardar.</translation>
+<translation id="2901621928549457170">Abre Chrome ao instante cando esteas no iPad</translation>
 <translation id="2922914028977213693">Toca aquí para aproveitar todo o que Chrome che ofrece no teu iPad.</translation>
 <translation id="292371311537977079">Configuración de Chrome</translation>
 <translation id="2923827943290349720">Bloquear pestanas do modo de incógnito ao pechar Chrome</translation>
@@ -170,6 +175,8 @@ Espera uns minutiños antes de pechar a sesión. Se a pechas agora, estes datos 
 <translation id="5119391094379141756">Selecciona Chrome</translation>
 <translation id="5123188916260706415">Fai buscas por voz en Chrome</translation>
 <translation id="5162467219239570114">A versión de Chrome está desactualizada. Se non hai dispoñible ningunha actualización na <ph name="BEGIN_LINK" />tenda de aplicacións<ph name="END_LINK" />, é posible que o teu dispositivo xa non sexa compatible coas novas versións de Chrome.</translation>
+<translation id="5172049865623113551">Abre Chrome ao instante cando esteas no iPhone</translation>
+<translation id="5179095426828744632">Accede a Chrome máis rápido desde a barra de aplicacións</translation>
 <translation id="5184329579814168207">Abrir en Chrome</translation>
 <translation id="5190139289262548459">A túa organización, <ph name="DOMAIN" />, xestiona a conta na que tes a sesión iniciada e o xeito no que se usa Chrome.</translation>
 <translation id="5209238444239954363">Chrome non puido comprobar se hai actualizacións. Téntao de novo máis tarde.</translation>
@@ -308,7 +315,6 @@ Se queres ver máis opcións de configuración que usen datos para mellorar a t�
 <translation id="787226752901403048">Inicia sesión en Chrome para compartir grupos de pestanas e unirte a eles, así como para desenvolver ideas con outras persoas</translation>
 <translation id="7897703007638178753">Mostra as pestanas recentes de Chrome</translation>
 <translation id="7948283758957877064">Novidades de Chrome</translation>
-<translation id="7996707498590516621">Crear imaxe con Gemini en Chrome</translation>
 <translation id="8000174216052461231">Consello de Chrome: Goza da máxima seguranza de Chrome</translation>
 <translation id="8006014511203279255">Utiliza Chrome sempre que toques ligazóns en mensaxes ou noutras aplicacións.</translation>
 <translation id="8014670471808569312">Chrome ofrecerache gardar o teu contrasinal.</translation>
@@ -320,6 +326,7 @@ Se queres ver máis opcións de configuración que usen datos para mellorar a t�
 <translation id="8136856065410661948">Usarase para crear eventos no teu calendario de Apple desde Chrome e Google Lens.</translation>
 <translation id="8154120522323162874">Continúa coa configuración do teu navegador para tirar o máximo proveito de Chrome.</translation>
 <translation id="8160472928944011082">Non se puido actualizar Chrome</translation>
+<translation id="8213550501565480896">Definir Chrome como navegador predeterminado</translation>
 <translation id="8245080522851805544">Mantén a túa navegación privada coa autenticación do dispositivo cando peches Chrome</translation>
 <translation id="8248887045858762645">Consello de Chrome</translation>
 <translation id="8265730590513812063">Abre Menú de Chrome</translation>
@@ -351,6 +358,7 @@ Os teus datos encriptáronse coa túa frase de acceso o <ph name="TIME" />. Intr
 <translation id="8788269841521769222">Non terás que lembrar este contrasinal. Gardarase no xestor de contrasinais de Google para <ph name="EMAIL" /></translation>
 <translation id="8796490717897731471"><ph name="EMAIL" />. Chrome está xestionado.</translation>
 <translation id="880967149107462122">Vai á configuración de Chrome</translation>
+<translation id="8840947648682778034">Tema de Chrome para iPhone e iPad</translation>
 <translation id="8842132678697187091">Podes abrir Google Lens aquí.</translation>
 <translation id="8850736900032787670">Para recibir contido personalizado en función dos teus intereses, inicia sesión en Chrome.</translation>
 <translation id="8855781063981781621">Para desactivar o modo de bloqueo en Chrome, desactívao no teu dispositivo iPad.</translation>

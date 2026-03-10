@@ -64,7 +64,9 @@ import org.chromium.base.Callback;
 import org.chromium.base.DeviceInfo;
 import org.chromium.base.DiscardableReferencePool;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.NonNullObservableSupplier;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
 import org.chromium.base.test.BaseActivityTestRule;
@@ -135,7 +137,7 @@ public class DownloadActivityV2Test {
     public OverrideContextWrapperTestRule mOverrideContextWrapperTestRule =
             new OverrideContextWrapperTestRule();
 
-    private ObservableSupplierImpl<EdgeToEdgeController> mEdgeToEdgeSupplier;
+    private SettableMonotonicObservableSupplier<EdgeToEdgeController> mEdgeToEdgeSupplier;
 
     private ModalDialogManager.Presenter mAppModalPresenter;
 
@@ -224,7 +226,7 @@ public class DownloadActivityV2Test {
             boolean showDangerousItems, boolean inlineSearchBar, boolean autoFocusSearchBox) {
         // Initialize this here to avoid "wrong thread" assertion.
         ThreadUtils.runOnUiThreadBlocking(
-                () -> mEdgeToEdgeSupplier = new ObservableSupplierImpl<>());
+                () -> mEdgeToEdgeSupplier = ObservableSuppliers.createMonotonic());
 
         DownloadManagerUiConfig config =
                 DownloadManagerUiConfigHelper.fromFlags(sActivity)
@@ -254,8 +256,8 @@ public class DownloadActivityV2Test {
                             final String url, int faviconSizePx, Callback<Bitmap> callback) {}
                 };
         Callback<Context> settingsNavigation = context -> {};
-        ObservableSupplierImpl<Boolean> isPrefetchEnabledSupplier = new ObservableSupplierImpl<>();
-        isPrefetchEnabledSupplier.set(true);
+        NonNullObservableSupplier<Boolean> isPrefetchEnabledSupplier =
+                ObservableSuppliers.alwaysTrue();
 
         mDownloadCoordinator =
                 new DownloadManagerCoordinatorImpl(
@@ -421,7 +423,7 @@ public class DownloadActivityV2Test {
                     setUpUi();
                 });
 
-        String storageHeaderText = "Using 1.10 KB of";
+        String storageHeaderText = "Using 1.12 KB of";
         onView(withText(containsString(storageHeaderText))).check(matches(isDisplayed()));
 
         // Add an item. The new item should be visible and the storage text should be updated.
@@ -439,13 +441,13 @@ public class DownloadActivityV2Test {
 
         ThreadUtils.runOnUiThreadBlocking(() -> mStubbedOfflineContentProvider.addItem(item5));
         onView(withText("page 5")).check(matches(isDisplayed()));
-        onView(withText(containsString("Using 2.10 KB of"))).check(matches(isDisplayed()));
+        onView(withText(containsString("Using 2.15 KB of"))).check(matches(isDisplayed()));
 
         // Delete an item. The item should be gone and the storage text should be updated.
         ThreadUtils.runOnUiThreadBlocking(
                 () -> mStubbedOfflineContentProvider.removeItem(item5.id));
         onView(withText("page 5")).check(doesNotExist());
-        onView(withText(containsString("Using 1.10 KB of"))).check(matches(isDisplayed()));
+        onView(withText(containsString("Using 1.12 KB of"))).check(matches(isDisplayed()));
     }
 
     @Test
@@ -459,14 +461,14 @@ public class DownloadActivityV2Test {
                             /* autoFocusSearchBox= */ false);
                 });
 
-        String storageHeaderText = "Using 1.10 KB of";
+        String storageHeaderText = "Using 1.12 KB of";
         onView(withText(containsString(storageHeaderText))).check(matches(isDisplayed()));
 
         // Add a dangerous item. The new item should be visible and the storage text should not
         // include the size of the dangerous item.
         ContentId dangerousItemId = setUpDangerousItem();
         onView(withText("dangerous")).check(matches(isDisplayed()));
-        onView(withText(containsString("Using 1.10 KB of"))).check(matches(isDisplayed()));
+        onView(withText(containsString("Using 1.12 KB of"))).check(matches(isDisplayed()));
         onView(withText(containsString("Dangerous download blocked")))
                 .check(matches(isDisplayed()));
 
@@ -484,7 +486,7 @@ public class DownloadActivityV2Test {
         ThreadUtils.runOnUiThreadBlocking(
                 () -> mStubbedOfflineContentProvider.removeItem(dangerousItemId));
         onView(withText("dangerous")).check(doesNotExist());
-        onView(withText(containsString("Using 1.10 KB of"))).check(matches(isDisplayed()));
+        onView(withText(containsString("Using 1.12 KB of"))).check(matches(isDisplayed()));
         onView(withText(containsString("Dangerous download blocked"))).check(doesNotExist());
     }
 
@@ -499,21 +501,21 @@ public class DownloadActivityV2Test {
                             /* autoFocusSearchBox= */ false);
                 });
 
-        String storageHeaderText = "Using 1.10 KB of";
+        String storageHeaderText = "Using 1.12 KB of";
         onView(withText(containsString(storageHeaderText))).check(matches(isDisplayed()));
 
         // Attempt to add a dangerous item. The new item should not be visible because the config
         // does not specify showDangerousItems.
         ContentId dangerousItemId = setUpDangerousItem();
         onView(withText("dangerous")).check(doesNotExist());
-        onView(withText(containsString("Using 1.10 KB of"))).check(matches(isDisplayed()));
+        onView(withText(containsString("Using 1.12 KB of"))).check(matches(isDisplayed()));
         onView(withText(containsString("Dangerous download blocked"))).check(doesNotExist());
 
         // Delete the item. Nothing should change because it was never displayed.
         ThreadUtils.runOnUiThreadBlocking(
                 () -> mStubbedOfflineContentProvider.removeItem(dangerousItemId));
         onView(withText("dangerous")).check(doesNotExist());
-        onView(withText(containsString("Using 1.10 KB of"))).check(matches(isDisplayed()));
+        onView(withText(containsString("Using 1.12 KB of"))).check(matches(isDisplayed()));
         onView(withText(containsString("Dangerous download blocked"))).check(doesNotExist());
     }
 
@@ -591,13 +593,13 @@ public class DownloadActivityV2Test {
                             /* autoFocusSearchBox= */ false);
                 });
 
-        String storageHeaderText = "Using 1.10 KB of";
+        String storageHeaderText = "Using 1.12 KB of";
         onView(withText(containsString(storageHeaderText))).check(matches(isDisplayed()));
 
         // Add a dangerous item.
         setUpDangerousItem();
         onView(withText("dangerous")).check(matches(isDisplayed()));
-        onView(withText(containsString("Using 1.10 KB of"))).check(matches(isDisplayed()));
+        onView(withText(containsString("Using 1.12 KB of"))).check(matches(isDisplayed()));
         // Open bypass dialog by clicking on the item.
         onView(withText(containsString("Dangerous download blocked")))
                 .check(matches(isDisplayed()))
@@ -619,7 +621,7 @@ public class DownloadActivityV2Test {
                     onView(withText(containsString("Dangerous download blocked")))
                             .check(doesNotExist());
                 });
-        onView(withText(containsString("Using 2.10 KB of"))).check(matches(isDisplayed()));
+        onView(withText(containsString("Using 2.15 KB of"))).check(matches(isDisplayed()));
     }
 
     @Test

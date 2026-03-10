@@ -103,20 +103,13 @@ export class InkTextBoxElement extends InkTextBoxElementBase {
   private existing_: boolean = false;
   private id_: number = -1;
   private keyDownCount_: number = -1;
-  private pageNumber_: number = -1;
+  private pageIndex_: number = -1;
   private pageHeight_: number = 0;
   private pageWidth_: number = 0;
   private pageX_: number = 0;
   private pageY_: number = 0;
   private pointerStart_: {x: number, y: number}|null = null;
   private startPosition_: TextBoxRect|null = null;
-
-  override firstUpdated(changedProperties: PropertyValues<this>) {
-    super.firstUpdated(changedProperties);
-    this.setAttribute('tabindex', '0');
-    this.addEventListener('focus', e => this.onFocus_(e));
-    document.addEventListener('keydown', e => this.onDocumentKeyDown_(e));
-  }
 
   override connectedCallback() {
     super.connectedCallback();
@@ -169,6 +162,13 @@ export class InkTextBoxElement extends InkTextBoxElementBase {
       this.textRotations_ =
           (this.viewportRotations_ + this.textOrientation_) % 4;
     }
+  }
+
+  override firstUpdated(changedProperties: PropertyValues<this>) {
+    super.firstUpdated(changedProperties);
+    this.setAttribute('tabindex', '0');
+    this.addEventListener('focus', e => this.onFocus_(e));
+    document.addEventListener('keydown', e => this.onDocumentKeyDown_(e));
   }
 
   override updated(changedProperties: PropertyValues<this>) {
@@ -311,7 +311,7 @@ export class InkTextBoxElement extends InkTextBoxElementBase {
         {
           text: this.textValue_,
           id: this.id_,
-          pageNumber: this.pageNumber_,
+          pageIndex: this.pageIndex_,
           textAttributes: this.attributes_,
           textBoxRect: {
             height: this.height_,
@@ -348,7 +348,7 @@ export class InkTextBoxElement extends InkTextBoxElementBase {
     this.existing_ = data.annotation.text !== '';
     this.textValue_ = data.annotation.text;
     this.id_ = data.annotation.id;
-    this.pageNumber_ = data.annotation.pageNumber;
+    this.pageIndex_ = data.annotation.pageIndex;
     this.textOrientation_ = data.annotation.textOrientation;
     this.updateTextAttributes_(data.annotation.textAttributes);
 

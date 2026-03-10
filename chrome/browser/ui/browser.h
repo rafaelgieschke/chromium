@@ -33,6 +33,7 @@
 #include "chrome/browser/ui/browser_window/public/desktop_browser_window_capabilities_delegate.h"
 #include "chrome/browser/ui/browser_window_deleter.h"
 #include "chrome/browser/ui/chrome_web_modal_dialog_manager_delegate.h"
+#include "chrome/browser/ui/tabs/tab_change_type.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/unload_controller.h"
@@ -173,7 +174,6 @@ class Browser : public TabStripModelObserver,
     kLastAndUrlsStartupPref,
     kDeskTemplate,
   };
-
 
   // Represents whether a value was known to be explicitly specified.
   enum class ValueSpecified { kUnknown, kSpecified, kUnspecified };
@@ -649,9 +649,6 @@ class Browser : public TabStripModelObserver,
   // Saving can be disabled e.g. for the DevTools window.
   bool CanSaveContents(content::WebContents* web_contents) const;
 
-  // Returns whether favicon should be shown.
-  bool ShouldDisplayFavicon(content::WebContents* web_contents) const;
-
   /////////////////////////////////////////////////////////////////////////////
 
   // Called by Navigate() when a navigation has occurred in a tab in
@@ -706,8 +703,6 @@ class Browser : public TabStripModelObserver,
       const input::NativeWebKeyboardEvent& event) override;
   bool HandleKeyboardEvent(content::WebContents* source,
                            const input::NativeWebKeyboardEvent& event) override;
-  bool PreHandleGestureEvent(content::WebContents* source,
-                             const blink::WebGestureEvent& event) override;
   bool CanDragEnter(content::WebContents* source,
                     const content::DropData& data,
                     blink::DragOperationsMask operations_allowed) override;
@@ -752,9 +747,6 @@ class Browser : public TabStripModelObserver,
   bool is_type_app() const { return type_ == TYPE_APP; }
   bool is_type_app_popup() const { return type_ == TYPE_APP_POPUP; }
   bool is_type_devtools() const { return type_ == TYPE_DEVTOOLS; }
-#if BUILDFLAG(IS_CHROMEOS)
-  bool is_type_custom_tab() const { return type_ == TYPE_CUSTOM_TAB; }
-#endif
   bool is_type_picture_in_picture() const {
     return type_ == TYPE_PICTURE_IN_PICTURE;
   }
@@ -784,6 +776,7 @@ class Browser : public TabStripModelObserver,
   // BrowserWindowInterface overrides:
   Profile* GetProfile() override;
   const Profile* GetProfile() const override;
+  bool IsDeleteScheduled() const override;
   void OpenGURL(const GURL& gurl, WindowOpenDisposition disposition) override;
   content::WebContents* OpenURL(
       const content::OpenURLParams& params,
@@ -822,8 +815,6 @@ class Browser : public TabStripModelObserver,
   Browser* GetBrowserForMigrationOnly() override;
   const Browser* GetBrowserForMigrationOnly() const override;
   bool IsTabModalPopupDeprecated() const override;
-  bool CanShowCallToAction() const override;
-  std::unique_ptr<ScopedWindowCallToAction> ShowCallToAction() override;
   ui::BaseWindow* GetWindow() override;
   const ui::BaseWindow* GetWindow() const override;
   DesktopBrowserWindowCapabilities* capabilities() override;
@@ -844,11 +835,6 @@ class Browser : public TabStripModelObserver,
   // requesting the browser close via BrowserWindow::Close(), which happens
   // async and allows graceful teardown of the tab strip and associated data.
   void SynchronouslyDestroyBrowser();
-
-#if BUILDFLAG(IS_CHROMEOS)
-  bool IsLockedForOnTask();
-  void SetLockedForOnTask(bool locked);
-#endif
 
 #if BUILDFLAG(IS_OZONE)
   const std::optional<ui::PlatformSessionWindowData>& platform_session_data()
@@ -883,17 +869,6 @@ class Browser : public TabStripModelObserver,
 
     // Result of the tab strip not having any significant tabs.
     kEmpty
-  };
-
-  // Tracks whether a tabstrip call to action UI is showing.
-  class ScopedWindowCallToActionImpl : public ScopedWindowCallToAction {
-   public:
-    explicit ScopedWindowCallToActionImpl(Browser* browser);
-    ~ScopedWindowCallToActionImpl() override;
-
-   private:
-    // Owns this.
-    base::WeakPtr<Browser> browser_;
   };
 
   explicit Browser(const CreateParams& params);
@@ -950,6 +925,8 @@ class Browser : public TabStripModelObserver,
       const GURL& opener_url,
       const std::string& frame_name,
       const GURL& target_url,
+      WindowOpenDisposition disposition,
+      const blink::mojom::WindowFeatures& window_features,
       const content::StoragePartitionConfig& partition_config,
       content::SessionStorageNamespace* session_storage_namespace) override;
   void WebContentsCreated(content::WebContents* source_contents,
@@ -974,7 +951,6 @@ class Browser : public TabStripModelObserver,
   void EnumerateDirectory(content::WebContents* web_contents,
                           scoped_refptr<content::FileSelectListener> listener,
                           const base::FilePath& path) override;
-  void OnWebApiWindowResizableChanged() override;
   bool GetCanResize() override;
 #if !BUILDFLAG(IS_ANDROID)
   bool CanUseWindowingControls(
@@ -982,6 +958,7 @@ class Browser : public TabStripModelObserver,
   void MinimizeFromWebAPI() override;
   void MaximizeFromWebAPI() override;
   void RestoreFromWebAPI() override;
+  void SetResizableFromWebAPI(bool resizable) override;
 #endif
   ui::mojom::WindowShowState GetWindowShowState() const override;
   bool CanEnterFullscreenModeForTab(
@@ -1017,6 +994,8 @@ class Browser : public TabStripModelObserver,
                           bool last_unlocked_by_target) override;
   void LostPointerLock() override;
   bool IsWaitingForPointerLockPrompt(
+      content::WebContents* web_contents) override;
+  bool AllowKeyboardLockForInnerContents(
       content::WebContents* web_contents) override;
   void RequestKeyboardLock(content::WebContents* web_contents,
                            bool esc_key_locked) override;
@@ -1080,10 +1059,8 @@ class Browser : public TabStripModelObserver,
   void OnTabClosing(content::WebContents* contents);
   void OnTabDetached(content::WebContents* contents, bool was_active);
   void OnTabDeactivated(content::WebContents* contents);
-  void OnActiveTabChanged(content::WebContents* old_contents,
-                          content::WebContents* new_contents,
-                          int index,
-                          int reason);
+  void OnActiveTabChanged(const TabStripModelChange& change,
+                          const TabStripSelectionChange& selection);
   void OnTabMoved(int from_index, int to_index);
   void OnTabReplacedAt(content::WebContents* old_contents,
                        content::WebContents* new_contents,
@@ -1197,11 +1174,6 @@ class Browser : public TabStripModelObserver,
   bool AppBrowserSupportsWindowFeature(WindowFeature feature,
                                        bool check_can_support) const;
 
-#if BUILDFLAG(IS_CHROMEOS)
-  // See comment on SupportsWindowFeatureImpl for info on `check_can_support`.
-  bool CustomTabBrowserSupportsWindowFeature(WindowFeature feature) const;
-#endif
-
   // See comment on SupportsWindowFeatureImpl for info on `check_can_support`.
   bool PictureInPictureBrowserSupportsWindowFeature(
       WindowFeature feature,
@@ -1253,6 +1225,10 @@ class Browser : public TabStripModelObserver,
   // Returns true if a `FindBarController` exists for this browser.
   // TODO(crbug.com/423956131): Remove this function.
   bool HasFindBarController();
+
+  // Notifies the tab UI that it should update when the browser schedule or
+  // process UI updates.
+  void NotifyTabUIChanged(int tab_index, TabChangeType change_type);
 
   // Data members /////////////////////////////////////////////////////////////
 
@@ -1362,14 +1338,6 @@ class Browser : public TabStripModelObserver,
   // If true, immediately updates the UI when scheduled.
   bool update_ui_immediately_for_testing_ = false;
 
-#if BUILDFLAG(IS_CHROMEOS)
-  // OnTask is a ChromeOS feature that is not related to web browsers, but
-  // happens to be implemented using code in //chrome/browser. The feature,
-  // when enabled, disables certain functionality that a web browser would
-  // never typically disable.
-  bool on_task_locked_ = false;
-#endif
-
   const base::ElapsedTimer creation_timer_;
 
   // The opener browser of the document picture-in-picture browser. Null if the
@@ -1387,7 +1355,6 @@ class Browser : public TabStripModelObserver,
   // If true, the browser window was created as a tab modal pop-up. This is
   // determined by the NavigateParams::is_tab_modal_popup_deprecated.
   bool is_tab_modal_popup_deprecated_ = false;
-
 
   using BrowserDidCloseCallbackList =
       base::RepeatingCallbackList<void(BrowserWindowInterface*)>;
@@ -1419,8 +1386,6 @@ class Browser : public TabStripModelObserver,
   std::optional<ui::PlatformSessionWindowData> platform_session_data_ =
       std::nullopt;
 #endif
-  // Tracks whether a modal UI is showing.
-  bool showing_call_to_action_ = false;
 
   // Tracks whether the browser object is fully initialized.
   bool is_initialized_ = false;

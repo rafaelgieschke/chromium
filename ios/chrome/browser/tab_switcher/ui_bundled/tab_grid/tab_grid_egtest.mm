@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#import "base/containers/contains.h"
 #import "base/format_macros.h"
 #import "base/i18n/message_formatter.h"
 #import "base/ios/ios_util.h"
@@ -260,7 +259,7 @@ class EchoURLDefaultSearchEngineResponseProvider
 
 bool EchoURLDefaultSearchEngineResponseProvider::CanHandleRequest(
     const Request& request) {
-  return base::Contains(request.url.spec(), kSearchEngineHost);
+  return request.url.spec().contains(kSearchEngineHost);
 }
 
 void EchoURLDefaultSearchEngineResponseProvider::GetResponseHeadersAndBody(
@@ -1086,7 +1085,7 @@ void EchoURLDefaultSearchEngineResponseProvider::GetResponseHeadersAndBody(
   if (![ChromeEarlGrey areMultipleWindowsSupported]) {
     EARL_GREY_TEST_SKIPPED(@"Multiple windows can't be opened.");
   }
-  if (@available(iOS 19.0, *)) {
+  if (@available(iOS 26.0, *)) {
     // TODO(crbug.com/427699033): Re-enable test on iOS 26.
     // Drag creates new window, but test fails to interact with it.
     EARL_GREY_TEST_DISABLED(@"Test disabled on iOS 26.");

@@ -8,8 +8,10 @@
 #include <memory>
 #include <utility>
 
+#include "base/containers/span.h"
 #include "build/build_config.h"
 #include "chrome/browser/apps/app_service/web_contents_app_id_utils.h"
+#include "chrome/browser/glic/glic_tab_restore_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/browser/sessions/session_service_base.h"
@@ -23,6 +25,7 @@
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui_browser/webui_browser.h"
+#include "chrome/common/buildflags.h"
 #include "components/sessions/content/content_serialized_navigation_builder.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "components/tabs/public/tab_group.h"
@@ -48,7 +51,7 @@ namespace {
 
 std::unique_ptr<WebContents> CreateRestoredTab(
     Browser* browser,
-    const std::vector<SerializedNavigationEntry>& navigations,
+    base::span<const SerializedNavigationEntry> navigations,
     int selected_navigation,
     const std::string& extension_app_id,
     base::TimeTicks last_active_time_ticks,
@@ -58,7 +61,7 @@ std::unique_ptr<WebContents> CreateRestoredTab(
     const std::map<std::string, std::string>& extra_data,
     bool initially_hidden,
     bool from_session_restore) {
-  GURL restore_url = navigations.at(selected_navigation).virtual_url();
+  GURL restore_url = navigations[selected_navigation].virtual_url();
   // TODO(ajwong): Remove the temporary session_storage_namespace_map when
   // we teach session restore to understand that one tab can have multiple
   // SessionStorageNamespace objects. Also remove the
@@ -80,6 +83,8 @@ std::unique_ptr<WebContents> CreateRestoredTab(
                                             session_storage_namespace_map);
   apps::SetAppIdForWebContents(browser->profile(), web_contents.get(),
                                extension_app_id);
+
+  glic::RestoreGlicStateFromExtraData(web_contents.get(), extra_data);
 
   std::vector<std::unique_ptr<NavigationEntry>> entries =
       ContentSerializedNavigationBuilder::ToNavigationEntries(
@@ -190,7 +195,7 @@ WebContents* AddRestoredTabImpl(std::unique_ptr<WebContents> web_contents,
     // the throbber when a background restored tab is loading.
     tabs::TabInterface* const tab_interface =
         tabs::TabInterface::GetFromContents(raw_web_contents);
-    TabUIHelper::From(tab_interface)->set_created_by_session_restore(true);
+    TabUIHelper::From(tab_interface)->SetCreatedBySessionRestore(true);
   }
 
   // We set the size of the view here, before Blink does its initial layout.
@@ -261,7 +266,7 @@ WebContents* AddRestoredTabImpl(std::unique_ptr<WebContents> web_contents,
 
 WebContents* AddRestoredTab(
     Browser* browser,
-    const std::vector<SerializedNavigationEntry>& navigations,
+    base::span<const SerializedNavigationEntry> navigations,
     int tab_index,
     int selected_navigation,
     const std::string& extension_app_id,
@@ -288,7 +293,7 @@ WebContents* AddRestoredTab(
 
 WebContents* ReplaceRestoredTab(
     Browser* browser,
-    const std::vector<SerializedNavigationEntry>& navigations,
+    base::span<const SerializedNavigationEntry> navigations,
     int selected_navigation,
     const std::string& extension_app_id,
     content::SessionStorageNamespace* session_storage_namespace,
@@ -315,7 +320,7 @@ WebContents* ReplaceRestoredTab(
     // the throbber when a background restored tab is loading.
     tabs::TabInterface* const tab_interface =
         tabs::TabInterface::GetFromContents(raw_web_contents);
-    TabUIHelper::From(tab_interface)->set_created_by_session_restore(true);
+    TabUIHelper::From(tab_interface)->SetCreatedBySessionRestore(true);
   }
 
   tab_strip->CloseWebContentsAt(insertion_index, TabCloseTypes::CLOSE_NONE);

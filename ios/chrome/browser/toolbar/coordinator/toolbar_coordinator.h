@@ -13,11 +13,10 @@
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/public/fakebox_focuser.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/public/side_swipe_toolbar_snapshot_providing.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/public/toolbar_coordinating.h"
-#import "ios/chrome/browser/toolbar/legacy/ui_bundled/public/toolbar_height_delegate.h"
+#import "ios/chrome/browser/toolbar/ui/toolbar_height_delegate.h"
 
 @protocol OmniboxPopupPresenterDelegate;
 @protocol OmniboxFocusDelegate;
-@protocol SharingPositioner;
 
 /// Coordinator above primary and secondary toolbars. It does not have a
 /// view controller. This object is also an interface between multiple toolbars
@@ -44,8 +43,6 @@
 /// Temporary storing the keyboard height here. Used when updating the bottom
 /// omnibox size while editing.
 @property(nonatomic, assign) CGFloat keyboardHeight;
-/// Returns the toolbar type containing the omnibox.
-@property(nonatomic, assign, readonly) ToolbarType omniboxPosition;
 
 /// Initializes this coordinator with its `browser` and a nil base view
 /// controller.
@@ -60,8 +57,8 @@
 /// Returns `secondaryToolbarViewController`.
 - (UIViewController*)secondaryToolbarViewController;
 
-/// Returns the sharing positioner for the current toolbar configuration.
-- (id<SharingPositioner>)sharingPositioner;
+/// Returns the share button for the toolbars.
+- (UIView*)shareButton;
 
 /// Updates the toolbar's appearance.
 /// TODO(crbug.com/40842406): Remove this once toolbar coordinator owns focus
@@ -77,8 +74,6 @@
 /// transition to the expanded location bar state of the view controller.
 - (void)transitionToLocationBarFocusedState:(BOOL)focused
                                  completion:(ProceduralBlock)completion;
-/// Whether the omnibox is currently in edit state.
-- (BOOL)inEditState;
 /// Whether the omnibox is currently the first responder.
 - (BOOL)isOmniboxFirstResponder;
 /// Whether the omnibox popup is currently presented.
@@ -99,8 +94,6 @@
 - (CGFloat)collapsedSecondaryToolbarHeight;
 /// The maximum height of the secondary toolbar.
 - (CGFloat)expandedSecondaryToolbarHeight;
-/// The height necessary to display only the location bar.
-- (CGFloat)locationBarCompactDisplayHeight;
 
 @end
 

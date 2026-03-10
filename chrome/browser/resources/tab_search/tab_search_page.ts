@@ -28,7 +28,6 @@ import type {SelectableLazyListElement} from './selectable_lazy_list.js';
 import {NO_SELECTION, selectorNavigationKeys} from './selectable_lazy_list.js';
 import {ariaLabel, getDisplayHostnameForUrl, getHostname, getTabGroupTitle, getTitle, type ItemData, normalizeURL, TabData, TabGroupData, TabItemType, tokenEquals, tokenToString} from './tab_data.js';
 import type {ProfileData, RecentlyClosedTab, Tab, TabGroup, TabsRemovedInfo, TabUpdateInfo} from './tab_search.mojom-webui.js';
-import {TabSearchSection} from './tab_search.mojom-webui.js';
 import type {TabSearchApiProxy} from './tab_search_api_proxy.js';
 import {TabSearchApiProxyImpl} from './tab_search_api_proxy.js';
 import type {TabSearchGroupItemElement} from './tab_search_group_item.js';
@@ -72,6 +71,14 @@ export class TabSearchPageElement extends TabSearchSearchFieldBase {
     return 'tab-search-page';
   }
 
+  static override get styles() {
+    return getCss();
+  }
+
+  override render() {
+    return getHtml.bind(this)();
+  }
+
   static override get properties() {
     return {
       // Text that describes the resulting tabs currently present in the list.
@@ -90,16 +97,9 @@ export class TabSearchPageElement extends TabSearchSearchFieldBase {
        */
       searchOptions_: {type: Object},
       recentlyClosedDefaultItemDisplayCount_: {type: Number},
-
-      tabOrganizationEnabled: {
-        type: Boolean,
-        reflect: true,
-      },
     };
   }
 
-  accessor tabOrganizationEnabled: boolean =
-      loadTimeData.getBoolean('tabOrganizationEnabled');
   accessor availableHeight: number|undefined;
   private accessor searchText_: string = '';
   protected accessor listMaxHeight_: number|undefined;
@@ -153,8 +153,6 @@ export class TabSearchPageElement extends TabSearchSearchFieldBase {
   private filteredOpenHeaderIndices_: number[] = [];
   private initiallySelectedIndex_: number = NO_SELECTION;
   private documentVisibilityChangedListener_: () => void;
-  private elementVisibilityChangedListener_: IntersectionObserver;
-  private wasInactive_: boolean = false;
 
   constructor() {
     super();
@@ -168,13 +166,6 @@ export class TabSearchPageElement extends TabSearchSearchFieldBase {
         this.onDocumentHidden_();
       }
     };
-
-    this.elementVisibilityChangedListener_ =
-        new IntersectionObserver((entries, _observer) => {
-          entries.forEach(entry => {
-            this.onElementVisibilityChanged_(entry.intersectionRatio > 0);
-          });
-        }, {root: document.documentElement});
 
     this.mediaTabsTitleItem_ =
         new TitleItem(loadTimeData.getString('mediaTabs'));
@@ -193,22 +184,11 @@ export class TabSearchPageElement extends TabSearchSearchFieldBase {
     return this.metricsReporter_;
   }
 
-  override firstUpdated(changedProperties: PropertyValues<this>) {
-    super.firstUpdated(changedProperties);
-    this.listItemSize_ = this.getStylePropertyPixelValue_('--mwb-item-height');
-  }
-
   override connectedCallback() {
     super.connectedCallback();
 
     document.addEventListener(
         'visibilitychange', this.documentVisibilityChangedListener_);
-
-    this.elementVisibilityChangedListener_.observe(this);
-
-    this.apiProxy_.getTabSearchSection().then(
-        ({section}) => this.wasInactive_ =
-            section !== TabSearchSection.kSearch);
 
     const callbackRouter = this.apiProxy_.getCallbackRouter();
     this.listenerIds_.push(
@@ -230,8 +210,11 @@ export class TabSearchPageElement extends TabSearchSearchFieldBase {
 
     document.removeEventListener(
         'visibilitychange', this.documentVisibilityChangedListener_);
+  }
 
-    this.elementVisibilityChangedListener_.disconnect();
+  override firstUpdated(changedProperties: PropertyValues<this>) {
+    super.firstUpdated(changedProperties);
+    this.listItemSize_ = this.getStylePropertyPixelValue_('--mwb-item-height');
   }
 
   override updated(changedProperties: PropertyValues<this>) {
@@ -294,14 +277,6 @@ export class TabSearchPageElement extends TabSearchSearchFieldBase {
     this.$.searchInput.focus();
   }
 
-  private onElementVisibilityChanged_(visible: boolean) {
-    if (visible && this.wasInactive_) {
-      this.$.tabsList.fillCurrentViewport();
-    } else if (!visible) {
-      this.wasInactive_ = true;
-    }
-  }
-
   private updateTabs_() {
     const isMarkOverlap =
         this.metricsReporter.hasLocalMark('TabListDataReceived');
@@ -331,7 +306,7 @@ export class TabSearchPageElement extends TabSearchSearchFieldBase {
       // or scroll position change triggers the viewport fill logic.
       listenOnce(
           this.$.tabsList, 'viewport-filled',
-          () => this.apiProxy_.notifySearchUiReadyToShow());
+          () => this.apiProxy_.maybeShowUi());
 
       this.tabsChanged_(profileData);
     });
@@ -515,7 +490,7 @@ export class TabSearchPageElement extends TabSearchSearchFieldBase {
     });
   }
 
-  protected onItemKeyDown_(e: KeyboardEvent) {
+  protected onItemKeydown_(e: KeyboardEvent) {
     if (e.key !== 'Enter' && e.key !== ' ') {
       return;
     }
@@ -577,7 +552,7 @@ export class TabSearchPageElement extends TabSearchSearchFieldBase {
     return item;
   }
 
-  protected async onTitleExpandChanged_(e: CustomEvent<{value: boolean}>) {
+  protected async onTitleExpandedChanged_(e: CustomEvent<{value: boolean}>) {
     // Instead of relying on two-way binding to update the `expanded` property,
     // we update the value directly as the `expanded-changed` event takes place
     // before a two way bound property update and we need the TitleItem
@@ -613,7 +588,7 @@ export class TabSearchPageElement extends TabSearchSearchFieldBase {
   /**
    * Handles key events when the search field has focus.
    */
-  protected onSearchKeyDown_(e: KeyboardEvent) {
+  protected onSearchKeydown_(e: KeyboardEvent) {
     // In the event the search field has focus and the first item in the list is
     // selected and we receive a Shift+Tab navigation event, ensure All DOM
     // items are available so that the focus can transfer to the last item in
@@ -663,8 +638,7 @@ export class TabSearchPageElement extends TabSearchSearchFieldBase {
       tab: Tab|RecentlyClosedTab, inActiveWindow: boolean, type: TabItemType,
       tabGroupsMap: Map<string, TabGroup>): TabData {
     const tabData = new TabData(
-        tab, type,
-        getDisplayHostnameForUrl(new URL(normalizeURL(tab.url.url))));
+        tab, type, getDisplayHostnameForUrl(new URL(normalizeURL(tab.url))));
 
     if (tab.groupId) {
       tabData.tabGroup = tabGroupsMap.get(tokenToString(tab.groupId));
@@ -834,15 +808,7 @@ export class TabSearchPageElement extends TabSearchSearchFieldBase {
     return this.searchText_;
   }
 
-  static override get styles() {
-    return getCss();
-  }
-
-  override render() {
-    return getHtml.bind(this)();
-  }
-
-  protected onSelectedChanged_(
+  protected onSelectedChange_(
       e: CustomEvent<
           {item: (TabSearchItemElement | TabSearchGroupItemElement | null)}>) {
     const itemData = e.detail.item ? e.detail.item.data : null;

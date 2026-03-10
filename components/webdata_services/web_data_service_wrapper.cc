@@ -136,8 +136,7 @@ WebDataServiceWrapper::WebDataServiceWrapper(
     const std::string& application_locale,
     const scoped_refptr<base::SequencedTaskRunner>& ui_task_runner,
     const ShowErrorCallback& show_error_callback,
-    os_crypt_async::OSCryptAsync* os_crypt,
-    bool use_in_memory_autofill_account_database) {
+    os_crypt_async::OSCryptAsync* os_crypt) {
   base::FilePath path = context_path.Append(kWebDataFilename);
   auto db_task_runner = base::ThreadPool::CreateSequencedTaskRunnerForResource(
       {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
@@ -166,8 +165,7 @@ WebDataServiceWrapper::WebDataServiceWrapper(
   profile_database_->AddTable(
       std::make_unique<plus_addresses::PlusAddressTable>());
 #if !BUILDFLAG(IS_IOS)
-  if (base::FeatureList::IsEnabled(syncer::kSyncAutofillLoyaltyCard) &&
-      base::FeatureList::IsEnabled(syncer::kSyncMoveValuablesToProfileDb)) {
+  if (base::FeatureList::IsEnabled(syncer::kSyncAutofillLoyaltyCard)) {
     profile_database_->AddTable(std::make_unique<autofill::ValuablesTable>());
   }
 #endif
@@ -216,8 +214,7 @@ WebDataServiceWrapper::WebDataServiceWrapper(
   profile_autofill_web_data_->GetAutofillBackend(
       base::BindOnce(&InitWalletUsageDataSyncBridgeOnDBSequence, db_task_runner,
                      profile_autofill_web_data_));
-  if (base::FeatureList::IsEnabled(syncer::kSyncAutofillLoyaltyCard) &&
-      base::FeatureList::IsEnabled(syncer::kSyncMoveValuablesToProfileDb)) {
+  if (base::FeatureList::IsEnabled(syncer::kSyncAutofillLoyaltyCard)) {
     profile_autofill_web_data_->GetAutofillBackend(
         base::BindOnce(&InitValuableSyncBridgeOnDBSequence, db_task_runner,
                        profile_autofill_web_data_));
@@ -237,9 +234,7 @@ WebDataServiceWrapper::WebDataServiceWrapper(
   }
 
   const base::FilePath account_storage_path =
-      use_in_memory_autofill_account_database
-          ? base::FilePath(WebDatabase::kInMemoryPath)
-          : context_path.Append(kAccountWebDataFilename);
+      context_path.Append(kAccountWebDataFilename);
 
   // Account database must run backend on same sequence as profile database. See
   // comment in ChromeSyncClient::CreateDataTypeControllers.
@@ -249,12 +244,6 @@ WebDataServiceWrapper::WebDataServiceWrapper(
       std::make_unique<autofill::AutofillSyncMetadataTable>());
   account_database_->AddTable(
       std::make_unique<autofill::PaymentsAutofillTable>());
-#if !BUILDFLAG(IS_IOS)
-  if (base::FeatureList::IsEnabled(syncer::kSyncAutofillLoyaltyCard) &&
-      !base::FeatureList::IsEnabled(syncer::kSyncMoveValuablesToProfileDb)) {
-    account_database_->AddTable(std::make_unique<autofill::ValuablesTable>());
-  }
-#endif
   account_database_->LoadDatabase(os_crypt);
 
   account_autofill_web_data_ =
@@ -269,12 +258,6 @@ WebDataServiceWrapper::WebDataServiceWrapper(
       base::BindOnce(&InitWalletOfferSyncBridgeOnDBSequence, db_task_runner,
                      account_autofill_web_data_));
 #if !BUILDFLAG(IS_IOS)
-  if (base::FeatureList::IsEnabled(syncer::kSyncAutofillLoyaltyCard) &&
-      !base::FeatureList::IsEnabled(syncer::kSyncMoveValuablesToProfileDb)) {
-    account_autofill_web_data_->GetAutofillBackend(
-        base::BindOnce(&InitValuableSyncBridgeOnDBSequence, db_task_runner,
-                       account_autofill_web_data_));
-  }
   account_autofill_web_data_->GetAutofillBackend(
       base::BindOnce(&InitWalletUsageDataSyncBridgeOnDBSequence, db_task_runner,
                      account_autofill_web_data_));

@@ -10,6 +10,7 @@
 #include "base/thread_annotations.h"
 #include "base/time/time.h"
 #include "cc/paint/skia_paint_canvas.h"
+#include "components/viz/common/gpu/raster_context_provider.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_types.h"
 #include "media/base/video_util.h"
@@ -17,6 +18,9 @@
 #include "skia/ext/platform_canvas.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
+#include "third_party/blink/renderer/platform/graphics/canvas_non2d_snapshot_provider_bitmap.h"
+#include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
+#include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/video_frame_image_util.h"
 #include "third_party/blink/renderer/platform/heap/cross_thread_handle.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
@@ -166,31 +170,53 @@ void ImageCaptureFrameGrabber::GrabFrame(
       MediaStreamVideoSink::UsesAlpha::kDefault);
 }
 
+// Killswitch guarding ImageCaptureFrameGrabber not caching the SkSurface used
+// for VideoFrame->StaticBitmapImage software draws.
+BASE_FEATURE(kImageCaptureFrameGrabberDrawCacheSkSurface,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 void ImageCaptureFrameGrabber::OnVideoFrame(
     media::VideoFrame* frame,
     ScriptPromiseResolver<ImageBitmap>* resolver) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  const SkAlphaType alpha_type = media::IsOpaque(frame->format())
-                                     ? kOpaque_SkAlphaType
-                                     : kPremul_SkAlphaType;
-  const gfx::ColorSpace dest_color_space = frame->CompatRGBColorSpace();
-  if (!snapshot_provider_ ||
-      snapshot_provider_->Size() != frame->natural_size() ||
-      snapshot_provider_->GetColorSpace() != dest_color_space ||
-      snapshot_provider_->GetAlphaType() != alpha_type) {
-    snapshot_provider_ = CreateSnapshotProviderForVideoFrame(
-        frame->natural_size(),
-        viz::SkColorTypeToSinglePlaneSharedImageFormat(kN32_SkColorType),
-        alpha_type, dest_color_space,
-        // TODO(crbug.com/468035607): The RasterContextProvider is nullptr since
-        // this API has historically provided software backed images, but maybe
-        // shouldn't be.
-        /*raster_context_provider=*/nullptr);
+  auto required_provider_info = CreateSnapshotProviderInfoForVideoFrame(*frame);
+
+  if (!cached_draw_info_ ||
+      !required_provider_info.Matches(*cached_draw_info_)) {
+    cached_draw_info_.reset();
+    sw_draw_surface_.reset();
+    snapshot_provider_.reset();
+    if (ShouldCreateAcceleratedImages(GetRasterContextProvider().get())) {
+      snapshot_provider_ = CanvasNon2DResourceProviderSharedImage::Create(
+          required_provider_info.size, required_provider_info.format,
+          required_provider_info.alpha_type, required_provider_info.color_space,
+          SharedGpuContext::ContextProviderWrapper(),
+          gpu::SHARED_IMAGE_USAGE_DISPLAY_READ);
+      if (snapshot_provider_) {
+        cached_draw_info_ = required_provider_info;
+      }
+    } else {
+      if (base::FeatureList::IsEnabled(
+              kImageCaptureFrameGrabberDrawCacheSkSurface)) {
+        sw_draw_surface_ = CanvasNon2DSnapshotProviderBitmap::CreateSurface(
+            required_provider_info);
+      }
+      cached_draw_info_ = required_provider_info;
+    }
   }
 
-  scoped_refptr<StaticBitmapImage> image = CreateImageFromVideoFrame(
-      frame, snapshot_provider_.get(), &video_renderer_);
+  scoped_refptr<StaticBitmapImage> image;
+
+  if (cached_draw_info_) {
+    if (snapshot_provider_) {
+      image = CreateAcceleratedImageFromVideoFrame(
+          frame, snapshot_provider_.get(), &video_renderer_);
+    } else {
+      image = CreateUnacceleratedImageFromVideoFrame(
+          frame, required_provider_info, sw_draw_surface_, &video_renderer_);
+    }
+  }
 
   timeout_task_handle_.Cancel();
   MediaStreamVideoSink::DisconnectFromTrack();

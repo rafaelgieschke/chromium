@@ -520,7 +520,6 @@ class SearchPreloadBrowserTest : public SearchPreloadBrowserTestBase {
             {
                 features::kDsePreload2,
                 {
-                    {"kDsePreload2UsePreloadServingMetrics", "true"},
                     {"kDsePreload2DeviceMemoryThresholdMiB", "0"},
                 },
             },
@@ -1308,7 +1307,6 @@ class SearchPreloadBrowserTest_ErrorBackoffDuration
             {
                 features::kDsePreload2,
                 {
-                    {"kDsePreload2UsePreloadServingMetrics", "true"},
                     {"kDsePreload2ErrorBackoffDuration", "1000ms"},
                     {"kDsePreload2DeviceMemoryThresholdMiB", "0"},
                 },
@@ -1374,7 +1372,6 @@ class SearchPreloadBrowserTest_DeviceMemoryThreshold
             {
                 features::kDsePreload2,
                 {
-                    {"kDsePreload2UsePreloadServingMetrics", "true"},
                     {"kDsePreload2DeviceMemoryThresholdMiB",
                      base::NumberToString(std::numeric_limits<int>::max())},
                 },
@@ -1409,7 +1406,6 @@ class SearchPreloadBrowserTest_Limit : public SearchPreloadBrowserTestBase {
             {
                 features::kDsePreload2,
                 {
-                    {"kDsePreload2UsePreloadServingMetrics", "true"},
                     {"kDsePreload2DeviceMemoryThresholdMiB", "0"},
                     {"kDsePreload2MaxPrefetch", "2"},
                 },
@@ -1587,7 +1583,7 @@ IN_PROC_BROWSER_TEST_F(SearchPreloadBrowserTest_Limit,
              queries_cancelled_prerender) {
           SearchUrls cancelled_urls = GetSearchUrls(query_cancelled_prerender);
           ASSERT_EQ(prerender_helper().GetHostForUrl(cancelled_urls.prerender),
-                    content::FrameTreeNodeId());
+                    content::PrerenderHostId());
         }
       }
     }
@@ -1631,7 +1627,6 @@ class SearchPreloadBrowserTest_Ttl : public SearchPreloadBrowserTestBase {
             {
                 features::kDsePreload2,
                 {
-                    {"kDsePreload2UsePreloadServingMetrics", "true"},
                     {"kDsePreload2DeviceMemoryThresholdMiB", "0"},
                     {"kDsePreload2MaxPrefetch", "2"},
                     {"kDsePreload2PrefetchTtl", "1000ms"},

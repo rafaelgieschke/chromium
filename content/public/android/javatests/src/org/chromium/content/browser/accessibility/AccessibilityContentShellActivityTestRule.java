@@ -170,8 +170,8 @@ public class AccessibilityContentShellActivityTestRule extends ContentShellActiv
         mWcax = getWebContentsAccessibility();
 
         // Empty map to imply no throttle delay for events.
-        Map<Integer, Integer> TestingThrottleDelays = new HashMap<>();
-        mWcax.setThrottleDelayForTesting(TestingThrottleDelays);
+        Map<Integer, Integer> testingThrottleDelays = new HashMap<>();
+        mWcax.setThrottleDelayForTesting(testingThrottleDelays);
 
         mNodeProvider = getAccessibilityNodeProvider();
 
@@ -378,6 +378,25 @@ public class AccessibilityContentShellActivityTestRule extends ContentShellActiv
         return returnValue;
     }
 
+    /**
+     * Helper method to set extended selection.
+     *
+     * @param viewId int virtualViewId of the node to which selection is assigned.
+     * @param startNodeId int virtualViewId of the start node.
+     * @param startNodeOffset int offset of the start node.
+     * @param endNodeId int virtualViewId of the end node.
+     * @param endNodeOffset int offset of the end node.
+     * @return boolean return value of setting selection.
+     */
+    public boolean setSelectionOnUiThread(
+            int viewId, int startNodeId, int startNodeOffset, int endNodeId, int endNodeOffset)
+            throws ExecutionException {
+        return ThreadUtils.runOnUiThreadBlocking(
+                () ->
+                        mWcax.setExtendedSelectionForTesting(
+                                viewId, startNodeId, startNodeOffset, endNodeId, endNodeOffset));
+    }
+
     /** Helper method for executing a given JS method for the current web contents. */
     public void executeJS(String method) {
         ThreadUtils.runOnUiThreadBlocking(
@@ -484,7 +503,7 @@ public class AccessibilityContentShellActivityTestRule extends ContentShellActiv
         AccessibilityNodeInfoCompat nodeInfo = createAccessibilityNodeInfoBlocking(rootNodevvId);
         builder.append(
                 AccessibilityNodeInfoUtils.toString(
-                        nodeInfo, includeScreenSizeDependentAttributes));
+                        mWcax, nodeInfo, includeScreenSizeDependentAttributes));
 
         builder.append(getLabeledByString(rootNodevvId));
 
@@ -520,7 +539,7 @@ public class AccessibilityContentShellActivityTestRule extends ContentShellActiv
                 .append(indent)
                 .append(
                         AccessibilityNodeInfoUtils.toString(
-                                node, includeScreenSizeDependentAttributes));
+                                mWcax, node, includeScreenSizeDependentAttributes));
         builder.append(getLabeledByString(nodeId));
 
         for (int j = 0; j < node.getChildCount(); ++j) {

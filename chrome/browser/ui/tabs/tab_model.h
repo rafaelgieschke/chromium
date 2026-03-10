@@ -13,8 +13,8 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+#include "components/split_tabs/split_tab_id.h"
 #include "components/tab_groups/tab_group_id.h"
-#include "components/tabs/public/split_tab_id.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
@@ -52,13 +52,13 @@ class TabModel final : public TabInterface,
   void OnRemovedFromModel();
 
   TabStripModel* owning_model() const { return owning_model_; }
-  tabs::TabInterface* opener() const { return opener_; }
+  tabs::TabInterface* opener() const;
   bool reset_opener_on_active_tab_change() const {
     return reset_opener_on_active_tab_change_;
   }
   std::optional<tab_groups::TabGroupId> group() const { return group_; }
 
-  void set_opener(tabs::TabInterface* opener) { opener_ = opener; }
+  void set_opener(tabs::TabInterface* opener);
   void set_reset_opener_on_active_tab_change(
       bool reset_opener_on_active_tab_change) {
     reset_opener_on_active_tab_change_ = reset_opener_on_active_tab_change;
@@ -67,7 +67,7 @@ class TabModel final : public TabInterface,
   void SetPinned(bool pinned);
   void SetGroup(std::optional<tab_groups::TabGroupId> group);
 
-  void set_blocked(bool blocked) { blocked_ = blocked; }
+  void SetBlocked(bool blocked);
   void set_split(std::optional<split_tabs::SplitTabId> split) {
     split_ = split;
   }
@@ -147,6 +147,8 @@ class TabModel final : public TabInterface,
       TabInterface::PinnedStateChangedCallback callback) override;
   base::CallbackListSubscription RegisterGroupChanged(
       TabInterface::GroupChangedCallback callback) override;
+  base::CallbackListSubscription RegisterBlockedStateChanged(
+      TabInterface::BlockedStateChangedCallback callback) override;
 
   bool CanShowModalUI() const override;
   std::unique_ptr<ScopedTabModalUI> ShowModalUI() override;
@@ -231,7 +233,7 @@ class TabModel final : public TabInterface,
   raw_ptr<TabStripModel> owning_model_ = nullptr;
   raw_ptr<TabStripModel> soon_to_be_owning_model_ = nullptr;
   bool will_be_detaching_ = false;
-  raw_ptr<tabs::TabInterface> opener_ = nullptr;
+  tabs::TabHandle opener_handle_;
   bool reset_opener_on_active_tab_change_ = false;
   bool pinned_ = false;
   bool blocked_ = false;
@@ -278,6 +280,10 @@ class TabModel final : public TabInterface,
   using GroupChangedCallbackList = base::RepeatingCallbackList<
       void(TabInterface*, std::optional<tab_groups::TabGroupId> new_group)>;
   GroupChangedCallbackList group_changed_callback_list_;
+
+  using BlockedStateChangedCallbackList =
+      base::RepeatingCallbackList<void(TabInterface*, bool new_blocked_state)>;
+  BlockedStateChangedCallbackList blocked_state_changed_callback_list_;
 
   using TabInterfaceCallbackList =
       base::RepeatingCallbackList<void(TabInterface*)>;

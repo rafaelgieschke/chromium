@@ -10,7 +10,6 @@
 
 #include "base/barrier_closure.h"
 #include "base/base64.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/raw_ref.h"
@@ -30,6 +29,7 @@
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/common/child_process_id_util.h"
 #include "content/public/common/content_client.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
@@ -53,7 +53,6 @@
 #include "services/network/public/cpp/resource_request_body.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
 #include "services/network/public/mojom/early_hints.mojom.h"
-#include "services/network/public/mojom/encoded_body_length.mojom-forward.h"
 #include "services/network/public/mojom/encoded_body_length.mojom.h"
 #include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
@@ -153,8 +152,7 @@ DevToolsURLLoaderInterceptor::Pattern::Pattern(
 bool DevToolsURLLoaderInterceptor::Pattern::Matches(
     const std::string& url,
     blink::mojom::ResourceType resource_type) const {
-  if (!resource_types.empty() &&
-      !base::Contains(resource_types, resource_type)) {
+  if (!resource_types.empty() && !resource_types.contains(resource_type)) {
     return false;
   }
   return base::MatchPattern(url, url_pattern);
@@ -1027,7 +1025,8 @@ InterceptionJob::InterceptionJob(
     mojo::PendingRemote<network::mojom::URLLoaderFactory> target_factory,
     mojo::PendingRemote<network::mojom::CookieManager> cookie_manager)
     : id_prefix_(id),
-      global_req_id_(process_id, create_loader_params->request_id),
+      global_req_id_(ToOriginatingProcessIdUnsafe(process_id),
+                     create_loader_params->request_id),
       frame_token_(frame_token),
       report_upload_(!!create_loader_params->request.request_body),
       interceptor_(interceptor),
@@ -1833,16 +1832,7 @@ void InterceptionJob::FollowRedirect(
   }
   request_cookies_.reset();
 
-  request->method = info.new_method;
-  request->url = info.new_url;
-  request->site_for_cookies = info.new_site_for_cookies;
-  request->referrer_policy = info.new_referrer_policy;
-  request->referrer = GURL(info.new_referrer);
-  if (request->trusted_params) {
-    const auto new_origin = url::Origin::Create(info.new_url);
-    request->trusted_params->isolation_info =
-        request->trusted_params->isolation_info.CreateForRedirect(new_origin);
-  }
+  request->UpdateOnRedirect(info);
   response_metadata_.reset();
 
   UpdateCORSFlag();

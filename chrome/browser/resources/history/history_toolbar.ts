@@ -112,12 +112,24 @@ export class HistoryToolbarElement extends CrLitElement {
     return this.$.mainToolbar.getSearchField();
   }
 
+  protected onDeleteSelectedItemsClick_() {
+    this.deleteSelectedItems();
+  }
+
   deleteSelectedItems() {
     this.fire('delete-selected');
   }
 
+  protected onOpenSelectedItemsClick_() {
+    this.openSelectedItems();
+  }
+
   openSelectedItems() {
     this.fire('open-selected');
+  }
+
+  protected onClearSelectedItems_() {
+    this.clearSelectedItems();
   }
 
   clearSelectedItems() {
@@ -142,10 +154,6 @@ export class HistoryToolbarElement extends CrLitElement {
       this.searchField.showAndFocus();
       this.searchField.setValue(this.searchTerm);
     }
-  }
-
-  private canShowMenuPromo_(): boolean {
-    return this.showMenuPromo && !loadTimeData.getBoolean('isGuestSession');
   }
 
   protected onSearchChanged_(event: CustomEvent<string>) {
@@ -188,7 +196,7 @@ export class HistoryToolbarElement extends CrLitElement {
           'historyEmbeddingsAnswersSearchAlternativePrompt4',
         ];
         const randomIndex = Math.floor(Math.random() * possiblePrompts.length);
-        return loadTimeData.getString(possiblePrompts[randomIndex]);
+        return loadTimeData.getString(possiblePrompts[randomIndex]!);
       }
 
       return loadTimeData.getString('historyEmbeddingsSearchPrompt');

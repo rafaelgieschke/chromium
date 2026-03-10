@@ -64,7 +64,6 @@ IN_PROC_BROWSER_TEST_F(BrowserShutdownBrowserTest,
       "Shutdown.ShutdownType2",
       static_cast<int>(browser_shutdown::ShutdownType::kWindowClose), 1);
   histogram_tester_.ExpectTotalCount("Shutdown.WindowClose.Time2", 1);
-  histogram_tester_.ExpectTotalCount("Shutdown.Renderers.Total2", 1);
 }
 
 // Flakes on Mac12.0: https://crbug.com/1259913
@@ -112,12 +111,11 @@ IN_PROC_BROWSER_TEST_F(BrowserShutdownBrowserTest,
       "Shutdown.ShutdownType2",
       static_cast<int>(browser_shutdown::ShutdownType::kWindowClose), 1);
   histogram_tester_.ExpectTotalCount("Shutdown.WindowClose.Time2", 1);
-  histogram_tester_.ExpectTotalCount("Shutdown.Renderers.Total2", 1);
 }
 #else
 // On Chrome OS, the shutdown accelerator is handled by Ash and requires
 // confirmation, so Chrome shouldn't try to shut down after it's been hit one
-// time. Regression test for crbug.com/834092
+// time. Regression test for crbug.com/40572237
 IN_PROC_BROWSER_TEST_F(BrowserShutdownBrowserTest, ShutdownConfirmation) {
   const int modifiers = ui::EF_CONTROL_DOWN | ui::EF_SHIFT_DOWN;
 

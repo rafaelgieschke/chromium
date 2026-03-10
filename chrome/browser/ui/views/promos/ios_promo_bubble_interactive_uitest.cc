@@ -4,9 +4,10 @@
 
 #include "base/notreached.h"
 #include "base/test/scoped_feature_list.h"
+#include "build/build_config.h"
+#include "chrome/browser/desktop_to_mobile_promos/promos_pref_names.h"
+#include "chrome/browser/desktop_to_mobile_promos/promos_utils.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/promos/promos_pref_names.h"
-#include "chrome/browser/promos/promos_utils.h"
 #include "chrome/browser/ui/actions/chrome_action_id.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/page_action/page_action_icon_type.h"
@@ -68,7 +69,7 @@ class IOSPromoBubbleBrowserTest
           browser_view->toolbar_button_provider();
 
       PromoType promo_type = GetParam();
-      views::View* anchor_view = nullptr;
+      views::BubbleAnchor anchor = nullptr;
       views::Button* highlighted_button = nullptr;
 
       // Explicitly set impression count to 0 before showing the promo.
@@ -79,33 +80,33 @@ class IOSPromoBubbleBrowserTest
 
       switch (promo_type) {
         case PromoType::kPassword:
-          anchor_view =
-              button_provider->GetAnchorView(kActionShowPasswordsBubbleOrPage);
+          anchor = button_provider->GetBubbleAnchor(
+              kActionShowPasswordsBubbleOrPage);
           highlighted_button = button_provider->GetPageActionView(
               kActionShowPasswordsBubbleOrPage);
           break;
         case PromoType::kAddress:
-          anchor_view =
-              button_provider->GetAnchorView(kActionShowAddressesBubbleOrPage);
+          anchor = button_provider->GetBubbleAnchor(
+              kActionShowAddressesBubbleOrPage);
           highlighted_button = button_provider->GetPageActionIconView(
               PageActionIconType::kAutofillAddress);
           break;
         case PromoType::kPayment:
-          anchor_view =
-              button_provider->GetAnchorView(kActionShowPaymentsBubbleOrPage);
+          anchor =
+              button_provider->GetBubbleAnchor(kActionShowPaymentsBubbleOrPage);
           highlighted_button = button_provider->GetPageActionIconView(
               PageActionIconType::kSaveCard);
           break;
         case PromoType::kEnhancedBrowsing:
         case PromoType::kLens:
-          anchor_view = browser_view->toolbar()->app_menu_button();
+          anchor = browser_view->toolbar()->app_menu_button();
           break;
         default:
           NOTREACHED();
       }
 
       promos_utils::IOSDesktopPromoShown(browser()->profile(), promo_type);
-      IOSPromoBubble::ShowPromoBubble(IOSPromoBubble::Anchor{anchor_view},
+      IOSPromoBubble::ShowPromoBubble(IOSPromoBubble::Anchor{anchor},
                                       highlighted_button, browser()->profile(),
                                       promo_type, bubble_type);
     });
@@ -149,7 +150,14 @@ IN_PROC_BROWSER_TEST_P(IOSPromoBubbleBrowserTest, ShowQRCode_NoPageAction) {
                  kScreenshotBaselineCL));
 }
 
-IN_PROC_BROWSER_TEST_P(IOSPromoBubbleBrowserTest, ShowReminder) {
+#if BUILDFLAG(IS_WIN)
+// Disabled by gardener on 02/10/2026.
+// https://crbug.com/483422434.
+#define MAYBE_ShowReminder DISABLED_ShowReminder
+#else
+#define MAYBE_ShowReminder ShowReminder
+#endif
+IN_PROC_BROWSER_TEST_P(IOSPromoBubbleBrowserTest, MAYBE_ShowReminder) {
   if (GetParam() == PromoType::kAddress || GetParam() == PromoType::kPayment) {
     GTEST_SKIP() << "Reminder bubble not supported for this promo type.";
   }

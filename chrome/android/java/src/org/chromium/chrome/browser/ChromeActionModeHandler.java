@@ -94,7 +94,7 @@ public class ChromeActionModeHandler {
 
         new ActivityTabProvider.ActivityTabTabObserver(activityTabProvider) {
             @Override
-            public void onObservingDifferentTab(@Nullable Tab tab, boolean hint) {
+            public void onObservingDifferentTab(@Nullable Tab tab) {
                 // ActivityTabProvider will null out the tab passed to onObservingDifferentTab when
                 // the tab is non-interactive (e.g. when entering the TabSwitcher), but in those
                 // cases we actually still want to use the most recently selected tab.
@@ -215,12 +215,12 @@ public class ChromeActionModeHandler {
                     view.getResources()
                             .getDimensionPixelSize(R.dimen.iph_shared_highlighting_padding_top);
             Rect anchorRect = new Rect(view.getWidth() / 2, padding, view.getWidth() / 2, padding);
-            UserEducationHelper mUserEducationHelper =
+            UserEducationHelper userEducationHelper =
                     new UserEducationHelper(
                             assertNonNull(TabUtils.getActivity(mTab)),
                             mTab.getProfile(),
                             new Handler());
-            mUserEducationHelper.requestShowIph(
+            userEducationHelper.requestShowIph(
                     new IphCommandBuilder(
                                     view.getResources(),
                                     FeatureConstants.SHARED_HIGHLIGHTING_BUILDER_FEATURE,

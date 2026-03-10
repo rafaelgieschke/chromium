@@ -84,6 +84,14 @@ namespace blink {
 
 namespace {
 
+// Returns true if the element is inside an inactive column tab.
+// Inside inactive column tab meaning being wrapped by a ::column
+// pseudo-element whose ::scroll-marker is not selected.
+bool InsideInactiveColumnTab(const Element& element) {
+  return element.GetLayoutObject() &&
+         element.GetLayoutObject()->InsideInactiveColumnTab();
+}
+
 // Start of carousel helpers for focus navigation.
 bool ElementHasScrollButton(const Element& element) {
   return element.GetPseudoElement(kPseudoIdScrollButtonBlockStart) ||
@@ -463,7 +471,8 @@ class FocusNavigation final {
       // DOM order is different from carousel focus order.
       while (next &&
              (!IsOwnedByRoot(*next) || next->IsScrollMarkerPseudoElement() ||
-              next->IsScrollMarkerGroupAfterPseudoElement())) {
+              next->IsScrollMarkerGroupAfterPseudoElement() ||
+              InsideInactiveColumnTab(*next))) {
         next = ElementTraversal::NextIncludingPseudo(*next, root_);
       }
       next = PostAdjustNextForCarouselFocusOrder(current, next);
@@ -504,7 +513,8 @@ class FocusNavigation final {
       // DOM order is different from carousel focus order.
       while (previous && (!IsOwnedByRoot(*previous) ||
                           previous->IsScrollMarkerPseudoElement() ||
-                          previous->IsScrollMarkerGroupAfterPseudoElement())) {
+                          previous->IsScrollMarkerGroupAfterPseudoElement() ||
+                          InsideInactiveColumnTab(*previous))) {
         previous = ElementTraversal::PreviousIncludingPseudo(*previous, root_);
       }
       previous = PostAdjustPreviousForCarouselFocusOrder(current, previous);
@@ -779,24 +789,28 @@ bool ScopedFocusNavigation::IsNonEntryFocusgroupItem(const Element& element) {
     return false;
   }
 
+  // When an element is in an excluded subtree (either explicitly via
+  // focusgroup="none", or because it's inside a focused arrow key handler),
+  // treat it as not a focusgroup item for sequential navigation purposes.
+  // This allows normal Tab order to apply.
+  if (FocusgroupControllerUtils::FindExcludedSubtreeRoot(&element)) {
+    return false;
+  }
+
   // Calling this on every element is expensive. TODO(janewman): We should keep
   // track of when we enter/exit focusgroups during navigation, and only call
   // this when we are inside a focusgroup.
-  const Element* focusgroup_owner = focusgroup::FindFocusgroupOwner(&element);
-
-  // GetFocusgroupOwnerOfItem additionally checks if the element is keyboard
-  // focusable, avoid this expensive check as IsNonEntryFocusgroupItem assumes
-  // the element is already keyboard focusable.
-  DCHECK_EQ(focusgroup_owner,
-            FocusgroupControllerUtils::GetFocusgroupOwnerOfItem(&element));
+  const Element* focusgroup_owner =
+      FocusgroupControllerUtils::GetFocusgroupOwnerOfItem(&element);
   if (!focusgroup_owner) {
-    // Not in a focusgroup.
+    // Not participating in a focusgroup.
     return false;
   }
 
   // Find the first item in this element's segment to use as the cache key.
   const Element* segment_first_item =
-      FocusgroupControllerUtils::FirstFocusgroupItemInSegment(element);
+      FocusgroupControllerUtils::FocusgroupItemInSegment(
+          element, FocusgroupItemPosition::kFirst);
   // An element in a focusgroup defines a segment, so this should never be null.
   CHECK(segment_first_item);
 
@@ -919,6 +933,9 @@ ScopedFocusNavigation ScopedFocusNavigation::OwnedByPopoverInvoker(
     const Element& invoker,
     FocusController::OwnerMap& owner_map) {
   HTMLElement* popover = invoker.GetOpenPopoverTarget();
+  if (IsShadowHost(popover)) {
+    return ScopedFocusNavigation::OwnedByShadowHost(*popover, owner_map);
+  }
   DCHECK(InvokerForOpenPopover(popover));
   return ScopedFocusNavigation(*popover, nullptr, owner_map);
 }
@@ -966,10 +983,10 @@ bool IsLikelyCaptchaIframe(const Element& element) {
   }
   DEFINE_STATIC_LOCAL(String, kCaptcha, ("captcha"));
   return iframe_element->FastGetAttribute(html_names::kSrcAttr)
-             .Contains(kCaptcha) ||
-         iframe_element->title().Contains(kCaptcha) ||
-         iframe_element->GetIdAttribute().Contains(kCaptcha) ||
-         iframe_element->GetNameAttribute().Contains(kCaptcha);
+             .contains(kCaptcha) ||
+         iframe_element->title().contains(kCaptcha) ||
+         iframe_element->GetIdAttribute().contains(kCaptcha) ||
+         iframe_element->GetNameAttribute().contains(kCaptcha);
 }
 
 // Checks whether |element| is a captcha <iframe> or enclosed with such an
@@ -1187,6 +1204,7 @@ int ScopedFocusNavigation::ReadingFlowAdjustedTabIndex(const Element& element) {
 
 Element* ScopedFocusNavigation::NextFocusableElement() {
   Element* current = CurrentElement();
+  Element* initial_current = current;
   if (current) {
     int tab_index = ReadingFlowAdjustedTabIndex(*current);
     // If an element is excluded from the normal tabbing cycle, the next
@@ -1211,6 +1229,18 @@ Element* ScopedFocusNavigation::NextFocusableElement() {
     if (!tab_index) {
       // We've reached the last element in the document with a tabindex of 0.
       // This is the end of the tabbing order.
+      return nullptr;
+    }
+    const bool initial_element_is_non_focusable_with_scroll_marker =
+        initial_current && !ShouldVisit(*initial_current) &&
+        initial_current->GetPseudoElement(kPseudoIdScrollMarker);
+    if (initial_element_is_non_focusable_with_scroll_marker) {
+      // If the initial starting element is a non-focusable element with
+      // scroll-marker pseudo-element, we should not continue to
+      // search for next focusable element, as we reach that non-focusable
+      // element from the ::scroll-marker pseudo-element via a special path
+      // in Document::SequentialFocusNavigationStartingPoint, and once we
+      // reach here, it's basically the same condition as tab_index being 0.
       return nullptr;
     }
   }

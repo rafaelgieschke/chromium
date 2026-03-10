@@ -11,6 +11,7 @@
 
 #include "base/unguessable_token.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/global_routing_id.h"
 #include "net/base/isolation_info.h"
 #include "net/storage_access_api/status.h"
 #include "services/network/public/mojom/client_security_state.mojom.h"
@@ -34,8 +35,7 @@ class WebSocketConnectorImpl final : public blink::mojom::WebSocketConnector {
   // - For shared workers and service workers, |frame_id| should be
   //   IPC::mojom::kRoutingIdNone because they do not have a frame.
   WebSocketConnectorImpl(
-      int process_id,
-      int frame_id,
+      const content::GlobalRenderFrameHostId& frame_id,
       const url::Origin& origin,
       const net::IsolationInfo& isolation_info,
       network::mojom::ClientSecurityStatePtr client_security_state);
@@ -44,7 +44,6 @@ class WebSocketConnectorImpl final : public blink::mojom::WebSocketConnector {
   // WebSocketConnector implementation
   void Connect(const GURL& url,
                const std::vector<std::string>& requested_protocols,
-               const net::SiteForCookies& site_for_cookies,
                const std::optional<std::string>& user_agent,
                net::StorageAccessApiStatus storage_access_api_status,
                mojo::PendingRemote<network::mojom::WebSocketHandshakeClient>
@@ -55,11 +54,9 @@ class WebSocketConnectorImpl final : public blink::mojom::WebSocketConnector {
  private:
   static void ConnectCalledByContentBrowserClient(
       const std::vector<std::string>& requested_protocols,
-      const net::SiteForCookies& site_for_cookies,
       net::StorageAccessApiStatus storage_access_api_status,
       const net::IsolationInfo& isolation_info,
-      int process_id,
-      int frame_id,
+      const content::GlobalRenderFrameHostId& frame_id,
       const url::Origin& origin,
       network::mojom::ClientSecurityStatePtr client_security_state,
       uint32_t options,
@@ -73,8 +70,7 @@ class WebSocketConnectorImpl final : public blink::mojom::WebSocketConnector {
       mojo::PendingRemote<network::mojom::TrustedHeaderClient>
           trusted_header_client);
 
-  const int process_id_;
-  const int frame_id_;
+  const content::GlobalRenderFrameHostId frame_id_;
   const url::Origin origin_;
   const net::IsolationInfo isolation_info_;
   const network::mojom::ClientSecurityStatePtr client_security_state_;

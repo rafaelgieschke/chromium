@@ -49,6 +49,8 @@ public class HeadlessTabModelSelectorImpl extends TabModelSelectorImpl {
                 AsyncTabParamsManagerFactory.createAsyncTabParamsManager(),
                 /* supportUndo= */ false,
                 ActivityType.TABBED,
+                /* customTabProfileType= */ null,
+                TabModelType.HEADLESS,
                 /* startIncognito= */ false);
     }
 

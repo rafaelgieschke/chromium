@@ -9,7 +9,6 @@
 <translation id="101823271612280837">Įrašymas sustabdytas. Negalima naudoti žaidimų informacijos suvestinės planšetinio kompiuterio režimu.</translation>
 <translation id="1024364763893396229">Išsaugokite „<ph name="NAME" />“</translation>
 <translation id="1032891413405719768">Rašiklio akumuliatorius senka</translation>
-<translation id="1036073649888683237">Norėdami tvarkyti pranešimus, eikite į nustatymus</translation>
 <translation id="1036348656032585052">Išjungti</translation>
 <translation id="1037492556044956303">„<ph name="DEVICE_NAME" />“ pridėtas</translation>
 <translation id="1038106730571050514">Rodyti pasiūlymus</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">Naujausia <ph name="INDEX" /> nuotrauka iš <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Sutraukti „Google Tasks“</translation>
 <translation id="2208323208084708176">Vieno darbalaukio režimas</translation>
-<translation id="2210311543574621570">Paspaudus ir palaikius „Ctrl“ + V bus rodoma iškarpinė. Šį spartųjį klavišą galite išjungti išjungdami žymą #clipboard-history-longpress adresu chrome://flags.</translation>
 <translation id="2215920961700443347">Nėra interneto ryšio. Prisijunkite prie interneto ir bandykite dar kartą.</translation>
 <translation id="2222841058024245321">7 darbalaukis</translation>
 <translation id="2223384056430485343">Išskaidyto ekrano režimu</translation>
@@ -428,6 +426,7 @@ Prijungtų įrenginių: <ph name="DEVICECOUNT" />.</translation>
 <translation id="2478076885740497414">Įdiegti programą</translation>
 <translation id="2482878487686419369">Pranešimai</translation>
 <translation id="2484513351006226581">Paspauskite <ph name="KEYBOARD_SHORTCUT" />, kad perjungtumėte klaviatūros išdėstymą.</translation>
+<translation id="2485422356828889247">Pašalinti</translation>
 <translation id="2486214324139475545">„<ph name="DESK_NAME" />“ peržiūra. Aktyvus darbalaukis.</translation>
 <translation id="2486405091093637109">„<ph name="DISPLAY_NAME" />“ skyra pakeista į <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz). Jei nepatvirtinsite, ankstesni nustatymai bus atkurti po <ph name="TIMEOUT_SECONDS" />.</translation>
 <translation id="2487915095798731898">Prisijungti</translation>
@@ -2195,7 +2194,6 @@ Jei norite išjungti įrenginį, dar kartą paspauskite ir palaikykite įrengini
 <translation id="8241650983304689286">Pridėti skirtuką prie naujo išskaidyto rodinio</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, signalo stiprumas <ph name="SIGNAL_STRENGTH" />, telefono akumuliatorius <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Rodyti visą „Google“ disko turinį</translation>
-<translation id="8257510091797044096">Nustatykite savo įrenginį</translation>
 <translation id="8261506727792406068">Ištrinti</translation>
 <translation id="8262312463845990408">Perjungti atkūrimą</translation>
 <translation id="8268302343625273732">Žr. visas užduotis sistemoje „Google Classroom“</translation>

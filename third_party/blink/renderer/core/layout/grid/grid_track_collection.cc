@@ -119,8 +119,7 @@ void GridRangeBuilder::EnsureTrackCoverage(
 }
 
 GridRangeVector GridRangeBuilder::FinalizeRanges(
-    bool needs_intrinsic_track_size,
-    Vector<wtf_size_t>* collapsed_track_indexes) {
+    bool needs_intrinsic_track_size) {
   DCHECK_EQ(start_lines_.size(), end_lines_.size());
 
   // Sort start and ending tracks from low to high.
@@ -315,13 +314,6 @@ GridRangeVector GridRangeBuilder::FinalizeRanges(
         !needs_intrinsic_track_size) {
       range.SetIsCollapsed();
       range.set_count = 0;
-      if (collapsed_track_indexes) {
-        wtf_size_t start_line = range.start_line;
-        for (wtf_size_t i = start_line; i < start_line + range.track_count;
-             ++i) {
-          collapsed_track_indexes->emplace_back(i);
-        }
-      }
     } else {
       // If this is a non-collapsed range, the number of sets in this range is
       // the number of track definitions in the current repeater clamped by the
@@ -865,6 +857,18 @@ bool GridLayoutTrackCollection::IsDependentOnAvailableSize() const {
       TrackSpanProperties::kIsDependentOnAvailableSize);
 }
 
+wtf_size_t GridLayoutTrackCollection::FirstNonCollapsedLineIndex() const {
+  if (ranges_.empty()) {
+    return kNotFound;
+  }
+  const auto& range = ranges_[0];
+  if (!range.IsCollapsed()) {
+    return range.start_line;
+  }
+
+  return range.start_line + range.track_count;
+}
+
 bool GridLayoutTrackCollection::HasIndefiniteSet() const {
   return !last_indefinite_index_.empty() &&
          last_indefinite_index_.back() != kNotFound;
@@ -873,7 +877,8 @@ bool GridLayoutTrackCollection::HasIndefiniteSet() const {
 GridSizingTrackCollection::GridSizingTrackCollection(
     GridRangeVector&& ranges,
     GridTrackSizingDirection track_direction,
-    bool must_create_baselines)
+    bool must_create_baselines,
+    bool should_store_collapsed_track_indexes)
     : GridLayoutTrackCollection(track_direction) {
   ranges_ = std::move(ranges);
 
@@ -881,11 +886,20 @@ GridSizingTrackCollection::GridSizingTrackCollection(
     baselines_.emplace();
   }
 
+  if (should_store_collapsed_track_indexes) {
+    collapsed_track_indexes_.Shrink(0);
+  }
+
   wtf_size_t set_count = 0;
   for (const auto& range : ranges_) {
     if (!range.IsCollapsed()) {
       non_collapsed_track_count_ += range.track_count;
       set_count += range.set_count;
+    } else if (should_store_collapsed_track_indexes) {
+      for (wtf_size_t i = range.start_line;
+           i < range.start_line + range.track_count; ++i) {
+        collapsed_track_indexes_.emplace_back(i);
+      }
     }
   }
 
@@ -1135,32 +1149,6 @@ void GridSizingTrackCollection::BuildSets(
         if (set_track_size.HasPercentage()) {
           range.properties.SetProperty(
               TrackSpanProperties::kIsDependentOnAvailableSize);
-        }
-
-        if (intrinsic_sized_repeater_set_index_ == kNotFound &&
-            range.IsAutoRepeat() &&
-            set_track_size.IsTrackDefinitionIntrinsic()) {
-          // This is not yet supported in Grid, only Grid-lanes.
-          CHECK(is_grid_lanes);
-
-          // Get the index of the first set of the intrinsic auto repeat. For
-          // example, if the track definition was repeat(auto-fill, 50px auto),
-          // we want the index of the set that holds 50px.
-          wtf_size_t repeater_offset = range.repeater_offset;
-
-          // Use the size since that will be the index of the current set once
-          // it is added.
-          wtf_size_t set_index = sets_.size();
-
-          // If this range/set doesn't start the intrinsic auto repeat, walk the
-          // sets backward until we hit the first track in the repeat.
-          while (repeater_offset > 0) {
-            set_index--;
-            CHECK_LT(set_index, sets_.size());
-            repeater_offset -= sets_[set_index].track_count;
-          }
-          CHECK_EQ(repeater_offset, 0U);
-          intrinsic_sized_repeater_set_index_ = set_index;
         }
 
         CacheSetProperties(sets_.emplace_back(set_track_count, set_track_size,

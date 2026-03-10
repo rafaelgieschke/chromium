@@ -9,7 +9,6 @@
 <translation id="101823271612280837">Se ha detenido la grabación. No se puede usar el Panel de juego en modo Tablet.</translation>
 <translation id="1024364763893396229">Guarda <ph name="NAME" /></translation>
 <translation id="1032891413405719768">El lápiz óptico tiene poca batería</translation>
-<translation id="1036073649888683237">Para gestionar las notificaciones, ve a Configuración</translation>
 <translation id="1036348656032585052">Desactivar</translation>
 <translation id="1037492556044956303">Se ha añadido <ph name="DEVICE_NAME" /></translation>
 <translation id="1038106730571050514">Mostrar sugerencias</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">Foto reciente <ph name="INDEX" /> de <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Contraer Google Tasks</translation>
 <translation id="2208323208084708176">Modo Escritorio unificado</translation>
-<translation id="2210311543574621570">Para ver el portapapeles, mantén pulsadas las teclas Ctrl + V. Puedes desactivar esta combinación de teclas inhabilitando la marca #clipboard-history-longpress en chrome://flags.</translation>
 <translation id="2215920961700443347">No hay conexión a Internet. Conéctate a Internet y vuelve a intentarlo.</translation>
 <translation id="2222841058024245321">Escritorio 7</translation>
 <translation id="2223384056430485343">En una pantalla dividida</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">Instalar aplicación</translation>
 <translation id="2482878487686419369">Notificaciones</translation>
 <translation id="2484513351006226581">Pulsa <ph name="KEYBOARD_SHORTCUT" /> para cambiar el diseño del teclado.</translation>
+<translation id="2485422356828889247">Desinstalar</translation>
 <translation id="2486214324139475545">Vista previa de <ph name="DESK_NAME" />. Escritorio activo.</translation>
 <translation id="2486405091093637109">Se ha cambiado la resolución de "<ph name="DISPLAY_NAME" />" a <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz). Si no confirmas, se restaurará la configuración anterior en <ph name="TIMEOUT_SECONDS" />.</translation>
 <translation id="2487915095798731898">Unirse</translation>
@@ -1001,7 +1000,7 @@ Algunas funciones están limitadas para aumentar la duración de la batería.</t
 <translation id="4356872429719185452">Muestra detalles del punto de acceso. El punto de acceso se está activando.</translation>
 <translation id="4364101114148522660"><ph name="DURATION" />  Grabando</translation>
 <translation id="4368227575116094370">Crear hoja de cálculo de Google</translation>
-<translation id="4371348193907997655">Configuración de envío</translation>
+<translation id="4371348193907997655">Ajustes de Cast</translation>
 <translation id="4371834685492830207">El PIN solo puede contener caracteres válidos</translation>
 <translation id="4375482231364171368">Buscar en la barra de direcciones</translation>
 <translation id="4378479437904450384"><ph name="WIRELESS_PROVIDER" />; intensidad de la señal: <ph name="SIGNAL_STRENGTH" /> %</translation>
@@ -2196,7 +2195,6 @@ Para apagarlo, mantén pulsado de nuevo el botón de encendido del dispositivo.<
 <translation id="8241650983304689286">Añadir pestaña a la nueva vista dividida</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, intensidad de la señal: <ph name="SIGNAL_STRENGTH" />, batería del teléfono: <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Mostrar todo el contenido de Google Drive</translation>
-<translation id="8257510091797044096">Configurar tu dispositivo</translation>
 <translation id="8261506727792406068">Eliminar</translation>
 <translation id="8262312463845990408">Reproducir/Pausar</translation>
 <translation id="8268302343625273732">Ver todas las tareas en Google Classroom</translation>

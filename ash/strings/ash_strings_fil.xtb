@@ -9,7 +9,6 @@
 <translation id="101823271612280837">Tumigil ang pag-record. Hindi magagamit ang Dashboard ng game sa tablet mode.</translation>
 <translation id="1024364763893396229">I-save ang iyong <ph name="NAME" /></translation>
 <translation id="1032891413405719768">Mahina na ang baterya ng stylus</translation>
-<translation id="1036073649888683237">Para pamahalaan ang mga notification, pumunta sa Mga Setting</translation>
 <translation id="1036348656032585052">I-off</translation>
 <translation id="1037492556044956303">Idinagdag ang <ph name="DEVICE_NAME" /></translation>
 <translation id="1038106730571050514">Ipakita ang mga suhestyon</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">Kamakailang larawan <ph name="INDEX" /> ng <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">I-collapse ang Google Tasks</translation>
 <translation id="2208323208084708176">Unified desktop mode</translation>
-<translation id="2210311543574621570">Makikita mo ang clipboard kapag pinindot mo nang matagal ang Ctrl + V. Puwede mong i-off ang shortcut na ito sa pamamagitan ng pag-disable sa flag ng #clipboard-history-longpress sa chrome://flags.</translation>
 <translation id="2215920961700443347">Walang internet. Kumonekta sa internet at subukan ulit.</translation>
 <translation id="2222841058024245321">Desk 7</translation>
 <translation id="2223384056430485343">Sa isang split screen</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">I-install ang app</translation>
 <translation id="2482878487686419369">Mga Abiso</translation>
 <translation id="2484513351006226581">Pindutin ang <ph name="KEYBOARD_SHORTCUT" /> upang palitan ang layout ng keyboard.</translation>
+<translation id="2485422356828889247">I-uninstall</translation>
 <translation id="2486214324139475545">Preview ng <ph name="DESK_NAME" />. Aktibong desk.</translation>
 <translation id="2486405091093637109">Pinalitan ang "<ph name="DISPLAY_NAME" />" at ginawang <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz) na resolution. Kung hindi kukumpirmahin, mare-restore ang mga nakaraang setting sa loob ng <ph name="TIMEOUT_SECONDS" />.</translation>
 <translation id="2487915095798731898">Sumali</translation>
@@ -2194,7 +2193,6 @@ Para i-shut down ang device, pindutin ulit nang matagal ang power button sa devi
 <translation id="8241650983304689286">Magdagdag ng tab sa bagong split view</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, Lakas ng Signal <ph name="SIGNAL_STRENGTH" />, Baterya ng Telepono <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Ipakita ang lahat ng content ng Google Drive</translation>
-<translation id="8257510091797044096">I-set up ang iyong device</translation>
 <translation id="8261506727792406068">I-delete</translation>
 <translation id="8262312463845990408">I-toggle ang pag-playback</translation>
 <translation id="8268302343625273732">Tingnan ang lahat ng assignment sa Google Classroom</translation>

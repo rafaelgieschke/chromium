@@ -516,7 +516,7 @@ class PasswordFormManagerTest : public testing::Test,
     ON_CALL(client_, IsCommittedMainFrameSecure()).WillByDefault(Return(true));
     ON_CALL(crowdsourcing_manager(), StartUploadRequest)
         .WillByDefault(Return(true));
-    ON_CALL(*client_.GetPasswordFeatureManager(), IsAccountStorageEnabled)
+    ON_CALL(*client_.GetPasswordFeatureManager(), IsAccountStorageActive)
         .WillByDefault(Return(false));
 
     ON_CALL(client_, GetLastCommittedURL())
@@ -556,6 +556,20 @@ class PasswordFormManagerTest : public testing::Test,
 
     form_manager_ = std::make_unique<PasswordFormManager>(
         &client_, driver_.AsWeakPtr(), observed_form, fetcher_.get(),
+        std::move(password_save_manager), nullptr);
+  }
+
+  // Creates PasswordFormManager without a passed |fetcher_| in order to
+  // populate |owned_form_fetcher_|.
+  virtual void CreateFormManagerWithoutFetcher(const FormData& observed_form) {
+    auto password_save_manager = std::make_unique<PasswordSaveManagerImpl>(
+        /*profile_form_saver=*/std::make_unique<NiceMock<MockFormSaver>>(),
+        /*account_form_saver=*/GetParam()
+            ? std::make_unique<NiceMock<MockFormSaver>>()
+            : nullptr);
+
+    form_manager_ = std::make_unique<PasswordFormManager>(
+        &client_, driver_.AsWeakPtr(), observed_form, nullptr,
         std::move(password_save_manager), nullptr);
   }
 
@@ -4229,7 +4243,7 @@ TEST_P(PasswordFormManagerTest, MovableToAccountStore) {
                                        signin::ConsentLevel::kSignin);
   ON_CALL(client_, GetIdentityManager())
       .WillByDefault(Return(identity_test_env_.identity_manager()));
-  ON_CALL(*client_.GetPasswordFeatureManager(), IsAccountStorageEnabled)
+  ON_CALL(*client_.GetPasswordFeatureManager(), IsAccountStorageActive)
       .WillByDefault(Return(true));
   EXPECT_TRUE(form_manager_->IsMovableToAccountStore());
 }
@@ -4850,6 +4864,25 @@ TEST_P(PasswordFormManagerTest, DoesNotNotifyAfterObserverRemoved) {
   task_environment_.FastForwardUntilNoTasksRemain();
 }
 
+TEST_P(PasswordFormManagerTest,
+       NoWaitForPasskeysWhenFormLacksWebauthnAutocomplete) {
+  test_api(observed_form_).field(-1).set_autocomplete_attribute("new-password");
+
+  EXPECT_CALL(webauthn_credentials_delegate_,
+              RequestNotificationWhenPasskeysReady)
+      .Times(0);
+  CreateFormManagerWithoutFetcher(observed_form_);
+}
+
+TEST_P(PasswordFormManagerTest,
+       WaitForPasskeysWhenFormHasWebauthnAutocomplete) {
+  test_api(observed_form_).field(-1).set_autocomplete_attribute("webauthn");
+
+  EXPECT_CALL(webauthn_credentials_delegate_,
+              RequestNotificationWhenPasskeysReady);
+  CreateFormManagerWithoutFetcher(observed_form_);
+}
+
 INSTANTIATE_TEST_SUITE_P(All, PasswordFormManagerTest, testing::Bool());
 
 class MockPasswordSaveManager : public PasswordSaveManager {
@@ -5130,7 +5163,7 @@ TEST_F(PasswordFormManagerTestWithMockedSaver, Blocklist) {
 }
 
 TEST_F(PasswordFormManagerTestWithMockedSaver, MoveCredentialsToAccountStore) {
-  ON_CALL(*client_.GetPasswordFeatureManager(), IsAccountStorageEnabled)
+  ON_CALL(*client_.GetPasswordFeatureManager(), IsAccountStorageActive)
       .WillByDefault(Return(true));
   EXPECT_CALL(*mock_password_save_manager(),
               MoveCredentialsToAccountStore(
@@ -5153,7 +5186,7 @@ TEST_F(PasswordFormManagerTestWithMockedSaver,
 
   ON_CALL(client_, GetIdentityManager())
       .WillByDefault(Return(identity_test_env_.identity_manager()));
-  ON_CALL(*client_.GetPasswordFeatureManager(), IsAccountStorageEnabled)
+  ON_CALL(*client_.GetPasswordFeatureManager(), IsAccountStorageActive)
       .WillByDefault(Return(true));
 
   identity_test_env_.SetPrimaryAccount(kEmail, signin::ConsentLevel::kSync);

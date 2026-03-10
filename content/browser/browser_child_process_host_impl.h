@@ -9,7 +9,9 @@
 
 #include <list>
 #include <memory>
+#include <optional>
 
+#include "base/memory/memory_pressure_listener.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/unsafe_shared_memory_region.h"
@@ -64,7 +66,8 @@ class BrowserChildProcessHostImpl
       public base::win::ObjectWatcher::Delegate,
 #endif
       public ChildProcessLauncher::Client,
-      public memory_instrumentation::mojom::CoordinatorConnector {
+      public memory_instrumentation::mojom::CoordinatorConnector,
+      public base::MemoryPressureListener {
  public:
   // Constructs a process host with |ipc_mode| determining how IPC is done.
   BrowserChildProcessHostImpl(content::ProcessType process_type,
@@ -99,6 +102,7 @@ class BrowserChildProcessHostImpl
   void BindChildHistogramFetcherFactory(
       mojo::PendingReceiver<metrics::mojom::ChildHistogramFetcherFactory>
           factory) override;
+  bool IsWebiumRenderer() const override;
 
   // Terminates the process and logs a stack trace after a bad message was
   // received from the child process.
@@ -179,6 +183,9 @@ class BrowserChildProcessHostImpl
           receiver,
       mojo::PendingRemote<memory_instrumentation::mojom::ClientProcess>
           client_process) override;
+
+  void OnMemoryPressure(
+      base::MemoryPressureLevel memory_pressure_level) override;
 
   // Returns true if the process has successfully launched. Must only be called
   // on the IO thread.
@@ -276,6 +283,9 @@ class BrowserChildProcessHostImpl
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   ChildThreadTypeSwitcher child_thread_type_switcher_;
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+
+  std::optional<base::MemoryPressureListenerRegistration>
+      memory_pressure_listener_registration_;
 
   base::WeakPtrFactory<BrowserChildProcessHostImpl> weak_factory_{this};
 };

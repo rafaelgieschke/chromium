@@ -1,9 +1,9 @@
 // Copyright 2024 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-
 import type {CrActionMenuElement} from '//resources/cr_elements/cr_action_menu/cr_action_menu.js';
 import {AnchorAlignment} from '//resources/cr_elements/cr_action_menu/cr_action_menu.js';
+import {isRTL} from '//resources/js/util.js';
 
 import type {ShowAtConfigPrefs} from '../content/read_anything_types.js';
 import {TextSegmenter} from '../read_aloud/text_segmenter.js';
@@ -52,6 +52,26 @@ export function openMenu(
                 noOffset: true,
               },
               showAtConfig));
+
+      const isSubmenu = menuToOpen.nonModal;
+      // We manually override submenu positions here because cr-action-menu's
+      // native side-collision aggressively flips the entire menu. We must do
+      // this after showAt() because <cr-lazy-render> keeps offsetWidth at 0
+      // until opened.
+      if (isSubmenu) {
+        const dialog = menuToOpen.getDialog();
+        const targetRect = target.getBoundingClientRect();
+        const viewportWidth = window.innerWidth;
+        const menuWidth = dialog.offsetWidth;
+        const idealLeft =
+            isRTL() ? targetRect.right : targetRect.left - menuWidth;
+        const maxLeftAllowed = viewportWidth - menuWidth;
+        const exactLeft = Math.max(0, Math.min(idealLeft, maxLeftAllowed));
+
+        dialog.style.left = `${exactLeft}px`;
+        dialog.style.right = 'auto';
+      }
+
       if (onShow) {
         onShow();
       }
@@ -64,6 +84,7 @@ export function getWordCount(text: string): number {
   return TextSegmenter.getInstance().getWordCount(text);
 }
 
+// TODO(crbug.com/447427066): Move these visibility functions to dom_queries.ts.
 // Returns true if the given rect is mostly within the visible window.
 export function isRectMostlyVisible(rect: DOMRect): boolean {
   if (rect.height <= 0) {
@@ -91,4 +112,10 @@ function isPointVisible(point: number) {
       (point >= 0) &&
       ((point <= window.innerHeight) ||
        (point <= document.documentElement.clientHeight)));
+}
+
+// Returns true if the active distillation method is readability.
+export function isDistilledByReadability(): boolean {
+  return chrome.readingMode.activeDistillationMethod ===
+      chrome.readingMode.distillationTypeReadability;
 }

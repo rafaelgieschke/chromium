@@ -104,7 +104,8 @@ class ActorClickToolBrowserTest : public ActorToolsTest {
   ActorClickToolBrowserTest() {
     feature_list_.InitAndEnableFeatureWithParameters(
         ::features::kGlicActor,
-        {{features::kGlicActorClickDelay.name, "200ms"}});
+        {{features::kGlicActorClickDelay.name, "200ms"},
+         {features::kGlicActorPolicyControlExemption.name, "true"}});
   }
 
   ~ActorClickToolBrowserTest() override = default;
@@ -511,6 +512,24 @@ IN_PROC_BROWSER_TEST_F(ActorClickToolBrowserTest, UserInteractionTriggered) {
   ASSERT_TRUE(observer.WasUserInteractionReceived());
 }
 
+// Test that we can dispatch a click to a checkbox that's entirely overlaid by
+// a pseudo element in its associated label.
+IN_PROC_BROWSER_TEST_F(ActorClickToolBrowserTest, CheckboxOverlayedByPseudo) {
+  const GURL start_url = embedded_https_test_server().GetURL(
+      "example.com", "/actor/page_with_clickable_element.html");
+  ASSERT_TRUE(content::NavigateToURL(web_contents(), start_url));
+
+  std::optional<int> checkbox_id =
+      GetDOMNodeId(*main_frame(), "#checkboxPseudo");
+  ASSERT_TRUE(checkbox_id);
+
+  std::unique_ptr<ToolRequest> action =
+      MakeClickRequest(*main_frame(), checkbox_id.value());
+  ActResultFuture result;
+  actor_task().Act(ToRequestList(action), result.GetCallback());
+  ExpectOkResult(result);
+}
+
 class ActorClickToolScaledBrowserTest : public ActorToolsTest {
  public:
   ActorClickToolScaledBrowserTest() = default;
@@ -564,7 +583,7 @@ class ActorClickToolPDFBrowserTest
       public ::testing::WithParamInterface<bool> {
  public:
   ActorClickToolPDFBrowserTest() {
-    if (BypaassTOUValidationForGuestView()) {
+    if (BypassTOUValidationForGuestView()) {
       feature_list_.InitWithFeatures({kActorBypassTOUValidationForGuestView},
                                      {chrome_pdf::features::kPdfOopif});
     } else {
@@ -576,7 +595,7 @@ class ActorClickToolPDFBrowserTest
 
   ~ActorClickToolPDFBrowserTest() override = default;
 
-  bool BypaassTOUValidationForGuestView() { return GetParam(); }
+  bool BypassTOUValidationForGuestView() { return GetParam(); }
 
   void SetUpOnMainThread() override {
     ActorToolsTest::SetUpOnMainThread();
@@ -594,7 +613,13 @@ class ActorClickToolPDFBrowserTest
 };
 
 // Ensure clicks can rotate on a PDF.
-IN_PROC_BROWSER_TEST_P(ActorClickToolPDFBrowserTest, Click) {
+// TODO(crbug.com/485814156): Re-enable the test.
+#if BUILDFLAG(IS_LINUX)
+#define MAYBE_Click DISABLED_Click
+#else
+#define MAYBE_Click Click
+#endif
+IN_PROC_BROWSER_TEST_P(ActorClickToolPDFBrowserTest, MAYBE_Click) {
   const GURL url = embedded_test_server()->GetURL("/pdf/test.pdf");
   ASSERT_TRUE(content::NavigateToURL(web_contents(), url));
 
@@ -605,7 +630,8 @@ IN_PROC_BROWSER_TEST_P(ActorClickToolPDFBrowserTest, Click) {
         if (!pdf_helper) {
           return false;
         }
-        return pdf_helper->IsDocumentLoadComplete();
+        return pdf_helper->IsDocumentLoadComplete() &&
+               web_contents()->IsDocumentOnLoadCompletedInPrimaryMainFrame();
       }),
       "PDF Loaded");
 
@@ -615,7 +641,7 @@ IN_PROC_BROWSER_TEST_P(ActorClickToolPDFBrowserTest, Click) {
         MakeClickRequest(*active_tab(), gfx::Point(650, 25));
     ActResultFuture future;
     actor_task().Act(ToRequestList(action), future.GetCallback());
-    if (BypaassTOUValidationForGuestView()) {
+    if (BypassTOUValidationForGuestView()) {
       // This should always pass the first time.
       ExpectOkResult(future);
       break;

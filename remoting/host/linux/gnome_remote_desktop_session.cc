@@ -4,18 +4,25 @@
 
 #include "remoting/host/linux/gnome_remote_desktop_session.h"
 
+#include <signal.h>
+
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
 
+#include "base/command_line.h"
 #include "base/functional/bind.h"
 #include "base/no_destructor.h"
 #include "base/strings/strcat.h"
+#include "base/strings/string_split.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/types/expected.h"
+#include "remoting/base/branding.h"
 #include "remoting/base/file_path_util_linux.h"
 #include "remoting/base/logging.h"
+#include "remoting/host/base/switches.h"
 #include "remoting/host/linux/dbus_interfaces/org_gnome_Mutter_RemoteDesktop.h"
 #include "remoting/host/linux/dbus_interfaces/org_gnome_Mutter_ScreenCast.h"
 #include "remoting/host/linux/gnome_desktop_display_info_monitor.h"
@@ -38,7 +45,7 @@ constexpr ObjectPathCStr kScreenCastObjectPath = "/org/gnome/Mutter/ScreenCast";
 
 base::FilePath GetDisplayLayoutFilePath() {
   return (base::FilePath(
-      GetConfigDirectoryPath().Append(GetHostHash() + ".display_layout.pb")));
+      GetConfigDir().Append(GetHostHash() + ".display_layout.pb")));
 }
 
 std::unique_ptr<protocol::VideoLayout> CreateDefaultLayout() {
@@ -84,7 +91,11 @@ bool GnomeRemoteDesktopSession::IsRunningUnderGnome() {
   if (!xdg_current_desktop) {
     return true;
   }
-  return std::string_view{xdg_current_desktop} == "GNOME";
+  // XDG_CURRENT_DESKTOP is a colon-separated list of desktop names.
+  auto xdg_current_desktop_values = base::SplitString(
+      xdg_current_desktop, ":", base::WhitespaceHandling::TRIM_WHITESPACE,
+      base::SplitResult::SPLIT_WANT_NONEMPTY);
+  return std::ranges::contains(xdg_current_desktop_values, "GNOME");
 }
 
 // static
@@ -155,6 +166,18 @@ void GnomeRemoteDesktopSession::OnConnectionCreated(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   connection_ = std::move(connection);
 
+  const auto* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->GetSwitchValueASCII(kProcessTypeSwitchName) ==
+      kProcessTypeDesktop) {
+    // For the multi-process Linux host, the desktop process is always run under
+    // a GDM remote display, so it is guaranteed to be headless.
+    // TODO: yuweih - This needs to be changed if we want to support custom
+    // sessions, or remoting the local session (if it becomes possible) in
+    // multi-process mode.
+    OnHeadlessDetection(/*is_headless=*/true);
+    return;
+  }
+
   headless_detector_.Start(
       connection_,
       base::BindOnce(&GnomeRemoteDesktopSession::OnHeadlessDetection,
@@ -205,14 +228,32 @@ void GnomeRemoteDesktopSession::OnHeadlessDetection(bool is_headless) {
 void GnomeRemoteDesktopSession::OnSessionCreated(std::tuple<ObjectPath> args) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   std::tie(session_path_) = args;
-  // TODO(jamiewalch): While we don't close the session ourselves, the Mutter
-  // remote desktop has a Close signal, which might be fired when the session is
-  // closed externally. See if we need to do something with it.
+
+  session_closed_signal_ =
+      connection_
+          .SignalSubscribe<org_gnome_Mutter_RemoteDesktop_Session::Closed>(
+              kRemoteDesktopBusName, session_path_,
+              base::BindRepeating(&GnomeRemoteDesktopSession::OnSessionClosed,
+                                  weak_ptr_factory_.GetWeakPtr()));
 
   connection_.GetProperty<org_gnome_Mutter_RemoteDesktop_Session::SessionId>(
       kRemoteDesktopBusName, session_path_,
       CheckResultAndContinue(&GnomeRemoteDesktopSession::OnGotSessionId,
                              "Failed to get session ID"));
+}
+
+void GnomeRemoteDesktopSession::OnSessionClosed(std::tuple<>) {
+  // This can happen if the user clicks on GNOME's taskbar button to stop the
+  // recording session.
+  HOST_LOG << "The GNOME remote desktop session was closed externally. "
+              "Restarting the host process now.";
+
+  // Raising SIGTERM causes the host process to run its signal-handler, which
+  // cleanly disconnects the user and shuts down the process. The process will
+  // be automatically restarted and the user can reconnect.
+  // TODO: crbug.com/465280349 - Recreate the GNOME remote desktop session and
+  // streams without disconnecting the user.
+  raise(SIGTERM);
 }
 
 void GnomeRemoteDesktopSession::OnGotSessionId(std::string session_id) {
@@ -293,7 +334,20 @@ void GnomeRemoteDesktopSession::OnDisplayConfigReceived(
   // on a physical machine with physical monitors.
   // TODO: yuweih - see what to do for ME2ME on a physical machine.
   if (config.monitors.empty()) {
-    persistent_display_layout_manager_.Start(CreateDefaultLayout());
+    // Apply the default layout immediately to allow GNOME to initialize.
+    desktop_resizer_.SetVideoLayout(*CreateDefaultLayout());
+
+    // Block and queue up any further display changes (including those made by
+    // `persistent_display_layout_manager_`) for a short period to avoid a race
+    // condition in GNOME/Mutter during session startup.
+    // See: https://gitlab.gnome.org/GNOME/mutter/-/issues/4642
+    desktop_resizer_.BlockAndQueueDisplayChanges();
+    base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(&GnomeDesktopResizer::UnblockAndFlushDisplayChanges,
+                       desktop_resizer_.GetWeakPtr()),
+        base::Seconds(3));
+    persistent_display_layout_manager_.Start();
   }
   initialization_state_ = InitializationState::kInitialized;
   init_callbacks_.Notify(base::ok());

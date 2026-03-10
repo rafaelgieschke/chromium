@@ -8,6 +8,7 @@
 #include "components/input/features.h"
 #include "content/common/features.h"
 #include "content/public/common/content_features.h"
+#include "media/base/media_switches.h"
 #include "third_party/blink/public/common/features.h"
 #include "ui/accessibility/accessibility_features.h"
 
@@ -23,21 +24,28 @@ namespace {
 // in other locations in the code base (e.g. content_features.h).
 const base::Feature* const kFeaturesExposedToJava[] = {
     &blink::features::kAndroidDesktopWebPrefsLargeDisplays,
+    &blink::features::kAndroidSpellcheckFullApiBlink,
     &blink::features::kDevicePosture,
     &blink::features::kSecurePaymentConfirmationBrowserBoundKeys,
     &blink::features::kSecurePaymentConfirmationUxRefresh,
     &blink::features::kViewportSegments,
+    &media::kAllowDelayedAudioFocusGainAndroid,
     &input::features::kInputOnViz,
     &features::kAndroidCaptureKeyEvents,
     &features::kAndroidCaretBrowsing,
     &features::kAndroidDevToolsFrontend,
+    &features::kAndroidEnableBackgroundMediaCapturing,
     &features::kAccessibilityCheckJavaNodeCacheFreshness,
+    &features::kAccessibilityAtomicLiveRegions,
     &features::kAccessibilityDeprecateJavaNodeCache,
     &features::kAccessibilityDeprecateTypeAnnounce,
+    &features::kAccessibilityExposeNonAtomicTextFieldChildren,
     &features::kAccessibilityExtendedSelection,
+    &features::kAccessibilityImeGetFormattedText,
     &features::kAccessibilityImproveLiveRegionAnnounce,
     &features::kAccessibilityMagnificationFollowsFocus,
     &features::kAccessibilityRequestLayoutBasedActions,
+    &features::kAccessibilityRequestScopedContentChangedEvents,
     &features::kAccessibilityPageZoomV2,
     &features::kAccessibilityPopulateSupplementalDescriptionApi,
     &features::kAccessibilitySequentialFocus,
@@ -52,6 +60,7 @@ const base::Feature* const kFeaturesExposedToJava[] = {
     &features::kStrictHighRankProcessLRU,
     &features::kFedCm,
     &features::kHidePastePopupOnGSB,
+    &features::kNoSelectionMenuCaching,
     &features::kReduceGpuPriorityOnBackground,
     &features::kRemoveCachedProcessFromBindingManager,
     &features::kContinueGestureOnLosingFocus,
@@ -61,8 +70,8 @@ const base::Feature* const kFeaturesExposedToJava[] = {
     &features::kWebBluetoothNewPermissionsBackend,
     &features::kWebContentsDiscard,
     &features::kWebIdentityDigitalCredentials,
+    &features::kJavalessRendererExperimentOn,
     &features::kBtmTtl,
-    &features::kEnableJavalessRenderers,
     &features::kSpareRendererProcessPriority,
 };
 
@@ -75,8 +84,8 @@ base::android::FeatureMap* GetFeatureMap() {
 
 }  // namespace
 
-static jlong JNI_ContentFeatureMap_GetNativeMap(JNIEnv* env) {
-  return reinterpret_cast<jlong>(GetFeatureMap());
+static int64_t JNI_ContentFeatureMap_GetNativeMap(JNIEnv* env) {
+  return reinterpret_cast<int64_t>(GetFeatureMap());
 }
 
 }  // namespace content::android

@@ -202,7 +202,7 @@ base::OnceCallback<void(T)> AdaptCallbackForJava(
 static void JNI_WebFeedBridge_FollowWebFeed(
     JNIEnv* env,
     const base::android::JavaRef<jobject>& pageInfo,
-    jint change_reason,
+    int32_t change_reason,
     const base::android::JavaRef<jobject>& j_callback) {
   auto callback =
       AdaptCallbackForJava<WebFeedSubscriptions::FollowWebFeedResult>(
@@ -222,19 +222,19 @@ static void JNI_WebFeedBridge_FollowWebFeed(
       std::move(callback));
 }
 
-static jboolean JNI_WebFeedBridge_IsWebFeedEnabled(JNIEnv* env) {
+static bool JNI_WebFeedBridge_IsWebFeedEnabled(JNIEnv* env) {
   return feed::IsWebFeedEnabledForLocale(FeedServiceFactory::GetCountry());
 }
 
-static jboolean JNI_WebFeedBridge_IsCormorantEnabledForLocale(JNIEnv* env) {
+static bool JNI_WebFeedBridge_IsCormorantEnabledForLocale(JNIEnv* env) {
   return JNI_WebFeedBridge_IsWebFeedEnabled(env);
 }
 
 static void JNI_WebFeedBridge_FollowWebFeedById(
     JNIEnv* env,
     const base::android::JavaRef<jbyteArray>& webFeedId,
-    jboolean is_durable,
-    jint change_reason,
+    bool is_durable,
+    int32_t change_reason,
     const base::android::JavaRef<jobject>& j_callback) {
   WebFeedSubscriptions* subscriptions = GetSubscriptions();
   auto callback =
@@ -254,8 +254,8 @@ static void JNI_WebFeedBridge_FollowWebFeedById(
 static void JNI_WebFeedBridge_UnfollowWebFeed(
     JNIEnv* env,
     const base::android::JavaRef<jbyteArray>& webFeedId,
-    jboolean is_durable,
-    jint change_reason,
+    bool is_durable,
+    int32_t change_reason,
     const base::android::JavaRef<jobject>& j_callback) {
   auto callback =
       AdaptCallbackForJava<WebFeedSubscriptions::UnfollowWebFeedResult>(
@@ -385,7 +385,7 @@ static void JNI_WebFeedBridge_IncrementFollowedFromWebPageMenuCount(
 
 static void JNI_WebFeedBridge_QueryWebFeed(
     JNIEnv* env,
-    std::string& url,
+    const std::string& url,
     const base::android::JavaRef<jobject>& j_callback) {
   base::OnceCallback<void(WebFeedSubscriptions::QueryWebFeedResult)> callback =
       AdaptQueryWebFeedResultCallback(j_callback);
@@ -399,7 +399,7 @@ static void JNI_WebFeedBridge_QueryWebFeed(
 
 static void JNI_WebFeedBridge_QueryWebFeedId(
     JNIEnv* env,
-    std::string& id,
+    const std::string& id,
     const base::android::JavaRef<jobject>& j_callback) {
   base::OnceCallback<void(WebFeedSubscriptions::QueryWebFeedResult)> callback =
       AdaptQueryWebFeedResultCallback(j_callback);

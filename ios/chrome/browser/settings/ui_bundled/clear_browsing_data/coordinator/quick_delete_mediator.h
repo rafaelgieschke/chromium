@@ -20,6 +20,7 @@ namespace feature_engagement {
 class Tracker;
 }
 class PrefService;
+class TemplateURLService;
 @protocol QuickDeleteCommands;
 @protocol QuickDeleteConsumer;
 @protocol QuickDeletePresentationCommands;
@@ -34,32 +35,34 @@ class PrefService;
 @property(nonatomic, weak) id<QuickDeletePresentationCommands>
     presentationHandler;
 
-// Initializes this mediator. The initial value for the selected time range is
-// the value that the `kDeleteTimePeriod` pref holds.
+// Convenience initializer for this mediator. The initial value for the selected
+// time range is the value that the `kDeleteTimePeriod` pref holds.
+// `templateURLService` can be null if not needed.
 - (instancetype)initWithPrefs:(PrefService*)prefs
     browsingDataCounterWrapperProducer:
         (BrowsingDataCounterWrapperProducer*)counterWrapperProducer
                        identityManager:(signin::IdentityManager*)identityManager
                    browsingDataRemover:(BrowsingDataRemover*)browsingDataRemover
                    discoverFeedService:(DiscoverFeedService*)discoverFeedService
+                    templateURLService:(TemplateURLService*)templateURLService
          canPerformRadialWipeAnimation:(BOOL)canPerformRadialWipeAnimation
                        uiBlockerTarget:(id<UIBlockerTarget>)uiBlockerTarget
-              featureEngagementTracker:(feature_engagement::Tracker*)tracker
-    NS_DESIGNATED_INITIALIZER;
+              featureEngagementTracker:(feature_engagement::Tracker*)tracker;
 
-// Initializes this mediator with `timeRange` as the initial value for the
-// selected time range. If the mediator is initialized by this method, the tabs
-// closure animation is not run.
+// Convenience initializer for this mediator with `timeRange` as the initial
+// value for the selected time range. If the mediator is initialized by this
+// method, the tabs closure animation is not run.`templateURLService` can be
+// null if not needed.
 - (instancetype)initWithPrefs:(PrefService*)prefs
     browsingDataCounterWrapperProducer:
         (BrowsingDataCounterWrapperProducer*)counterWrapperProducer
                        identityManager:(signin::IdentityManager*)identityManager
                    browsingDataRemover:(BrowsingDataRemover*)browsingDataRemover
                    discoverFeedService:(DiscoverFeedService*)discoverFeedService
+                    templateURLService:(TemplateURLService*)templateURLService
                              timeRange:(browsing_data::TimePeriod)timeRange
                        uiBlockerTarget:(id<UIBlockerTarget>)uiBlockerTarget
-              featureEngagementTracker:(feature_engagement::Tracker*)tracker
-    NS_DESIGNATED_INITIALIZER;
+              featureEngagementTracker:(feature_engagement::Tracker*)tracker;
 
 - (instancetype)init NS_UNAVAILABLE;
 

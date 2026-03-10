@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40285824): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "media/gpu/chromeos/vulkan_overlay_adaptor.h"
 
 #include <linux/videodev2.h>
@@ -590,7 +585,7 @@ class VulkanOverlayAdaptorTest
       public testing::WithParamInterface<VulkanOverlayAdaptorTestParam> {
  public:
   VulkanOverlayAdaptorTest();
-  ~VulkanOverlayAdaptorTest() = default;
+  ~VulkanOverlayAdaptorTest();
 
   struct PrintToStringParamName {
     template <class ParamType>
@@ -668,6 +663,10 @@ VulkanOverlayAdaptorTest::VulkanOverlayAdaptorTest()
       &shared_image_manager_, nullptr, false);
 }
 
+VulkanOverlayAdaptorTest::~VulkanOverlayAdaptorTest() {
+  shared_image_factory_->DestroyAllSharedImages(true);
+}
+
 void VulkanOverlayAdaptorTest::ProcessMailboxes(
     gpu::Mailbox in_mailbox,
     const gfx::Size& size,
@@ -677,11 +676,13 @@ void VulkanOverlayAdaptorTest::ProcessMailboxes(
     gfx::OverlayTransform transform,
     VulkanOverlayAdaptor& processor) {
   auto in_vulkan_representation = shared_image_manager_.ProduceVulkan(
-      in_mailbox, nullptr, processor.GetVulkanDeviceQueue(),
-      processor.GetVulkanImplementation(), /*needs_detiling=*/true);
+      in_mailbox, context_state_->memory_type_tracker(),
+      processor.GetVulkanDeviceQueue(), processor.GetVulkanImplementation(),
+      /*needs_detiling=*/true);
   auto out_vulkan_representation = shared_image_manager_.ProduceVulkan(
-      out_mailbox, nullptr, processor.GetVulkanDeviceQueue(),
-      processor.GetVulkanImplementation(), /*needs_detiling=*/true);
+      out_mailbox, context_state_->memory_type_tracker(),
+      processor.GetVulkanDeviceQueue(), processor.GetVulkanImplementation(),
+      /*needs_detiling=*/true);
   {
     std::vector<VkSemaphore> begin_semaphores;
     std::vector<VkSemaphore> end_semaphores;
@@ -715,7 +716,7 @@ scoped_refptr<VideoFrame> VulkanOverlayAdaptorTest::CreateVideoFrame(
                           kMM21TileHeight) *
           bpp_numerator / bpp_denom);
 
-  scoped_refptr<VideoFrame> frame = CreateMappableVideoFrame(
+  scoped_refptr<VideoFrame> frame = CreateMappableSharedImageVideoFrame(
       VideoPixelFormat::PIXEL_FORMAT_NV12, alloc_size, visible_rect, alloc_size,
       kNullTimestamp, gfx::BufferUsage::SCANOUT_CPU_READ_WRITE,
       test_sii_.get());
@@ -756,7 +757,7 @@ scoped_refptr<VideoFrame> VulkanOverlayAdaptorTest::CreateFramebuffer(
     bool is_10bit) {
   constexpr base::TimeDelta kNullTimestamp;
 
-  scoped_refptr<VideoFrame> frame = CreateMappableVideoFrame(
+  scoped_refptr<VideoFrame> frame = CreateMappableSharedImageVideoFrame(
       is_10bit ? VideoPixelFormat::PIXEL_FORMAT_XR30
                : VideoPixelFormat::PIXEL_FORMAT_ARGB,
       coded_size, gfx::Rect(coded_size), coded_size, kNullTimestamp,

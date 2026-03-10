@@ -268,11 +268,6 @@ coverage_builder(
                     "android_10_emulator_gtests",
                     "android_10_isolated_scripts",
                 ],
-                mixins = targets.mixin(
-                    args = [
-                        "--use-persistent-shell",
-                    ],
-                ),
             ),
             "chromium_android_scripts",
             "gtests_once",
@@ -408,18 +403,12 @@ coverage_builder(
             ),
             # Keep this same as android-10-x86-rel
             "webview_instrumentation_test_apk_multiple_process_mode": targets.mixin(
-                args = [
-                    "--use-persistent-shell",
-                ],
                 swarming = targets.swarming(
                     shards = 18,
                 ),
             ),
             # Keep this same as android-10-x86-rel
             "webview_instrumentation_test_apk_single_process_mode": targets.mixin(
-                args = [
-                    "--use-persistent-shell",
-                ],
                 # Only multiple process tests run in CQ.
                 ci_only = True,
                 swarming = targets.swarming(
@@ -533,9 +522,6 @@ coverage_builder(
                 reason = "TODO(crbug.com/41440830): Fix permission issue when creating tmp files",
             ),
             "webview_instrumentation_test_apk_multiple_process_mode": targets.mixin(
-                args = [
-                    "--use-persistent-shell",
-                ],
                 swarming = targets.swarming(
                     # Shard number is increased for longer test execution time
                     # and added local coverage data merging time.
@@ -543,9 +529,6 @@ coverage_builder(
                 ),
             ),
             "webview_instrumentation_test_apk_single_process_mode": targets.mixin(
-                args = [
-                    "--use-persistent-shell",
-                ],
                 swarming = targets.swarming(
                     # Shard number is increased for longer test execution time
                     # and added local coverage data merging time.
@@ -1228,9 +1211,8 @@ coverage_builder(
             short_name = "lnx-fuzz",
         ),
     ],
-    # TODO(crbug.com/449026537): Remove elevated timeout once performance
-    # improves.
-    execution_timeout = 32 * time.hour,
+    # TODO(crbug.com/449026537): Remove elevated timeout once performance improves.
+    execution_timeout = 48 * time.hour,
     notifies = ["chrome-fuzzing-core"],
     properties = {
         "collect_fuzz_coverage": True,
@@ -1364,6 +1346,9 @@ coverage_builder(
         ),
     ),
     gn_args = gn_args.config(
+        args = {
+            "enable_single_byte_coverage": True,
+        },
         configs = [
             "release_builder",
             "remoteexec",
@@ -1412,6 +1397,9 @@ coverage_builder(
                     shards = 50,
                 ),
             ),
+            "check_static_initializers": targets.remove(
+                reason = "Coverage instrumentation adds static initializers, so this test will always fail.",
+            ),
             "content_browsertests": targets.mixin(
                 args = [
                     "--no-sandbox",
@@ -1434,6 +1422,7 @@ coverage_builder(
             "not_site_per_process_blink_web_tests": targets.mixin(
                 args = [
                     "--additional-env-var=LLVM_PROFILE_FILE=${ISOLATED_OUTDIR}/profraw/default-%2m%c.profraw",
+                    "--timeout-multiplier=5",
                 ],
                 swarming = targets.swarming(
                     shards = 20,

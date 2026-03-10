@@ -74,17 +74,15 @@ export {DefaultBrowserBrowserProxyImpl} from './default_browser_page/default_bro
 export type {DefaultBrowserBrowserProxy, DefaultBrowserInfo} from './default_browser_page/default_browser_browser_proxy.js';
 export {SettingsDefaultBrowserPageElement} from './default_browser_page/default_browser_page.js';
 // </if>
-// <if expr="enable_glic">
 export {GlicBrowserProxyImpl} from './glic_page/glic_browser_proxy.js';
-export type {GlicBrowserProxy} from './glic_page/glic_browser_proxy.js';
+export type {GlicBrowserProxy, LoginPermission} from './glic_page/glic_browser_proxy.js';
 export {SettingsGlicPageElement} from './glic_page/glic_page.js';
 export {SettingsGlicPageFeaturePrefName, SettingsGlicSubpageElement} from './glic_page/glic_subpage.js';
-// </if>
 export {loadTimeData} from './i18n_setup.js';
 // <if expr="not is_chromeos">
 export {convertLanguageCodeForChrome, convertLanguageCodeForTranslate, getBaseLanguage, isTranslateBaseLanguage} from './languages_page/languages_util.js';
 // </if>
-export {AiPageCompareInteractions, AiPageComposeInteractions, AiPageHistorySearchInteractions, AiPageInteractions, AiPageTabOrganizationInteractions, AutofillSettingsReferrer, CardBenefitsUserAction, CvcDeletionUserAction, DeleteBrowsingDataAction, MetricsBrowserProxyImpl, PrivacyElementInteractions, PrivacyGuideInteractions, PrivacyGuideSettingsStates, PrivacyGuideStepsEligibleAndReached, SafeBrowsingInteractions, SafetyCheckNotificationsModuleInteractions, SafetyCheckUnusedSitePermissionsModuleInteractions, SafetyHubCardState, SafetyHubEntryPoint, SafetyHubModuleType, SafetyHubSurfaces, YourSavedInfoDataCategory, YourSavedInfoDataChip, YourSavedInfoRelatedService} from './metrics_browser_proxy.js';
+export {AiPageComposeInteractions, AiPageHistorySearchInteractions, AiPageInteractions, AiPageTabOrganizationInteractions, AutofillSettingsReferrer, CardBenefitsUserAction, CvcDeletionUserAction, DeleteBrowsingDataAction, MetricsBrowserProxyImpl, PrivacyElementInteractions, PrivacyGuideInteractions, PrivacyGuideSettingsStates, PrivacyGuideStepsEligibleAndReached, SafeBrowsingInteractions, SafetyCheckNotificationsModuleInteractions, SafetyCheckUnusedSitePermissionsModuleInteractions, SafetyHubCardState, SafetyHubEntryPoint, SafetyHubModuleType, SafetyHubSurfaces, YourSavedInfoDataCategory, YourSavedInfoDataChip, YourSavedInfoRelatedService} from './metrics_browser_proxy.js';
 export type {MetricsBrowserProxy} from './metrics_browser_proxy.js';
 export {OnStartupBrowserProxyImpl} from './on_startup_page/on_startup_browser_proxy.js';
 export type {NtpExtension, OnStartupBrowserProxy} from './on_startup_page/on_startup_browser_proxy.js';
@@ -148,7 +146,7 @@ export {SettingsMenuElement} from './settings_menu/settings_menu.js';
 export {SearchableViewContainerMixin} from './settings_page/searchable_view_container_mixin.js';
 export {SettingsSectionElement} from './settings_page/settings_section.js';
 export {SettingsViewMixin} from './settings_page/settings_view_mixin.js';
-export {SettingsUiElement} from './settings_ui/settings_ui.js';
+export {MAX_QUERY_LENGTH, SettingsUiElement} from './settings_ui/settings_ui.js';
 export {SiteFaviconElement} from './site_favicon.js';
 export {convertDateToWindowsEpoch} from './time.js';
 export {TooltipMixin} from './tooltip_mixin.js';

@@ -4,7 +4,6 @@
 
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/permissions/quiet_notification_permission_ui_config.h"
 #include "chrome/browser/permissions/quiet_notification_permission_ui_state.h"
 #include "chrome/browser/ui/browser.h"
@@ -44,7 +43,8 @@
 
 DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kWebContentsElementId);
 const char kLocationBarView[] = "LocationBarView";
-const auto QuietChipElementId = PermissionChipView::kElementIdForTesting;
+const auto QuietChipElementId =
+    PermissionChipView::kPermissionRequestChipElementId;
 const auto QuietBubbleAllowElementId =
     views::DialogClientView::kOkButtonElementId;
 const auto QuietBubbleElementId = ContentSettingBubbleContents::kMainElementId;
@@ -97,7 +97,7 @@ class QuietPromptInteractiveUITest : public InteractiveBrowserTest {
   LocationBarView* GetLocationBarView() {
     return BrowserView::GetBrowserViewForBrowser(browser())
         ->toolbar()
-        ->location_bar();
+        ->location_bar_view();
   }
 
   void OverrideVisibleUrlInLocationBar(const std::u16string& text) {
@@ -361,19 +361,7 @@ struct QuietPromptInfoBarTestCase {
 
 class QuietPromptInteractiveParamUITest
     : public QuietPromptInteractiveUITest,
-      public testing::WithParamInterface<QuietPromptInfoBarTestCase> {
- public:
-  void SetUp() override {
-    feature_list_->InitWithFeatures(
-        {permissions::features::kPermissionPromiseLifetimeModulation},
-        /*disabled_features=*/{});
-    QuietPromptInteractiveUITest::SetUp();
-  }
-
- private:
-  std::unique_ptr<ScopedFeatureList> feature_list_ =
-      std::make_unique<ScopedFeatureList>();
-};
+      public testing::WithParamInterface<QuietPromptInfoBarTestCase> {};
 
 INSTANTIATE_TEST_SUITE_P(
     PermissionChangeListenerTests,

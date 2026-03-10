@@ -28,6 +28,7 @@
 #include "ui/base/interaction/interactive_test.h"
 #include "ui/base/interaction/interactive_test_definitions.h"
 #include "ui/base/interaction/interactive_test_internal.h"
+#include "ui/base/interaction/state_observer.h"
 #include "ui/base/metadata/metadata_types.h"
 #include "ui/base/test/ui_controls.h"
 #include "ui/views/interaction/element_tracker_views.h"
@@ -81,7 +82,8 @@ class InteractiveViewsTestApi : virtual public ui::test::InteractiveTestApi {
   //     ...
   //     NameView(kThirdTabName,
   //              base::BindLambdaForTesting([&](){
-  //                return browser_view->tabstrip()->tab_at(3);
+  //                return
+  //                browser_view->horizontal_tab_strip_for_testing()->tab_at(3);
   //              }))
   //     WithElement(kThirdTabName, ...)
   //     ...
@@ -851,7 +853,8 @@ ui::InteractionSequence::StepBuilder InteractiveViewsTestApi::PollView(
   auto step =
       WithElement(ui::test::internal::kInteractiveTestPivotElementId,
                   base::BindOnce(
-                      [](InteractiveViewsTestApi* api, ui::ElementIdentifier id,
+                      [](InteractiveViewsTestApi* api,
+                         ui::test::UntypedStateIdentifier id,
                          ui::ElementIdentifier view_id, Cb callback,
                          base::TimeDelta polling_interval,
                          ui::InteractionSequence* seq, ui::TrackedElement* el) {
@@ -881,7 +884,7 @@ ui::InteractionSequence::StepBuilder InteractiveViewsTestApi::PollViewProperty(
   auto step = WithElement(
       ui::test::internal::kInteractiveTestPivotElementId,
       base::BindOnce(
-          [](InteractiveViewsTestApi* api, ui::ElementIdentifier id,
+          [](InteractiveViewsTestApi* api, ui::test::UntypedStateIdentifier id,
              ui::ElementIdentifier view_id, R (V::*property)() const,
              base::TimeDelta polling_interval, ui::InteractionSequence* seq,
              ui::TrackedElement* el) {

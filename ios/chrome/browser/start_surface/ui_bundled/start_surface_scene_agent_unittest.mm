@@ -14,7 +14,6 @@
 #import "ios/chrome/app/profile/profile_state.h"
 #import "ios/chrome/app/profile/profile_state_test_utils.h"
 #import "ios/chrome/browser/ntp/model/new_tab_page_tab_helper.h"
-#import "ios/chrome/browser/shared/coordinator/scene/scene_controller.h"
 #import "ios/chrome/browser/shared/coordinator/scene/test/fake_scene_state.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/browser/browser_provider.h"
@@ -25,6 +24,7 @@
 #import "ios/chrome/browser/shared/model/url/url_util.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/signin/model/fake_system_identity.h"
 #import "ios/chrome/browser/signin/model/fake_system_identity_manager.h"
@@ -78,7 +78,7 @@ class StartSurfaceSceneAgentTest : public PlatformTest {
     dispatcher_ = browser->GetCommandDispatcher();
     StartSurfaceRecentTabBrowserAgent::CreateForBrowser(browser);
     TabInsertionBrowserAgent::CreateForBrowser(browser);
-    application_handler_ = OCMProtocolMock(@protocol(ApplicationCommands));
+    application_handler_ = OCMProtocolMock(@protocol(SceneCommands));
     [[NSUserDefaults standardUserDefaults] setObject:@14400
                                               forKey:@"HomeSurfaceDuration"];
   }
@@ -124,7 +124,7 @@ class StartSurfaceSceneAgentTest : public PlatformTest {
   StartSurfaceSceneAgent* agent_;
   ScopedKeyWindow scoped_window_;
   base::HistogramTester histogram_tester_;
-  id<ApplicationCommands> application_handler_;
+  id<SceneCommands> application_handler_;
   id dispatcher_;
 
   // Returns the Browser for the SceneState.
@@ -467,7 +467,7 @@ TEST_F(StartSurfaceSceneAgentTest, ShowTabGroupInGridOnStart) {
       scene_state_, time_last_background);
 
   [dispatcher_ startDispatchingToTarget:application_handler_
-                            forProtocol:@protocol(ApplicationCommands)];
+                            forProtocol:@protocol(SceneCommands)];
 
   InsertNewWebState(0, GURL(kURL));
   WebStateList* web_state_list = GetWebStateList();
@@ -510,7 +510,7 @@ TEST_F(StartSurfaceSceneAgentTest,
           ->GetCommandDispatcher();
 
   [dispatcherIncognito startDispatchingToTarget:application_handler_
-                                    forProtocol:@protocol(ApplicationCommands)];
+                                    forProtocol:@protocol(SceneCommands)];
 
   InsertNewIncognitoWebState(0, GURL(kURL));
   WebStateList* web_state_list = GetIncognitoWebStateList();
@@ -546,7 +546,7 @@ TEST_F(StartSurfaceSceneAgentTest,
       scene_state_, time_last_background);
 
   [dispatcher_ startDispatchingToTarget:application_handler_
-                            forProtocol:@protocol(ApplicationCommands)];
+                            forProtocol:@protocol(SceneCommands)];
 
   InsertNewWebState(0, GURL(kURL));
   WebStateList* web_state_list = GetWebStateList();
@@ -582,7 +582,7 @@ TEST_F(StartSurfaceSceneAgentTest,
       scene_state_, time_last_background);
 
   [dispatcher_ startDispatchingToTarget:application_handler_
-                            forProtocol:@protocol(ApplicationCommands)];
+                            forProtocol:@protocol(SceneCommands)];
 
   InsertNewWebState(0, GURL(kURL));
   WebStateList* web_state_list = GetWebStateList();
@@ -621,7 +621,7 @@ TEST_F(StartSurfaceSceneAgentTest,
       scene_state_, time_last_background);
 
   [dispatcher_ startDispatchingToTarget:application_handler_
-                            forProtocol:@protocol(ApplicationCommands)];
+                            forProtocol:@protocol(SceneCommands)];
 
   InsertNewWebState(0, GURL(kURL));
   WebStateList* web_state_list = GetWebStateList();
@@ -657,7 +657,7 @@ TEST_F(StartSurfaceSceneAgentTest,
       scene_state_, time_last_background);
 
   [dispatcher_ startDispatchingToTarget:application_handler_
-                            forProtocol:@protocol(ApplicationCommands)];
+                            forProtocol:@protocol(SceneCommands)];
 
   InsertNewWebState(0, GURL(kURL));
   WebStateList* web_state_list = GetWebStateList();
@@ -692,7 +692,7 @@ TEST_F(StartSurfaceSceneAgentTest, OpenNTPAfterFourHours) {
       scene_state_, time_last_background);
 
   [dispatcher_ startDispatchingToTarget:application_handler_
-                            forProtocol:@protocol(ApplicationCommands)];
+                            forProtocol:@protocol(SceneCommands)];
 
   InsertNewWebState(0, GURL(kURL));
   WebStateList* web_state_list = GetWebStateList();
@@ -724,7 +724,7 @@ TEST_F(StartSurfaceSceneAgentTest, OpenNTPAfterFourHoursOutsideActiveGroup) {
       scene_state_, time_last_background);
 
   [dispatcher_ startDispatchingToTarget:application_handler_
-                            forProtocol:@protocol(ApplicationCommands)];
+                            forProtocol:@protocol(SceneCommands)];
 
   InsertNewWebState(0, GURL(kURL));
   WebStateList* web_state_list = GetWebStateList();
@@ -737,6 +737,33 @@ TEST_F(StartSurfaceSceneAgentTest, OpenNTPAfterFourHoursOutsideActiveGroup) {
   scene_state_.activationLevel = SceneActivationLevelForegroundActive;
   ASSERT_EQ(2, web_state_list->count());
   ASSERT_FALSE(web_state_list->GetGroupOfWebStateAt(1));
+
+  [dispatcher_ stopDispatchingToTarget:application_handler_];
+}
+
+// Tests that the app does not crash when the webStateList is empty.
+TEST_F(StartSurfaceSceneAgentTest, AppDoesNotCrashWhenWebStateListEmpty) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  // Setting the ShowTabGroupInGridInactiveDuration to 1 hour.
+  base::FieldTrialParams show_tab_grid_treshold = {
+      {kShowTabGroupInGridInactiveDurationInSeconds, kOneHourTreshold}};
+  scoped_feature_list.InitWithFeaturesAndParameters(
+      /*enabled_features=*/
+      {{kShowTabGroupInGridOnStart, show_tab_grid_treshold}},
+      /*disabled_features=*/{});
+
+  // Within the interval.
+  base::Time time_last_background = base::Time::Now() - base::Hours(2);
+  test::SetStartSurfaceSessionObjectForSceneStateForTesting(
+      scene_state_, time_last_background);
+
+  [dispatcher_ startDispatchingToTarget:application_handler_
+                            forProtocol:@protocol(SceneCommands)];
+
+  WebStateList* web_state_list = GetWebStateList();
+  ASSERT_TRUE(web_state_list->empty());
+
+  scene_state_.activationLevel = SceneActivationLevelForegroundActive;
 
   [dispatcher_ stopDispatchingToTarget:application_handler_];
 }

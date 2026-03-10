@@ -348,7 +348,7 @@ RtcTransport::ParseStunServers(const RtcTransportConfig* config,
 RtcTransport::RtcTransport(PassKey, ExecutionContext* context)
     : ExecutionContextLifecycleObserver(context),
       task_runner_(context->GetTaskRunner(TaskType::kNetworking)),
-      digest_(0, kMaxDigestSize) {
+      digest_(webrtc::Buffer::CreateWithCapacity(kMaxDigestSize)) {
   // Should this be done async? cf
   // RTCCertificateGenerator::GenerateCertificateAsync.
   certificate_ = webrtc::RTCCertificateGenerator::GenerateCertificate(
@@ -498,7 +498,7 @@ HeapVector<Member<RtcReceivedPacket>> RtcTransport::getReceivedPackets() {
 void RtcTransport::sendPackets(
     HeapVector<Member<RtcSendPacketParameters>> packets) {
   if (!initialized_) {
-    pending_send_packets_calls_.AppendVector(packets);
+    pending_send_packets_calls_.append_range(packets);
     return;
   }
   auto packet_payloads = std::make_unique<Vector<Vector<uint8_t>>>();

@@ -74,8 +74,7 @@ component("mirroring_service") {
   # //third_party/openscreen/src/third_party/protobuf. direct include_dirs
   # takes precedence over those pulled in from configs.
   include_dirs = [ "//third_party/protobuf/src" ]
-  configs +=
-      [ "//third_party/openscreen/src/build_overrides:openscreen_include_dirs" ]
+  configs += [ "//third_party/openscreen/src:include_dirs" ]
   defines = [ "IS_MIRRORING_SERVICE_IMPL" ]
 }
 
@@ -88,6 +87,7 @@ source_set("unittests") {
     "fake_video_capture_host.cc",
     "fake_video_capture_host.h",
     "media_remoter_unittest.cc",
+    "mirroring_gpu_factories_factory_unittest.cc",
     "openscreen_message_port_unittest.cc",
     "openscreen_session_host_unittest.cc",
     "openscreen_stats_client_unittest.cc",
@@ -133,8 +133,7 @@ source_set("unittests") {
   # //third_party/openscreen/src/third_party/protobuf. direct include_dirs
   # takes precedence over those pulled in from configs.
   include_dirs = [ "//third_party/protobuf/src" ]
-  configs +=
-      [ "//third_party/openscreen/src/build_overrides:openscreen_include_dirs" ]
+  configs += [ "//third_party/openscreen/src:include_dirs" ]
 
   # TODO(crbug.com/40031409): Fix code that adds exit-time destructors and
   # enable the diagnostic by removing this line.

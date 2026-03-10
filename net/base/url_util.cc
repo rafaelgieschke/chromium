@@ -219,7 +219,7 @@ bool ParseHostAndPort(std::string_view input, std::string* host, int* port) {
 
   int parsed_port_number = -1;
   if (port_component.is_nonempty()) {
-    parsed_port_number = url::ParsePort(input.data(), port_component);
+    parsed_port_number = url::ParsePort(input, port_component);
 
     // If parsing failed, port_number will be either PORT_INVALID or
     // PORT_UNSPECIFIED, both of which are negative.
@@ -597,10 +597,7 @@ std::string UnescapePercentEncodedUrl(std::string_view input) {
     }
   }
   // Run UTF-8 decoding without BOM on the percent-decoding.
-  url::RawCanonOutputT<char16_t> canon_output;
-  url::DecodeURLEscapeSequences(result, url::DecodeURLMode::kUTF8,
-                                &canon_output);
-  return base::UTF16ToUTF8(canon_output.view());
+  return url::DecodeUrlEscapeSequences(result, url::DecodeUrlMode::kUtf8);
 }
 
 }  // namespace net

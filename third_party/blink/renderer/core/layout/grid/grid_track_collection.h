@@ -107,12 +107,8 @@ class CORE_EXPORT GridRangeBuilder {
   // Build the collection of ranges based on information provided through the
   // specified tracks and `EnsureTrackCoverage`. If `needs_intrinsic_track_size`
   // is true, that means we are in a track sizing pass to computed a repeat tack
-  // defintion of intrinsic sized tracks. If `collapsed_track_indexes` is
-  // not nullptr, this method with populate it with the track indexes of all
-  // collapsed tracks.
-  GridRangeVector FinalizeRanges(
-      bool needs_intrinsic_track_size = false,
-      Vector<wtf_size_t>* collapsed_track_indexes = nullptr);
+  // definition of intrinsic sized tracks.
+  GridRangeVector FinalizeRanges(bool needs_intrinsic_track_size = false);
 
  private:
   friend class GridTrackCollectionTest;
@@ -229,6 +225,12 @@ class CORE_EXPORT GridLayoutTrackCollection : public GridTrackCollectionBase {
   bool HasNonDefiniteTrack() const;
   bool IsDependentOnAvailableSize() const;
 
+  wtf_size_t FirstNonCollapsedLineIndex() const;
+
+  const Vector<wtf_size_t>& CollapsedTrackIndexes() const {
+    return collapsed_track_indexes_;
+  }
+
  protected:
   friend class GridLanesLayoutAlgorithmTest;
 
@@ -280,6 +282,10 @@ class CORE_EXPORT GridLayoutTrackCollection : public GridTrackCollectionBase {
   LayoutUnit accumulated_gutter_size_delta_;
   LayoutUnit accumulated_start_extra_margin_;
   LayoutUnit accumulated_end_extra_margin_;
+
+  // Collapsed track indexes from auto-fit ranges, populated when
+  // `should_store_collapsed_track_indexes` is true at construction.
+  Vector<wtf_size_t> collapsed_track_indexes_;
 };
 
 // |GridRangeBuilder::EnsureTrackCoverage| may introduce a range start and/or
@@ -356,8 +362,10 @@ struct CORE_EXPORT GridSet {
   //   used to decide whether this is the first item for baseline calculation
   // - last_item_stacking_position: Position of the last item in this set,
   //   used to decide whether this is the last item for baseline calculation
+  // - grid_lanes_first_baseline: The first baseline value for this set
   // - grid_lanes_last_baseline: The last baseline value for this set
   std::optional<LayoutUnit> first_item_stacking_position;
+  std::optional<LayoutUnit> grid_lanes_first_baseline;
   std::optional<LayoutUnit> last_item_stacking_position;
   std::optional<LayoutUnit> grid_lanes_last_baseline;
 
@@ -424,7 +432,8 @@ class CORE_EXPORT GridSizingTrackCollection final
   explicit GridSizingTrackCollection(
       GridRangeVector&& ranges,
       GridTrackSizingDirection track_direction = kForColumns,
-      bool must_create_baselines = false);
+      bool must_create_baselines = false,
+      bool should_store_collapsed_track_indexes = false);
 
   // This class should be specifically used for grid sizing.
   bool IsForSizing() const override { return true; }
@@ -464,12 +473,6 @@ class CORE_EXPORT GridSizingTrackCollection final
   void SetMajorBaseline(wtf_size_t set_index, LayoutUnit candidate_baseline);
   void SetMinorBaseline(wtf_size_t set_index, LayoutUnit candidate_baseline);
 
-  // Return the index of the first set with an intrinsically sized track within
-  // an auto repeat definition.
-  wtf_size_t GetIntrinsicSizedRepeaterSetIndex() const {
-    return intrinsic_sized_repeater_set_index_;
-  }
-
  private:
   friend class GridLayoutAlgorithmTest;
   friend class GridTrackCollectionTest;
@@ -483,7 +486,6 @@ class CORE_EXPORT GridSizingTrackCollection final
   void InitializeSets(LayoutUnit grid_available_size = kIndefiniteSize);
 
   wtf_size_t non_collapsed_track_count_{0};
-  wtf_size_t intrinsic_sized_repeater_set_index_{kNotFound};
 
   // A vector of every set element that compose the entire collection's ranges;
   // track definitions from the same set are stored in consecutive positions,

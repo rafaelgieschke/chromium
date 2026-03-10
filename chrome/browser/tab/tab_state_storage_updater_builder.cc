@@ -4,13 +4,13 @@
 
 #include "chrome/browser/tab/tab_state_storage_updater_builder.h"
 
+#include <algorithm>
 #include <initializer_list>
 #include <memory>
 #include <string>
 #include <utility>
 #include <variant>
 
-#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "chrome/browser/tab/payload.h"
 #include "chrome/browser/tab/storage_pending_updates.h"
@@ -44,7 +44,7 @@ bool TabStateStorageUpdaterBuilder::ContainsUpdateWithAnyType(
   }
 
   const UnitType update_type = it->second->type();
-  return base::Contains(types, update_type);
+  return std::ranges::contains(types, update_type);
 }
 
 void TabStateStorageUpdaterBuilder::SquashIntoSaveNode(
@@ -86,8 +86,18 @@ void TabStateStorageUpdaterBuilder::SaveNodePayload(
     return;
   }
 
+  const TabCollection* collection = nullptr;
+  if (std::holds_alternative<TabHandle>(handle)) {
+    collection = std::get<TabHandle>(handle).Get()->GetParentCollection();
+    DCHECK(collection) << "Tab must have a parent collection to be saved.";
+  } else {
+    collection = std::get<TabCollectionHandle>(handle).Get();
+    DCHECK(collection) << "Collection must not be null.";
+  }
+
   update_for_id_[id] = std::make_unique<SavePayloadPendingUpdate>(
-      id, packager_, mapping_.get(), handle);
+      id, packager_->GetWindowTag(collection),
+      packager_->IsOffTheRecord(collection), packager_, mapping_.get(), handle);
 }
 
 void TabStateStorageUpdaterBuilder::SaveChildren(
@@ -107,6 +117,19 @@ void TabStateStorageUpdaterBuilder::SaveChildren(
       id, packager_, mapping_.get(), collection->GetHandle());
 }
 
+void TabStateStorageUpdaterBuilder::SaveDivergentChildren(
+    StorageId id,
+    const TabCollection* collection) {
+  auto [it, inserted] = divergence_update_for_id_.try_emplace(id);
+  if (!inserted) {
+    return;
+  }
+  it->second = std::make_unique<SaveDivergentChildrenPendingUpdate>(
+      id, packager_->GetWindowTag(collection),
+      packager_->IsOffTheRecord(collection), packager_, mapping_.get(),
+      collection->GetHandle());
+}
+
 void TabStateStorageUpdaterBuilder::RemoveNode(StorageId id) {
   if (ContainsUpdateWithAnyType(id, {UnitType::kRemoveNode})) {
     return;
@@ -118,6 +141,9 @@ void TabStateStorageUpdaterBuilder::RemoveNode(StorageId id) {
 std::unique_ptr<TabStateStorageUpdater> TabStateStorageUpdaterBuilder::Build() {
   auto updater = std::make_unique<TabStateStorageUpdater>();
   for (auto& [id, update] : update_for_id_) {
+    updater->Add(update->CreateUnit());
+  }
+  for (auto& [id, update] : divergence_update_for_id_) {
     updater->Add(update->CreateUnit());
   }
   return updater;

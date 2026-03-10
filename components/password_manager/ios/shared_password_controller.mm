@@ -489,7 +489,8 @@ autofill::LocalFrameToken GetLocalFrameToken(web::WebFrame* frame) {
 - (void)onFieldTypesDetermined:(AutofillManager&)manager
                        forForm:(FormGlobalId)formId
                     fromSource:
-                        (AutofillManager::Observer::FieldTypeSource)source {
+                        (AutofillManager::Observer::FieldTypeSource)source
+          smallFormsWereParsed:(bool)small_forms_were_parsed {
   const autofill::FormStructure* form_structure =
       manager.FindCachedFormById(formId);
   if (!form_structure) {
@@ -724,6 +725,16 @@ autofill::LocalFrameToken GetLocalFrameToken(web::WebFrame* frame) {
           password_manager::metrics_util::PasswordDropdownSelectedOption::
               kGenerate,
           [self IsOffTheRecord]);
+      return;
+    }
+    case autofill::SuggestionType::kWebauthnCredential: {
+      WebAuthnCredentialsDelegate* webAuthnCredentialsDelegate =
+          [self retrieveWebAuthnCredentialsDelegateForFrame:frame];
+      CHECK(webAuthnCredentialsDelegate);
+
+      webAuthnCredentialsDelegate->SelectPasskey(
+          webauthn::GetPasskeySuggestionEncodedCredentialId(suggestion),
+          base::BindOnce(completion));
       return;
     }
     default: {
@@ -1229,8 +1240,9 @@ autofill::LocalFrameToken GetLocalFrameToken(web::WebFrame* frame) {
   }
 }
 
-// Retrieves passkey suggestions for the provided `frame`.
-- (NSArray<FormSuggestion*>*)retrievePasskeySuggestionsForFrame:
+// Retrieves the WebAuthnCredentialsDelegate from the PasswordManagerClient
+// for the given `frame`.
+- (WebAuthnCredentialsDelegate*)retrieveWebAuthnCredentialsDelegateForFrame:
     (web::WebFrame*)frame {
   PasswordManagerClient* passwordManagerClient =
       self.delegate.passwordManagerClient;
@@ -1240,8 +1252,14 @@ autofill::LocalFrameToken GetLocalFrameToken(web::WebFrame* frame) {
       [_driverHelper PasswordManagerDriver:frame];
   CHECK(driver);
 
+  return passwordManagerClient->GetWebAuthnCredentialsDelegateForDriver(driver);
+}
+
+// Retrieves passkey suggestions for the provided `frame`.
+- (NSArray<FormSuggestion*>*)retrievePasskeySuggestionsForFrame:
+    (web::WebFrame*)frame {
   WebAuthnCredentialsDelegate* webAuthnCredentialsDelegate =
-      passwordManagerClient->GetWebAuthnCredentialsDelegateForDriver(driver);
+      [self retrieveWebAuthnCredentialsDelegateForFrame:frame];
   if (!webAuthnCredentialsDelegate) {
     // No WebAuthnCredentialsDelegate means that passkeys are not supported.
     return @[];

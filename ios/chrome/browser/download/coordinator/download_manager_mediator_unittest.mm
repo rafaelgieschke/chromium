@@ -16,6 +16,7 @@
 #import "ios/chrome/browser/download/model/download_directory_util.h"
 #import "ios/chrome/browser/download/model/download_manager_tab_helper.h"
 #import "ios/chrome/browser/download/model/external_app_util.h"
+#import "ios/chrome/browser/drive/model/drive_tab_helper.h"
 #import "ios/chrome/browser/shared/model/profile/test/test_profile_ios.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/test/fakes/fake_download_manager_consumer.h"
@@ -57,6 +58,7 @@ class DownloadManagerMediatorTest : public PlatformTest {
     web_state_->SetBrowserState(profile_.get());
     DocumentDownloadTabHelper::CreateForWebState(web_state_.get());
     DownloadManagerTabHelper::CreateForWebState(web_state_.get());
+    DriveTabHelper::CreateForWebState(web_state_.get());
 
     std::unique_ptr<web::FakeDownloadTask> task =
         std::make_unique<web::FakeDownloadTask>(GURL(kTestUrl), kTestMimeType);
@@ -66,7 +68,15 @@ class DownloadManagerMediatorTest : public PlatformTest {
     DownloadManagerTabHelper::FromWebState(web_state_.get())
         ->SetCurrentDownload(std::move(task));
   }
-  ~DownloadManagerMediatorTest() override { [application_ stopMocking]; }
+  ~DownloadManagerMediatorTest() override {
+    // Ensure all background tasks complete before destroying test fixtures.
+    // This is necessary when kDownloadList is enabled, as DownloadRecordService
+    // initializes on a background thread.
+    if (IsDownloadListEnabled()) {
+      task_environment_.RunUntilIdle();
+    }
+    [application_ stopMocking];
+  }
 
   web::FakeDownloadTask* task() { return task_; }
 

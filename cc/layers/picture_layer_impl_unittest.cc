@@ -358,6 +358,50 @@ class PictureLayerImplTestTreesInViz : public PictureLayerImplTest {
   base::test::ScopedFeatureList feature_list_;
 };
 
+TEST_F(PictureLayerImplTestTreesInViz, ChangeFlag) {
+  gfx::Size layer_bounds(1000, 1000);
+  SetupDefaultTrees(layer_bounds);
+
+  auto* picture_layer = active_layer();
+
+  // Test kChangedGeneralProperty.
+  picture_layer->ResetChangeTracking();
+  EXPECT_FALSE(picture_layer->GetChangeFlag(LayerImpl::kChangedAllProperties));
+
+  gfx::Size new_layer_bounds(500, 500);
+  picture_layer->SetBounds(new_layer_bounds);
+  EXPECT_TRUE(picture_layer->GetChangeFlag(LayerImpl::kChangedAllProperties));
+  EXPECT_TRUE(picture_layer->GetChangeFlag(LayerImpl::kChangedGeneralProperty));
+  EXPECT_FALSE(
+      picture_layer->GetChangeFlag(LayerImpl::kChangedPropertyTreeIndex));
+  EXPECT_FALSE(picture_layer->GetChangeFlag(LayerImpl::kChangedTile));
+
+  // Test kChangedPropertyTreeIndex.
+  picture_layer->ResetChangeTracking();
+  EXPECT_FALSE(picture_layer->GetChangeFlag(LayerImpl::kChangedAllProperties));
+
+  picture_layer->SetScrollTreeIndex(1);
+  EXPECT_TRUE(picture_layer->GetChangeFlag(LayerImpl::kChangedAllProperties));
+  EXPECT_FALSE(
+      picture_layer->GetChangeFlag(LayerImpl::kChangedGeneralProperty));
+  EXPECT_TRUE(
+      picture_layer->GetChangeFlag(LayerImpl::kChangedPropertyTreeIndex));
+  EXPECT_FALSE(picture_layer->GetChangeFlag(LayerImpl::kChangedTile));
+
+  // Test kChangedTile.
+  picture_layer->ResetChangeTracking();
+  EXPECT_FALSE(picture_layer->GetChangeFlag(LayerImpl::kChangedAllProperties));
+
+  Tile* tile = active_layer()->tilings()->tiling_at(0)->AllTilesForTesting()[0];
+  picture_layer->NotifyTileStateChanged(tile, /*update_damage=*/false);
+  EXPECT_TRUE(picture_layer->GetChangeFlag(LayerImpl::kChangedAllProperties));
+  EXPECT_FALSE(
+      picture_layer->GetChangeFlag(LayerImpl::kChangedGeneralProperty));
+  EXPECT_FALSE(
+      picture_layer->GetChangeFlag(LayerImpl::kChangedPropertyTreeIndex));
+  EXPECT_TRUE(picture_layer->GetChangeFlag(LayerImpl::kChangedTile));
+}
+
 TEST_F(LegacySWPictureLayerImplTest, CloneNoInvalidation) {
   gfx::Size layer_bounds(400, 400);
   SetupDefaultTrees(layer_bounds);
@@ -1665,7 +1709,6 @@ TEST_F(LegacySWPictureLayerImplTest,
 
   // All tiles in activation rect is ready to draw.
   EXPECT_EQ(0, data.num_missing_tiles);
-  EXPECT_FALSE(data.checkerboarded_needs_raster);
   EXPECT_FALSE(data.checkerboarded_needs_record);
   EXPECT_TRUE(active_layer()->produced_tile_last_append_quads());
 }
@@ -1697,7 +1740,6 @@ TEST_F(LegacySWPictureLayerImplTest, HighResTileIsComplete) {
   // All high res tiles drew, nothing was incomplete.
   EXPECT_EQ(9u, render_pass->quad_list.size());
   EXPECT_EQ(0, data.num_missing_tiles);
-  EXPECT_FALSE(data.checkerboarded_needs_raster);
   EXPECT_FALSE(data.checkerboarded_needs_record);
   EXPECT_TRUE(active_layer()->produced_tile_last_append_quads());
 }
@@ -1722,7 +1764,6 @@ TEST_F(LegacySWPictureLayerImplTest, HighResTileIsIncomplete) {
 
   EXPECT_EQ(1u, render_pass->quad_list.size());
   EXPECT_EQ(1, data.num_missing_tiles);
-  EXPECT_TRUE(data.checkerboarded_needs_raster);
   EXPECT_FALSE(data.checkerboarded_needs_record);
   EXPECT_FALSE(active_layer()->produced_tile_last_append_quads());
 }
@@ -1788,7 +1829,6 @@ TEST_F(LegacySWPictureLayerImplTest,
 
   // Neither the high res nor the ideal tiles were considered as incomplete.
   EXPECT_EQ(0, data.num_missing_tiles);
-  EXPECT_FALSE(data.checkerboarded_needs_raster);
   EXPECT_FALSE(data.checkerboarded_needs_record);
   EXPECT_TRUE(active_layer()->produced_tile_last_append_quads());
 }
@@ -1824,7 +1864,6 @@ TEST_F(LegacySWPictureLayerImplTest, AppendQuadsDataForCheckerboard) {
   EXPECT_EQ(recorded_bounds, active_layer()->HighResTiling()->tiling_rect());
   EXPECT_EQ(1u, render_pass->quad_list.size());
   EXPECT_EQ(1, data.num_missing_tiles);
-  EXPECT_TRUE(data.checkerboarded_needs_raster);
   EXPECT_TRUE(data.checkerboarded_needs_record);
   EXPECT_FALSE(active_layer()->produced_tile_last_append_quads());
 
@@ -1845,7 +1884,6 @@ TEST_F(LegacySWPictureLayerImplTest, AppendQuadsDataForCheckerboard) {
             active_layer()->HighResTiling()->tiling_rect());
   EXPECT_EQ(1u, render_pass->quad_list.size());
   EXPECT_EQ(1, data.num_missing_tiles);
-  EXPECT_TRUE(data.checkerboarded_needs_raster);
   EXPECT_TRUE(data.checkerboarded_needs_record);
   EXPECT_FALSE(active_layer()->produced_tile_last_append_quads());
 
@@ -1863,7 +1901,6 @@ TEST_F(LegacySWPictureLayerImplTest, AppendQuadsDataForCheckerboard) {
   active_layer()->DidDraw(nullptr);
   EXPECT_EQ(4u, render_pass->quad_list.size());
   EXPECT_EQ(0, data.num_missing_tiles);
-  EXPECT_FALSE(data.checkerboarded_needs_raster);
   EXPECT_TRUE(data.checkerboarded_needs_record);
   EXPECT_TRUE(active_layer()->produced_tile_last_append_quads());
 
@@ -1885,7 +1922,6 @@ TEST_F(LegacySWPictureLayerImplTest, AppendQuadsDataForCheckerboard) {
   active_layer()->DidDraw(nullptr);
   EXPECT_EQ(4u, render_pass->quad_list.size());
   EXPECT_EQ(0, data.num_missing_tiles);
-  EXPECT_FALSE(data.checkerboarded_needs_raster);
   EXPECT_FALSE(data.checkerboarded_needs_record);
   EXPECT_TRUE(active_layer()->produced_tile_last_append_quads());
 }
@@ -5312,9 +5348,6 @@ TEST_F(LegacySWPictureLayerImplTest, CompositedImageIgnoreIdealContentsScale) {
   ASSERT_FALSE(render_pass->quad_list.empty());
   EXPECT_EQ(viz::DrawQuad::Material::kTiledContent,
             render_pass->quad_list.front()->material);
-
-  // Tiles are ready at correct scale. No tiles need raster.
-  EXPECT_FALSE(data.checkerboarded_needs_raster);
 }
 
 TEST_F(LegacySWPictureLayerImplTest, CompositedImageRasterScaleChanges) {

@@ -28,6 +28,7 @@
 
 #include <utility>
 
+#include "third_party/blink/renderer/core/css/css_selector.h"
 #include "third_party/blink/renderer/core/css/post_style_update_scope.h"
 #include "third_party/blink/renderer/core/css/resolver/style_adjuster.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
@@ -36,7 +37,6 @@
 #include "third_party/blink/renderer/core/dom/element_rare_data_vector.h"
 #include "third_party/blink/renderer/core/dom/first_letter_pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/interest_hint_pseudo_element.h"
-#include "third_party/blink/renderer/core/dom/overscroll_pseudo_element_data.h"
 #include "third_party/blink/renderer/core/dom/scroll_button_pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/scroll_marker_group_pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/scroll_marker_pseudo_element.h"
@@ -59,6 +59,7 @@
 #include "third_party/blink/renderer/core/view_transition/view_transition_pseudo_element_base.h"
 #include "third_party/blink/renderer/core/view_transition/view_transition_utils.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -87,9 +88,10 @@ PseudoElement* PseudoElement::Create(Element* parent,
                                      PseudoId pseudo_id,
                                      const AtomicString& pseudo_argument) {
   if (pseudo_id == kPseudoIdCheckMark) {
-    if (!IsA<HTMLOptionElement>(parent) && !IsA<HTMLMenuItemElement>(parent)) {
-      // The `::checkmark` pseudo-element should only be created for option and
-      // menuitem elements.
+    if (!IsA<HTMLOptionElement>(parent) && !IsA<HTMLMenuItemElement>(parent) &&
+        !IsA<HTMLInputElement>(parent)) {
+      // The `::checkmark` pseudo-element should only be created for option,
+      // menuitem, and input (checkbox and radio) elements.
       return nullptr;
     }
   }
@@ -644,6 +646,7 @@ bool PseudoElement::CanGenerateContent() const {
     case kPseudoIdScrollButtonInlineStart:
     case kPseudoIdScrollButtonInlineEnd:
     case kPseudoIdScrollButtonBlockEnd:
+    case kPseudoIdOverscrollAreaParent:
       return true;
     default:
       return false;
@@ -691,6 +694,36 @@ Node* PseudoElement::InnerNodeForHitTesting() {
   if (parent && parent->IsPseudoElement())
     return To<PseudoElement>(parent)->InnerNodeForHitTesting();
   return parent;
+}
+
+// static
+bool PseudoElement::SupportsHitTesting(PseudoId pseudo_id) {
+  // Returns true for pseudo-elements that should participate in hit testing.
+  // This gates whether the pseudo appears via InnerPossiblyPseudoElement().
+  // Event targeting (which pseudo keeps event.RawTarget vs resolves to
+  // originating) is determined by HasActivationBehavior() in
+  // EventTargetRespectingTargetRules.
+  switch (pseudo_id) {
+    case kPseudoIdBefore:
+    case kPseudoIdAfter:
+    case kPseudoIdMarker:
+      return RuntimeEnabledFeatures::PseudoElementsHitTestableEnabled();
+    case kPseudoIdInterestHint:
+    case kPseudoIdScrollMarker:
+    case kPseudoIdScrollMarkerGroupBefore:
+    case kPseudoIdScrollMarkerGroupAfter:
+    case kPseudoIdScrollButtonBlockStart:
+    case kPseudoIdScrollButtonInlineStart:
+    case kPseudoIdScrollButtonInlineEnd:
+    case kPseudoIdScrollButtonBlockEnd:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool PseudoElement::SupportsHitTesting() const {
+  return SupportsHitTesting(pseudo_id_);
 }
 
 void PseudoElement::AccessKeyAction(

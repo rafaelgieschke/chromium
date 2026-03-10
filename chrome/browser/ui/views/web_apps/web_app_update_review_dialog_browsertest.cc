@@ -46,6 +46,7 @@
 #include "chrome/browser/web_applications/web_app_command_manager.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/browser/web_applications/web_app_registrar.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/url_formatter/elide_url.h"
@@ -54,6 +55,7 @@
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/base/interaction/element_tracker.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/events/test/test_event.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/skia_util.h"
@@ -121,18 +123,18 @@ class WebAppUpdateReviewDialog : public DialogBrowserTest {
   // DialogBrowserTest:
   void ShowUi(const std::string& name) override {
     // Modify the update configuration based on the test name.
-    if (base::Contains(name, "NameChange")) {
+    if (name.contains("NameChange")) {
       update_.new_title =
           u"Definitely a longer title that is really really really really "
           u"long.";
     }
-    if (base::Contains(name, "IconChange")) {
+    if (name.contains("IconChange")) {
       update_.new_icon = gfx::Image::CreateFrom1xBitmap(new_icon_);
     }
-    if (base::Contains(name, "UrlChange")) {
+    if (name.contains("UrlChange")) {
       update_.new_start_url = GURL("http://other.test.com");
     }
-    if (base::Contains(name, "ForcedMigration")) {
+    if (name.contains("ForcedMigration")) {
       update_.new_start_url = GURL("http://other.test.com");
       update_.is_forced_migration = true;
     }
@@ -200,6 +202,10 @@ IN_PROC_BROWSER_TEST_F(WebAppUpdateReviewDialog, InvokeUi_UrlChange) {
   ShowAndVerifyUi();
 }
 
+IN_PROC_BROWSER_TEST_F(WebAppUpdateReviewDialog, InvokeUi_ForcedMigration) {
+  ShowAndVerifyUi();
+}
+
 IN_PROC_BROWSER_TEST_F(WebAppUpdateReviewDialog,
                        ForcedMigrationNoIgnoreButton) {
   views::NamedWidgetShownWaiter update_dialog_waiter(
@@ -208,7 +214,6 @@ IN_PROC_BROWSER_TEST_F(WebAppUpdateReviewDialog,
   views::Widget* dialog_widget = update_dialog_waiter.WaitIfNeededAndGet();
   ASSERT_TRUE(dialog_widget != nullptr);
   ASSERT_FALSE(dialog_widget->IsClosed());
-
   views::ElementTrackerViews* tracker_views =
       views::ElementTrackerViews::GetInstance();
   ui::ElementContext context =
@@ -523,7 +528,8 @@ IN_PROC_BROWSER_TEST_F(WebAppUpdateDialogBrowserTests, CancelUninstall) {
   WebAppProvider* provider = WebAppProvider::GetForTest(profile());
   views::test::AcceptDialog(uninstall_dialog);
   provider->command_manager().AwaitAllCommandsCompleteForTesting();
-  EXPECT_FALSE(provider->registrar_unsafe().IsInRegistrar(app_id));
+  EXPECT_FALSE(
+      provider->registrar_unsafe().GetInstallState(app_id).has_value());
 }
 
 IN_PROC_BROWSER_TEST_F(WebAppUpdateDialogBrowserTests, IgnoreRemovesMenuLabel) {

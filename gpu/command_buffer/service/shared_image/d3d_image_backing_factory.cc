@@ -69,11 +69,8 @@ class GpuMemoryBufferHandleSharedState {
       CHECK_EQ(hr, S_OK);
 
       Microsoft::WRL::ComPtr<IDXGIAdapter> dxgi_adapter = nullptr;
-      hr = FAILED(angle_dxgi_device->GetAdapter(&dxgi_adapter));
-      if (FAILED(hr)) {
-        DLOG(ERROR) << "GetAdapter failed with error 0x" << std::hex << hr;
-        return nullptr;
-      }
+      hr = angle_dxgi_device->GetAdapter(&dxgi_adapter);
+      CHECK_EQ(hr, S_OK);
 
       // If adapter is not null, driver type must be D3D_DRIVER_TYPE_UNKNOWN
       // otherwise D3D11CreateDevice will return E_INVALIDARG.
@@ -255,7 +252,8 @@ constexpr SharedImageUsageSet kSupportedUsage =
     SHARED_IMAGE_USAGE_WEBGPU_SHARED_BUFFER | SHARED_IMAGE_USAGE_CPU_READ |
     SHARED_IMAGE_USAGE_CPU_WRITE_ONLY | SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR |
     SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR_WRITE |
-    SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR_READ;
+    SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR_READ |
+    SHARED_IMAGE_USAGE_VIDEO_ENCODE_ACCELERATOR;
 
 const char* kD3DImageBackingLabel = "D3DImageBacking";
 
@@ -521,8 +519,8 @@ bool D3DImageBackingFactory::CreateSwapChainInternal(
   HRESULT hr = d3d11_device_.As(&dxgi_device);
   CHECK_EQ(hr, S_OK);
   Microsoft::WRL::ComPtr<IDXGIAdapter> dxgi_adapter;
-  dxgi_device->GetAdapter(&dxgi_adapter);
-  DCHECK(dxgi_adapter);
+  hr = dxgi_device->GetAdapter(&dxgi_adapter);
+  CHECK_EQ(hr, S_OK);
   Microsoft::WRL::ComPtr<IDXGIFactory2> dxgi_factory;
   dxgi_adapter->GetParent(IID_PPV_ARGS(&dxgi_factory));
   DCHECK(dxgi_factory);
@@ -648,8 +646,6 @@ std::unique_ptr<SharedImageBacking> D3DImageBackingFactory::CreateSharedImage(
     std::string debug_label,
     bool is_thread_safe,
     base::span<const uint8_t> pixel_data) {
-  DCHECK(!is_thread_safe);
-
   if (usage.Has(SHARED_IMAGE_USAGE_WEBGPU_SHARED_BUFFER)) {
     gfx::Size buffer_size = size;
     // WebNN tensors have a valid height and format and must be converted to 1D
@@ -673,8 +669,11 @@ std::unique_ptr<SharedImageBacking> D3DImageBackingFactory::CreateSharedImage(
 
     return CreateSharedBufferD3D12(mailbox, buffer_size, color_space,
                                    surface_origin, alpha_type, usage,
-                                   debug_label);
+                                   debug_label, is_thread_safe);
   }
+
+  // D3D11/Texture-based paths below do not yet support thread-safe access.
+  DCHECK(!is_thread_safe);
 
   // Without D3D11, we cannot do shared images. This will happen if we're
   // running with Vulkan, D3D12, D3D9, GL or with the non-passthrough command
@@ -913,7 +912,8 @@ D3DImageBackingFactory::CreateSharedBufferD3D12(
     GrSurfaceOrigin surface_origin,
     SkAlphaType alpha_type,
     SharedImageUsageSet usage,
-    std::string debug_label) {
+    std::string debug_label,
+    bool is_thread_safe) {
   if (!d3d12_device_) {
     // Lazily create a D3D12 Device by acquiring the DXGI adapter of the
     // existing D3D11 device.
@@ -935,11 +935,6 @@ D3DImageBackingFactory::CreateSharedBufferD3D12(
     }
   }
 
-  if (size.height() != 1) {
-    LOG(ERROR) << "Height must be 1 when creating a shared buffer.";
-    return nullptr;
-  }
-
   if (color_space != gfx::ColorSpace()) {
     LOG(ERROR) << "Color spaces are not supported for buffer-backed shared "
                   "images. Only gfx::ColorSpace() is accepted.";
@@ -951,32 +946,19 @@ D3DImageBackingFactory::CreateSharedBufferD3D12(
                   "images. Only kkTopLeft_GrSurfaceOrigin is accepted.";
   }
 
-  if (alpha_type != kUnknown_SkAlphaType) {
+  if (alpha_type != kPremul_SkAlphaType) {
     LOG(ERROR) << "Alpha type is not supported for buffer-backed shared "
-                  "images. Only kUnknown_SkAlphaType is accepted.";
-  }
-
-  // The passed usages AND-ed with the compliment of the OR-d valid usages
-  // should be zero.
-  // TODO(crbug.com/345352987): replace with IsSupported().
-  constexpr auto kValidWebNNUsage = SHARED_IMAGE_USAGE_WEBGPU_READ |
-                                    SHARED_IMAGE_USAGE_WEBGPU_WRITE |
-                                    SHARED_IMAGE_USAGE_WEBGPU_SHARED_BUFFER;
-  if (!kValidWebNNUsage.HasAll(usage)) {
-    LOG(ERROR) << "Only shared image usages SHARED_IMAGE_USAGE_WEBGPU_READ, "
-                  "SHARED_IMAGE_USAGE_WEBGPU_WRITE, and "
-                  "SHARED_IMAGE_USAGE_WEBGPU_SHARED_BUFFER are allowed when "
-                  "creating a buffer-backed shared image.";
+                  "images. Only kPremul_SkAlphaType is accepted.";
   }
 
   uint64_t buffer_width = size.width();
 
-  D3D12_HEAP_PROPERTIES heap_properties;
-  heap_properties.Type = D3D12_HEAP_TYPE_DEFAULT,
-  heap_properties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-  heap_properties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-  heap_properties.CreationNodeMask = 1;
-  heap_properties.VisibleNodeMask = 1;
+  D3D12_HEAP_DESC heap_desc = {};
+  heap_desc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS;
+  heap_desc.Properties.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+  heap_desc.Properties.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+  heap_desc.Properties.CreationNodeMask = 1;
+  heap_desc.Properties.VisibleNodeMask = 1;
 
   if (usage.Has(SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR)) {
     // DML requires buffers to be in multiple of 4 bytes.
@@ -997,39 +979,89 @@ D3DImageBackingFactory::CreateSharedBufferD3D12(
     }
 
     // If adapter supports UMA, create the custom heap with equivalent heap
-    // type.
+    // type. Otherwise, use shared cross-adapter heaps for a discrete (NUMA)
+    // adapter. This is currently required for ORT interop since ORT can only
+    // import mapped buffers.
+    // TODO(crbug.com/6064345): support D3D12_HEAP_TYPE_DEFAULT for NUMA.
     if (arch.UMA == TRUE) {
-      if (usage.Has(SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR_WRITE)) {
-        heap_properties =
-            d3d12_device_->GetCustomHeapProperties(0, D3D12_HEAP_TYPE_UPLOAD);
-      } else if (usage.Has(SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR_READ)) {
-        heap_properties =
-            d3d12_device_->GetCustomHeapProperties(0, D3D12_HEAP_TYPE_READBACK);
-      } else {
-        // Default to UPLOAD heap to enable CPU read-write access. This is
-        // currently required for ORT interop.
-        heap_properties =
-            d3d12_device_->GetCustomHeapProperties(0, D3D12_HEAP_TYPE_UPLOAD);
+      // Default to UPLOAD heap to enable CPU read-write access. This is
+      // currently required for ORT interop.
+      D3D12_HEAP_TYPE target_heap_type = D3D12_HEAP_TYPE_UPLOAD;
+      if (usage.Has(SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR_READ)) {
+        target_heap_type = D3D12_HEAP_TYPE_READBACK;
       }
+      heap_desc.Properties =
+          d3d12_device_->GetCustomHeapProperties(0, target_heap_type);
+    } else {
+      // Shared cross-adapter heaps require mixed resource heaps.
+      // https://learn.microsoft.com/en-us/windows/win32/direct3d12/shared-heaps
+      D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
+      if (FAILED(d3d12_device_->CheckFeatureSupport(
+              D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)))) {
+        LOG(ERROR) << "D3D12 device failed to check feature support.";
+        return nullptr;
+      }
+
+      // Mixed resource heaps are required but only supported on ResourceHeap
+      // Tier 2.
+      if (options.ResourceHeapTier == D3D12_RESOURCE_HEAP_TIER_1) {
+        LOG(ERROR)
+            << "D3D12 cross-adapter heaps are not supported on this device.";
+        return nullptr;
+      }
+
+      heap_desc.Flags = D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES |
+                        D3D12_HEAP_FLAG_SHARED |
+                        D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER;
+
+      // Must use L0 memory pool with no CPU caching.
+      heap_desc.Properties.Type = D3D12_HEAP_TYPE_CUSTOM;
+      heap_desc.Properties.CPUPageProperty =
+          D3D12_CPU_PAGE_PROPERTY_NOT_AVAILABLE;
+      heap_desc.Properties.MemoryPoolPreference = D3D12_MEMORY_POOL_L0;
     }
+  } else {
+    // Standard WebGPU uses default.
+    heap_desc.Properties.Type = D3D12_HEAP_TYPE_DEFAULT;
   }
 
-  D3D12_RESOURCE_DESC desc;
-  desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-  desc.Alignment = 0;
-  desc.Width = buffer_width;
-  desc.Height = 1;
-  desc.DepthOrArraySize = 1;
-  desc.MipLevels = 1;
-  desc.Format = DXGI_FORMAT_UNKNOWN;
-  desc.SampleDesc = {1, 0};
-  desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-  desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+  // D3D allocates buffers in a multiple of 64KB.
+  // Since a heap only holds a single buffer, use the same aligned size.
+  // https://learn.microsoft.com/en-us/windows/win32/direct3d12/uploading-resources
+  heap_desc.SizeInBytes = base::bits::AlignUp(
+      buffer_width,
+      static_cast<uint64_t>(D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT));
 
-  Microsoft::WRL::ComPtr<ID3D12Resource> resource;
-  HRESULT hr = d3d12_device_->CreateCommittedResource(
-      &heap_properties, D3D12_HEAP_FLAG_NONE, &desc,
-      D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&resource));
+  Microsoft::WRL::ComPtr<ID3D12Heap> d3d12_heap;
+  HRESULT hr = d3d12_device_->CreateHeap(&heap_desc, IID_PPV_ARGS(&d3d12_heap));
+  if (FAILED(hr)) {
+    LOG(ERROR) << "Failed to create D3D12 heap: "
+               << logging::SystemErrorCodeToString(hr);
+    return nullptr;
+  }
+
+  D3D12_RESOURCE_DESC buffer_desc;
+  buffer_desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+  buffer_desc.Alignment = 0;
+  buffer_desc.Width = buffer_width;
+  buffer_desc.Height = 1;
+  buffer_desc.DepthOrArraySize = 1;
+  buffer_desc.MipLevels = 1;
+  buffer_desc.Format = DXGI_FORMAT_UNKNOWN;
+  buffer_desc.SampleDesc = {1, 0};
+  buffer_desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  buffer_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+  // Only NUMA buffers support cross-adapter heaps.
+  // https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ne-d3d12-d3d12_resource_flags
+  if (heap_desc.Flags & D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER) {
+    buffer_desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
+  }
+
+  Microsoft::WRL::ComPtr<ID3D12Resource> d3d12_buffer;
+  hr = d3d12_device_->CreatePlacedResource(
+      d3d12_heap.Get(), 0, &buffer_desc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+      nullptr, IID_PPV_ARGS(&d3d12_buffer));
   if (FAILED(hr)) {
     LOG(ERROR) << "Failed to create D3D12 resource: "
                << logging::SystemErrorCodeToString(hr);
@@ -1037,8 +1069,8 @@ D3DImageBackingFactory::CreateSharedBufferD3D12(
   }
 
   debug_label = "D3DSharedBuffer_" + debug_label;
-  hr = resource->SetPrivateData(WKPDID_D3DDebugObjectName, debug_label.length(),
-                                debug_label.c_str());
+  hr = d3d12_buffer->SetPrivateData(WKPDID_D3DDebugObjectName,
+                                    debug_label.length(), debug_label.c_str());
 
   if (FAILED(hr)) {
     LOG(ERROR) << "Failed to set resource debug name: "
@@ -1046,11 +1078,12 @@ D3DImageBackingFactory::CreateSharedBufferD3D12(
     return nullptr;
   }
 
-  auto backing = D3DImageBacking::CreateFromD3D12Resource(
-      mailbox, size, usage, std::move(debug_label), std::move(resource));
+  auto backing = D3DImageBacking::CreateFromD3D12Buffer(
+      mailbox, size, usage, std::move(debug_label), std::move(d3d12_buffer),
+      std::move(d3d12_heap), is_thread_safe);
 
-  // CreateCommittedResource will zero the resource for us, which means we can
-  // set it as cleared.
+  // CreateHeap will zero the resource for us, which means we can set it as
+  // cleared.
   backing->SetCleared();
   return backing;
 }
@@ -1082,14 +1115,18 @@ bool D3DImageBackingFactory::IsSupported(SharedImageUsageSet usage,
                                          gfx::GpuMemoryBufferType gmb_type,
                                          GrContextType gr_context_type,
                                          base::span<const uint8_t> pixel_data) {
-  // Only usages for WebNN is allowed if D3D shared images are disabled.
+  constexpr auto kAllowedWebNNUsages =
+      gpu::SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR |
+      gpu::SHARED_IMAGE_USAGE_WEBGPU_SHARED_BUFFER |
+      gpu::SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR_READ |
+      gpu::SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR_WRITE |
+      gpu::SHARED_IMAGE_USAGE_WEBGPU_READ |
+      gpu::SHARED_IMAGE_USAGE_WEBGPU_WRITE;
+
+  // If this factory was created to support WebNN, reject any usage that isn't
+  // allowed by WebNN.
   if (enable_webnn_only_d3d_factory_) {
-    constexpr auto kAllowedUsages =
-        gpu::SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR |
-        gpu::SHARED_IMAGE_USAGE_WEBGPU_SHARED_BUFFER |
-        gpu::SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR_READ |
-        gpu::SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR_WRITE;
-    return kAllowedUsages.HasAll(usage);
+    return kAllowedWebNNUsages.HasAll(usage);
   }
 
   if (!pixel_data.empty() && !IsFormatSupportedForInitialData(format)) {
@@ -1115,8 +1152,18 @@ bool D3DImageBackingFactory::IsSupported(SharedImageUsageSet usage,
     }
   }
 
-  // Allow WebNN as part of a buffer usage when D3D shared images are supported.
-  if (is_buffer && usage.Has(gpu::SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR)) {
+  if (is_buffer) {
+    // If this buffer is for WebNN, only allow usages that WebNN supports.
+    // We allow height > 1 because the factory flattens it to a 1D D3D buffer.
+    if (usage.Has(gpu::SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR)) {
+      return kAllowedWebNNUsages.HasAll(usage);
+    }
+
+    // Standard WebGPU buffers must be 1D (height of 1).
+    if (size.height() != 1) {
+      return false;
+    }
+
     return true;
   }
 

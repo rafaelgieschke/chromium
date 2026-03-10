@@ -4,15 +4,17 @@
 
 #include "third_party/blink/renderer/core/css/parser/css_variable_parser.h"
 
+#include <algorithm>
 #include <optional>
 
-#include "base/containers/contains.h"
 #include "third_party/blink/renderer/core/css/css_attr_type.h"
 #include "third_party/blink/renderer/core/css/css_syntax_component.h"
 #include "third_party/blink/renderer/core/css/css_syntax_definition.h"
 #include "third_party/blink/renderer/core/css/css_unparsed_declaration_value.h"
 #include "third_party/blink/renderer/core/css/if_condition.h"
 #include "third_party/blink/renderer/core/css/parser/css_if_parser.h"
+#include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
+#include "third_party/blink/renderer/core/css/parser/css_parser_local_context.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token.h"
 #include "third_party/blink/renderer/core/css/parser/css_property_parser.h"
 #include "third_party/blink/renderer/core/css/properties/css_parsing_utils.h"
@@ -56,7 +58,8 @@ const CSSValue* CSSVariableParser::ParseDeclarationIncludingCSSWide(
   stream.EnsureLookAhead();
   bool important_ignored;
   if (const CSSValue* css_wide = CSSPropertyParser::ConsumeCSSWideKeyword(
-          stream, /*allow_important_annotation=*/true, important_ignored)) {
+          stream, context, /*allow_important_annotation=*/true,
+          important_ignored)) {
     return css_wide;
   }
   CSSVariableData* variable_data = ConsumeUnparsedDeclaration(
@@ -605,9 +608,6 @@ static bool ConsumeUnparsedValue(CSSParserTokenStream& stream,
           has_references = true;
           continue;
         case CSSValueID::kIf:
-          if (!RuntimeEnabledFeatures::CSSInlineIfForStyleQueriesEnabled()) {
-            break;
-          }
           if (!ConsumeIf(stream, has_references, has_font_units,
                          has_root_font_units, has_line_height_units,
                          has_dashed_functions, context)) {
@@ -751,7 +751,7 @@ CSSUnparsedDeclarationValue* CSSVariableParser::ParseUniversalSyntaxValue(
 
   bool important;
   if (CSSPropertyParser::ConsumeCSSWideKeyword(
-          stream, /*allow_important_annotation=*/false, important)) {
+          stream, context, /*allow_important_annotation=*/false, important)) {
     return nullptr;
   }
 
@@ -779,7 +779,7 @@ StringView CSSVariableParser::StripTrailingWhitespaceAndComments(
   // (i.e. not CSSOM, where we just get a string), we know we can't
   // have unfinished comments, so consider piping that knowledge all
   // the way through here.
-  if (text.Is8Bit() && !base::Contains(text.Span8(), '/')) {
+  if (text.Is8Bit() && !std::ranges::contains(text.Span8(), '/')) {
     // No comments, so we can strip whitespace only.
     while (!text.empty() && IsHTMLSpace(text[text.length() - 1])) {
       text = StringView(text, 0, text.length() - 1);

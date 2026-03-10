@@ -4,6 +4,7 @@
 
 #include "extensions/browser/process_map.h"
 
+#include <algorithm>
 #include <memory>
 #include <string_view>
 #include <vector>
@@ -15,6 +16,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/security_principal.h"
 #include "content/public/browser/site_isolation_policy.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
@@ -492,7 +494,7 @@ class ProcessMapBrowserTest : public ExtensionBrowserTest {
                    << (extension ? extension->name() : "<no extension>")
                    << ", Debug String: " << debug_string);
       bool expected_to_be_allowed =
-          base::Contains(allowed_contexts, context_type);
+          std::ranges::contains(allowed_contexts, context_type);
       EXPECT_EQ(expected_to_be_allowed,
                 process_map()->CanProcessHostContextType(extension, process,
                                                          context_type));
@@ -736,7 +738,9 @@ IN_PROC_BROWSER_TEST_F(
   // a sandbox attribute set, but it is not a manifest-sandboxed frame. As such,
   // it gets placed in the main extension process, has access to extension APIs
   // and is not places in a sandboxed SiteInstance.
-  EXPECT_FALSE(content::HasSandboxedSiteInstance(sandboxed_E2_frame));
+  EXPECT_FALSE(sandboxed_E2_frame->GetSiteInstance()
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
 
   // Each frame will be in a separate process due to site isolation.
   EXPECT_NE(main_frame->GetProcess(), sandboxed_a_frame->GetProcess());
@@ -968,10 +972,14 @@ void ProcessMapBrowserTest::VerifyWhetherSubframesAreIsolated(
 
   if (expect_subframes_isolated_from_each_other) {
     EXPECT_NE(sandboxed_frame_process_id, non_sandboxed_frame_process_id);
-    EXPECT_TRUE(content::HasSandboxedSiteInstance(sandboxed_child_frame));
+    EXPECT_TRUE(sandboxed_child_frame->GetSiteInstance()
+                    ->GetSecurityPrincipal()
+                    .IsSandboxed());
   } else {
     EXPECT_EQ(sandboxed_frame_process_id, non_sandboxed_frame_process_id);
-    EXPECT_FALSE(content::HasSandboxedSiteInstance(sandboxed_child_frame));
+    EXPECT_FALSE(sandboxed_child_frame->GetSiteInstance()
+                     ->GetSecurityPrincipal()
+                     .IsSandboxed());
   }
   if (expect_sandboxed_subframe_isolated_from_extension_page) {
     EXPECT_NE(main_frame_process_id, sandboxed_frame_process_id);
@@ -984,7 +992,9 @@ void ProcessMapBrowserTest::VerifyWhetherSubframesAreIsolated(
     EXPECT_EQ(main_frame_process_id, non_sandboxed_frame_process_id);
   }
   EXPECT_FALSE(ExtensionFrameIsSandboxed(main_frame));
-  EXPECT_FALSE(content::HasSandboxedSiteInstance(non_sandboxed_child_frame));
+  EXPECT_FALSE(non_sandboxed_child_frame->GetSiteInstance()
+                   ->GetSecurityPrincipal()
+                   .IsSandboxed());
 }
 
 // Tests that web pages loaded in sandboxed iframes inside an extension are

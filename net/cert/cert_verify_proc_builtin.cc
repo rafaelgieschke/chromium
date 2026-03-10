@@ -4,6 +4,7 @@
 
 #include "net/cert/cert_verify_proc_builtin.h"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -94,9 +95,9 @@ DEFINE_CERT_ERROR_ID(kPathLacksQwacPolicy, "Path does not have QWAC policies");
 DEFINE_CERT_ERROR_ID(kChromeRootConstraintsFailed,
                      "Path does not satisfy CRS constraints");
 
-base::Value::Dict NetLogCertParams(const CRYPTO_BUFFER* cert_handle,
-                                   const bssl::CertErrors& errors) {
-  base::Value::Dict results;
+base::DictValue NetLogCertParams(const CRYPTO_BUFFER* cert_handle,
+                                 const bssl::CertErrors& errors) {
+  base::DictValue results;
 
   std::string pem_encoded;
   if (X509Certificate::GetPEMEncodedFromDER(
@@ -111,19 +112,26 @@ base::Value::Dict NetLogCertParams(const CRYPTO_BUFFER* cert_handle,
   return results;
 }
 
-base::Value::Dict NetLogAdditionalCert(const CRYPTO_BUFFER* cert_handle,
-                                       const bssl::CertificateTrust& trust,
-                                       const bssl::CertErrors& errors) {
-  base::Value::Dict results = NetLogCertParams(cert_handle, errors);
+base::DictValue NetLogAdditionalCert(const CRYPTO_BUFFER* cert_handle,
+                                     const bssl::CertificateTrust& trust,
+                                     const bssl::CertErrors& errors) {
+  base::DictValue results = NetLogCertParams(cert_handle, errors);
   results.Set("trust", trust.ToDebugString());
   return results;
 }
 
 #if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
-base::Value::Dict NetLogChromeRootStoreVersion(
-    int64_t chrome_root_store_version) {
-  base::Value::Dict results;
+base::DictValue NetLogChromeRootStoreVersion(
+    int64_t chrome_root_store_version,
+    std::optional<base::Time> mtc_metadata_update_time) {
+  base::DictValue results;
   results.Set("version_major", NetLogNumberValue(chrome_root_store_version));
+  if (mtc_metadata_update_time.has_value()) {
+    results.Set(
+        "mtc_metadata_update_time",
+        NetLogNumberValue(
+            mtc_metadata_update_time->InMillisecondsSinceUnixEpoch() / 1000));
+  }
   return results;
 }
 
@@ -196,8 +204,8 @@ QwacQcStatementsStatus GetQwacQcStatementsStatus(
 }
 #endif  // BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
 
-base::Value::List PEMCertValueList(const bssl::ParsedCertificateList& certs) {
-  base::Value::List value;
+base::ListValue PEMCertValueList(const bssl::ParsedCertificateList& certs) {
+  base::ListValue value;
   for (const auto& cert : certs) {
     std::string pem;
     X509Certificate::GetPEMEncodedFromDER(
@@ -207,9 +215,9 @@ base::Value::List PEMCertValueList(const bssl::ParsedCertificateList& certs) {
   return value;
 }
 
-base::Value::Dict NetLogPathBuilderResultPath(
+base::DictValue NetLogPathBuilderResultPath(
     const bssl::CertPathBuilderResultPath& result_path) {
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("is_valid", result_path.IsValid());
   dict.Set("last_cert_trust",
            result_path.trust_anchor.CertTrust().ToDebugString());
@@ -222,9 +230,9 @@ base::Value::Dict NetLogPathBuilderResultPath(
   return dict;
 }
 
-base::Value::Dict NetLogPathBuilderResult(
+base::DictValue NetLogPathBuilderResult(
     const bssl::CertPathBuilder::Result& result) {
-  base::Value::Dict dict;
+  base::DictValue dict;
   // TODO(crbug.com/40479281): include debug data (or just have things netlog it
   // directly).
   dict.Set("has_valid_path", result.HasValidPath());
@@ -354,8 +362,13 @@ class CertVerifyProcTrustStore {
 
 #if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
   base::span<const ChromeRootCertConstraints> GetChromeRootConstraints(
-      const bssl::ParsedCertificate* cert) const {
-    return system_trust_store_->GetChromeRootConstraints(cert);
+      const bssl::CertPathBuilderResultPath* path) const {
+    return system_trust_store_->GetChromeRootConstraints(path);
+  }
+
+  const TrustStoreChrome::MtcAnchorExtraData* GetMTCAnchorData(
+      base::span<const uint8_t> log_id) const {
+    return system_trust_store_->GetMTCAnchorData(log_id);
   }
 
   bool IsNonChromeRootStoreTrustAnchor(
@@ -423,7 +436,6 @@ class PathBuilderDelegateImpl : public bssl::SimplePathBuilderDelegate {
       const RequireCTDelegate* require_ct_delegate,
       CertNetFetcher* net_fetcher,
       VerificationType verification_type,
-      bssl::SimplePathBuilderDelegate::DigestPolicy digest_policy,
       int flags,
       const CertVerifyProcTrustStore* trust_store,
       const std::vector<net::CertVerifyProc::CertificateWithConstraints>&
@@ -435,8 +447,9 @@ class PathBuilderDelegateImpl : public bssl::SimplePathBuilderDelegate {
       base::Time current_time,
       bool* checked_revocation_for_some_path,
       const NetLogWithSource& net_log)
-      : bssl::SimplePathBuilderDelegate(kMinRsaModulusLengthBits,
-                                        digest_policy),
+      : bssl::SimplePathBuilderDelegate(
+            kMinRsaModulusLengthBits,
+            bssl::SimplePathBuilderDelegate::DigestPolicy::kStrong),
         hostname_(hostname),
         crl_set_(crl_set),
         ct_verifier_(ct_verifier),
@@ -540,7 +553,7 @@ class PathBuilderDelegateImpl : public bssl::SimplePathBuilderDelegate {
     if (path->trust_anchor.MTCAnchor()) {
       // MTCs don't use traditional revocation checks or certificate
       // transparency.
-      // TODO(crbug.com/452986180): use MTC revoked_indices
+      CheckMTCRevocation(path);
       return;
     }
 
@@ -558,6 +571,37 @@ class PathBuilderDelegateImpl : public bssl::SimplePathBuilderDelegate {
                                   &delegate_data->stapled_ocsp_verify_result);
 
     CheckCertificateTransparency(path, cert_for_ct_verify.get(), delegate_data);
+  }
+
+  void CheckMTCRevocation(bssl::CertPathBuilderResultPath* path) {
+    // Revocation information for MTCs is distributed in the PKI Metadata
+    // Fastpush component, which is part of the Chrome Root Store. This method
+    // should never be reached in the non-CRS case since we also would not have
+    // any MTC anchors configured. If we ever support non-CRS MTC anchors, we
+    // may need to pull the revocation information definitions out of CRS code
+    // into a place that can be shared by both.
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
+    const TrustStoreChrome::MtcAnchorExtraData* mtc_anchor_data =
+        trust_store_->GetMTCAnchorData(
+            path->trust_anchor.MTCAnchor()->log_id());
+    if (!mtc_anchor_data) {
+      return;
+    }
+
+    const auto& leaf = path->certs.front();
+    uint64_t index;
+    // This method is only called on MTCs that boringssl verified successfully,
+    // so the serial number is already known to be valid and we don't need to
+    // gracefully handle a failure here.
+    CHECK(bssl::der::ParseUint64(leaf->tbs().serial_number, &index));
+
+    auto it = mtc_anchor_data->revoked_indices.upper_bound(index);
+    if (it != mtc_anchor_data->revoked_indices.end() && index >= it->second) {
+      path->errors.GetErrorsForCert(0)->AddError(
+          bssl::cert_errors::kCertificateRevoked);
+      return;
+    }
+#endif
   }
 
   void CheckCertificateTransparency(
@@ -661,6 +705,32 @@ class PathBuilderDelegateImpl : public bssl::SimplePathBuilderDelegate {
     // confusing when there are multiple ChromeRootCertConstraints objects,
     // would need to clearly distinguish which set of constraints had errors.)
 
+    if (constraint.validity_starts_not_after.has_value()) {
+      bssl::der::GeneralizedTime starts_not_after_generalizedtime;
+      if (!EncodeTimeAsGeneralizedTime(
+              constraint.validity_starts_not_after.value(),
+              &starts_not_after_generalizedtime)) {
+        // This should never happen, so just failing is fine.
+        return false;
+      }
+      if (path->certs.front()->tbs().validity_not_before >
+          starts_not_after_generalizedtime) {
+        return false;
+      }
+    }
+    if (constraint.validity_starts_after.has_value()) {
+      bssl::der::GeneralizedTime starts_after_generalizedtime;
+      if (!EncodeTimeAsGeneralizedTime(constraint.validity_starts_after.value(),
+                                       &starts_after_generalizedtime)) {
+        // This should never happen, so just failing is fine.
+        return false;
+      }
+      if (path->certs.front()->tbs().validity_not_before <=
+          starts_after_generalizedtime) {
+        return false;
+      }
+    }
+
     if (ct_policy_enforcer_->IsCtEnabled()) {
       if (constraint.sct_not_after.has_value()) {
         bool found_matching_sct = false;
@@ -723,19 +793,42 @@ class PathBuilderDelegateImpl : public bssl::SimplePathBuilderDelegate {
       return false;
     }
 
+    if (path->trust_anchor.MTCAnchor() &&
+        (constraint.index_not_after.has_value() ||
+         constraint.index_after.has_value())) {
+      const auto& leaf = path->certs.front();
+      uint64_t index;
+      if (!bssl::der::ParseUint64(leaf->tbs().serial_number, &index)) {
+        return false;
+      }
+
+      if (constraint.index_not_after.has_value() &&
+          index > constraint.index_not_after) {
+        return false;
+      }
+
+      if (constraint.index_after.has_value() &&
+          index <= constraint.index_after) {
+        return false;
+      }
+    }
+
     return true;
   }
 
   void CheckChromeRootConstraints(bssl::CertPathBuilderResultPath* path) {
     // If the root is trusted locally, do not enforce CRS constraints, even if
     // some exist.
+    // TODO(crbug.com/452986180): If we ever add support for user-added MTC
+    // anchors, need to check for them here, like
+    // IsNonChromeRootStoreTrustAnchor.
     if (trust_store_->IsNonChromeRootStoreTrustAnchor(
             path->certs.back().get())) {
       return;
     }
 
     if (base::span<const ChromeRootCertConstraints> constraints =
-            trust_store_->GetChromeRootConstraints(path->certs.back().get());
+            trust_store_->GetChromeRootConstraints(path);
         !constraints.empty()) {
       bool found_valid_constraint = false;
       for (const ChromeRootCertConstraints& constraint : constraints) {
@@ -1069,7 +1162,7 @@ CertVerifyProcBuiltin::CertVerifyProcBuiltin(
     additional_trust_store_.AddDistrustedCertificateBySPKI(
         std::string(base::as_string_view(spki)));
     net_log.AddEvent(NetLogEventType::CERT_VERIFY_PROC_ADDITIONAL_CERT, [&] {
-      base::Value::Dict results;
+      base::DictValue results;
       results.Set("spki", NetLogBinaryValue(base::span(spki)));
       results.Set("trust",
                   bssl::CertificateTrust::ForDistrusted().ToDebugString());
@@ -1288,19 +1381,11 @@ scoped_refptr<X509Certificate> CreateVerifiedCertChain(
 // certificates.
 struct BuildPathAttempt {
   BuildPathAttempt(VerificationType verification_type,
-                   bssl::SimplePathBuilderDelegate::DigestPolicy digest_policy,
                    bool use_system_time)
       : verification_type(verification_type),
-        digest_policy(digest_policy),
         use_system_time(use_system_time) {}
 
-  BuildPathAttempt(VerificationType verification_type, bool use_system_time)
-      : BuildPathAttempt(verification_type,
-                         bssl::SimplePathBuilderDelegate::DigestPolicy::kStrong,
-                         use_system_time) {}
-
   VerificationType verification_type;
-  bssl::SimplePathBuilderDelegate::DigestPolicy digest_policy;
   bool use_system_time;
 };
 
@@ -1315,7 +1400,6 @@ bssl::CertPathBuilder::Result TryBuildPath(
     base::Time current_time,
     base::TimeTicks deadline,
     VerificationType verification_type,
-    bssl::SimplePathBuilderDelegate::DigestPolicy digest_policy,
     int flags,
     std::string_view ocsp_response,
     std::string_view sct_list,
@@ -1340,7 +1424,7 @@ bssl::CertPathBuilder::Result TryBuildPath(
 
   PathBuilderDelegateImpl path_builder_delegate(
       hostname, crl_set, ct_verifier, ct_policy_enforcer, require_ct_delegate,
-      net_fetcher, verification_type, digest_policy, flags, trust_store,
+      net_fetcher, verification_type, flags, trust_store,
       additional_constraints, ocsp_response, sct_list, ev_metadata, deadline,
       current_time, checked_revocation, net_log);
 
@@ -1459,18 +1543,6 @@ int AssignVerifyResult(
   return OK;
 }
 
-// Returns true if retrying path building with a less stringent signature
-// algorithm *might* successfully build a path, based on the earlier failed
-// |result|.
-//
-// This implementation is simplistic, and looks only for the presence of the
-// kUnacceptableSignatureAlgorithm error somewhere among the built paths.
-bool CanTryAgainWithWeakerDigestPolicy(
-    const bssl::CertPathBuilder::Result& result) {
-  return result.AnyPathContainsError(
-      bssl::cert_errors::kUnacceptableSignatureAlgorithm);
-}
-
 // Returns true if retrying with the system time as the verification time might
 // successfully build a path, based on the earlier failed |result|.
 bool CanTryAgainWithSystemTime(const bssl::CertPathBuilder::Result& result) {
@@ -1490,10 +1562,13 @@ void CertVerifyProcBuiltin::LogChromeRootStoreVersion(
 #if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
   int64_t chrome_root_store_version =
       system_trust_store_->chrome_root_store_version();
-  if (chrome_root_store_version != 0) {
+  std::optional<base::Time> mtc_metadata_update_time =
+      system_trust_store_->mtc_metadata_update_time();
+  if (chrome_root_store_version != 0 || mtc_metadata_update_time.has_value()) {
     net_log.AddEvent(
         NetLogEventType::CERT_VERIFY_PROC_CHROME_ROOT_STORE_VERSION, [&] {
-          return NetLogChromeRootStoreVersion(chrome_root_store_version);
+          return NetLogChromeRootStoreVersion(chrome_root_store_version,
+                                              mtc_metadata_update_time);
         });
   }
 #endif
@@ -1593,7 +1668,7 @@ int CertVerifyProcBuiltin::VerifyInternal(X509Certificate* input_cert,
     cur_attempt = attempts[cur_attempt_index];
     net_log.BeginEvent(
         NetLogEventType::CERT_VERIFY_PROC_PATH_BUILD_ATTEMPT, [&] {
-          base::Value::Dict results;
+          base::DictValue results;
           if (cur_attempt.verification_type == VerificationType::kEV) {
             results.Set("is_ev_attempt", true);
           }
@@ -1603,8 +1678,6 @@ int CertVerifyProcBuiltin::VerifyInternal(X509Certificate* input_cert,
                 "network_time_value",
                 NetLogNumberValue(custom_time.InMillisecondsSinceUnixEpoch()));
           }
-          results.Set("digest_policy",
-                      static_cast<int>(cur_attempt.digest_policy));
           return results;
         });
 
@@ -1620,11 +1693,10 @@ int CertVerifyProcBuiltin::VerifyInternal(X509Certificate* input_cert,
         cur_attempt.use_system_time ? der_verification_system_time
                                     : der_verification_custom_time,
         cur_attempt.use_system_time ? base::Time::Now() : custom_time, deadline,
-        cur_attempt.verification_type, cur_attempt.digest_policy, flags,
-        ocsp_response, sct_list, crl_set(), ct_verifier_.get(),
-        ct_policy_enforcer_.get(), require_ct_delegate_.get(),
-        net_fetcher_.get(), ev_metadata, &checked_revocation_for_some_path,
-        net_log);
+        cur_attempt.verification_type, flags, ocsp_response, sct_list,
+        crl_set(), ct_verifier_.get(), ct_policy_enforcer_.get(),
+        require_ct_delegate_.get(), net_fetcher_.get(), ev_metadata,
+        &checked_revocation_for_some_path, net_log);
 
     net_log.EndEvent(NetLogEventType::CERT_VERIFY_PROC_PATH_BUILD_ATTEMPT,
                      [&] { return NetLogPathBuilderResult(result); });
@@ -1641,24 +1713,6 @@ int CertVerifyProcBuiltin::VerifyInternal(X509Certificate* input_cert,
       BuildPathAttempt system_time_attempt = cur_attempt;
       system_time_attempt.use_system_time = true;
       attempts.push_back(system_time_attempt);
-    } else if (cur_attempt.digest_policy ==
-                   bssl::SimplePathBuilderDelegate::DigestPolicy::kStrong &&
-               CanTryAgainWithWeakerDigestPolicy(result)) {
-      // If this path building attempt (may have) failed due to the chain using
-      // a
-      // weak signature algorithm, enqueue a similar attempt but with weaker
-      // signature algorithms (SHA1) permitted.
-      //
-      // This fallback is necessary because the CertVerifyProc layer may decide
-      // to allow SHA1 based on its own policy, so path building should return
-      // possibly weak chains too.
-      //
-      // TODO(eroman): Would be better for the SHA1 policy to be part of the
-      // delegate instead so it can interact with path building.
-      BuildPathAttempt sha1_fallback_attempt = cur_attempt;
-      sha1_fallback_attempt.digest_policy =
-          bssl::SimplePathBuilderDelegate::DigestPolicy::kWeakAllowSha1;
-      attempts.push_back(sha1_fallback_attempt);
     }
   }
 
@@ -1692,7 +1746,7 @@ void NetLog2QwacBindingError(const NetLogWithSource& net_log,
                              std::string_view message,
                              std::string_view details = {}) {
   net_log.EndEvent(NetLogEventType::CERT_VERIFY_PROC_2QWAC_BINDING, [&] {
-    base::Value::Dict dict;
+    base::DictValue dict;
     // Including a net_error will cause the netlog-viewer to display this event
     // as an error.
     dict.Set("net_error", ERR_FAILED);
@@ -1712,7 +1766,7 @@ scoped_refptr<X509Certificate> CertVerifyProcBuiltin::Verify2QwacBinding(
     base::span<const uint8_t> tls_cert,
     const NetLogWithSource& net_log) {
   net_log.BeginEvent(NetLogEventType::CERT_VERIFY_PROC_2QWAC_BINDING, [&] {
-    base::Value::Dict dict;
+    base::DictValue dict;
     dict.Set("binding", NetLogStringValue(binding));
     dict.Set("host", NetLogStringValue(hostname));
 
@@ -1754,7 +1808,7 @@ scoped_refptr<X509Certificate> CertVerifyProcBuiltin::Verify2QwacBinding(
   }
   HistogramVerify2QwacResult(Verify2QwacBindingResult::kValid2QwacBinding);
   net_log.EndEvent(NetLogEventType::CERT_VERIFY_PROC_2QWAC_BINDING, [&] {
-    base::Value::Dict dict;
+    base::DictValue dict;
     dict.Set("is_valid_2qwac_binding", true);
     return dict;
   });
@@ -1769,7 +1823,7 @@ int CertVerifyProcBuiltin::Verify2Qwac(X509Certificate* cert,
   CHECK(verify_result);
 
   net_log.BeginEvent(NetLogEventType::CERT_VERIFY_PROC_2QWAC, [&] {
-    base::Value::Dict dict;
+    base::DictValue dict;
     dict.Set("host", NetLogStringValue(hostname));
     dict.Set("certificates", NetLogX509CertificateList(cert));
     return dict;
@@ -1876,7 +1930,7 @@ int CertVerifyProcBuiltin::Verify2QwacInternal(
   }
 
   net_log.BeginEvent(NetLogEventType::CERT_VERIFY_PROC_PATH_BUILD_ATTEMPT, [&] {
-    base::Value::Dict results;
+    base::DictValue results;
     results.Set("is_qwac_attempt", true);
     return results;
   });
@@ -1990,7 +2044,7 @@ void CertVerifyProcBuiltin::MaybeVerify1QWAC(
   OneQwacPathBuilderDelegateImpl path_builder_delegate(net_log);
 
   net_log.BeginEvent(NetLogEventType::CERT_VERIFY_PROC_PATH_BUILD_ATTEMPT, [&] {
-    base::Value::Dict results;
+    base::DictValue results;
     results.Set("is_qwac_attempt", true);
     return results;
   });

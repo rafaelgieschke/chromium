@@ -21,8 +21,7 @@ impl SequencedTaskRunnerHandle {
     pub fn get_current_default() -> Option<Self> {
         let default_ptr = ffi::GetCurrentDefaultSequencedTaskRunnerForRust();
         // SAFETY: The ffi function above returns a pointer that owns one ref-count
-        unsafe { ScopedRefPtr::wrap_ref_counted(default_ptr) }
-            .map(|ptr| SequencedTaskRunnerHandle(ptr))
+        unsafe { ScopedRefPtr::wrap_ref_counted(default_ptr) }.map(SequencedTaskRunnerHandle)
     }
 
     /// Post a task to the sequenced task runner. This function corresponds to
@@ -36,5 +35,18 @@ impl SequencedTaskRunnerHandle {
     /// for ffi purposes.
     pub fn as_scoped_refptr(&self) -> &ScopedRefPtr<ffi::SequencedTaskRunner> {
         &self.0
+    }
+
+    /// Run all tasks which have been queued up so far
+    pub fn run_all_current_tasks_for_testing(&self) {
+        let run_loop = crate::run_loop::RunLoop::new();
+        self.post_task(run_loop.get_quit_closure());
+        run_loop.run();
+    }
+
+    pub fn run_all_current_tasks_on_default_runner_for_testing() {
+        Self::get_current_default()
+            .expect("Must be called in a context with a default task runner")
+            .run_all_current_tasks_for_testing();
     }
 }

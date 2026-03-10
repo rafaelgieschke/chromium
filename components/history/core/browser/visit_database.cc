@@ -14,6 +14,7 @@
 #include <string>
 #include <utility>
 
+#include "base/containers/span.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
@@ -413,12 +414,13 @@ VisitID VisitDatabase::AddVisit(VisitRow* visit) {
 
   visit->visit_id = GetDB().GetLastInsertRowId();
 
-  if (visit->source != SOURCE_BROWSED) {
+  CHECK(visit->source.has_value());
+  if (visit->source.value() != SOURCE_BROWSED) {
     // Record the source of this visit when it is not browsed.
     sql::Statement statement1(GetDB().GetCachedStatement(
         SQL_FROM_HERE, "INSERT INTO visit_source (id, source) VALUES (?,?)"));
     statement1.BindInt64(0, visit->visit_id);
-    statement1.BindInt64(1, visit->source);
+    statement1.BindInt64(1, visit->source.value());
 
     if (!statement1.Run()) {
       DVLOG(0) << "Failed to execute visit_source insert statement:  "
@@ -606,12 +608,23 @@ bool VisitDatabase::PrepareVisibleVisitsQuery(
 // rolled out.
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   if (history::IsBrowsingHistoryActorIntegrationM2Enabled()) {
-    sql += ", IFNULL(visit_source.source,1)";
+    sql += ", IFNULL(visit_source.source, 1)";
     joins += " LEFT JOIN visit_source ON visits.id = visit_source.id";
 
-    if (!options.include_actor_visits) {
+    if (history::IsBrowsingHistoryActorIntegrationM3Enabled()) {
+      CHECK(options.include_user_visits || options.include_actor_visits);
+
+      if (options.include_user_visits && !options.include_actor_visits) {
+        where_clauses.push_back(
+            "(visit_source.source IS NULL OR visit_source.source != ?)");
+        binding_values.push_back(SOURCE_ACTOR);
+      } else if (!options.include_user_visits && options.include_actor_visits) {
+        where_clauses.push_back("visit_source.source = ?");
+        binding_values.push_back(SOURCE_ACTOR);
+      }
+    } else if (!options.include_actor_visits) {
       where_clauses.push_back(
-          "(visit_source.source IS NULL OR visit_source.source!=?)");
+          "(visit_source.source IS NULL OR visit_source.source != ?)");
       binding_values.push_back(SOURCE_ACTOR);
     }
   }
@@ -693,7 +706,7 @@ bool VisitDatabase::GetVisibleVisitsForURL(URLID url_id,
   return FillVisitVectorWithOptions(statement, options, visits);
 }
 
-bool VisitDatabase::GetVisitsForTimes(const std::vector<base::Time>& times,
+bool VisitDatabase::GetVisitsForTimes(base::span<const base::Time> times,
                                       VisitVector* visits) {
   visits->clear();
 

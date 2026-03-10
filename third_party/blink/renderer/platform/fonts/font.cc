@@ -192,15 +192,20 @@ void GetTextInterceptsInternal(const ShapeResultBloberizer::BlobBuffer& blobs,
 }  // anonymous namespace
 
 void Font::GetTextIntercepts(const TextFragmentPaintInfo& text_info,
+                             InkSkipCJKHandling ink_skip_cjk_handling,
                              const cc::PaintFlags& flags,
                              const std::tuple<float, float>& bounds,
                              Vector<TextIntercept>& intercepts) const {
   if (ShouldSkipDrawing())
     return;
 
+  ShapeResultBloberizer::Type intercept_type =
+      ink_skip_cjk_handling == InkSkipCJKHandling::kIncludeCJK
+          ? ShapeResultBloberizer::Type::kTextInterceptsAll
+          : ShapeResultBloberizer::Type::kTextIntercepts;
   ShapeResultBloberizer::FillGlyphsNG bloberizer(
       GetFontDescription(), text_info.text, text_info.from, text_info.to,
-      text_info.shape_result, ShapeResultBloberizer::Type::kTextIntercepts);
+      text_info.shape_result, intercept_type);
 
   GetTextInterceptsInternal(bloberizer.Blobs(), flags, bounds, intercepts);
 }
@@ -310,8 +315,7 @@ float Font::TabWidth(const SimpleFontData* font_data,
     return GetFontDescription().LetterSpacing();
 
   float modulized_position = fmodf(position, base_tab_width);
-  if (RuntimeEnabledFeatures::TabWidthNegativePositionEnabled() &&
-      modulized_position < 0) [[unlikely]] {
+  if (modulized_position < 0) [[unlikely]] {
     modulized_position += base_tab_width;
   }
 
@@ -334,8 +338,7 @@ LayoutUnit Font::TabWidth(const TabSize& tab_size, LayoutUnit position) const {
   }
 
   float modulized_position = fmodf(position, base_tab_width);
-  if (RuntimeEnabledFeatures::TabWidthNegativePositionEnabled() &&
-      modulized_position < 0) [[unlikely]] {
+  if (modulized_position < 0) [[unlikely]] {
     modulized_position += base_tab_width;
   }
 

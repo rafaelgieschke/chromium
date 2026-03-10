@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/notreached.h"
@@ -162,6 +161,8 @@ WebContents* WebContentsDelegate::CreateCustomWebContents(
     const GURL& opener_url,
     const std::string& frame_name,
     const GURL& target_url,
+    WindowOpenDisposition disposition,
+    const blink::mojom::WindowFeatures& window_features,
     const StoragePartitionConfig& partition_config,
     SessionStorageNamespace* session_storage_namespace) {
   return nullptr;
@@ -230,6 +231,11 @@ void WebContentsDelegate::RequestPointerLock(WebContents* web_contents,
                                              bool last_unlocked_by_target) {
   web_contents->GotResponseToPointerLockRequest(
       blink::mojom::PointerLockResult::kUnknownError);
+}
+
+bool WebContentsDelegate::AllowKeyboardLockForInnerContents(
+    WebContents* web_contents) {
+  return false;
 }
 
 void WebContentsDelegate::RequestKeyboardLock(WebContents* web_contents,
@@ -330,12 +336,12 @@ WebContentsDelegate::~WebContentsDelegate() {
 }
 
 void WebContentsDelegate::Attach(WebContents* web_contents) {
-  DCHECK(!base::Contains(attached_contents_, web_contents));
+  DCHECK(!attached_contents_.contains(web_contents));
   attached_contents_.insert(web_contents);
 }
 
 void WebContentsDelegate::Detach(WebContents* web_contents) {
-  DCHECK(base::Contains(attached_contents_, web_contents));
+  DCHECK(attached_contents_.contains(web_contents));
   attached_contents_.erase(web_contents);
 }
 

@@ -75,7 +75,7 @@ void MaybeRecordHistoryPushStateUkm(LocalDOMWindow* window) {
 
   bool from_ad = window->GetFrame()->IsAdFrame() ||
                  ad_tracker->IsAdScriptInStack(
-                     AdTracker::StackType::kBottomAndTop,
+                     AdTracker::StackType::kTopOnly,
                      /*ignore_monkey_patch=*/
                      AdTracker::MonkeyPatchableApi::kHistoryPushState,
                      /*out_ad_script_ancestry=*/nullptr);
@@ -396,7 +396,8 @@ void History::StateObjectAdded(scoped_refptr<SerializedScriptValue> data,
   constexpr bool should_skip_screenshot = false;
   window->document()->Loader()->RunURLAndHistoryUpdateSteps(
       full_url, nullptr, mojom::blink::SameDocumentNavigationType::kHistoryApi,
-      std::move(data), type, FirePopstate::kNo, should_skip_screenshot);
+      std::move(data), type, FirePopstate::kNo, should_skip_screenshot,
+      params->involvement, params->interaction_id);
 }
 
 }  // namespace blink

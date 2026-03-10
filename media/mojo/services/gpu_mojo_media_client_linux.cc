@@ -4,6 +4,8 @@
 
 #include "media/mojo/services/gpu_mojo_media_client.h"
 
+#include <algorithm>
+
 #include "base/metrics/histogram_functions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "components/viz/common/resources/shared_image_format.h"
@@ -63,17 +65,13 @@ std::vector<Fourcc> GetPreferredRenderableFourccs(
       // GLX can only import native pixmap of format AR24. Ozone expose this
       // capability through gpu_feature_info so we can selectively allow hw
       // accelerated formats.
-      if (base::Contains(
-              gpu_feature_info.supported_formats_for_gl_native_pixmap_import,
-              viz::MultiPlaneFormat::kNV12)) {
+      if (gpu_feature_info.supports_nv12_gl_native_pixmap) {
         if (base::FeatureList::IsEnabled(kRenderableMM21)) {
           renderable_fourccs.emplace_back(Fourcc::MM21);
         }
         renderable_fourccs.emplace_back(Fourcc::NV12);
       }
-      if (base::Contains(
-              gpu_feature_info.supported_formats_for_gl_native_pixmap_import,
-              viz::MultiPlaneFormat::kP010)) {
+      if (gpu_feature_info.supports_p010_gl_native_pixmap) {
         renderable_fourccs.emplace_back(Fourcc::P010);
       }
     }

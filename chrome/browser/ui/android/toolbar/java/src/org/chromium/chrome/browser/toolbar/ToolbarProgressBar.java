@@ -115,16 +115,12 @@ public class ToolbarProgressBar extends ClipDrawableProgressBar
             new Runnable() {
                 @Override
                 public void run() {
-                    if (!mIsStarted
-                            || ChromeFeatureList.isEnabled(
-                                    ChromeFeatureList.ANDROID_PB_DISABLE_PULSE_ANIMATION)) {
+                    if (!mIsStarted) {
                         return;
                     }
                     mAnimationLogic.reset(getProgress());
 
-                    if (!ChromeFeatureList.isEnabled(
-                                    ChromeFeatureList.ANDROID_PB_DISABLE_SMOOTH_ANIMATION)
-                            && !shouldAnimateCompositedLayer()) {
+                    if (!shouldAnimateCompositedLayer()) {
                         mSmoothProgressAnimator.start();
                     }
 
@@ -134,7 +130,10 @@ public class ToolbarProgressBar extends ClipDrawableProgressBar
                                         getDrawable().getBounds().right
                                                 - getDrawable().getBounds().left);
                         mAnimatingView.update(getProgress() * width);
-                        if (shouldAnimateCompositedLayer()) {
+
+                        if (shouldAnimateCompositedLayer()
+                                && ChromeFeatureList.sAndroidApb144Patch1.isEnabled()
+                                && getDesiredAndroidVisibility() == VISIBLE) {
                             mAnimatingView.setVisibility(VISIBLE);
                         }
                         mAnimatingView.startAnimation();
@@ -273,7 +272,7 @@ public class ToolbarProgressBar extends ClipDrawableProgressBar
 
         // TODO(peilinwang): after AndroidAnimatedCompositedProgressBar launches, make the xml
         // property for this view default invisible and remove this.
-        if (shouldAnimateCompositedLayer()) {
+        if (shouldAnimateCompositedLayer() && ChromeFeatureList.sAndroidApb144Patch1.isEnabled()) {
             mAnimatingView.setVisibility(INVISIBLE);
         }
 

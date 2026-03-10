@@ -1,28 +1,27 @@
 // Copyright 2025 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-import type {ContextualUpload, TabUpload} from 'chrome://resources/cr_components/composebox/common.js';
-import {ComposeboxMode} from 'chrome://resources/cr_components/composebox/contextual_entrypoint_and_carousel.js';
+import 'chrome://resources/cr_elements/cr_icon_button/cr_icon_button.js';
+
+import type {TabUpload} from 'chrome://resources/cr_components/composebox/common.js';
+import {TabUploadOrigin} from 'chrome://resources/cr_components/composebox/common.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import type {PropertyValues} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
+import {ToolMode} from 'chrome://resources/mojo/components/omnibox/composebox/composebox_query.mojom-webui.js';
 
-import type {ActionChip, ActionChipsHandlerInterface, PageCallbackRouter, TabInfo} from '../action_chips.mojom-webui.js';
-import {ChipType} from '../action_chips.mojom-webui.js';
+import type {ActionChip, ActionChipsHandlerInterface, PageCallbackRouter} from '../action_chips.mojom-webui.js';
+import {IconType} from '../action_chips.mojom-webui.js';
 import {WindowProxy} from '../window_proxy.js';
 
 import {getCss} from './action_chips.css.js';
 import {getHtml} from './action_chips.html.js';
 import {ActionChipsApiProxyImpl} from './action_chips_proxy.js';
 
-namespace ActionChipsConstants {
-  export const EMPTY_QUERY_STRING = '';
-}  // namespace
-
-// Records a click metric for the given action chip type.
-function recordClick(chipType: ChipType) {
+// Records a click metric for the given action chip icon type.
+function recordClick(iconType: IconType) {
   chrome.metricsPrivate.recordEnumerationValue(
-      'NewTabPage.ActionChips.Click', chipType, ChipType.MAX_VALUE + 1);
+      'NewTabPage.ActionChips.Click2', iconType, IconType.MAX_VALUE + 1);
 }
 
 // Records a latency metric.
@@ -61,9 +60,18 @@ export class ActionChipsElement extends CrLitElement {
     return getCss();
   }
 
+  override render() {
+    return getHtml.bind(this)();
+  }
+
   static override get properties() {
     return {
+      showBackground: {type: Boolean, reflect: true},
       actionChips_: {type: Array, state: true},
+      showDismissalUI_: {
+        type: Boolean,
+        reflect: true,
+      },
       showSimplifiedUI_: {
         type: Boolean,
         reflect: true,
@@ -71,47 +79,35 @@ export class ActionChipsElement extends CrLitElement {
     };
   }
 
-  private handler: ActionChipsHandlerInterface;
-  private callbackRouter: PageCallbackRouter;
+  accessor showBackground: boolean = false;
+
   protected accessor actionChips_: ActionChip[] = [];
+  protected accessor showDismissalUI_: boolean =
+      loadTimeData.getBoolean('ntpNextShowDismissalUIEnabled');
   protected accessor showSimplifiedUI_: boolean =
       loadTimeData.getBoolean('ntpNextShowSimplificationUIEnabled');
-  private onActionChipChangedListenerId_: number|null = null;
-  private initialLoadStartTime_: number|null = null;
 
+  private callbackRouter: PageCallbackRouter;
   private delayTabUploads_: boolean =
       loadTimeData.getBoolean('addTabUploadDelayOnActionChipClick');
-
-  override render() {
-    return getHtml.bind(this)();
-  }
-
+  private handler: ActionChipsHandlerInterface;
+  private initialLoadStartTime_: number|null = null;
+  private onActionChipChangedListenerId_: number|null = null;
 
   protected getAdditionalIconClasses_(chip: ActionChip): string {
-    switch (chip.type) {
-      case ChipType.kImage:
-        return 'banana';
-      case ChipType.kDeepSearch:
-        return 'deep-search';
-      case ChipType.kDeepDive:
-        return 'deep-dive';
+    switch (chip.suggestTemplateInfo.typeIcon) {
+      case IconType.kBanana:
+        return 'icon-type-banana';
+      case IconType.kGlobeWithSearchLoop:
+        return 'icon-type-globe-with-search-loop';
+      case IconType.kSubArrowRight:
+        return 'icon-type-sub-arrow-right';
+      case IconType.kDraftSpark:
+        return 'icon-type-draft-spark';
+      case IconType.kFavicon:
+        return 'icon-type-favicon';
       default:
         return '';
-    }
-  }
-
-  protected getId_(chip: ActionChip, index: number): string|null {
-    switch (chip.type) {
-      case ChipType.kImage:
-        return 'nano-banana';
-      case ChipType.kDeepSearch:
-        return 'deep-search';
-      case ChipType.kRecentTab:
-        return 'tab-context';
-      case ChipType.kDeepDive:
-        return `deep-dive-${index}`;
-      default:
-        return null;
     }
   }
 
@@ -156,63 +152,42 @@ export class ActionChipsElement extends CrLitElement {
     }
   }
 
-  protected onCreateImageClick_() {
-    recordClick(ChipType.kImage);
-    this.onActionChipClick_(
-        ActionChipsConstants.EMPTY_QUERY_STRING, [],
-        ComposeboxMode.CREATE_IMAGE);
-  }
-
-  protected onDeepDiveClick_(chip: ActionChip) {
-    recordClick(ChipType.kDeepDive);
-    const tab = chip.tab!;
-    const deepDiveTabInfo: TabUpload = {
-      tabId: tab.tabId,
-      url: tab.url,
-      title: tab.title,
-      delayUpload: this.delayTabUploads_,
-    };
-    this.onActionChipClick_(
-        chip.suggestion, [deepDiveTabInfo], ComposeboxMode.DEFAULT);
-  }
-
-  protected onDeepSearchClick_() {
-    recordClick(ChipType.kDeepSearch);
-    this.onActionChipClick_(
-        ActionChipsConstants.EMPTY_QUERY_STRING, [],
-        ComposeboxMode.DEEP_SEARCH);
-  }
-
-  protected onTabContextClick_(tab: TabInfo) {
-    recordClick(ChipType.kRecentTab);
-    const recentTabInfo: TabUpload = {
-      tabId: tab.tabId,
-      url: tab.url,
-      title: tab.title,
-      delayUpload: this.delayTabUploads_,
-    };
-    this.onActionChipClick_(
-        ActionChipsConstants.EMPTY_QUERY_STRING, [recentTabInfo],
-        ComposeboxMode.DEFAULT);
-  }
-
-  protected handleClick_(chip: ActionChip): void {
-    switch (chip.type) {
-      case ChipType.kImage:
-        this.onCreateImageClick_();
+  protected onClick_(e: Event): void {
+    const index = Number((e.currentTarget as HTMLElement).dataset['index']);
+    const chip = this.actionChips_[index]!;
+    switch (chip.suggestTemplateInfo.typeIcon) {
+      case IconType.kBanana:
+        this.handler.activateMetricsFunnel('CreateImageChip');
+        this.onActionChipClick_(chip, ToolMode.kImageGen);
         break;
-      case ChipType.kDeepSearch:
-        this.onDeepSearchClick_();
+      case IconType.kGlobeWithSearchLoop:
+        this.handler.activateMetricsFunnel('DeepSearchChip');
+        this.onActionChipClick_(chip, ToolMode.kDeepSearch);
         break;
-      case ChipType.kRecentTab:
-        this.onTabContextClick_(chip.tab!);
+      case IconType.kFavicon:
+        this.handler.activateMetricsFunnel('RecentTabChip');
+        this.onActionChipClick_(chip, ToolMode.kUnspecified);
         break;
-      case ChipType.kDeepDive:
-        this.onDeepDiveClick_(chip);
+      case IconType.kSubArrowRight:
+        this.handler.activateMetricsFunnel('DeepDiveChip');
+        this.onActionChipClick_(chip, ToolMode.kUnspecified);
+        break;
+      case IconType.kDraftSpark:
+        this.handler.activateMetricsFunnel('CanvasChip');
+        this.onActionChipClick_(chip, ToolMode.kCanvas);
         break;
       default:
         // Do nothing yet...
     }
+  }
+
+  protected onRemoveClick_(e: MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    const index = Number((e.currentTarget as HTMLElement).dataset['index']);
+    const chip = this.actionChips_[index]!;
+    this.actionChips_ =
+        this.actionChips_.filter((c) => c.suggestion !== chip.suggestion);
   }
 
   protected getFaviconUrl_(url: string): string {
@@ -225,33 +200,71 @@ export class ActionChipsElement extends CrLitElement {
   }
 
   protected getMostRecentTabFaviconUrl_(chip: ActionChip) {
-    return chip.tab ? this.getFaviconUrl_(chip.tab.url.url) : '';
+    return chip.tab ? this.getFaviconUrl_(chip.tab.url) : '';
   }
 
-  private onActionChipClick_(
-      query: string, contextFiles: ContextualUpload[], mode: ComposeboxMode) {
-    this.fire('action-chip-click', {searchboxText: query, contextFiles, mode});
+  private onActionChipClick_(chip: ActionChip, mode: ToolMode) {
+    recordClick(chip.suggestTemplateInfo.typeIcon);
+    const contextFiles: TabUpload[] = [];
+    const tab = chip.tab;
+    if (tab) {
+      const tabInfo: TabUpload = {
+        tabId: tab.tabId,
+        url: tab.url,
+        title: tab.title,
+        delayUpload: this.delayTabUploads_,
+        origin: TabUploadOrigin.ACTION_CHIP,
+      };
+      contextFiles.push(tabInfo);
+    }
+    this.fire(
+        'action-chip-click',
+        {searchboxText: chip.suggestion, contextFiles, mode});
   }
 
   protected recentTabChipTitle_(chip: ActionChip) {
     if (!chip.tab) {
       return '';
     }
-    const url = new URL(chip.tab.url.url);
+    const url = new URL(chip.tab.url);
     const domain = url.hostname.replace(/^www\./, '');
-    return `${chip.title} - ${domain}`;
+    return `${chip.suggestTemplateInfo.secondaryText?.text ?? ''} - ${domain}`;
   }
 
-  protected isDeepDiveChip_(chip: ActionChip) {
-    return chip.type === ChipType.kDeepDive;
-  }
-
-  protected isRecentTabChip_(chip: ActionChip) {
-    return chip.type === ChipType.kRecentTab;
-  }
 
   protected showDashSimplifiedUI_(chip: ActionChip) {
-    return chip.type !== ChipType.kDeepDive && this.showSimplifiedUI_;
+    return chip.suggestTemplateInfo.typeIcon !== IconType.kSubArrowRight &&
+        this.showSimplifiedUI_;
+  }
+
+  protected getChipSubtitle_(chip: ActionChip): string {
+    const subtitle = (this.showSimplifiedUI_ && chip.suggestion) ?
+        chip.suggestion :
+        (chip.suggestTemplateInfo.secondaryText?.text ?? '');
+    const prefix = (subtitle && this.showDashSimplifiedUI_(chip)) ? ' - ' : '';
+    return `${prefix}${subtitle}`;
+  }
+
+  protected getChipTitle_(chip: ActionChip) {
+    const suggestion = chip.suggestion;
+
+    if (!chip.tab) {
+      return suggestion;
+    }
+
+    const tabTitle = chip.tab.title;
+    const url = new URL(chip.tab.url);
+    const domain = url.hostname.replace(/^www\./, '');
+
+    if (chip.suggestTemplateInfo.typeIcon === IconType.kFavicon) {
+      return `${tabTitle}\n${domain}`;
+    }
+
+    if (chip.suggestTemplateInfo.typeIcon === IconType.kSubArrowRight) {
+      return `${suggestion}\n${domain}`;
+    }
+
+    return suggestion;
   }
 }
 

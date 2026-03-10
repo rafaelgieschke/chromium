@@ -17,7 +17,7 @@
 #include "chrome/browser/ui/views/tabs/dragging/test/mock_tab_drag_context.h"
 #include "chrome/browser/ui/views/tabs/fake_base_tab_strip_controller.h"
 #include "chrome/browser/ui/views/tabs/fake_tab_slot_controller.h"
-#include "chrome/browser/ui/views/tabs/tab_close_button.h"
+#include "chrome/browser/ui/views/tabs/tab/tab_close_button.h"
 #include "chrome/browser/ui/views/tabs/tab_container_impl.h"
 #include "chrome/browser/ui/views/tabs/tab_group_header.h"
 #include "chrome/browser/ui/views/tabs/tab_group_views.h"
@@ -135,10 +135,7 @@ class FakeTabContainerController final : public TabContainerController {
     return tab_strip_controller_->IsBrowserClosing();
   }
 
-  bool CanExtendDragHandle() const override {
-    return !tab_strip_controller_->IsFrameCondensed() &&
-           !tab_strip_controller_->EverHasVisibleBackgroundTabShapes();
-  }
+  bool CanExtendDragHandle() const override { return true; }
 
   const views::View* GetTabClosingModeMouseWatcherHostView() const override {
     return nullptr;
@@ -197,7 +194,7 @@ class TabContainerTest : public ChromeViewsTestBase {
     tab_slot_controller_->set_tab_container(tab_container.get());
 
     widget_ =
-        CreateTestWidget(views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET);
+        CreateTestWidget(views::Widget::InitParams::CLIENT_OWNS_WIDGET);
     tab_container_ =
         widget_->GetRootView()->AddChildView(std::move(tab_container));
     drag_context_ =
@@ -383,7 +380,8 @@ class TabContainerTest : public ChromeViewsTestBase {
 
   void SetTabContainerWidth(int width) {
     tab_container_width_ = width;
-    gfx::Size size(tab_container_width_, GetLayoutConstant(TAB_STRIP_HEIGHT));
+    gfx::Size size(tab_container_width_,
+                   GetLayoutConstant(LayoutConstant::kTabStripHeight));
     drag_context_->SetSize(size);
     widget_->SetSize(size);
     tab_container_->SetSize(size);
@@ -393,7 +391,8 @@ class TabContainerTest : public ChromeViewsTestBase {
   // from Widget::SetSize.
   void SetTabContainerWidthSingleLayout(int width) {
     tab_container_width_ = width;
-    gfx::Size size(tab_container_width_, GetLayoutConstant(TAB_STRIP_HEIGHT));
+    gfx::Size size(tab_container_width_,
+                   GetLayoutConstant(LayoutConstant::kTabStripHeight));
     tab_container_->SetSize(size);
   }
 
@@ -1280,7 +1279,7 @@ TEST_F(TabContainerTest,
 }
 
 TEST_F(TabContainerTest, ZOrder_MixedScenario) {
-  auto* container_impl = static_cast<TabContainerImpl*>(tab_container_);
+  auto* container_impl = views::AsViewClass<TabContainerImpl>(tab_container_);
   Tab* pinned_tab =
       AddTab(0, std::nullopt, TabActive::kActive, TabPinned::kPinned);
   tab_groups::TabGroupId group = tab_groups::TabGroupId::GenerateNew();
@@ -1334,7 +1333,7 @@ TEST_F(TabContainerTest, ZOrder_MixedScenario) {
 }
 
 TEST_F(TabContainerTest, ZOrder_TabGroup) {
-  auto* container_impl = static_cast<TabContainerImpl*>(tab_container_);
+  auto* container_impl = views::AsViewClass<TabContainerImpl>(tab_container_);
   Tab* regular_tab = AddTab(0);
   tab_groups::TabGroupId group = tab_groups::TabGroupId::GenerateNew();
   Tab* grouped_tab = AddTab(1, group);
@@ -1366,7 +1365,7 @@ TEST_F(TabContainerTest, ZOrder_TabGroup) {
 }
 
 TEST_F(TabContainerTest, ZOrder_PinnedTab) {
-  auto* container_impl = static_cast<TabContainerImpl*>(tab_container_);
+  auto* container_impl = views::AsViewClass<TabContainerImpl>(tab_container_);
   Tab* pinned_tab =
       AddTab(0, std::nullopt, TabActive::kInactive, TabPinned::kPinned);
   Tab* regular_tab = AddTab(1);
@@ -1401,7 +1400,7 @@ TEST_F(TabContainerTest, ZOrder_PinnedTab) {
 }
 
 TEST_F(TabContainerTest, ZOrder_HoveredTabIsAfterNormalTab) {
-  auto* container_impl = static_cast<TabContainerImpl*>(tab_container_);
+  auto* container_impl = views::AsViewClass<TabContainerImpl>(tab_container_);
   Tab* tab1 = AddTab(0);
   Tab* tab2 = AddTab(1);
   container_impl->CompleteAnimationAndLayout();
@@ -1425,7 +1424,7 @@ TEST_F(TabContainerTest, ZOrder_HoveredTabIsAfterNormalTab) {
 }
 
 TEST_F(TabContainerTest, ZOrder_ActiveTabIsLast) {
-  auto* container_impl = static_cast<TabContainerImpl*>(tab_container_);
+  auto* container_impl = views::AsViewClass<TabContainerImpl>(tab_container_);
   AddTab(0);
   AddTab(1, std::nullopt, TabActive::kActive);
   AddTab(2);
@@ -1437,7 +1436,7 @@ TEST_F(TabContainerTest, ZOrder_ActiveTabIsLast) {
 }
 
 TEST_F(TabContainerTest, ZOrderCacheUpdatesAfterCRUDOperations) {
-  auto* container_impl = static_cast<TabContainerImpl*>(tab_container_);
+  auto* container_impl = views::AsViewClass<TabContainerImpl>(tab_container_);
   container_impl->CompleteAnimationAndLayout();
   container_impl->UpdateZOrderCacheForTesting();
   EXPECT_EQ(container_impl->GetZOrderCacheForTesting().size(), 0u);

@@ -19,7 +19,6 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/containers/heap_array.h"
 #include "base/containers/span.h"
 #include "base/strings/string_number_conversions.h"
@@ -74,7 +73,7 @@ void NormalizeInitState(gpu::gles2::GLES2DecoderTestBase::InitState* init) {
   };
   bool contains_vao_extension = false;
   for (const char* extension : kVAOExtensions) {
-    if (base::Contains(init->extensions, extension)) {
+    if (init->extensions.contains(extension)) {
       contains_vao_extension = true;
       break;
     }
@@ -353,10 +352,6 @@ ContextResult GLES2DecoderTestBase::MaybeInitDecoderWithWorkarounds(
       .RetiresOnSaturation();
   EXPECT_CALL(*gl_, GetIntegerv(GL_STENCIL_BITS, _))
       .WillOnce(SetArgPointee<1>(normalized_init.has_stencil ? 8 : 0))
-      .RetiresOnSaturation();
-
-  EXPECT_CALL(*gl_,
-              GetShaderPrecisionFormat(GL_FRAGMENT_SHADER, GL_HIGH_FLOAT, _, _))
       .RetiresOnSaturation();
 
   static auto max_viewport_dims =

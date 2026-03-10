@@ -809,6 +809,145 @@ TEST_F(NavigationControllerTest, LoadURLWithExtraParams_HttpPost) {
   CheckNavigationEntryMatchLoadParams(load_url_params, entry);
 }
 
+// Test that extra headers are cleared on cross-origin redirect when
+// |remove_extra_headers_on_cross_origin_redirect| is true.
+TEST_F(NavigationControllerTest, CrossOriginRedirectRemovesHeaders) {
+  NavigationControllerImpl& controller = controller_impl();
+  const GURL url1("http://foo1.com/foo");
+  const GURL url2("http://foo2.com/bar");
+  const std::string kExtraHeaders = "Foo: Bar\nBaz: Qux";
+  std::string kExtraHeadersCRLF;
+  base::ReplaceChars(kExtraHeaders, "\n", "\r\n", &kExtraHeadersCRLF);
+
+  auto navigation =
+      NavigationSimulatorImpl::CreateBrowserInitiated(url1, contents());
+  NavigationController::LoadURLParams load_url_params(url1);
+  load_url_params.extra_headers = kExtraHeaders;
+  load_url_params.remove_extra_headers_on_cross_origin_redirect = true;
+  navigation->SetLoadURLParams(&load_url_params);
+  navigation->Start();
+
+  // The pending entry should have the extra headers.
+  NavigationEntryImpl* pending_entry = controller.GetPendingEntry();
+  ASSERT_TRUE(pending_entry);
+  EXPECT_EQ(kExtraHeadersCRLF, pending_entry->extra_headers());
+
+  // Redirect to a cross-origin URL.
+  navigation->Redirect(url2);
+  navigation->Commit();
+
+  // The committed entry should not have the extra headers.
+  NavigationEntryImpl* committed_entry = controller.GetLastCommittedEntry();
+  ASSERT_TRUE(committed_entry);
+  EXPECT_TRUE(committed_entry->extra_headers().empty());
+}
+
+// Test that extra headers are kept on same-origin redirect when
+// |remove_extra_headers_on_cross_origin_redirect| is true.
+TEST_F(NavigationControllerTest, SameOriginRedirectKeepsHeaders) {
+  NavigationControllerImpl& controller = controller_impl();
+  const GURL url1("http://foo.com/foo");
+  const GURL url2("http://foo.com/bar");
+  const std::string kExtraHeaders = "Foo: Bar\nBaz: Qux";
+  std::string kExtraHeadersCRLF;
+  base::ReplaceChars(kExtraHeaders, "\n", "\r\n", &kExtraHeadersCRLF);
+
+  auto navigation =
+      NavigationSimulatorImpl::CreateBrowserInitiated(url1, contents());
+  NavigationController::LoadURLParams load_url_params(url1);
+  load_url_params.extra_headers = kExtraHeaders;
+  load_url_params.remove_extra_headers_on_cross_origin_redirect = true;
+  navigation->SetLoadURLParams(&load_url_params);
+  navigation->Start();
+
+  // The pending entry should have the extra headers.
+  NavigationEntryImpl* pending_entry = controller.GetPendingEntry();
+  ASSERT_TRUE(pending_entry);
+  EXPECT_EQ(kExtraHeadersCRLF, pending_entry->extra_headers());
+
+  // Redirect to a same-origin URL.
+  navigation->Redirect(url2);
+  navigation->Commit();
+
+  // The committed entry should have the extra headers.
+  NavigationEntryImpl* committed_entry = controller.GetLastCommittedEntry();
+  ASSERT_TRUE(committed_entry);
+  EXPECT_EQ(kExtraHeadersCRLF, committed_entry->extra_headers());
+}
+
+// Test that extra headers are kept on cross-origin redirect when
+// |remove_extra_headers_on_cross_origin_redirect| is false.
+TEST_F(NavigationControllerTest, CrossOriginRedirectKeepsHeadersWithoutFlag) {
+  NavigationControllerImpl& controller = controller_impl();
+  const GURL url1("http://foo1.com/foo");
+  const GURL url2("http://foo2.com/bar");
+  const std::string kExtraHeaders = "Foo: Bar\nBaz: Qux";
+  std::string kExtraHeadersCRLF;
+  base::ReplaceChars(kExtraHeaders, "\n", "\r\n", &kExtraHeadersCRLF);
+
+  auto navigation =
+      NavigationSimulatorImpl::CreateBrowserInitiated(url1, contents());
+  NavigationController::LoadURLParams load_url_params(url1);
+  load_url_params.extra_headers = kExtraHeaders;
+  load_url_params.remove_extra_headers_on_cross_origin_redirect = false;
+  navigation->SetLoadURLParams(&load_url_params);
+  navigation->Start();
+
+  // The pending entry should have the extra headers.
+  NavigationEntryImpl* pending_entry = controller.GetPendingEntry();
+  ASSERT_TRUE(pending_entry);
+  EXPECT_EQ(kExtraHeadersCRLF, pending_entry->extra_headers());
+
+  // Redirect to a cross-origin URL.
+  navigation->Redirect(url2);
+  navigation->Commit();
+
+  // The committed entry should have the extra headers.
+  NavigationEntryImpl* committed_entry = controller.GetLastCommittedEntry();
+  ASSERT_TRUE(committed_entry);
+  EXPECT_EQ(kExtraHeadersCRLF, committed_entry->extra_headers());
+}
+
+// Test that extra headers are cleared on cross-origin redirect when
+// |remove_extra_headers_on_cross_origin_redirect| is true.
+// This test specifically covers the case where the initial navigation is not
+// redirected, but is later redirected when the NavigationEntry is reloaded.
+TEST_F(NavigationControllerTest, CrossOriginRedirectRemovesHeaders_Reload) {
+  NavigationControllerImpl& controller = controller_impl();
+  const GURL url1("http://foo1.com/foo");
+  const GURL url2("http://foo2.com/bar");
+  const std::string kExtraHeaders = "Foo: Bar\nBaz: Qux";
+  std::string kExtraHeadersCRLF;
+  base::ReplaceChars(kExtraHeaders, "\n", "\r\n", &kExtraHeadersCRLF);
+
+  auto navigation =
+      NavigationSimulatorImpl::CreateBrowserInitiated(url1, contents());
+  NavigationController::LoadURLParams load_url_params(url1);
+  load_url_params.extra_headers = kExtraHeaders;
+  load_url_params.remove_extra_headers_on_cross_origin_redirect = true;
+  navigation->SetLoadURLParams(&load_url_params);
+  navigation->Start();
+  navigation->Commit();
+
+  // The committed entry should have the extra headers.
+  NavigationEntryImpl* initial_entry = controller.GetLastCommittedEntry();
+  ASSERT_TRUE(initial_entry);
+  EXPECT_EQ(kExtraHeadersCRLF, initial_entry->extra_headers());
+
+  // Reload the entry.
+  controller.Reload(ReloadType::NORMAL, true);
+  auto reload = NavigationSimulator::CreateFromPending(controller);
+
+  // Redirect to a cross-origin URL.
+  reload->Redirect(url2);
+  reload->Commit();
+
+  // The committed entry should not have the extra headers.
+  NavigationEntryImpl* reload_entry = controller.GetLastCommittedEntry();
+  ASSERT_TRUE(reload_entry);
+  EXPECT_TRUE(reload_entry->extra_headers().empty());
+}
+
 // Tests what happens when the same page is loaded again.  Should not create a
 // new session history entry. This is what happens when you press enter in the
 // URL bar to reload: a pending entry is created and then it is discarded when
@@ -1155,14 +1294,9 @@ TEST_F(NavigationControllerTest, LoadURL_IgnorePreemptsPending) {
   EXPECT_FALSE(controller.GetPendingEntry());
   // The pending entry deletion and commit of the new NavigationEntry both
   // count as "navigation state change", though only one notification will be
-  // sent if kSkipRedundantNavigationStateNotification is enabled.
+  // sent.
   EXPECT_EQ(0, controller.GetLastCommittedEntryIndex());
-  if (base::FeatureList::IsEnabled(
-          features::kSkipRedundantNavigationStateNotification)) {
-    EXPECT_EQ(2, delegate->navigation_state_change_count());
-  } else {
-    EXPECT_EQ(3, delegate->navigation_state_change_count());
-  }
+  EXPECT_EQ(2, delegate->navigation_state_change_count());
 
   contents()->SetDelegate(nullptr);
 }
@@ -1385,9 +1519,11 @@ TEST_F(NavigationControllerTest, ReloadWithGuest) {
 
   // Ensure the entry's SiteInstance and RenderProcessHost are for a guest.
   NavigationEntryImpl* entry1 = controller.GetVisibleEntry();
-  ASSERT_EQ(entry1->site_instance()->GetStoragePartitionConfig(),
+  ASSERT_EQ(entry1->site_instance()
+                ->GetSecurityPrincipal()
+                .GetStoragePartitionConfig(),
             kGuestPartitionConfig);
-  ASSERT_TRUE(entry1->site_instance()->IsGuest());
+  ASSERT_TRUE(entry1->site_instance()->GetSecurityPrincipal().IsGuest());
   ASSERT_TRUE(entry1->site_instance()->GetProcess()->IsForGuestsOnly());
 
   // And reload.
@@ -3929,9 +4065,8 @@ TEST_F(NavigationControllerTest, NoURLRewriteForSubframes) {
       false /* should_replace_current_entry */,
       blink::NavigationDownloadPolicy(), "GET", nullptr, "",
       network::mojom::SourceLocation::New(), nullptr,
-      false /*is_form_submission*/, std::nullopt,
-      blink::mojom::NavigationInitiatorActivationAndAdStatus::
-          kDidNotStartWithTransientActivation,
+      false /* is_form_submission */, std::nullopt,
+      false /* has_user_gesture */, false /* started_by_ad */,
       base::TimeTicks::Now() /* actual_navigation_start_time */,
       base::TimeTicks::Now() /* navigation_start_time */);
 
@@ -3974,9 +4109,8 @@ TEST_F(NavigationControllerTest,
       Referrer(), ui::PAGE_TRANSITION_LINK, should_replace_current_entry,
       blink::NavigationDownloadPolicy(), "GET", nullptr, "",
       network::mojom::SourceLocation::New(), nullptr,
-      false /*is_form_submission*/, std::nullopt,
-      blink::mojom::NavigationInitiatorActivationAndAdStatus::
-          kDidNotStartWithTransientActivation,
+      false /* is_form_submission */, std::nullopt,
+      false /* has_user_gesture */, false /* started_by_ad */,
       base::TimeTicks::Now() /* actual_navigation_start_time */,
       base::TimeTicks::Now() /* navigation_start_time */);
   NavigationRequest* request = node->navigation_request();
@@ -4361,9 +4495,8 @@ TEST_F(NavigationControllerFencedFrameTest, NoURLRewriteForFencedFrames) {
       false /* should_replace_current_entry */,
       blink::NavigationDownloadPolicy(), "GET", nullptr, "",
       network::mojom::SourceLocation::New(), nullptr,
-      false /*is_form_submission*/, std::nullopt,
-      blink::mojom::NavigationInitiatorActivationAndAdStatus::
-          kDidNotStartWithTransientActivation,
+      false /* is_form_submission */, std::nullopt,
+      false /* has_user_gesture */, false /* started_by_ad */,
       base::TimeTicks::Now() /* actual_navigation_start_time */,
       base::TimeTicks::Now() /* navigation_start_time */);
 

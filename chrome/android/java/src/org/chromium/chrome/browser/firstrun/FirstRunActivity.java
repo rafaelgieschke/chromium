@@ -29,8 +29,10 @@ import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ApplicationStatus.ActivityStateListener;
 import org.chromium.base.DeviceInfo;
+import org.chromium.base.FeatureList;
 import org.chromium.base.Promise;
 import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.shared_preferences.SharedPreferencesManager;
 import org.chromium.build.annotations.Initializer;
 import org.chromium.build.annotations.MonotonicNonNull;
 import org.chromium.build.annotations.NullMarked;
@@ -38,11 +40,15 @@ import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.customtabs.CustomTabActivity;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.metrics.UmaUtils;
+import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
+import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
 import org.chromium.chrome.browser.signin.SigninCheckerProvider;
 import org.chromium.chrome.browser.signin.SigninFirstRunFragment;
+import org.chromium.chrome.browser.ui.default_browser_promo.DefaultBrowserPromoUtils;
 import org.chromium.chrome.browser.ui.edge_to_edge.EdgeToEdgeUtils;
 import org.chromium.chrome.browser.ui.signin.DialogWhenLargeContentLayout;
 import org.chromium.chrome.browser.ui.signin.SigninUtils;
@@ -284,6 +290,26 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
         mPages.add(new FirstRunPage<>(HistorySyncFirstRunFragment.class, showHistorySync));
         mFreProgressStates.add(MobileFreProgress.HISTORY_SYNC_OPT_IN_SHOWN);
 
+        if (ChromeFeatureList.sDefaultBrowserPromoFre.isEnabled()) {
+            BooleanSupplier showDefaultBrowserPromo =
+                    () -> {
+                        // Skip CCT.
+                        if (isLaunchedFromCct()) return false;
+
+                        // Restrict promos to FRE triggered via main intents only (exclude FRE
+                        // before CCTs/PWAs/TWAs).
+                        if (!mLaunchedFromChromeIcon) return false;
+
+                        return DefaultBrowserPromoUtils.getInstance()
+                                .shouldShowRoleManagerPromoForFre(this);
+                    };
+
+            mPages.add(
+                    new FirstRunPage<>(
+                            DefaultBrowserPromoFirstRunFragment.class, showDefaultBrowserPromo));
+            mFreProgressStates.add(MobileFreProgress.DEFAULT_BROWSER_PROMO_SHOWN);
+        }
+
         if (mPagerAdapter != null) {
             mPagerAdapter.notifyDataSetChanged();
         }
@@ -434,6 +460,18 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
                 .notifyEvent(EventConstants.RESTORE_TABS_ON_FIRST_RUN_SHOW_PROMO);
         RecordHistogram.recordTimesHistogram(
                 "MobileFre.NativeInitialized", SystemClock.elapsedRealtime() - getStartTime());
+
+        if (FeatureList.isNativeInitialized()) {
+            if (ChromeFeatureList.isEnabled(ChromeFeatureList.XPLAT_SYNCED_SETUP)) {
+                SharedPreferencesManager prefManager = ChromeSharedPreferences.getInstance();
+                prefManager.writeBoolean(
+                        ChromePreferenceKeys.CROSS_DEVICE_IMPORTED_BOTTOM_OMNIBOX, false);
+                prefManager.writeBoolean(
+                        ChromePreferenceKeys.CROSS_DEVICE_IMPORTED_ALL_SETTINGS, false);
+            }
+        } else {
+            assert false : "Expected feature list to be initialized during FRE.";
+        }
     }
 
     private void onNativeDependenciesFullyInitialized() {
@@ -739,6 +777,14 @@ public class FirstRunActivity extends FirstRunActivityBase implements FirstRunPa
                         @Override
                         public void onAnimationEnd(Animator animation) {
                             mPager.endFakeDrag();
+                            if (ChromeFeatureList.sDefaultBrowserPromoFre.isEnabled()
+                                    && mPager.getCurrentItem() != position) {
+                                // When the user stays signed out, we jump from index 0 (sign-in
+                                // page) to index 2 (promo page) and skip index 1 (History sync).
+                                // Fake dragging seems to fail in multipage jumps, so we manually
+                                // jump to the target position.
+                                mPager.setCurrentItem(position, false);
+                            }
                             mAnimator = null;
                             // No need to call `mPager.setCurrentItem(position, false)`.
                         }

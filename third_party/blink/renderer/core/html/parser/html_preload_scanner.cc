@@ -82,6 +82,7 @@
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
+#include "third_party/perfetto/include/perfetto/tracing/track_event_args.h"
 
 namespace blink {
 
@@ -346,6 +347,13 @@ class TokenPreloadScanner::StartTagScanner {
                                  is_potentially_lcp_element)) {
       return nullptr;
     }
+    // Don't preload video poster if loading="lazy" is set.
+    if (RuntimeEnabledFeatures::LazyLoadVideoAndAudioEnabled() &&
+        type == ResourceType::kImage &&
+        Match(tag_impl_, html_names::kVideoTag) &&
+        loading_attr_value_ == LoadingAttributeValue::kLazy) {
+      return nullptr;
+    }
     // Do not set integrity metadata for <link> elements for destinations not
     // supporting SRI (crbug.com/1058045).
     // A corresponding check for non-preload-scanner code path is in
@@ -545,7 +553,7 @@ class TokenPreloadScanner::StartTagScanner {
       SetUrlToLoad(attribute_value, kDisallowURLReplacement);
     } else if (Match(attribute_name, html_names::kTypeAttr)) {
       input_is_image_ =
-          EqualIgnoringASCIICase(attribute_value, input_type_names::kImage);
+          EqualIgnoringAsciiCase(attribute_value, input_type_names::kImage);
     }
   }
 
@@ -575,10 +583,15 @@ class TokenPreloadScanner::StartTagScanner {
 
   void ProcessVideoAttribute(const AtomicString& attribute_name,
                              const String& attribute_value) {
-    if (Match(attribute_name, html_names::kPosterAttr))
+    if (Match(attribute_name, html_names::kPosterAttr)) {
       SetUrlToLoad(attribute_value, kDisallowURLReplacement);
-    else if (Match(attribute_name, html_names::kCrossoriginAttr))
+    } else if (Match(attribute_name, html_names::kCrossoriginAttr)) {
       SetCrossOrigin(attribute_value);
+    } else if (RuntimeEnabledFeatures::LazyLoadVideoAndAudioEnabled() &&
+               loading_attr_value_ == LoadingAttributeValue::kAuto &&
+               Match(attribute_name, html_names::kLoadingAttr)) {
+      loading_attr_value_ = GetLoadingAttributeValue(attribute_value);
+    }
   }
 
   void ProcessAttribute(const AtomicString& attribute_name,
@@ -638,10 +651,10 @@ class TokenPreloadScanner::StartTagScanner {
     // http://www.whatwg.org/specs/web-apps/current-work/multipage/tokenization.html#attribute-name-state
     if (replacement == kDisallowURLReplacement && !url_to_load_.empty())
       return;
-    String url = StripLeadingAndTrailingHTMLSpaces(value);
+    StringView url = StripLeadingAndTrailingHtmlSpaces(value);
     if (url.empty())
       return;
-    url_to_load_ = url;
+    url_to_load_ = url.ToString();
   }
 
   const String& Charset() const {
@@ -916,13 +929,13 @@ void TokenPreloadScanner::HandleMetaNameAttribute(
     return;
 
   String content_attribute_value(content_attribute->Value());
-  if (EqualIgnoringASCIICase(name_attribute_value, "viewport")) {
+  if (EqualIgnoringAsciiCase(name_attribute_value, "viewport")) {
     HandleMetaViewport(content_attribute_value, document_parameters_.get(),
                        EnsureMediaValues(), viewport);
     return;
   }
 
-  if (EqualIgnoringASCIICase(name_attribute_value, "referrer")) {
+  if (EqualIgnoringAsciiCase(name_attribute_value, "referrer")) {
     HandleMetaReferrer(content_attribute_value, document_parameters_.get(),
                        &css_scanner_);
   }
@@ -995,8 +1008,8 @@ void TokenPreloadScanner::Scan(const HTMLToken& token,
         if (shadowrootmode_attribute) {
           String shadowrootmode_value(shadowrootmode_attribute->Value());
           is_declarative_shadow_root =
-              EqualIgnoringASCIICase(shadowrootmode_value, "open") ||
-              EqualIgnoringASCIICase(shadowrootmode_value, "closed");
+              EqualIgnoringAsciiCase(shadowrootmode_value, "open") ||
+              EqualIgnoringAsciiCase(shadowrootmode_value, "closed");
         }
         // If this is a declarative shadow root <template shadowrootmode>
         // element *and* we're not already inside a non-DSD <template> element,
@@ -1038,10 +1051,10 @@ void TokenPreloadScanner::Scan(const HTMLToken& token,
             token.GetAttributeItem(html_names::kHttpEquivAttr);
         if (equiv_attribute) {
           String equiv_attribute_value(equiv_attribute->Value());
-          if (EqualIgnoringASCIICase(equiv_attribute_value,
+          if (EqualIgnoringAsciiCase(equiv_attribute_value,
                                      "content-security-policy")) {
             ++(*csp_meta_tag_count);
-          } else if (EqualIgnoringASCIICase(equiv_attribute_value,
+          } else if (EqualIgnoringAsciiCase(equiv_attribute_value,
                                             http_names::kAcceptCH)) {
             const HTMLToken::Attribute* content_attribute =
                 token.GetAttributeItem(html_names::kContentAttr);
@@ -1052,7 +1065,7 @@ void TokenPreloadScanner::Scan(const HTMLToken& token,
                               .is_doc_preloader =
                                   scanner_type_ == ScannerType::kMainDocument});
             }
-          } else if (EqualIgnoringASCIICase(equiv_attribute_value,
+          } else if (EqualIgnoringAsciiCase(equiv_attribute_value,
                                             http_names::kDelegateCH)) {
             const HTMLToken::Attribute* content_attribute =
                 token.GetAttributeItem(html_names::kContentAttr);
@@ -1080,7 +1093,7 @@ void TokenPreloadScanner::Scan(const HTMLToken& token,
             token.GetAttributeItem(html_names::kSrcAttr);
         if (source_attribute) {
           String source_attribute_value(source_attribute->Value());
-          if (source_attribute_value.StartsWithIgnoringASCIICase("data:")) {
+          if (source_attribute_value.StartsWithIgnoringAsciiCase("data:")) {
             return;
           }
         }
@@ -1132,7 +1145,7 @@ void TokenPreloadScanner::UpdatePredictedBaseURL(const HTMLToken& token) {
   if (const HTMLToken::Attribute* href_attribute =
           token.GetAttributeItem(html_names::kHrefAttr)) {
     KURL url(document_url_,
-             StripLeadingAndTrailingHTMLSpaces(href_attribute->Value()));
+             StripLeadingAndTrailingHtmlSpaces(href_attribute->Value()));
     bool is_valid_base_url =
         url.IsValid() && !url.ProtocolIsData() && !url.ProtocolIsJavaScript();
     predicted_base_element_url_ = is_valid_base_url ? url : KURL();
@@ -1204,19 +1217,18 @@ HTMLPreloadScanner::HTMLPreloadScanner(
       tokenizer_(std::move(tokenizer)),
       script_token_scanner_(std::move(script_token_scanner)),
       take_preload_(std::move(take_preload)) {
-  TRACE_EVENT_WITH_FLOW0("blink", "HTMLPreloadScanner::HTMLPreloadScanner",
-                         TRACE_ID_LOCAL(this), TRACE_EVENT_FLAG_FLOW_OUT);
+  TRACE_EVENT("blink", "HTMLPreloadScanner::HTMLPreloadScanner",
+              perfetto::Flow::FromPointer(this));
 }
 
 HTMLPreloadScanner::~HTMLPreloadScanner() {
-  TRACE_EVENT_WITH_FLOW0("blink", "HTMLPreloadScanner::~HTMLPreloadScanner",
-                         TRACE_ID_LOCAL(this), TRACE_EVENT_FLAG_FLOW_IN);
+  TRACE_EVENT("blink", "HTMLPreloadScanner::~HTMLPreloadScanner",
+              perfetto::TerminatingFlow::FromPointer(this));
 }
 
 void HTMLPreloadScanner::AppendToEnd(const SegmentedString& source) {
-  TRACE_EVENT_WITH_FLOW0("blink", "HTMLPreloadScanner::AppendToEnd",
-                         TRACE_ID_LOCAL(this),
-                         TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT);
+  TRACE_EVENT("blink", "HTMLPreloadScanner::AppendToEnd",
+              perfetto::Flow::FromPointer(this));
   source_.Append(source);
 }
 
@@ -1224,10 +1236,9 @@ std::unique_ptr<PendingPreloadData> HTMLPreloadScanner::Scan(
     const KURL& starting_base_element_url) {
   auto pending_data = std::make_unique<PendingPreloadData>();
 
-  TRACE_EVENT_WITH_FLOW1("blink", "HTMLPreloadScanner::scan",
-                         TRACE_ID_LOCAL(this),
-                         TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT,
-                         "source_length", source_.length());
+  TRACE_EVENT("blink", "HTMLPreloadScanner::scan",
+              perfetto::Flow::FromPointer(this), "source_length",
+              source_.length());
 
   // When we start scanning, our best prediction of the baseElementURL is the
   // real one!
@@ -1256,7 +1267,7 @@ std::unique_ptr<PendingPreloadData> HTMLPreloadScanner::Scan(
       // Don't preload anything if a CSP meta tag is found. We should rarely
       // find them here because the HTMLPreloadScanner is only used for the
       // synchronous parsing path.
-      CHECK(csp_meta_tag_count >= 0);
+      CHECK_GE(csp_meta_tag_count, 0);
       if (csp_meta_tag_count) {
         // Reset the tokenizer, to avoid re-scanning tokens that we are about to
         // start parsing.
@@ -1282,9 +1293,8 @@ std::unique_ptr<PendingPreloadData> HTMLPreloadScanner::Scan(
 void HTMLPreloadScanner::ScanInBackground(
     const String& source,
     const KURL& document_base_element_url) {
-  TRACE_EVENT_WITH_FLOW0("blink", "HTMLPreloadScanner::ScanInBackground",
-                         TRACE_ID_LOCAL(this),
-                         TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT);
+  TRACE_EVENT("blink", "HTMLPreloadScanner::ScanInBackground",
+              perfetto::Flow::FromPointer(this));
   source_.Append(source);
   take_preload_.Run(Scan(document_base_element_url));
 }

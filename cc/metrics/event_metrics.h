@@ -5,6 +5,7 @@
 #ifndef CC_METRICS_EVENT_METRICS_H_
 #define CC_METRICS_EVENT_METRICS_H_
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -238,9 +239,8 @@ class CC_EXPORT EventMetrics {
   // Timestamps of different stages of event dispatch. Timestamps are set as the
   // event moves forward in the pipeline. In the end, some stages might not have
   // a timestamp which means the event did not pass those stages.
-  base::TimeTicks
-      dispatch_stage_timestamps_[static_cast<int>(DispatchStage::kMaxValue) +
-                                 1];
+  std::array<base::TimeTicks, static_cast<int>(DispatchStage::kMaxValue) + 1>
+      dispatch_stage_timestamps_;
 
   // Determines whether a tracing event should be recorded for this object or
   // not. This is `true` by default and set to `false` after a tracing event is
@@ -369,6 +369,13 @@ class CC_EXPORT ScrollEventMetrics : public EventMetrics {
 
   const DispatchBeginFrameArgs& dispatch_args() const { return dispatch_args_; }
 
+  void set_scroll_jank_v4_result_id(std::optional<uint64_t> id) {
+    scroll_jank_v4_result_id_ = id;
+  }
+  std::optional<uint64_t> scroll_jank_v4_result_id() const {
+    return scroll_jank_v4_result_id_;
+  }
+
  protected:
   ScrollEventMetrics(EventType type,
                      ScrollType scroll_type,
@@ -402,6 +409,12 @@ class CC_EXPORT ScrollEventMetrics : public EventMetrics {
   // These may not match those of CompositorFrameReporter for which the event
   // is eventually displayed.
   DispatchBeginFrameArgs dispatch_args_;
+
+  // The ID of the result of the scroll jank V4 metric for the frame in which
+  // this event was first presented. This ID makes it easy to retrieve the
+  // mapping between "EventLatency" and "ScrollJankV4" slices in traces. Only
+  // set for scroll updates and ends.
+  std::optional<uint64_t> scroll_jank_v4_result_id_;
 };
 
 class CC_EXPORT ScrollUpdateEventMetrics : public ScrollEventMetrics {

@@ -55,6 +55,10 @@ const char* GetMotionEventActionName(MotionEvent::Action action) {
       return "Action::BUTTON_PRESS";
     case MotionEvent::Action::BUTTON_RELEASE:
       return "Action::BUTTON_RELEASE";
+    case MotionEvent::Action::OUTSIDE:
+      return "Action::OUTSIDE";
+    case MotionEvent::Action::SCROLL:
+      return "Action::SCROLL";
   }
   return "";
 }
@@ -943,8 +947,7 @@ GestureDetector* GestureProvider::GetGestureDetectorForTesting() {
   if (!gesture_listener_) {
     return nullptr;
   }
-  return static_cast<GestureListenerImpl*>(gesture_listener_.get())
-      ->GetGestureDetectorForTesting();  // IN-TEST
+  return gesture_listener_->GetGestureDetectorForTesting();  // IN-TEST
 }
 
 bool GestureProvider::CanHandle(const MotionEvent& event) const {
@@ -995,6 +998,8 @@ void GestureProvider::OnTouchEventHandlingBegin(const MotionEvent& event) {
     case MotionEvent::Action::HOVER_MOVE:
     case MotionEvent::Action::BUTTON_PRESS:
     case MotionEvent::Action::BUTTON_RELEASE:
+    case MotionEvent::Action::OUTSIDE:
+    case MotionEvent::Action::SCROLL:
       NOTREACHED();
   }
 }
@@ -1045,6 +1050,8 @@ void GestureProvider::OnTouchEventHandlingEnd(const MotionEvent& event) {
     case MotionEvent::Action::HOVER_MOVE:
     case MotionEvent::Action::BUTTON_PRESS:
     case MotionEvent::Action::BUTTON_RELEASE:
+    case MotionEvent::Action::OUTSIDE:
+    case MotionEvent::Action::SCROLL:
       NOTREACHED();
   }
 }

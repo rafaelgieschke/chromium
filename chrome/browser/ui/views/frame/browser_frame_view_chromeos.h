@@ -24,6 +24,7 @@
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/display/display_observer.h"
 #include "ui/display/tablet_state.h"
+#include "ui/gfx/geometry/rounded_corners_f.h"
 
 class ProfileIndicatorIcon;
 class TabIconView;
@@ -56,16 +57,13 @@ class BrowserFrameViewChromeOS
 
   // BrowserFrameView:
   BrowserLayoutParams GetBrowserLayoutParams() const override;
-  gfx::Rect GetBoundsForTabStripRegion(
-      const gfx::Size& tabstrip_minimum_size) const override;
-  gfx::Rect GetBoundsForWebAppFrameToolbar(
-      const gfx::Size& toolbar_preferred_size) const override;
   bool ShouldShowWebAppFrameToolbar() const override;
   int GetTopInset(bool restored) const override;
   void UpdateThrobber(bool running) override;
   SkColor GetCaptionColor(BrowserFrameActiveState active_state) const override;
   SkColor GetFrameColor(BrowserFrameActiveState active_state) const override;
   void UpdateMinimumSize() override;
+  gfx::RoundedCornersF GetWindowRoundedCorners() const override;
 
   // views::FrameView:
   gfx::Rect GetBoundsForClientView() const override;

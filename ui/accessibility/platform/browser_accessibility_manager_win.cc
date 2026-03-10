@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/containers/heap_array.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -19,6 +18,7 @@
 #include "base/win/scoped_bstr.h"
 #include "base/win/scoped_variant.h"
 #include "base/win/windows_version.h"
+#include "ui/accessibility/accessibility_features.h"
 #include "ui/accessibility/ax_role_properties.h"
 #include "ui/accessibility/platform/ax_fragment_root_win.h"
 #include "ui/accessibility/platform/ax_platform.h"
@@ -87,6 +87,12 @@ BrowserAccessibilityManagerWin::BrowserAccessibilityManagerWin(
     AXPlatformTreeManagerDelegate* delegate)
     : BrowserAccessibilityManager(node_id_delegate, delegate) {
   win::CreateATLModuleIfNeeded();
+  // Hydrate the custom property registry if MathML support is enabled.
+  // Since we don't fire any events that call into the registrar like the other
+  // custom properties, we need to ensure it's initialized here.
+  if (features::IsUiaMathMlSupportEnabled()) {
+    ui::UiaRegistrarWin::GetInstance();
+  }
   Initialize(initial_tree);
 }
 
@@ -267,6 +273,9 @@ void BrowserAccessibilityManagerWin::FireSourceEvent(
     case ax::mojom::Event::kClicked:
       if (node->GetData().IsInvocable())
         FireUiaAccessibilityEvent(UIA_Invoke_InvokedEventId, node);
+      break;
+    case ax::mojom::Event::kControlsChanged:
+      FireUiaPropertyChangedEvent(UIA_ControllerForPropertyId, node);
       break;
     case ax::mojom::Event::kEndOfTest:
       // Event tests use kEndOfTest as a sentinel to mark the end of the test.
@@ -593,6 +602,15 @@ void BrowserAccessibilityManagerWin::FireGeneratedEvent(
     case AXEventGenerator::Event::TEXT_ATTRIBUTE_CHANGED:
       FireWinAccessibilityEvent(IA2_EVENT_TEXT_ATTRIBUTE_CHANGED, wrapper);
       break;
+    case AXEventGenerator::Event::SPELLING_MARKER_CHANGED:
+      FireUiaChangesEvent(wrapper, AnnotationType_SpellingError);
+      break;
+    case AXEventGenerator::Event::GRAMMAR_MARKER_CHANGED:
+      FireUiaChangesEvent(wrapper, AnnotationType_GrammarError);
+      break;
+    case AXEventGenerator::Event::HIGHLIGHT_MARKER_CHANGED:
+      FireUiaChangesEvent(wrapper, AnnotationType_Highlighted);
+      break;
     case AXEventGenerator::Event::VALUE_IN_TEXT_FIELD_CHANGED:
       DCHECK(wrapper->IsTextField());
       FireWinAccessibilityEvent(EVENT_OBJECT_VALUECHANGE, wrapper);
@@ -671,8 +689,8 @@ void BrowserAccessibilityManagerWin::FireWinAccessibilityEvent(
 
 bool BrowserAccessibilityManagerWin::IsIgnoredChangedNode(
     const BrowserAccessibility* node) const {
-  return base::Contains(ignored_changed_nodes_,
-                        const_cast<BrowserAccessibility*>(node));
+  return ignored_changed_nodes_.contains(
+      const_cast<BrowserAccessibility*>(node));
 }
 
 void BrowserAccessibilityManagerWin::FireUiaAccessibilityEvent(
@@ -854,10 +872,57 @@ void BrowserAccessibilityManagerWin::FireUiaActiveTextPositionChangedEvent(
   active_text_position_changed_func(provider, text_range.Get());
 }
 
+void BrowserAccessibilityManagerWin::FireUiaChangesEvent(
+    BrowserAccessibility* node,
+    int annotation_type_id) {
+  if (!AXPlatform::GetInstance().IsUiaProviderEnabled()) {
+    return;
+  }
+  if (!ShouldFireEventForNode(node)) {
+    return;
+  }
+  if (IsIgnoredChangedNode(node) || node->IsIgnored()) {
+    return;
+  }
+
+  // UiaRaiseChangesEvent is available since Windows 10 according to
+  // https://learn.microsoft.com/en-us/windows/win32/api/uiautomationcoreapi/nf-uiautomationcoreapi-uiaraisechangesevent#requirements.
+  // Resolve it at runtime to avoid failing to load on older versions.
+  using UiaRaiseChangesEventFunction =
+      HRESULT(WINAPI*)(IRawElementProviderSimple*, int, UiaChangeInfo*);
+  static const UiaRaiseChangesEventFunction raise_changes_event_func =
+      reinterpret_cast<UiaRaiseChangesEventFunction>(::GetProcAddress(
+          ::GetModuleHandle(L"uiautomationcore.dll"), "UiaRaiseChangesEvent"));
+  if (!raise_changes_event_func) {
+    return;
+  }
+
+  auto* provider = ToBrowserAccessibilityWin(node)->GetCOM();
+  if (!provider->HasEventListenerForEvent(UIA_ChangesEventId)) {
+    return;
+  }
+
+  WinAccessibilityAPIUsageScopedUIAEventsNotifier scoped_events_notifier;
+
+  UiaChangeInfo change = {};
+  change.uiaId = annotation_type_id;
+  // TODO(crbug.com/479561828): Set the payload field of UiaChangeInfo with
+  // relevant information of the change, such as the marker's text content when
+  // there's a spelling or grammar error.
+  raise_changes_event_func(provider, 1, &change);
+}
+
 bool BrowserAccessibilityManagerWin::CanFireEvents() const {
-  return BrowserAccessibilityManager::CanFireEvents() &&
-         GetDelegateFromRootManager() &&
-         GetDelegateFromRootManager()->AccessibilityGetAcceleratedWidget();
+  if (!BrowserAccessibilityManager::CanFireEvents()) {
+    return false;
+  }
+
+  if (delegate()->AccessibilityIsWebContentSource()) {
+    return GetDelegateFromRootManager() &&
+           GetDelegateFromRootManager()->AccessibilityGetAcceleratedWidget();
+  }
+
+  return delegate()->AccessibilityGetAcceleratedWidget();
 }
 
 void BrowserAccessibilityManagerWin::OnSubtreeWillBeDeleted(AXTree* tree,

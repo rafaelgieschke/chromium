@@ -4,7 +4,6 @@
 
 #include "ui/accessibility/ax_event_generator.h"
 
-#include "base/containers/contains.h"
 #include "base/no_destructor.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_event.h"
@@ -62,6 +61,22 @@ bool HasIgnoredChangedState(
     const AXEventGenerator::IgnoredChangedStatesBitset& ignored_changed_states,
     const AXEventGenerator::IgnoredChangedState& state) {
   return ignored_changed_states[static_cast<size_t>(state)];
+}
+
+// Returns the node on which text-attribute and marker events should be fired.
+// On a native text field, markers are associated with children not exposed on
+// any platform, so we adjust the target to the text field ancestor. For richly
+// editable nodes, the node itself is the target. Returns nullptr if neither
+// applies.
+AXNode* GetTextAttributeTarget(AXNode* node) {
+  if (!node) {
+    return nullptr;
+  }
+  AXNode* target = node->GetTextFieldAncestor();
+  if (!target && node->HasState(ax::mojom::State::kRichlyEditable)) {
+    target = node;
+  }
+  return target;
 }
 
 }  // namespace
@@ -428,7 +443,7 @@ void AXEventGenerator::OnIgnoredChanged(AXTree* tree,
   // whether nodes are known to the AT. In fact, a node can be invisible and
   // have visible descendants.
   const bool was_in_invisible_subtree =
-      !base::Contains(nodes_to_suppress_parent_changed_on_, node->id());
+      !nodes_to_suppress_parent_changed_on_.contains(node->id());
   if (was_in_invisible_subtree) {
     for (auto iter = node->UnignoredChildrenBegin(),
               end = node->UnignoredChildrenEnd();
@@ -797,18 +812,99 @@ void AXEventGenerator::OnIntListAttributeChanged(
     case ax::mojom::IntListAttribute::kLabelledbyIds:
       AddEvent(node, Event::LABELED_BY_CHANGED);
       break;
-    case ax::mojom::IntListAttribute::kMarkerEnds:
-    case ax::mojom::IntListAttribute::kMarkerStarts:
-    case ax::mojom::IntListAttribute::kMarkerTypes:
-      // On a native text field, the spelling- and grammar-error markers are
-      // associated with children not exposed on any platform. Therefore, we
-      // adjust the node we fire that event on here.
-      if (AXNode* text_field = node->GetTextFieldAncestor()) {
-        AddEvent(text_field, Event::TEXT_ATTRIBUTE_CHANGED);
-      } else if (node->HasState(ax::mojom::State::kRichlyEditable)) {
-        AddEvent(node, Event::TEXT_ATTRIBUTE_CHANGED);
+    case ax::mojom::IntListAttribute::kMarkerTypes: {
+      AXNode* target = GetTextAttributeTarget(node);
+      if (!target) {
+        break;
+      }
+      AddEvent(target, Event::TEXT_ATTRIBUTE_CHANGED);
+
+      // If there was a removal, don't fire events.
+      if (old_value.size() > new_value.size()) {
+        break;
+      }
+
+      // Fire specific marker events only for types that were newly added
+      // (not for removals).
+      int32_t added_types = 0;
+      size_t min_size = std::min(old_value.size(), new_value.size());
+      for (size_t i = 0; i < min_size; ++i) {
+        // Bits present in new but not old are newly added.
+        added_types |= (new_value[i] & ~old_value[i]);
+      }
+      // Entries only in new_value are entirely new.
+      for (size_t i = min_size; i < new_value.size(); ++i) {
+        added_types |= new_value[i];
+      }
+      if (added_types &
+          static_cast<int32_t>(ax::mojom::MarkerType::kSpelling)) {
+        AddEvent(target, Event::SPELLING_MARKER_CHANGED);
+      }
+      if (added_types & static_cast<int32_t>(ax::mojom::MarkerType::kGrammar)) {
+        AddEvent(target, Event::GRAMMAR_MARKER_CHANGED);
+      }
+      // We skip highlight marker case here because it's handled by highlight
+      // types.
+      break;
+    }
+    case ax::mojom::IntListAttribute::kHighlightTypes: {
+      AXNode* target = GetTextAttributeTarget(node);
+      if (!target) {
+        break;
+      }
+      AddEvent(target, Event::TEXT_ATTRIBUTE_CHANGED);
+
+      // If there was a removal, don't fire events.
+      if (old_value.size() > new_value.size()) {
+        break;
+      }
+
+      // Fire specific marker events only for highlight types that were
+      // newly added (not for removals).
+      bool spelling_added = false;
+      bool grammar_added = false;
+      bool highlight_added = false;
+      size_t min_size = std::min(old_value.size(), new_value.size());
+      auto flag_highlight_type = [&](int32_t ht) {
+        auto t = static_cast<ax::mojom::HighlightType>(ht);
+        if (t == ax::mojom::HighlightType::kSpellingError) {
+          spelling_added = true;
+        } else if (t == ax::mojom::HighlightType::kGrammarError) {
+          grammar_added = true;
+        } else if (t == ax::mojom::HighlightType::kHighlight) {
+          highlight_added = true;
+        }
+      };
+      // For overlapping indices, only flag the new type when it differs.
+      for (size_t i = 0; i < min_size; ++i) {
+        if (old_value[i] != new_value[i]) {
+          flag_highlight_type(new_value[i]);
+        }
+      }
+      // Entries only in new_value were added.
+      for (size_t i = min_size; i < new_value.size(); ++i) {
+        flag_highlight_type(new_value[i]);
+      }
+      if (spelling_added) {
+        AddEvent(target, Event::SPELLING_MARKER_CHANGED);
+      }
+      if (grammar_added) {
+        AddEvent(target, Event::GRAMMAR_MARKER_CHANGED);
+      }
+      if (highlight_added) {
+        AddEvent(target, Event::HIGHLIGHT_MARKER_CHANGED);
       }
       break;
+    }
+    case ax::mojom::IntListAttribute::kMarkerEnds:
+    case ax::mojom::IntListAttribute::kMarkerStarts: {
+      AXNode* target = GetTextAttributeTarget(node);
+      if (!target) {
+        break;
+      }
+      AddEvent(target, Event::TEXT_ATTRIBUTE_CHANGED);
+      break;
+    }
     case ax::mojom::IntListAttribute::kCaretBounds:
       AddEvent(node, Event::CARET_BOUNDS_CHANGED);
       break;
@@ -1088,7 +1184,7 @@ void AXEventGenerator::TrimEventsDueToAncestorIgnoredChanged(
   // |ancestor_ignored_changed_map|, if |node|'s ancestors have become ignored
   // and the ancestor's ignored changed results have not been cached.
   if (node->parent() &&
-      !base::Contains(ancestor_ignored_changed_map, node->parent())) {
+      !ancestor_ignored_changed_map.contains(node->parent())) {
     TrimEventsDueToAncestorIgnoredChanged(node->parent(),
                                           ancestor_ignored_changed_map);
   }
@@ -1221,8 +1317,8 @@ void AXEventGenerator::PostprocessEvents() {
     // existing node's parent has changed on the platform.
     if (HasEvent(node_events, Event::PARENT_CHANGED)) {
       while (parent && (tree_events_.find(parent->id()) != tree_events_.end() ||
-                        base::Contains(removed_parent_changed_nodes, parent))) {
-        if ((base::Contains(removed_parent_changed_nodes, parent) ||
+                        removed_parent_changed_nodes.contains(parent))) {
+        if ((removed_parent_changed_nodes.contains(parent) ||
              HasEvent(tree_events_[parent->id()], Event::PARENT_CHANGED)) &&
             !HasEvent(tree_events_[parent->id()], Event::SUBTREE_CREATED)) {
           RemoveEvent(&node_events, Event::PARENT_CHANGED);
@@ -1245,10 +1341,9 @@ void AXEventGenerator::PostprocessEvents() {
     // subtree created.
     parent = node->GetUnignoredParent();
     if (HasEvent(node_events, Event::SUBTREE_CREATED)) {
-      while (parent &&
-             (tree_events_.find(parent->id()) != tree_events_.end() ||
-              base::Contains(removed_subtree_created_nodes, parent))) {
-        if (base::Contains(removed_subtree_created_nodes, parent) ||
+      while (parent && (tree_events_.find(parent->id()) != tree_events_.end() ||
+                        removed_subtree_created_nodes.contains(parent))) {
+        if (removed_subtree_created_nodes.contains(parent) ||
             HasEvent(tree_events_[parent->id()], Event::SUBTREE_CREATED)) {
           RemoveEvent(&node_events, Event::SUBTREE_CREATED);
           removed_subtree_created_nodes.insert(node);
@@ -1369,10 +1464,14 @@ const char* ToString(AXEventGenerator::Event event) {
       return "flowFromChanged";
     case AXEventGenerator::Event::FLOW_TO_CHANGED:
       return "flowToChanged";
+    case AXEventGenerator::Event::GRAMMAR_MARKER_CHANGED:
+      return "grammarMarkerChanged";
     case AXEventGenerator::Event::HASPOPUP_CHANGED:
       return "haspopupChanged";
     case AXEventGenerator::Event::HIERARCHICAL_LEVEL_CHANGED:
       return "hierarchicalLevelChanged";
+    case AXEventGenerator::Event::HIGHLIGHT_MARKER_CHANGED:
+      return "highlightMarkerChanged";
     case AXEventGenerator::Event::IGNORED_CHANGED:
       return "ignoredChanged";
     case AXEventGenerator::Event::IMAGE_ANNOTATION_CHANGED:
@@ -1453,6 +1552,8 @@ const char* ToString(AXEventGenerator::Event event) {
       return "setSizeChanged";
     case AXEventGenerator::Event::SORT_CHANGED:
       return "sortChanged";
+    case AXEventGenerator::Event::SPELLING_MARKER_CHANGED:
+      return "spellingMarkerChanged";
     case AXEventGenerator::Event::STATE_CHANGED:
       return "stateChanged";
     case AXEventGenerator::Event::SUBTREE_CREATED:
@@ -1479,7 +1580,7 @@ bool MaybeParseGeneratedEvent(const char* attribute,
          i <= static_cast<int>(AXEventGenerator::Event::MAX_VALUE); i++) {
       auto attr = static_cast<AXEventGenerator::Event>(i);
       std::string str = ToString(attr);
-      if (!base::Contains(*attr_map, str))
+      if (!attr_map->contains(str))
         (*attr_map)[str] = attr;
     }
   }

@@ -7,12 +7,12 @@
 
 #include "base/callback_list.h"
 #include "base/time/time.h"
+#include "chrome/browser/glic/common/local_hotkey_manager.h"
 #include "chrome/browser/glic/host/context/glic_screenshot_capturer.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
 #include "chrome/browser/glic/host/host.h"
 #include "chrome/browser/glic/service/glic_ui_embedder.h"
 #include "chrome/browser/glic/widget/glic_window_event_observer.h"
-#include "chrome/browser/glic/widget/local_hotkey_manager.h"
 #include "components/tabs/public/tab_interface.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
@@ -59,7 +59,7 @@ class GlicFloatingUi : public GlicUiEmbedder,
   Host::EmbedderDelegate* GetHostEmbedderDelegate() override;
   void Show(const ShowOptions& options) override;
   bool IsShowing() const override;
-  void Close() override;
+  void Close(const CloseOptions& options) override;
   std::unique_ptr<GlicUiEmbedder> CreateInactiveEmbedder() const override;
   void Focus() override;
   mojom::PanelState GetPanelState() const override;
@@ -70,8 +70,6 @@ class GlicFloatingUi : public GlicUiEmbedder,
   void Resize(const gfx::Size& size,
               base::TimeDelta duration,
               base::OnceClosure callback) override;
-  void SetDraggableAreas(
-      const std::vector<gfx::Rect>& draggable_areas) override;
   void EnableDragResize(bool enabled) override;
   void Attach() override;
   void Detach() override;
@@ -83,6 +81,8 @@ class GlicFloatingUi : public GlicUiEmbedder,
       glic::mojom::WebClientHandler::CaptureScreenshotCallback callback)
       override;
   void ClosePanel() override;
+  void OnReload() override;
+  void OnMicrophoneStatusChanged(mojom::MicrophoneStatus status) override;
 
   // GlicWindowEventObserver::Delegate:
   GlicWindowAnimator* window_animator() override;
@@ -100,8 +100,11 @@ class GlicFloatingUi : public GlicUiEmbedder,
   void FocusIfOpen() override;
   bool HasFocus() override;
   bool ActivateBrowser() override;
+  void Zoom(mojom::ZoomAction zoom_action) override;
   void ShowTitleBarContextMenuAt(gfx::Point event_loc) override;
+#if !BUILDFLAG(IS_ANDROID)
   base::WeakPtr<views::View> GetView() override;
+#endif
 
   // web_modal::WebContentsModalDialogManagerDelegate:
   web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHost(
@@ -124,6 +127,8 @@ class GlicFloatingUi : public GlicUiEmbedder,
   void SetGlicWindowToFloatingMode(bool floating);
   void OnSourceTabDestroyed(tabs::TabInterface* tab);
   void FloatingPanelCanAttachChanged(bool can_attach);
+  void ConfigureWebContentsModalDialogs();
+  void MaybeNotifyActivationChanged(bool window_active);
 
   // Whether the widget should be user resizable, kept here in case it's
   // specified before the widget is created.
@@ -145,7 +150,7 @@ class GlicFloatingUi : public GlicUiEmbedder,
 
   // Used by web modals to listens for glic window events, e.g. size change or
   // window close.
-  base::ObserverList<web_modal::ModalDialogHostObserver>::Unchecked
+  base::ObserverList<web_modal::ModalDialogHostObserver>
       modal_dialog_host_observers_;
 
   raw_ptr<Profile> profile_;

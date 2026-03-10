@@ -37,6 +37,8 @@
 
 namespace {
 
+inline constexpr base::TimeDelta kThrottleDuration = base::Days(14);
+
 // Shorten the name to spare line breaks. The code provides enough context
 // already.
 using Logger = password_manager::BrowserSavePasswordProgressLogger;
@@ -142,12 +144,12 @@ void ChromePasswordChangeService::RecordLoginAttemptQuality(
 }
 
 bool ChromePasswordChangeService::IsPasswordChangeSupported(
-    const GURL& url,
+    const password_manager::PasswordForm& form,
     const autofill::LanguageCode& page_language) const {
 #if BUILDFLAG(IS_ANDROID)
   return false;
 #else
-  auto availability = GetPerSiteAvailability(url, page_language);
+  auto availability = GetPerSiteAvailability(form, page_language);
   base::UmaHistogramEnumeration("PasswordManager.PasswordChangeAvailability",
                                 availability);
 
@@ -193,6 +195,24 @@ void ChromePasswordChangeService::OfferPasswordChangeUi(
   NOTREACHED();
 #endif  // BUILDFLAG(IS_ANDROID)
 }
+
+#if !BUILDFLAG(IS_ANDROID)
+void ChromePasswordChangeService::StartPasswordChangeFromCheckup(
+    const password_manager::CredentialUIEntry& credential,
+    content::WebContents* web_contents) {
+  if (!web_contents) {
+    return;
+  }
+
+  if (!password_change_from_checkup_delegate_) {
+    password_change_from_checkup_delegate_ =
+        std::make_unique<PasswordChangeFromCheckupDelegate>();
+  }
+
+  password_change_from_checkup_delegate_->StartPasswordChangeFlow(
+      credential, web_contents->GetWeakPtr());
+}
+#endif  // BUILDFLAG(IS_ANDROID)
 
 PasswordChangeDelegate* ChromePasswordChangeService::GetPasswordChangeDelegate(
     content::WebContents* web_contents) {
@@ -286,27 +306,18 @@ PasswordChangeAvailability ChromePasswordChangeService::GetGeneralAvailability()
     return PasswordChangeAvailability::kNoSavedPasswords;
   }
 
-  if (base::FeatureList::IsEnabled(
-          password_manager::features::kThrottlePasswordChangeDialog) &&
-      base::Time::Now() -
-              pref_service_->GetTime(password_manager::prefs::
-                                         kLastNegativePasswordChangeTimestamp) <
-          password_manager::features::kPasswordChangeThrottleTime.Get()) {
+  if (base::Time::Now() -
+          pref_service_->GetTime(
+              password_manager::prefs::kLastNegativePasswordChangeTimestamp) <
+      kThrottleDuration) {
     return PasswordChangeAvailability::kThrottled;
   }
 
-  const bool result = base::FeatureList::IsEnabled(
-      password_manager::features::kImprovedPasswordChangeService);
-  if (logger) {
-    logger->LogBoolean(Logger::STRING_PASSWORD_CHANGE_FEATURE_ENABLED, result);
-  }
-
-  return result ? PasswordChangeAvailability::kAvailable
-                : PasswordChangeAvailability::kFeatureDisabled;
+  return PasswordChangeAvailability::kAvailable;
 }
 
 PasswordChangeAvailability ChromePasswordChangeService::GetPerSiteAvailability(
-    const GURL& url,
+    const password_manager::PasswordForm& form,
     const autofill::LanguageCode& page_language) const {
   auto [log_manager, logger] = CreateLoggerPair(log_router_);
 
@@ -315,7 +326,18 @@ PasswordChangeAvailability ChromePasswordChangeService::GetPerSiteAvailability(
     return general_availability;
   }
 
-  if (GetChangePasswordURLOverride(url).is_valid()) {
+  if (form.IsLikelySignupForm() ||
+      (form.new_password_element_renderer_id &&
+       base::FeatureList::IsEnabled(
+           password_manager::features::
+               kDisablePasswordChangeFromNewPasswordFields))) {
+    if (logger) {
+      logger->LogMessage(Logger::STRING_PASSWORD_CHANGE_SIGNUP_FORM);
+    }
+    return PasswordChangeAvailability::kSignupForm;
+  }
+
+  if (GetChangePasswordURLOverride(form.url).is_valid()) {
     if (logger) {
       logger->LogMessage(Logger::STRING_PASSWORD_CHANGE_OVERRIDDEN_BY_SWITCH);
     }
@@ -343,7 +365,7 @@ PasswordChangeAvailability ChromePasswordChangeService::GetPerSiteAvailability(
   }
 
   const bool has_change_url =
-      affiliation_service_->GetChangePasswordURL(url).is_valid();
+      affiliation_service_->GetChangePasswordURL(form.url).is_valid();
   base::UmaHistogramBoolean(kHasPasswordChangeUrlHistogram, has_change_url);
   if (logger) {
     logger->LogBoolean(Logger::STRING_PASSWORD_CHANGE_URL_AVAILABLE,

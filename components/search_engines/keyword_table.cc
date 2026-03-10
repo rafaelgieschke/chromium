@@ -60,6 +60,8 @@ enum class HashValidationStatus {
 // Keys used in the meta table.
 constexpr char kBuiltinKeywordDataVersion[] = "Builtin Keyword Version";
 constexpr char kBuiltinKeywordCountry[] = "Builtin Keyword Country";
+constexpr char kIsPrepopulatedEnginesMigrationEnabled[] =
+    "Is Prepopulated Engines Migration Enabled";
 constexpr char kStarterPackKeywordVersion[] = "Starter Pack Keyword Version";
 
 // Version that added the url_hash column. Used in several places in this code.
@@ -150,7 +152,7 @@ const std::string ColumnsForVersion(int version, bool concatenated) {
     // Column added in version 137.
     columns.push_back("url_hash");
   }
-  return base::JoinString(columns, std::string(concatenated ? " || " : ", "));
+  return base::JoinString(columns, concatenated ? " || " : ", ");
 }
 
 WebDatabaseTable::TypeKey GetKey() {
@@ -313,6 +315,20 @@ CountryId KeywordTable::GetBuiltinKeywordCountry() {
   return meta_table()->GetValue(kBuiltinKeywordCountry, &country_id)
              ? CountryId::Deserialize(country_id)
              : CountryId();
+}
+
+bool KeywordTable::SetPrepopulatedEnginesMigrationEnabled(
+    bool is_migration_enabled) {
+  return meta_table()->SetValue(kIsPrepopulatedEnginesMigrationEnabled,
+                                is_migration_enabled);
+}
+
+bool KeywordTable::IsPrepopulatedEnginesMigrationEnabled() {
+  int is_migration_enabled = false;
+  return meta_table()->GetValue(kIsPrepopulatedEnginesMigrationEnabled,
+                                &is_migration_enabled)
+             ? is_migration_enabled
+             : false;
 }
 
 bool KeywordTable::SetStarterPackKeywordVersion(int version) {
@@ -658,7 +674,7 @@ void KeywordTable::BindURLToStatement(const TemplateURLData& data,
   // TODO(crbug.com/40950727): Check what it would take to use a new table to
   // store alternate_urls while keeping backups and table signature in a good
   // state.
-  base::Value::List alternate_urls_value;
+  base::ListValue alternate_urls_value;
   for (const auto& alternate_url : data.alternate_urls) {
     alternate_urls_value.Append(alternate_url);
   }

@@ -192,7 +192,7 @@ class TabDesktopMediaListTest : public testing::Test,
     if (!extension_) {
       extension_ =
           extensions::ExtensionBuilder()
-              .SetManifest(base::Value::Dict()
+              .SetManifest(base::DictValue()
                                .Set("name", "TabListUnitTest Extension")
                                .Set("version", "1.0")
                                .Set("manifest_version", 2))
@@ -242,7 +242,7 @@ class TabDesktopMediaListTest : public testing::Test,
 
     // TODO(erikchen): Tearing down the TabStripModel should just delete all its
     // owned WebContents. Then |manually_added_web_contents_| won't be
-    // necessary. https://crbug.com/832879.
+    // necessary. https://crbug.com/40571733.
     TabStripModel* tab_strip_model = browser_->tab_strip_model();
     for (WebContents* contents : manually_added_web_contents_) {
       tab_strip_model->DetachAndDeleteWebContentsAt(

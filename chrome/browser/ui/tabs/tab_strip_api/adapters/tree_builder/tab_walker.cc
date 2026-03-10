@@ -4,25 +4,24 @@
 
 #include "chrome/browser/ui/tabs/tab_strip_api/adapters/tree_builder/tab_walker.h"
 
-#include "chrome/browser/ui/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/tabs/tab_strip_api/converters/tab_converters.h"
 #include "content/public/browser/web_contents.h"
 
 namespace tabs_api {
 
-TabWalker::TabWalker(const TabStripModel* model, const tabs::TabInterface* tab)
+TabWalker::TabWalker(const TabStripModel* model, tabs::TabInterface* tab)
     : model_(model), target_(tab) {}
 
 mojom::ContainerPtr TabWalker::Walk() {
-  auto idx = model_->GetIndexOfTab(target_);
+  const auto idx = model_->GetIndexOfTab(target_);
   CHECK(idx != TabStripModel::kNoTab)
       << "tab disappeared while walking through the model";
 
-  content::WebContents* contents = model_->GetWebContentsAt(idx);
+  content::WebContents* const contents = target_->GetContents();
   CHECK(contents);
   const ui::ColorProvider& provider = contents->GetColorProvider();
   mojom::TabPtr mojo_tab = converters::BuildMojoTab(
-      target_->GetHandle(), TabRendererData::FromTabInModel(model_, idx),
+      target_,
       // TODO(crbug.com/438632110): this is dup code with the adapter. See if
       // we can combine state computation.
       provider,

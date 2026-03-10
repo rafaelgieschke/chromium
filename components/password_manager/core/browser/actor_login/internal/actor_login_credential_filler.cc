@@ -112,6 +112,7 @@ ActorLoginCredentialFiller::ActorLoginCredentialFiller(
     bool should_store_permission,
     PasswordManagerClient* client,
     base::WeakPtr<ActorLoginQualityLoggerInterface> mqls_logger,
+    base::TimeTicks attempt_login_start_time,
     IsTaskInFocus is_task_in_focus,
     LoginStatusResultOrErrorReply callback)
     : origin_(main_frame_origin),
@@ -120,6 +121,7 @@ ActorLoginCredentialFiller::ActorLoginCredentialFiller(
       client_(client),
       mqls_logger_(mqls_logger),
       start_time_(base::TimeTicks::Now()),
+      attempt_login_start_time_(attempt_login_start_time),
       login_form_finder_(std::make_unique<ActorLoginFormFinder>(client_)),
       is_task_in_focus_(std::move(is_task_in_focus)),
       callback_(std::move(callback)) {}
@@ -316,6 +318,13 @@ const PasswordForm* ActorLoginCredentialFiller::GetMatchingStoredCredential(
   const PasswordForm* matching_stored_credential = nullptr;
   for (const password_manager::PasswordForm& stored_credential_form :
        signin_form_manager.GetBestMatches()) {
+    // Don't consider weakly affiliated credentials (grouped) because they are
+    // not provided in the "Get" step and thus don't actually match the
+    // credential that was selected for filling.
+    if (stored_credential_form.match_type.value() ==
+        password_manager::PasswordForm::MatchType::kGrouped) {
+      continue;
+    }
     if (stored_credential_form.username_value == credential_.username &&
         ActorLoginFormFinder::GetSourceSiteOrAppFromUrl(
             stored_credential_form.url) == credential_.source_site_or_app) {
@@ -379,6 +388,13 @@ void ActorLoginCredentialFiller::FillAllEligibleFields(
   }
 
   for (PasswordFormManager* manager : eligible_managers) {
+    if (manager->GetMetricsRecorder()) {
+      // Sets the time in which the attempt login started to compute
+      // how long it took until a successful login submission.
+      manager->GetMetricsRecorder()->SetActorLoginStartTime(
+          attempt_login_start_time_);
+    }
+
     bool stored_credential_belongs_to_manager = std::ranges::any_of(
         manager->GetBestMatches().begin(), manager->GetBestMatches().end(),
         [&stored_credential](const PasswordForm& best_match) {
@@ -483,11 +499,47 @@ void ActorLoginCredentialFiller::BuildAttemptLoginOutcome(
 void ActorLoginCredentialFiller::OnFillingDone() {
   LoginStatusResult result =
       GetEndFillingResult(username_filled_, password_filled_);
-  if (result == LoginStatusResult::kErrorNoFillableFields) {
-    BuildAttemptLoginOutcome(AttemptLoginOutcomeMqls::kNoFillableFields);
-  } else {
-    BuildAttemptLoginOutcome(AttemptLoginOutcomeMqls::kSuccess);
+  base::TimeDelta time_to_fill =
+      base::TimeTicks::Now() - attempt_login_start_time_;
+
+  switch (result) {
+    case LoginStatusResult::kSuccessUsernameAndPasswordFilled:
+      base::UmaHistogramMediumTimes(
+          "PasswordManager.ActorLogin.TimeToUsernameAndPasswordFilled",
+          time_to_fill);
+      BuildAttemptLoginOutcome(AttemptLoginOutcomeMqls::kSuccess);
+      break;
+    case LoginStatusResult::kSuccessUsernameFilled:
+      base::UmaHistogramMediumTimes(
+          "PasswordManager.ActorLogin.TimeToUsernameFilled", time_to_fill);
+      BuildAttemptLoginOutcome(AttemptLoginOutcomeMqls::kSuccess);
+      break;
+    case LoginStatusResult::kSuccessPasswordFilled:
+      base::UmaHistogramMediumTimes(
+          "PasswordManager.ActorLogin.TimeToPasswordFilled", time_to_fill);
+      BuildAttemptLoginOutcome(AttemptLoginOutcomeMqls::kSuccess);
+      break;
+    case LoginStatusResult::kErrorNoFillableFields:
+      BuildAttemptLoginOutcome(AttemptLoginOutcomeMqls::kNoFillableFields);
+      break;
+    case LoginStatusResult::kErrorInvalidCredential:
+    case LoginStatusResult::kErrorNoSigninForm:
+    case LoginStatusResult::kErrorDeviceReauthRequired:
+    case LoginStatusResult::kErrorDeviceReauthFailed:
+    case LoginStatusResult::kSuccessFederated:
+    case LoginStatusResult::kErrorFederatedContinuation:
+    case LoginStatusResult::kErrorFederatedAccountNotLoggedIn:
+    case LoginStatusResult::kErrorFederatedAccountIsSignUp:
+    case LoginStatusResult::kErrorFederatedAccountNotAvailable:
+    case LoginStatusResult::kErrorFederatedIdpReturnedError:
+    case LoginStatusResult::kErrorFederatedIdpNetworkError:
+    case LoginStatusResult::kErrorFederatedTokenRequestAborted:
+    case LoginStatusResult::kErrorFederatedFrameNotActive:
+    case LoginStatusResult::kErrorFederatedExpectedAccountNotPresent:
+    case LoginStatusResult::kErrorFederatedTimeout:
+      NOTREACHED();
   }
+
   std::move(callback_).Run(result);
 }
 

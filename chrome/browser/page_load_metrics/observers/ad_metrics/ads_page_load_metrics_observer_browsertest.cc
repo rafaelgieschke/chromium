@@ -1684,7 +1684,7 @@ IN_PROC_BROWSER_TEST_F(AdsPageLoadMetricsObserverBrowserTest,
       static_cast<int>(page_load_metrics::MediaStatus::kNotPlayed));
 }
 
-// Flaky on all platforms, http://crbug.com/972822.
+// Flaky on all platforms, http://crbug.com/40631523.
 IN_PROC_BROWSER_TEST_F(AdsPageLoadMetricsObserverBrowserTest,
                        DISABLED_AdFrameRecordMediaStatusPlayed) {
   base::HistogramTester histogram_tester;
@@ -3145,7 +3145,7 @@ IN_PROC_BROWSER_TEST_F(AdsPageLoadMetricsObserverPrerenderingBrowserTest,
   // Start a prerender.
   GURL prerender_url =
       embedded_test_server()->GetURL("/ads_observer/srcdoc_embedded_ad.html");
-  content::FrameTreeNodeId host_id =
+  content::PrerenderHostId host_id =
       prerender_helper().AddPrerender(prerender_url);
   content::test::PrerenderHostObserver prerender_observer(*web_contents(),
                                                           host_id);

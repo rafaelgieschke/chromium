@@ -117,6 +117,10 @@ AddressComponent::AddressComponent(FieldType storage_type,
   }
 }
 
+AddressComponent::AddressComponent(FieldType storage_type,
+                                   SubcomponentsList subcomponents)
+    : AddressComponent(storage_type, subcomponents, MergeMode::kNone) {}
+
 AddressComponent::~AddressComponent() = default;
 
 FieldType AddressComponent::GetStorageType() const {
@@ -322,10 +326,10 @@ std::u16string AddressComponent::GetValueForOtherSupportedType(
 }
 
 std::u16string AddressComponent::GetFormatString() const {
-  std::u16string result = i18n_model_definition::GetFormattingExpression(
+  std::u16string_view result = i18n_model_definition::GetFormattingExpression(
       GetStorageType(), GetCountryCode());
   if (!result.empty()) {
-    return result;
+    return std::u16string(result);
   }
 
   // If the component is atomic, the format string is just the value.

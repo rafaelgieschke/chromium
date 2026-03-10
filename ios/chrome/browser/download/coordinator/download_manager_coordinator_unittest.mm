@@ -28,6 +28,7 @@
 #import "ios/chrome/browser/download/ui/download_manager_view_controller+Testing.h"
 #import "ios/chrome/browser/download/ui/download_manager_view_controller.h"
 #import "ios/chrome/browser/download/ui/download_manager_view_controller_delegate.h"
+#import "ios/chrome/browser/drive/model/drive_tab_helper.h"
 #import "ios/chrome/browser/overlays/model/public/overlay_request_queue.h"
 #import "ios/chrome/browser/overlays/model/public/web_content_area/alert_overlay.h"
 #import "ios/chrome/browser/shared/model/browser/test/test_browser.h"
@@ -36,6 +37,7 @@
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_opener.h"
 #import "ios/chrome/browser/shared/public/commands/browser_coordinator_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
+#import "ios/chrome/browser/shared/public/commands/download_list_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/util/file_size_util.h"
 #import "ios/chrome/grit/ios_strings.h"
@@ -80,6 +82,7 @@ class DownloadManagerCoordinatorTest : public PlatformTest {
     OverlayRequestQueue::CreateForWebState(web_state_.get());
     DownloadManagerTabHelper::CreateForWebState(web_state_.get());
     DocumentDownloadTabHelper::CreateForWebState(web_state_.get());
+    DriveTabHelper::CreateForWebState(web_state_.get());
     web_state_->SetBrowserState(profile_.get());
     coordinator_ = [[DownloadManagerCoordinator alloc]
         initWithBaseViewController:base_view_controller_
@@ -439,6 +442,11 @@ TEST_F(DownloadManagerCoordinatorTest, OpenIn) {
   [browser_->GetCommandDispatcher()
       startDispatchingToTarget:dispatcher_mock
                    forProtocol:@protocol(BrowserCoordinatorCommands)];
+  id download_list_dispatcher_mock =
+      OCMProtocolMock(@protocol(DownloadListCommands));
+  [browser_->GetCommandDispatcher()
+      startDispatchingToTarget:download_list_dispatcher_mock
+                   forProtocol:@protocol(DownloadListCommands)];
 
   // Start the download.
   base::FilePath path;

@@ -43,13 +43,13 @@ component("app_types") {
   public_deps = [
     "//base",
     "//components/services/app_service/public/protos",
+    "//url",
   ]
 
   deps = [
     ":macros",
     "//third_party/abseil-cpp:absl",
     "//ui/gfx",
-    "//url",
   ]
 }
 
@@ -141,6 +141,25 @@ source_set("app_icon_info") {
 
   deps = [
     "//base",
+    "//url",
+  ]
+
+  visibility = [ "//components/services/app_service/*" ]
+}
+
+source_set("app_launch_params") {
+  sources = [
+    "app_launch_params.cc",
+    "app_launch_params.h",
+  ]
+
+  deps = [
+    ":app_types",
+    ":intents",
+    "//base",
+    "//ui/base:types",
+    "//ui/display/types",
+    "//ui/gfx/geometry",
     "//url",
   ]
 

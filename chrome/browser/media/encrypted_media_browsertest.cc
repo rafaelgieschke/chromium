@@ -136,6 +136,7 @@ using ukm::builders::Media_EME_CdmMetrics;
 using ukm::builders::Media_EME_CreateMediaKeys;
 using ukm::builders::Media_EME_RequestMediaKeySystemAccess;
 using ukm::builders::Media_EME_Usage;
+using ukm::builders::Media_WebMediaPlayerState;
 
 // Base class for encrypted media tests.
 class EncryptedMediaTestBase : public MediaBrowserTest {
@@ -406,7 +407,7 @@ class EncryptedMediaTestBase : public MediaBrowserTest {
         // For now, `switches::kDisableGpu` should not be set. Otherwise,
         // the video playback will not work with software rendering. Note that
         // this switch is appended to browser_tests.exe by force as a workaround
-        // of http://crbug.com/687387.
+        // of http://crbug.com/40504416.
         command_line->RemoveSwitch(switches::kDisableGpu);
       }
     }
@@ -513,43 +514,6 @@ class ECKEncryptedMediaReportMetricsTest : public EncryptedMediaTestBase,
     ukm_recorder_ = std::make_unique<ukm::TestAutoSetUkmRecorder>();
   }
 
-  void TearDown() override {
-    auto report_metric_entries = ukm_recorder_->GetEntries(
-        Media_EME_CdmMetrics::kEntryName,
-        {
-            Media_EME_CdmMetrics::kCertificateSerialNumberName,
-            Media_EME_CdmMetrics::kDecoderBypassBlockCountName,
-            Media_EME_CdmMetrics::kDecoderCheck1SuccessCountName,
-            Media_EME_CdmMetrics::kDecoderCheck1WarningCountName,
-            Media_EME_CdmMetrics::kDecoderCheck1ErrorCountName,
-            Media_EME_CdmMetrics::kLicenseSdkVersionName,
-            Media_EME_CdmMetrics::kNumberOfOnMessageEventsName,
-            Media_EME_CdmMetrics::kNumberOfUpdateCallsName,
-        });
-
-    // The ReportMetrics functionality only works in v11 and onwards, but verify
-    // that in v10, RecordUkm is not called and the Ukm is not set.
-    if (GetCdmInterfaceVersion() > 10) {
-      EXPECT_EQ(report_metric_entries.size(), 1u);
-
-      EXPECT_EQ(ukm::GetSourceIdType(report_metric_entries[0].source_id),
-                ukm::SourceIdType::CDM_ID);
-
-      // The ClearKey cdm does not report kCertificateSerialNumber or
-      // kDecoderBypassBlockCount, so the entries should not even be set in the
-      // ukm data.
-      EXPECT_THAT(
-          report_metric_entries[0].metrics,
-          UnorderedElementsAre(
-              Pair(Media_EME_CdmMetrics::kLicenseSdkVersionName, 12345),
-              Pair(Media_EME_CdmMetrics::kNumberOfOnMessageEventsName, 1),
-              Pair(Media_EME_CdmMetrics::kNumberOfUpdateCallsName, 1),
-              Pair(Media_EME_CdmMetrics::kDecoderCheck1SuccessCountName, 1)));
-    } else {
-      EXPECT_EQ(report_metric_entries.size(), 0u);
-    }
-  }
-
  protected:
   void SetUpCommandLine(base::CommandLine* command_line) override {
     EncryptedMediaTestBase::SetUpCommandLine(command_line);
@@ -560,6 +524,83 @@ class ECKEncryptedMediaReportMetricsTest : public EncryptedMediaTestBase,
     command_line->AppendSwitchASCII(
         switches::kOverrideEnabledCdmInterfaceVersion,
         base::NumberToString(GetCdmInterfaceVersion()));
+  }
+
+  std::unique_ptr<ukm::TestAutoSetUkmRecorder> ukm_recorder_;
+};
+
+class EncryptedMediaVisibilityRatioReportTest : public EncryptedMediaTestBase {
+ public:
+  void SetUpOnMainThread() override {
+    EncryptedMediaTestBase::SetUpOnMainThread();
+    ukm_recorder_ = std::make_unique<ukm::TestAutoSetUkmRecorder>();
+  }
+
+ protected:
+  enum class Expectation {
+    kZero,
+    kGreaterThanZero,
+    kPartial,
+  };
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    EncryptedMediaTestBase::SetUpCommandLine(command_line);
+    SetUpCommandLineForKeySystem(
+        media::kExternalClearKeyKeySystem, command_line,
+        {{media::kEncryptedMediaOcclusionTracking, {}}});
+  }
+
+  void TestVisibility(const std::pair<std::string, std::string>& param,
+                      Expectation expectation) {
+    base::StringPairs query_params;
+    query_params.emplace_back("mediaFile", "bear-320x240-av_enc-av.webm");
+    query_params.emplace_back("mediaType",
+                              "video/webm; codecs=\"vorbis, vp8\"");
+    query_params.emplace_back("keySystem", media::kExternalClearKeyKeySystem);
+    query_params.emplace_back("useMSE", "1");
+    query_params.emplace_back("playCount", "1");
+
+    if (!param.first.empty()) {
+      query_params.push_back(param);
+    }
+
+    RunEncryptedMediaTestPage(kDefaultEmePlayer,
+                              media::kExternalClearKeyKeySystem, query_params,
+                              media::kEndedTitle);
+
+    base::RunLoop run_loop;
+    ukm_recorder_->SetOnAddEntryCallback(Media_WebMediaPlayerState::kEntryName,
+                                         run_loop.QuitClosure());
+
+    browser()->tab_strip_model()->CloseWebContentsAt(
+        0, TabCloseTypes::CLOSE_USER_GESTURE);
+    run_loop.Run();
+
+    auto wmps_entries = ukm_recorder_->GetEntries(
+        Media_WebMediaPlayerState::kEntryName,
+        {Media_WebMediaPlayerState::kIsEMEName,
+         Media_WebMediaPlayerState::kVisibilityRatioAtPlaybackStartName});
+
+    ASSERT_EQ(1u, wmps_entries.size());
+
+    const auto& metrics = wmps_entries[0].metrics;
+    auto is_eme_it = metrics.find(Media_WebMediaPlayerState::kIsEMEName);
+
+    ASSERT_NE(is_eme_it, metrics.end());
+    EXPECT_EQ(is_eme_it->second, 1);
+
+    auto playback_start_it = metrics.find(
+        Media_WebMediaPlayerState::kVisibilityRatioAtPlaybackStartName);
+    ASSERT_NE(playback_start_it, metrics.end());
+
+    if (expectation == Expectation::kZero) {
+      EXPECT_EQ(playback_start_it->second, 0);
+    } else if (expectation == Expectation::kGreaterThanZero) {
+      EXPECT_GT(playback_start_it->second, 0);
+    } else if (expectation == Expectation::kPartial) {
+      EXPECT_GT(playback_start_it->second, 0);
+      EXPECT_LT(playback_start_it->second, 100);
+    }
   }
 
   std::unique_ptr<ukm::TestAutoSetUkmRecorder> ukm_recorder_;
@@ -777,8 +818,8 @@ class EncryptedMediaTest
 
 // Similar to EncryptedMediaTest, but the source type is always MSE. This is
 // needed because many tests can only work with MSE (not with SRC), e.g.
-// encrypted MP4, see http://crbug.com/170793. Use this class for those tests so
-// we don't have to start the test and then skip it.
+// encrypted MP4, see http://crbug.com/40960332. Use this class for those tests
+// so we don't have to start the test and then skip it.
 class MseEncryptedMediaTest : public ParameterizedEncryptedMediaTestBase,
                               public WithParamInterface<const char*> {
  public:
@@ -1223,10 +1264,64 @@ INSTANTIATE_TEST_SUITE_P(CDM_12,
                          Values(12));
 
 IN_PROC_BROWSER_TEST_P(ECKEncryptedMediaReportMetricsTest, RecordUkmTest) {
-  RunSimpleEncryptedMediaTest("bear-320x240-av_enc-a.webm",
-                              media::kExternalClearKeyKeySystem, SrcType::SRC,
-                              PlayCount::ONCE);
-  base::RunLoop().RunUntilIdle();
+  base::RunLoop run_loop;
+
+  // The ReportMetrics functionality only works in v11 and onwards, so verify
+  // that in v10, RecordUkm is not called and the Cdm Metrics UKM is not set.
+  if (GetCdmInterfaceVersion() > 10) {
+    ukm_recorder_->SetOnAddEntryCallback(Media_EME_CdmMetrics::kEntryName,
+                                         run_loop.QuitClosure());
+    RunSimpleEncryptedMediaTest("bear-320x240-av_enc-a.webm",
+                                media::kExternalClearKeyKeySystem, SrcType::SRC,
+                                PlayCount::ONCE);
+    browser()->tab_strip_model()->CloseWebContentsAt(
+        0, TabCloseTypes::CLOSE_USER_GESTURE);
+    run_loop.Run();
+
+    auto report_metric_entries = ukm_recorder_->GetEntries(
+        Media_EME_CdmMetrics::kEntryName,
+        {
+            Media_EME_CdmMetrics::kCertificateSerialNumberName,
+            Media_EME_CdmMetrics::kDecoderBypassBlockCountName,
+            Media_EME_CdmMetrics::kDecoderCheck1SuccessCountName,
+            Media_EME_CdmMetrics::kDecoderCheck1WarningCountName,
+            Media_EME_CdmMetrics::kDecoderCheck1ErrorCountName,
+            Media_EME_CdmMetrics::kLicenseSdkVersionName,
+            Media_EME_CdmMetrics::kNumberOfOnMessageEventsName,
+            Media_EME_CdmMetrics::kNumberOfUpdateCallsName,
+        });
+
+    ASSERT_EQ(report_metric_entries.size(), 1u);
+
+    EXPECT_EQ(ukm::GetSourceIdType(report_metric_entries[0].source_id),
+              ukm::SourceIdType::CDM_ID);
+
+    // The ClearKey cdm does not report kCertificateSerialNumber or
+    // kDecoderBypassBlockCount, so the entries should not even be set in the
+    // ukm data.
+    EXPECT_THAT(
+        report_metric_entries[0].metrics,
+        UnorderedElementsAre(
+            Pair(Media_EME_CdmMetrics::kLicenseSdkVersionName, 12345),
+            Pair(Media_EME_CdmMetrics::kNumberOfOnMessageEventsName, 1),
+            Pair(Media_EME_CdmMetrics::kNumberOfUpdateCallsName, 1),
+            Pair(Media_EME_CdmMetrics::kDecoderCheck1SuccessCountName, 1)));
+  } else {
+    // Wait for a standard media metric to ensure the reporting pipeline has
+    // flushed.
+    ukm_recorder_->SetOnAddEntryCallback(Media_WebMediaPlayerState::kEntryName,
+                                         run_loop.QuitClosure());
+    RunSimpleEncryptedMediaTest("bear-320x240-av_enc-a.webm",
+                                media::kExternalClearKeyKeySystem, SrcType::SRC,
+                                PlayCount::ONCE);
+    browser()->tab_strip_model()->CloseWebContentsAt(
+        0, TabCloseTypes::CLOSE_USER_GESTURE);
+    run_loop.Run();
+
+    auto report_metric_entries =
+        ukm_recorder_->GetEntries(Media_EME_CdmMetrics::kEntryName, {});
+    EXPECT_EQ(report_metric_entries.size(), 0u);
+  }
 }
 
 IN_PROC_BROWSER_TEST_P(ECKEncryptedMediaTest, InitializeCDMFail) {
@@ -1258,7 +1353,7 @@ IN_PROC_BROWSER_TEST_P(ECKEncryptedMediaFileIOTest, FileIOTest) {
                        kUnitTestSuccess);
 }
 
-// Intermittent leaks on ASan/LSan runs: crbug.com/889923
+// Intermittent leaks on ASan/LSan runs: crbug.com/41417613
 #if defined(LEAK_SANITIZER) || defined(ADDRESS_SANITIZER)
 #define MAYBE_MessageTypeTest DISABLED_MessageTypeTest
 #else
@@ -1791,9 +1886,9 @@ IN_PROC_BROWSER_TEST_F(MediaFoundationEncryptedMediaTest,
   // Enable 127.0.0.1 as an exception.
   prefs->SetDict(
       kProtectedContentIdExceptionPrefPath,
-      base::Value::Dict().Set(
+      base::DictValue().Set(
           "http://127.0.0.1,*",
-          base::Value::Dict().Set("setting", kAllowProtectedContentId)));
+          base::DictValue().Set("setting", kAllowProtectedContentId)));
 
   RunEncryptedMediaTest(kDefaultEmePlayer, "bear-640x360-v_frag-cbcs.mp4",
                         media::kMediaFoundationClearKeyKeySystem, SrcType::MSE,
@@ -1816,9 +1911,9 @@ IN_PROC_BROWSER_TEST_F(MediaFoundationEncryptedMediaTest,
   // Disable 127.0.0.1 as an exception.
   prefs->SetDict(
       kProtectedContentIdExceptionPrefPath,
-      base::Value::Dict().Set(
+      base::DictValue().Set(
           "http://127.0.0.1,*",
-          base::Value::Dict().Set("setting", kDisallowProtectedContentId)));
+          base::DictValue().Set("setting", kDisallowProtectedContentId)));
 
   RunEncryptedMediaTest(kDefaultEmePlayer, "bear-640x360-v_frag-cbcs.mp4",
                         media::kMediaFoundationClearKeyKeySystem, SrcType::MSE,
@@ -1891,3 +1986,28 @@ IN_PROC_BROWSER_TEST_F(
 #endif  // BUILDFLAG(ENABLE_PLATFORM_ENCRYPTED_DOLBY_VISION)
 
 #endif  // BUILDFLAG(IS_WIN) && BUILDFLAG(USE_PROPRIETARY_CODECS)
+
+IN_PROC_BROWSER_TEST_F(EncryptedMediaVisibilityRatioReportTest,
+                       VisibilityRatio) {
+  TestVisibility({}, Expectation::kGreaterThanZero);
+}
+
+IN_PROC_BROWSER_TEST_F(EncryptedMediaVisibilityRatioReportTest,
+                       VisibilityRatio_Hidden) {
+  TestVisibility({"hidden", "true"}, Expectation::kZero);
+}
+
+IN_PROC_BROWSER_TEST_F(EncryptedMediaVisibilityRatioReportTest,
+                       VisibilityRatio_Occluded) {
+  TestVisibility({"occluded", "true"}, Expectation::kZero);
+}
+
+IN_PROC_BROWSER_TEST_F(EncryptedMediaVisibilityRatioReportTest,
+                       VisibilityRatio_PartiallyOccluded) {
+  TestVisibility({"partial_occlusion", "true"}, Expectation::kPartial);
+}
+
+IN_PROC_BROWSER_TEST_F(EncryptedMediaVisibilityRatioReportTest,
+                       VisibilityRatio_OpacityZero) {
+  TestVisibility({"opacity", "0"}, Expectation::kZero);
+}

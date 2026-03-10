@@ -132,9 +132,8 @@ static void JNI_AwContentsStatics_SetSafeBrowsingAllowlist(
 }
 
 // static
-static void JNI_AwContentsStatics_SetCheckClearTextPermitted(
-    JNIEnv* env,
-    jboolean permitted) {
+static void JNI_AwContentsStatics_SetCheckClearTextPermitted(JNIEnv* env,
+                                                             bool permitted) {
   AwContentBrowserClient::set_check_cleartext_permitted(permitted);
 }
 
@@ -171,7 +170,7 @@ static void JNI_AwContentsStatics_LogFlagMetrics(
 }
 
 // static
-static jboolean JNI_AwContentsStatics_IsMultiProcessEnabled(JNIEnv* env) {
+static bool JNI_AwContentsStatics_IsMultiProcessEnabled(JNIEnv* env) {
   return !content::RenderProcessHost::run_renderer_in_process();
 }
 
@@ -188,21 +187,22 @@ static std::string JNI_AwContentsStatics_GetVariationsHeader(JNIEnv* env) {
 
 // static
 static void JNI_AwContentsStatics_SetRendererLibraryPrefetchMode(JNIEnv* env,
-                                                                 jint mode) {
+                                                                 int32_t mode) {
   SetRendererLibraryPrefetchMode(
       static_cast<RendererLibraryPrefetchMode>(mode));
 }
 
 // static
-static jint JNI_AwContentsStatics_GetRendererLibraryPrefetchMode(JNIEnv* env) {
-  return static_cast<jint>(GetRendererLibraryPrefetchMode());
+static int32_t JNI_AwContentsStatics_GetRendererLibraryPrefetchMode(
+    JNIEnv* env) {
+  return static_cast<int32_t>(GetRendererLibraryPrefetchMode());
 }
 
 // static
 static void JNI_AwContentsStatics_ForceVariationIdsForTesting(  // IN-TEST
     JNIEnv* env,
-    std::vector<std::string>& variationIds,
-    std::string& commandLineVariationIds) {
+    const std::vector<std::string>& variationIds,
+    const std::string& commandLineVariationIds) {
   variations::VariationsIdsProvider::GetInstance()
       ->ForceVariationIdsForTesting(  // IN-TEST
           variationIds, commandLineVariationIds);

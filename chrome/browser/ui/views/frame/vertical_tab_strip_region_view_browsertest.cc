@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h"
 
+#include "base/test/metrics/histogram_tester.h"
+#include "base/test/metrics/user_action_tester.h"
 #include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/profiles/profile.h"
@@ -17,6 +19,7 @@
 #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/top_container_view.h"
 #include "chrome/browser/ui/views/tabs/vertical/root_tab_collection_node.h"
 #include "chrome/browser/ui/views/tabs/vertical/vertical_pinned_tab_container_view.h"
 #include "chrome/browser/ui/views/tabs/vertical/vertical_split_tab_view.h"
@@ -29,6 +32,7 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/pointer/touch_ui_controller.h"
 #include "ui/views/controls/button/button_controller.h"
 #include "ui/views/controls/resize_area.h"
 #include "ui/views/controls/separator.h"
@@ -43,8 +47,19 @@ class VerticalTabStripRegionViewTest
         .vertical_tab_strip_region_view_for_testing();
   }
 
+  RootTabCollectionNode* root_node() {
+    return browser()
+        ->GetBrowserView()
+        .vertical_tab_strip_region_view_for_testing()
+        ->root_node_for_testing();
+  }
+
   tabs::VerticalTabStripStateController* state_controller() {
     return tabs::VerticalTabStripStateController::From(browser());
+  }
+
+  TabStrip* horizontal_tab_strip() {
+    return browser()->GetBrowserView().horizontal_tab_strip_for_testing();
   }
 
  protected:
@@ -110,19 +125,9 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ResizeAreaBounds) {
   EXPECT_EQ(region_view()->bounds().height(),
             region_view()->resize_area_for_testing()->bounds().height());
   EXPECT_EQ(0, region_view()->resize_area_for_testing()->bounds().y());
-  // Verify resize area width.
-  EXPECT_EQ(VerticalTabStripRegionView::kResizeAreaWidth,
-            region_view()->resize_area_for_testing()->bounds().width());
 }
 
-// TODO(crbug.com/470402527): Fix test on non-mac platforms.
-#if BUILDFLAG(IS_MAC)
-#define MAYBE_ResizeViewSmaller ResizeViewSmaller
-#else
-#define MAYBE_ResizeViewSmaller DISABLED_ResizeViewSmaller
-#endif
-IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
-                       MAYBE_ResizeViewSmaller) {
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ResizeViewSmaller) {
   const int initial_width = tabs::kVerticalTabStripDefaultUncollapsedWidth;
 
   // Verify the initial state of the region view.
@@ -131,7 +136,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
   ASSERT_EQ(
       initial_width,
       region_view()->target_collapse_state_for_testing().uncollapsed_width);
-  ASSERT_FALSE(region_view()->is_animating_for_testing());
+  ASSERT_FALSE(region_view()->is_animating());
   ASSERT_FALSE(state_controller()->IsCollapsed());
   WaitForBoundsToMatchPreferredWidth();
 
@@ -148,7 +153,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
     EXPECT_EQ(
         resize_width,
         region_view()->target_collapse_state_for_testing().uncollapsed_width);
-    EXPECT_FALSE(region_view()->is_animating_for_testing());
+    EXPECT_FALSE(region_view()->is_animating());
     EXPECT_FALSE(state_controller()->IsCollapsed());
     WaitForBoundsToMatchPreferredWidth();
   }
@@ -168,7 +173,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
     EXPECT_EQ(
         VerticalTabStripRegionView::kUncollapsedMinWidth,
         region_view()->target_collapse_state_for_testing().uncollapsed_width);
-    EXPECT_FALSE(region_view()->is_animating_for_testing());
+    EXPECT_FALSE(region_view()->is_animating());
     EXPECT_FALSE(state_controller()->IsCollapsed());
     WaitForBoundsToMatchPreferredWidth();
   }
@@ -185,7 +190,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
     EXPECT_EQ(
         VerticalTabStripRegionView::kUncollapsedMinWidth,
         region_view()->target_collapse_state_for_testing().uncollapsed_width);
-    EXPECT_TRUE(region_view()->is_animating_for_testing());
+    EXPECT_TRUE(region_view()->is_animating());
 
     // Some time after the animation starts, the state controller collapsed
     // state will true.
@@ -194,21 +199,27 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
 
     // When the animation completes, the preferred width will be the collapsed
     // width.
-    ASSERT_TRUE(base::test::RunUntil(
-        [&]() { return !region_view()->is_animating_for_testing(); }));
+    ASSERT_TRUE(
+        base::test::RunUntil([&]() { return !region_view()->is_animating(); }));
     EXPECT_EQ(VerticalTabStripRegionView::kCollapsedWidth,
               region_view()->GetPreferredSize().width());
     WaitForBoundsToMatchPreferredWidth();
   }
 }
 
-IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ResizeViewBigger) {
+// TODO(https://crbug.com/481074869): Re-enable this test
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_ResizeViewBigger DISABLED_ResizeViewBigger
+#else
+#define MAYBE_ResizeViewBigger ResizeViewBigger
+#endif
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, MAYBE_ResizeViewBigger) {
   const int initial_width = VerticalTabStripRegionView::kCollapsedWidth;
 
   // Start this test from the collapsed state.
   state_controller()->SetCollapsed(true);
-  ASSERT_TRUE(base::test::RunUntil(
-      [&]() { return !region_view()->is_animating_for_testing(); }));
+  ASSERT_TRUE(
+      base::test::RunUntil([&]() { return !region_view()->is_animating(); }));
   WaitForBoundsToMatchPreferredWidth();
 
   // Verify the initial state of the region view.
@@ -217,7 +228,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ResizeViewBigger) {
   ASSERT_EQ(
       tabs::kVerticalTabStripDefaultUncollapsedWidth,
       region_view()->target_collapse_state_for_testing().uncollapsed_width);
-  ASSERT_FALSE(region_view()->is_animating_for_testing());
+  ASSERT_FALSE(region_view()->is_animating());
   ASSERT_TRUE(state_controller()->IsCollapsed());
 
   // Grow the area a small amount and nothing will happen.
@@ -232,7 +243,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ResizeViewBigger) {
     EXPECT_EQ(
         tabs::kVerticalTabStripDefaultUncollapsedWidth,
         region_view()->target_collapse_state_for_testing().uncollapsed_width);
-    EXPECT_FALSE(region_view()->is_animating_for_testing());
+    EXPECT_FALSE(region_view()->is_animating());
     EXPECT_TRUE(state_controller()->IsCollapsed());
     EXPECT_EQ(initial_width, region_view()->width());
   }
@@ -249,7 +260,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ResizeViewBigger) {
     EXPECT_EQ(
         VerticalTabStripRegionView::kUncollapsedMinWidth,
         region_view()->target_collapse_state_for_testing().uncollapsed_width);
-    EXPECT_TRUE(region_view()->is_animating_for_testing());
+    EXPECT_TRUE(region_view()->is_animating());
 
     // Some time after the animation starts, the state controller collapsed
     // state will become false.
@@ -258,8 +269,8 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ResizeViewBigger) {
 
     // When the animation completes, the preferred width will be the minimum
     // expanded width.
-    ASSERT_TRUE(base::test::RunUntil(
-        [&]() { return !region_view()->is_animating_for_testing(); }));
+    ASSERT_TRUE(
+        base::test::RunUntil([&]() { return !region_view()->is_animating(); }));
     EXPECT_EQ(VerticalTabStripRegionView::kUncollapsedMinWidth,
               region_view()->GetPreferredSize().width());
     WaitForBoundsToMatchPreferredWidth();
@@ -279,7 +290,7 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ResizeViewBigger) {
     EXPECT_EQ(
         resize_width,
         region_view()->target_collapse_state_for_testing().uncollapsed_width);
-    EXPECT_FALSE(region_view()->is_animating_for_testing());
+    EXPECT_FALSE(region_view()->is_animating());
     EXPECT_FALSE(state_controller()->IsCollapsed());
     WaitForBoundsToMatchPreferredWidth();
   }
@@ -298,20 +309,14 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ResizeViewBigger) {
     EXPECT_EQ(
         VerticalTabStripRegionView::kUncollapsedMaxWidth,
         region_view()->target_collapse_state_for_testing().uncollapsed_width);
-    EXPECT_FALSE(region_view()->is_animating_for_testing());
+    EXPECT_FALSE(region_view()->is_animating());
     EXPECT_FALSE(state_controller()->IsCollapsed());
     WaitForBoundsToMatchPreferredWidth();
   }
 }
 
-// TODO(crbug.com/470402527): Fix test on non-mac platforms.
-#if BUILDFLAG(IS_MAC)
-#define MAYBE_RestoreUncollapsedWidth RestoreUncollapsedWidth
-#else
-#define MAYBE_RestoreUncollapsedWidth DISABLED_RestoreUncollapsedWidth
-#endif
 IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
-                       MAYBE_RestoreUncollapsedWidth) {
+                       RestoreUncollapsedWidth) {
   const int initial_width = tabs::kVerticalTabStripDefaultUncollapsedWidth;
 
   // Verify the initial state of the region view.
@@ -387,8 +392,8 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
     ASSERT_LE(resize_width, VerticalTabStripRegionView::kCollapseSnapWidth);
 
     region_view()->OnResize(resize_amount, true);
-    ASSERT_TRUE(base::test::RunUntil(
-        [&]() { return !region_view()->is_animating_for_testing(); }));
+    ASSERT_TRUE(
+        base::test::RunUntil([&]() { return !region_view()->is_animating(); }));
     EXPECT_EQ(VerticalTabStripRegionView::kCollapsedWidth,
               region_view()->GetPreferredSize().width());
     EXPECT_EQ(last_uncollapsed_width,
@@ -404,6 +409,76 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
     return region_view()->GetPreferredSize().width() == last_uncollapsed_width;
   }));
   WaitForBoundsToMatchPreferredWidth();
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, LogsResizeMetrics) {
+  base::UserActionTester user_action_tester;
+  base::HistogramTester histogram_tester;
+  const int initial_width = tabs::kVerticalTabStripDefaultUncollapsedWidth;
+
+  ASSERT_EQ(initial_width, region_view()->GetPreferredSize().width());
+  ASSERT_EQ(initial_width, state_controller()->GetUncollapsedWidth());
+  WaitForBoundsToMatchPreferredWidth();
+  ASSERT_EQ(0, user_action_tester.GetActionCount(
+                   "VerticalTabs_TabStrip_ResizeToCollapsed"));
+  ASSERT_EQ(0, user_action_tester.GetActionCount(
+                   "VerticalTabs_TabStrip_ResizeToUncollapsed"));
+  ASSERT_EQ(0, histogram_tester.GetTotalSum("Tabs.VerticalTabs.TabStripSize"));
+
+  // Adjust the area without finishing resizing. Nothing should be logged.
+  {
+    const int resize_amount = 10;
+    const int resize_width = initial_width + resize_amount;
+    ASSERT_LE(VerticalTabStripRegionView::kUncollapsedMinWidth, resize_width);
+    ASSERT_LE(resize_width, VerticalTabStripRegionView::kUncollapsedMaxWidth);
+
+    region_view()->OnResize(resize_amount, false);
+    WaitForBoundsToMatchPreferredWidth();
+    EXPECT_EQ(0, user_action_tester.GetActionCount(
+                     "VerticalTabs_TabStrip_ResizeToCollapsed"));
+    EXPECT_EQ(0, user_action_tester.GetActionCount(
+                     "VerticalTabs_TabStrip_ResizeToUncollapsed"));
+    histogram_tester.ExpectTotalCount("Tabs.VerticalTabs.TabStripSize", 0);
+  }
+
+  // Adjust the area and finish resizing. The resize UMA and width histogram
+  // will be logged.
+  {
+    const int resize_amount = -10;
+    const int resize_width = initial_width + resize_amount;
+    ASSERT_LE(VerticalTabStripRegionView::kUncollapsedMinWidth, resize_width);
+    ASSERT_LE(resize_width, VerticalTabStripRegionView::kUncollapsedMaxWidth);
+
+    region_view()->OnResize(resize_amount, true);
+    WaitForBoundsToMatchPreferredWidth();
+    EXPECT_EQ(0, user_action_tester.GetActionCount(
+                     "VerticalTabs_TabStrip_ResizeToCollapsed"));
+    EXPECT_EQ(1, user_action_tester.GetActionCount(
+                     "VerticalTabs_TabStrip_ResizeToUncollapsed"));
+    histogram_tester.ExpectTotalCount("Tabs.VerticalTabs.TabStripSize", 1);
+    histogram_tester.ExpectBucketCount("Tabs.VerticalTabs.TabStripSize",
+                                       resize_width, 1);
+  }
+
+  // Resize the tabstrip so that it is collapsed. The resize UMA and width
+  // histogram will be logged.
+  {
+    const int resize_amount = -180;
+    const int resize_width =
+        region_view()->GetPreferredSize().width() + resize_amount;
+    ASSERT_LE(resize_width, VerticalTabStripRegionView::kCollapseSnapWidth);
+
+    region_view()->OnResize(resize_amount, true);
+    WaitForBoundsToMatchPreferredWidth();
+    EXPECT_EQ(1, user_action_tester.GetActionCount(
+                     "VerticalTabs_TabStrip_ResizeToCollapsed"));
+    EXPECT_EQ(1, user_action_tester.GetActionCount(
+                     "VerticalTabs_TabStrip_ResizeToUncollapsed"));
+    histogram_tester.ExpectTotalCount("Tabs.VerticalTabs.TabStripSize", 2);
+    histogram_tester.ExpectBucketCount(
+        "Tabs.VerticalTabs.TabStripSize",
+        VerticalTabStripRegionView::kCollapsedWidth, 1);
+  }
 }
 
 // Verify that the pinned tabs container will never be larger than the unpinned
@@ -504,16 +579,10 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
 
 IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
                        AccessiblePaneViewDefaultFocusableChild) {
-  // Add a tab.
-  AppendTab();
-
   // Ensure the default focusable element is the VerticalTabStripTopContainer.
   views::View* view = region_view()->GetDefaultFocusableChild();
   ASSERT_TRUE(view);
-  EXPECT_TRUE(views::IsViewClass<VerticalTabStripTopContainer>(view))
-      << "GetDefaultFocusableChild() should return a "
-         "VerticalTabStripTopContainer, but returned "
-      << view->GetClassName();
+  EXPECT_EQ(view, region_view()->GetTabAnchorViewAt(0));
 }
 
 IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
@@ -609,34 +678,197 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
   tab_strip_model->AddToNewSplit(
       {index4}, {}, split_tabs::SplitTabCreatedSource::kTabContextMenu);
 
-  // Create view hierarchy from an arbitrary parent view since we don't
-  // currently support updates from the API.
-  auto parent_view = std::make_unique<views::View>();
-  parent_view->SetBounds(0, 0, 200, 600);
-  RootTabCollectionNode root_node(
-      browser()->tab_strip_model(),
-      base::BindRepeating<TabCollectionNode::CustomAddChildView>(
-          &views::View::AddChildView, base::Unretained(parent_view.get())));
-
-  auto* pinned_tabs = root_node.children()[0]->get_view_for_testing();
+  auto* pinned_tabs = root_node()->children()[0]->view();
   EXPECT_TRUE(views::IsViewClass<VerticalPinnedTabContainerView>(pinned_tabs));
   EXPECT_EQ(pinned_tabs->children().size(), 1);
-  auto* unpinned_tabs = root_node.children()[1]->get_view_for_testing();
+  auto* unpinned_tabs = root_node()->children()[1]->view();
   EXPECT_TRUE(
       views::IsViewClass<VerticalUnpinnedTabContainerView>(unpinned_tabs));
-  EXPECT_EQ(unpinned_tabs->children().size(), 2);
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return unpinned_tabs->children().size() == 2; }));
 
   // Expect pinned tabs to have equal width.
   auto pinned_split_tab = pinned_tabs->children()[0];
   EXPECT_TRUE(views::IsViewClass<VerticalSplitTabView>(pinned_split_tab));
   EXPECT_EQ(pinned_split_tab->children().size(), 2);
-  EXPECT_EQ(pinned_split_tab->children()[0]->size().width(),
-            pinned_split_tab->children()[1]->size().width());
+  ASSERT_TRUE(base::test::RunUntil([&]() {
+    return pinned_split_tab->children()[0]->size().width() ==
+           pinned_split_tab->children()[1]->size().width();
+  }));
 
   // Expect unpinned tabs to have equal width.
   auto unpinned_split_tab = unpinned_tabs->children()[1];
   EXPECT_TRUE(views::IsViewClass<VerticalSplitTabView>(unpinned_split_tab));
   EXPECT_EQ(unpinned_split_tab->children().size(), 2);
-  EXPECT_EQ(unpinned_split_tab->children()[0]->size().width(),
-            unpinned_split_tab->children()[1]->size().width());
+  ASSERT_TRUE(base::test::RunUntil([&]() {
+    return unpinned_split_tab->children()[0]->size().width() ==
+           unpinned_split_tab->children()[1]->size().width();
+  }));
+}
+
+// Simulates swapping between horizontal and vertical modes. The inactive
+// TabStrip should have no tabs.
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, SwitchModes) {
+  EXPECT_TRUE(root_node());
+
+  TabStripModel* model = browser()->tab_strip_model();
+
+  // 1. Unpinned Tab
+  // This tab is added by default for browser tests.
+
+  // 2. Pinned Tab
+  AppendPinnedTab();
+
+  // 3. Split Tab (Unpinned)
+  {
+    content::WebContents* c1 = AppendTab();
+    content::WebContents* c2 = AppendTab();
+    int i1 = model->GetIndexOfWebContents(c1);
+    int i2 = model->GetIndexOfWebContents(c2);
+    model->ActivateTabAt(i1,
+                         TabStripUserGestureDetails(
+                             TabStripUserGestureDetails::GestureType::kOther));
+    model->AddToNewSplit({i2}, {},
+                         split_tabs::SplitTabCreatedSource::kTabContextMenu);
+  }
+
+  // 4. Pinned Split Tab
+  {
+    content::WebContents* c1 = AppendPinnedTab();
+    content::WebContents* c2 = AppendPinnedTab();
+    int i1 = model->GetIndexOfWebContents(c1);
+    int i2 = model->GetIndexOfWebContents(c2);
+    model->ActivateTabAt(i1,
+                         TabStripUserGestureDetails(
+                             TabStripUserGestureDetails::GestureType::kOther));
+    model->AddToNewSplit({i2}, {},
+                         split_tabs::SplitTabCreatedSource::kTabContextMenu);
+  }
+
+  // 5. Grouped Tab
+  {
+    content::WebContents* c = AppendTab();
+    int i = model->GetIndexOfWebContents(c);
+    model->AddToNewGroup({i});
+  }
+
+  // 6. Split within a Group
+  {
+    content::WebContents* c1 = AppendTab();
+    content::WebContents* c2 = AppendTab();
+    int i1 = model->GetIndexOfWebContents(c1);
+    int i2 = model->GetIndexOfWebContents(c2);
+    model->AddToNewGroup({i1, i2});
+    model->ActivateTabAt(i1,
+                         TabStripUserGestureDetails(
+                             TabStripUserGestureDetails::GestureType::kOther));
+    model->AddToNewSplit({i2}, {},
+                         split_tabs::SplitTabCreatedSource::kTabContextMenu);
+  }
+
+  // Total tabs: 1 (pinned) + 1 (unpinned) + 2 (split) + 2 (pinned split) + 1
+  // (grouped) + 2 (grouped split) = 9.
+  auto* pinned_tabs_view = root_node()->children()[0]->view();
+  auto* unpinned_tabs_view = root_node()->children()[1]->view();
+
+  // Horizontal tabstrip should be empty when in vertical mode.
+  EXPECT_EQ(horizontal_tab_strip()->GetTabCount(), 0);
+
+  // Vertical tabstrip should have the tabs.
+  // Pinned: 1 single + 1 split = 2 children.
+  // Unpinned: 1 single + 1 split + 1 group + 1 group = 4 children.
+  ASSERT_TRUE(base::test::RunUntil([&]() {
+    return pinned_tabs_view->children().size() == 2 &&
+           unpinned_tabs_view->children().size() == 4;
+  }));
+
+  ExitVerticalTabsMode();
+
+  // Root node should be null after exiting vertical tabs mode.
+  EXPECT_FALSE(root_node());
+
+  // Horizontal tabstrip should have the tabs.
+  // 1 pinned + 1 unpinned + 2 split + 2 pinned split + 1 grouped +
+  // 2 grouped split = 10.
+  EXPECT_EQ(horizontal_tab_strip()->GetTabCount(), 9);
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, TabStripEditableState) {
+  // Default state should be editable.
+  EXPECT_TRUE(region_view()->IsTabStripEditable());
+
+  // Disable editing.
+  region_view()->DisableTabStripEditingForTesting();
+  EXPECT_FALSE(region_view()->IsTabStripEditable());
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, TabStripCloseableState) {
+  // Default state should be closeable (no drag session).
+  EXPECT_TRUE(region_view()->IsTabStripCloseable());
+}
+
+// Verifies that entering Touch UI mode with vertical tabs enabled doesn't
+// crash and correctly handles the vertical tab strip. This is a regression test
+// for crbug.com/479887003.
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest,
+                       NoCrashOnTouchUiModeChange) {
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
+
+  // Toggle Touch UI mode ON.
+  {
+    ui::TouchUiController::TouchUiScoperForTesting touch_ui_scoper(true);
+
+    // Verify that the tab strip view is still the vertical one.
+    // If it crashed, we won't reach here.
+    TabStripRegionView* touch_view = browser_view->tab_strip_view();
+    EXPECT_TRUE(views::IsViewClass<VerticalTabStripRegionView>(touch_view));
+    EXPECT_EQ(region_view(), touch_view);
+  }
+
+  // Toggle Touch UI mode OFF (happens when touch_ui_scoper goes out of scope).
+
+  // Verify it's still vertical.
+  TabStripRegionView* final_view = browser_view->tab_strip_view();
+  EXPECT_TRUE(views::IsViewClass<VerticalTabStripRegionView>(final_view));
+  EXPECT_EQ(region_view(), final_view);
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripRegionViewTest, ImmersiveModeLock) {
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser());
+  tabs::VerticalTabStripStateController* controller = state_controller();
+
+  // The mixin starts us in vertical tabs mode.
+  ASSERT_TRUE(controller->ShouldDisplayVerticalTabs());
+
+  // 1. Simulate entering immersive mode.
+  browser_view->OnImmersiveFullscreenEntered();
+
+  // 2. Try to disable vertical tabs via pref.
+  browser()->profile()->GetPrefs()->SetBoolean(prefs::kVerticalTabsEnabled,
+                                               false);
+
+  // 3. Verify vertical tabs are STILL enabled (deferred).
+  EXPECT_TRUE(controller->ShouldDisplayVerticalTabs());
+
+  // 4. Simulate exiting immersive mode.
+  browser_view->OnImmersiveFullscreenExited();
+
+  // 5. Verify vertical tabs are now disabled.
+  EXPECT_FALSE(controller->ShouldDisplayVerticalTabs());
+
+  // 6. Simulate entering immersive mode again.
+  browser_view->OnImmersiveFullscreenEntered();
+
+  // 7. Try to enable vertical tabs via pref.
+  browser()->profile()->GetPrefs()->SetBoolean(prefs::kVerticalTabsEnabled,
+                                               true);
+
+  // 8. Verify vertical tabs are STILL disabled.
+  EXPECT_FALSE(controller->ShouldDisplayVerticalTabs());
+
+  // 9. Simulate exiting immersive mode.
+  browser_view->OnImmersiveFullscreenExited();
+
+  // 10. Verify vertical tabs are now enabled.
+  EXPECT_TRUE(controller->ShouldDisplayVerticalTabs());
 }

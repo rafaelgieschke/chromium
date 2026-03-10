@@ -7,7 +7,9 @@
 #include <memory>
 #include <variant>
 
+#include "base/feature_list.h"
 #include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_id_helper.h"
 #include "cc/base/features.h"
 #include "cc/metrics/event_metrics.h"
 #include "cc/metrics/scroll_jank_v4_decision_queue.h"
@@ -30,11 +32,10 @@ class ProcessorResultConsumer
                      const ScrollJankV4Frame::ScrollDamage& damage,
                      const ScrollJankV4Frame::BeginFrameArgsForScrollJank& args,
                      const ScrollJankV4Result& result) override {
-    bool counts_towards_histogram_frame_count =
-        std::holds_alternative<ScrollJankV4Frame::DamagingFrame>(damage) ||
-        features::kCountNonDamagingFramesTowardsHistogramFrameCount.Get();
-    histogram_emitter_.OnFrameWithScrollUpdates(
-        result.missed_vsyncs_per_reason, counts_towards_histogram_frame_count);
+    bool is_damaging =
+        std::holds_alternative<ScrollJankV4Frame::DamagingFrame>(damage);
+    histogram_emitter_.OnFrameWithScrollUpdates(result.missed_vsyncs_per_reason,
+                                                is_damaging);
     ScrollJankV4TracingRecorder::RecordTraceEvents(updates, damage, args,
                                                    result);
   }
@@ -53,7 +54,7 @@ ScrollJankV4Processor::ScrollJankV4Processor()
     : decision_queue_(std::make_unique<ProcessorResultConsumer>()) {}
 
 void ScrollJankV4Processor::ProcessEventsMetricsForPresentedFrame(
-    const EventMetrics::List& events_metrics,
+    EventMetrics::List& events_metrics,
     base::TimeTicks presentation_ts,
     const viz::BeginFrameArgs& args) {
   static const bool scroll_jank_v4_metric_enabled =
@@ -65,11 +66,13 @@ void ScrollJankV4Processor::ProcessEventsMetricsForPresentedFrame(
   if (!base::FeatureList::IsEnabled(
           features::kHandleNonDamagingInputsInScrollJankV4Metric)) {
     // Ignore non-damaging events (legacy behavior).
+    uint64_t result_id = base::trace_event::GetNextGlobalTraceId();
     ScrollJankV4FrameStage::List stages =
         ScrollJankV4FrameStage::CalculateStages(
-            events_metrics, /* skip_non_damaging_events= */ true);
-    HandleFrame(stages, ScrollJankV4Frame::DamagingFrame(presentation_ts),
-                ScrollJankV4Frame::BeginFrameArgsForScrollJank::From(args));
+            events_metrics, result_id, /* skip_non_damaging_events= */ true);
+    HandleFrame(
+        stages, ScrollJankV4Frame::DamagingFrame(presentation_ts),
+        ScrollJankV4Frame::BeginFrameArgsForScrollJank::From(args, result_id));
     return;
   }
 

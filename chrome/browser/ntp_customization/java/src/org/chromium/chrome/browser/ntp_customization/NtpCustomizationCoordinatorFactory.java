@@ -9,8 +9,10 @@ import android.content.Context;
 import org.chromium.base.ResettersForTesting;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.magic_stack.ModuleRegistry;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
+import org.chromium.ui.base.WindowAndroid;
 
 import java.util.function.Supplier;
 
@@ -54,7 +56,9 @@ public class NtpCustomizationCoordinatorFactory {
             Context context,
             BottomSheetController bottomSheetController,
             Supplier<@Nullable Profile> profileSupplier,
-            @NtpCustomizationCoordinator.BottomSheetType int bottomSheetType) {
+            @NtpCustomizationCoordinator.BottomSheetType int bottomSheetType,
+            WindowAndroid windowAndroid,
+            @Nullable ModuleRegistry moduleRegistry) {
         // Destroys any previously existing coordinator to ensure only one is active.
         if (mCoordinator != null) {
             mCoordinator.dismissBottomSheet();
@@ -63,7 +67,12 @@ public class NtpCustomizationCoordinatorFactory {
 
         mCoordinator =
                 new NtpCustomizationCoordinator(
-                        context, bottomSheetController, profileSupplier, bottomSheetType);
+                        context,
+                        bottomSheetController,
+                        profileSupplier,
+                        bottomSheetType,
+                        windowAndroid,
+                        moduleRegistry);
         return mCoordinator;
     }
 

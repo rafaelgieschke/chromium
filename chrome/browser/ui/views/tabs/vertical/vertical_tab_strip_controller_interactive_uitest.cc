@@ -4,11 +4,16 @@
 
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
+#include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/frame/browser_widget.h"
 #include "chrome/browser/ui/views/frame/vertical_tab_strip_region_view.h"
+#include "chrome/browser/ui/views/tabs/tab_hover_card_bubble_view.h"
 #include "chrome/browser/ui/views/tabs/vertical/vertical_tab_view.h"
 #include "chrome/browser/ui/views/test/vertical_tabs_interactive_test_mixin.h"
 #include "chrome/grit/generated_resources.h"
@@ -22,7 +27,9 @@
 #include "ui/events/event_constants.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/menus/simple_menu_model.h"
+#include "ui/views/controls/scroll_view.h"
 #include "ui/views/interaction/interactive_views_test.h"
+#include "ui/views/view_utils.h"
 
 namespace {
 
@@ -71,8 +78,9 @@ class VerticalTabStripControllerInteractiveUiTest
   }
 };
 
+// TODO(crbug.com/478118942): This test is flaky on Mac and Win platforms.
 IN_PROC_BROWSER_TEST_F(VerticalTabStripControllerInteractiveUiTest,
-                       VerifyTabSelection) {
+                       DISABLED_VerifyTabSelection) {
   RunTestSequence(
       // Verify Vertical Tabs is showing.
       WaitForShow(kVerticalTabStripBottomContainerElementId),
@@ -95,16 +103,8 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripControllerInteractiveUiTest,
           0));
 }
 
-// TODO(crbug.com/466106773): Unable to click middle mouse button on MacOS.
-#if BUILDFLAG(IS_MAC)
-#define MAYBE_VerifyClosingTabWithMiddleMouseButton \
-  DISABLED_VerifyClosingTabWithMiddleMouseButton
-#else
-#define MAYBE_VerifyClosingTabWithMiddleMouseButton \
-  VerifyClosingTabWithMiddleMouseButton
-#endif
 IN_PROC_BROWSER_TEST_F(VerticalTabStripControllerInteractiveUiTest,
-                       MAYBE_VerifyClosingTabWithMiddleMouseButton) {
+                       VerifyClosingTabWithMiddleMouseButton) {
   RunTestSequence(
       // Verify Vertical Tabs is showing.
       WaitForShow(kVerticalTabStripBottomContainerElementId),
@@ -118,10 +118,58 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripControllerInteractiveUiTest,
       NameDescendantViewByType<VerticalTabView>(kBrowserViewElementId,
                                                 kFirstTabName, 0),
       // Close tab at index 0 w/middle mouse button and verify tab count.
-      MoveMouseTo(kFirstTabName), ClickMouse(ui_controls::MIDDLE),
+      MoveMouseTo(kFirstTabName),
+#if BUILDFLAG(IS_MAC)
+      // Interactive tests on Mac don't support middle click so simulate the
+      // event.
+      WithView(kFirstTabName,
+               [](views::View* view) {
+                 gfx::Point point = view->bounds().CenterPoint();
+                 ui::MouseEvent event(ui::EventType::kMouseReleased, point,
+                                      point, ui::EventTimeForNow(),
+                                      ui::EF_MIDDLE_MOUSE_BUTTON,
+                                      ui::EF_MIDDLE_MOUSE_BUTTON);
+                 view->OnMouseReleased(event);
+               }),
+#else
+      ClickMouse(ui_controls::MIDDLE),
+#endif
       CheckResult([this]() { return browser()->tab_strip_model()->count(); },
                   1),
       WaitForHide(kFirstTabName));
+}
+
+IN_PROC_BROWSER_TEST_F(
+    VerticalTabStripControllerInteractiveUiTest,
+    VerifyNotClosingTabWhenMiddleMouseButtonReleasedElsewhere) {
+  RunTestSequence(
+      // Verify Vertical Tabs is showing.
+      WaitForShow(kVerticalTabStripBottomContainerElementId),
+      // Create a second tab.
+      EnsurePresent(kNewTabButtonElementId),
+      PressButton(kNewTabButtonElementId,
+                  ui::test::InteractionTestUtil::InputType::kDontCare),
+      CheckResult([this]() { return browser()->tab_strip_model()->count(); },
+                  2),
+      // Name views so we can interact with them.
+      NameDescendantViewByType<VerticalTabView>(kBrowserViewElementId,
+                                                kFirstTabName, 0),
+      // Move mouse to tab at index 0.
+      MoveMouseTo(kFirstTabName),
+      // We pass a point outside the view's local bounds so that HitTestPoint()
+      // fails.
+      WithView(kFirstTabName,
+               [](views::View* view) {
+                 gfx::Point off_tab_point(-10, -10);
+                 ui::MouseEvent event(
+                     ui::EventType::kMouseReleased, off_tab_point,
+                     off_tab_point, ui::EventTimeForNow(),
+                     ui::EF_MIDDLE_MOUSE_BUTTON, ui::EF_MIDDLE_MOUSE_BUTTON);
+                 view->OnMouseReleased(event);
+               }),
+      // Verify that the tab count is still 2 (the tab did not close).
+      CheckResult([this]() { return browser()->tab_strip_model()->count(); },
+                  2));
 }
 
 // TODO(crbug.com/469912247): Fails on mac-rel-ready and linux-rel-ready bots.
@@ -178,8 +226,9 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripControllerInteractiveUiTest,
           0));
 }
 
+// TODO(crbug.com/478118942): This test is flaky on Mac and Win platforms.
 IN_PROC_BROWSER_TEST_F(VerticalTabStripControllerInteractiveUiTest,
-                       ToggleTabSelection) {
+                       DISABLED_ToggleTabSelection) {
   RunTestSequence(
       // Verify Vertical Tabs is showing.
       WaitForShow(kVerticalTabStripBottomContainerElementId),
@@ -342,30 +391,154 @@ IN_PROC_BROWSER_TEST_F(VerticalTabStripControllerInteractiveUiTest,
                   2));
 }
 
-IN_PROC_BROWSER_TEST_F(VerticalTabStripControllerInteractiveUiTest,
-                       VerifyTabContextMenuText) {
+class VerticalTabStripControllerTabGroupFocusingInteractiveUiTest
+    : public VerticalTabsInteractiveTestMixin<InteractiveBrowserTest> {
+ public:
+  const std::vector<base::test::FeatureRefAndParams> GetEnabledFeatures()
+      override {
+    return {{tabs::kVerticalTabs, {}}, {features::kTabGroupsFocusing, {}}};
+  }
+
+  bool CheckBrowserHasColorOverride() {
+    BrowserWidget* widget =
+        BrowserView::GetBrowserViewForBrowser(browser())->browser_widget();
+    return widget->user_color_override() != std::nullopt;
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(
+    VerticalTabStripControllerTabGroupFocusingInteractiveUiTest,
+    OnTabGroupFocusChangedUpdatesTheme) {
   RunTestSequence(
       // Verify Vertical Tabs is showing.
       WaitForShow(kVerticalTabStripBottomContainerElementId),
-      // Identify Tab by Type (VerticalTabView).
-      NameDescendantViewByType<VerticalTabView>(kBrowserViewElementId,
-                                                kFirstTabName, 0),
-      // Open Tab Context Menu.
-      MoveMouseTo(kFirstTabName),
-      MayInvolveNativeContextMenu(
-          ClickMouse(ui_controls::RIGHT),
-          WaitForShow(TabMenuModel::kAddNewTabAdjacentMenuItem), Do([this]() {
-            // Verify "New Tab Below" text is present.
-            EXPECT_TRUE(CheckMenuHasStringId(IDS_TAB_CXMENU_NEWTABBELOW));
-            // Verify "Close Tabs Below" text is present.
-            EXPECT_TRUE(CheckMenuHasStringId(IDS_TAB_CXMENU_CLOSETABSBELOW));
-          }),
-          // Close menu to avoid the test hanging.
-          Do([this]() {
-            vertical_tab_strip_controller()
-                ->GetTabContextMenuController()
-                ->CloseMenu();
-          })));
+      // Create a second tab.
+      EnsurePresent(kNewTabButtonElementId),
+      PressButton(kNewTabButtonElementId,
+                  ui::test::InteractionTestUtil::InputType::kDontCare),
+      Do([this]() {
+        EXPECT_FALSE(CheckBrowserHasColorOverride());
+        browser()->tab_strip_model()->AddToNewGroup({0, 1});
+      }),
+      WaitForShow(kTabGroupHeaderElementId), Do([this]() {
+        std::optional<tab_groups::TabGroupId> group =
+            browser()->tab_strip_model()->GetActiveTabGroupId();
+        EXPECT_TRUE(group.has_value());
+
+        // Focus on the group, which should override the tab strip color.
+        browser()->tab_strip_model()->SetFocusedGroup(group.value());
+        EXPECT_TRUE(CheckBrowserHasColorOverride());
+
+        // Unset focused group, which should remove the override.
+        browser()->tab_strip_model()->SetFocusedGroup(std::nullopt);
+        EXPECT_FALSE(CheckBrowserHasColorOverride());
+
+        // Focus on the group again, which should override the tab strip color.
+        browser()->tab_strip_model()->SetFocusedGroup(group.value());
+        EXPECT_TRUE(CheckBrowserHasColorOverride());
+      }));
 }
 
+IN_PROC_BROWSER_TEST_F(
+    VerticalTabStripControllerTabGroupFocusingInteractiveUiTest,
+    UnfocusButtonShowsWhenGroupFocused) {
+  RunTestSequence(
+      // Verify Vertical Tabs is showing.
+      WaitForShow(kVerticalTabStripBottomContainerElementId),
+      // Create a second tab.
+      EnsurePresent(kNewTabButtonElementId),
+      PressButton(kNewTabButtonElementId,
+                  ui::test::InteractionTestUtil::InputType::kDontCare),
+      Do([this]() { browser()->tab_strip_model()->AddToNewGroup({0, 1}); }),
+      WaitForShow(kTabGroupHeaderElementId), Do([this]() {
+        std::optional<tab_groups::TabGroupId> group =
+            browser()->tab_strip_model()->GetActiveTabGroupId();
+        EXPECT_TRUE(group.has_value());
+
+        // Focus on the group, which should show the unfocus button.
+        browser()->tab_strip_model()->SetFocusedGroup(group.value());
+      }),
+      WaitForShow(kUnfocusTabGroupButtonElementId), Do([this]() {
+        // Unset focused group, which should hide the button.
+        browser()->tab_strip_model()->SetFocusedGroup(std::nullopt);
+      }),
+      WaitForHide(kUnfocusTabGroupButtonElementId));
+}
+
+// TODO(crbug.com/481392191) Fix these flaky hovercard tests.
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_VerticalTabHoverCardShowUnpinned \
+  DISABLED_VerticalTabHoverCardShowUnpinned
+#else
+#define MAYBE_VerticalTabHoverCardShowUnpinned VerticalTabHoverCardShowUnpinned
+#endif  // BUILDFLAG(IS_WIN)
+IN_PROC_BROWSER_TEST_F(VerticalTabStripControllerInteractiveUiTest,
+                       MAYBE_VerticalTabHoverCardShowUnpinned) {
+  RunTestSequence(
+      WaitForShow(kVerticalTabStripBottomContainerElementId),
+      MoveMouseTo(kVerticalTabStripBottomContainerElementId),
+      NameDescendantViewByType<VerticalTabView>(kBrowserViewElementId,
+                                                kFirstTabName, 0),
+      MoveMouseTo(kFirstTabName),
+      WaitForShow(TabHoverCardBubbleView::kHoverCardBubbleElementId));
+}
+
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_ScrollingHidesHoverCard DISABLED_ScrollingHidesHoverCard
+#else
+#define MAYBE_ScrollingHidesHoverCard ScrollingHidesHoverCard
+#endif  // BUILDFLAG(IS_WIN)
+IN_PROC_BROWSER_TEST_F(VerticalTabStripControllerInteractiveUiTest,
+                       MAYBE_ScrollingHidesHoverCard) {
+  RunTestSequence(
+      WaitForShow(kVerticalTabStripBottomContainerElementId),
+      MoveMouseTo(kVerticalTabStripBottomContainerElementId),
+      NameDescendantViewByType<VerticalTabView>(kBrowserViewElementId,
+                                                kFirstTabName, 0),
+      MoveMouseTo(kFirstTabName),
+      WaitForShow(TabHoverCardBubbleView::kHoverCardBubbleElementId),
+      Do([this]() {
+        views::View* tab_strip_view =
+            BrowserView::GetBrowserViewForBrowser(browser())
+                ->vertical_tab_strip_region_view_for_testing()
+                ->GetTabStripView();
+        VerticalTabStripView* vertical_tab_strip_view =
+            views::AsViewClass<VerticalTabStripView>(tab_strip_view);
+        vertical_tab_strip_view->unpinned_tabs_scroll_view_for_testing()
+            ->ScrollByOffset({0, -100});
+      }),
+      WaitForHide(TabHoverCardBubbleView::kHoverCardBubbleElementId));
+}
+
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_MousePressHidesHoverCard DISABLED_MousePressHidesHoverCard
+#else
+#define MAYBE_MousePressHidesHoverCard MousePressHidesHoverCard
+#endif  // BUILDFLAG(IS_WIN)
+IN_PROC_BROWSER_TEST_F(VerticalTabStripControllerInteractiveUiTest,
+                       MAYBE_MousePressHidesHoverCard) {
+  RunTestSequence(
+      WaitForShow(kVerticalTabStripBottomContainerElementId),
+      MoveMouseTo(kVerticalTabStripBottomContainerElementId),
+      NameDescendantViewByType<VerticalTabView>(kBrowserViewElementId,
+                                                kFirstTabName, 0),
+      MoveMouseTo(kFirstTabName),
+      WaitForShow(TabHoverCardBubbleView::kHoverCardBubbleElementId),
+      ClickMouse(ui_controls::MouseButton::LEFT, /*release=*/false),
+      WaitForHide(TabHoverCardBubbleView::kHoverCardBubbleElementId));
+}
+
+IN_PROC_BROWSER_TEST_F(VerticalTabStripControllerInteractiveUiTest,
+                       DISABLED_VerticalTabHoverCardShowPinned) {
+  TabStripModel* model = browser()->tab_strip_model();
+  model->SetTabPinned(0, true);
+
+  RunTestSequence(
+      WaitForShow(kVerticalTabStripBottomContainerElementId),
+      NameDescendantViewByType<VerticalTabView>(kBrowserViewElementId,
+                                                kFirstTabName, 0),
+      MoveMouseTo(kVerticalTabStripBottomContainerElementId),
+      MoveMouseTo(kFirstTabName),
+      WaitForShow(TabHoverCardBubbleView::kHoverCardBubbleElementId));
+}
 }  // namespace

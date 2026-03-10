@@ -335,12 +335,12 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
 
 #pragma mark - Public
 
-- (BOOL)isScrolledToTop {
-  return IsScrollViewScrolledToTop(self.collectionView);
+- (CGFloat)remainingScrollDistanceTop {
+  return RemainingScrollDistanceToTop(self.collectionView);
 }
 
-- (BOOL)isScrolledToBottom {
-  return IsScrollViewScrolledToBottom(self.collectionView);
+- (CGFloat)remainingScrollDistanceBottom {
+  return RemainingScrollDistanceToBottom(self.collectionView);
 }
 
 - (BOOL)isGridScrollsToTopEnabled {
@@ -930,15 +930,15 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
       [collectionView indexPathForItemAtPoint:locationInCollectionView];
   NSIndexPath* draggedItemIndexPath = [self.diffableDataSource
       indexPathForItemIdentifier:_draggedItemIdentifier];
-  BOOL isSharedGroup = NO;
-  if ([dragItem.localObject isKindOfClass:[TabGroupInfo class]]) {
-    TabGroupInfo* tabGroupInfo =
-        static_cast<TabGroupInfo*>(dragItem.localObject);
-    isSharedGroup = [self.dragDropHandler isGroupShared:tabGroupInfo];
-  }
-  if (IsTabGridDragAndDropEnabled() && !isSharedGroup &&
-      destinationItemIndexPath &&
-      draggedItemIndexPath != destinationItemIndexPath) {
+  BOOL isGroup = [dragItem.localObject isKindOfClass:[TabGroupInfo class]];
+  // This is how the explicit forbidden icon or (+) copy icon is shown. Move
+  // has no explicit icon.
+  UIDropOperation dropOperation = [self.dragDropHandler
+      dropOperationForDropSession:session
+                          toIndex:destinationIndexPath.item];
+  if (IsTabGridDragAndDropEnabled() && !isGroup && destinationItemIndexPath &&
+      draggedItemIndexPath != destinationItemIndexPath &&
+      dropOperation != UIDropOperationForbidden) {
     // If the drag goes into a different cell's frame, either highlight or allow
     // for reorder depending on location.
     DragEntrySide entryDirection = DragEntrySideNone;
@@ -967,30 +967,29 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
                              UICollectionViewDropIntentInsertIntoDestinationIndexPath];
     }
   }
-    if (IsTabGridDragAndDropEnabled()) {
-      [self clearCurrentlyHighlightedCell];
-    }
+  if (IsTabGridDragAndDropEnabled()) {
+    [self clearCurrentlyHighlightedCell];
+  }
 
-    // This is how the explicit forbidden icon or (+) copy icon is shown. Move
-    // has no explicit icon.
-    UIDropOperation dropOperation = [self.dragDropHandler
-        dropOperationForDropSession:session
-                            toIndex:destinationIndexPath.item];
-    return [[UICollectionViewDropProposal alloc]
-        initWithDropOperation:dropOperation
-                       intent:
-                           UICollectionViewDropIntentInsertAtDestinationIndexPath];
+  return [[UICollectionViewDropProposal alloc]
+      initWithDropOperation:dropOperation
+                     intent:
+                         UICollectionViewDropIntentInsertAtDestinationIndexPath];
 }
 
 - (void)collectionView:(UICollectionView*)collectionView
     performDropWithCoordinator:
         (id<UICollectionViewDropCoordinator>)coordinator {
+  id<UICollectionViewDropItem> dropItem = coordinator.items.firstObject;
+  NSIndexPath* sourceIndexPath = dropItem.sourceIndexPath;
+  // Check for a valid sourceIndexPath so that a URL that has not yet been
+  // created as a tab isn't dropped into another tab/group.
+  // [self.dragDropHandler dropItemFromProvider:toIndex:placeholderContext:]
+  // will handle this case further down in the method and load the URL.
   if (IsTabGridDragAndDropEnabled() &&
       coordinator.proposal.intent ==
           UICollectionViewDropIntentInsertIntoDestinationIndexPath &&
-      coordinator.items.count == 1) {
-    id<UICollectionViewDropItem> dropItem = coordinator.items.firstObject;
-    NSIndexPath* sourceIndexPath = dropItem.sourceIndexPath;
+      coordinator.items.count == 1 && sourceIndexPath) {
     NSIndexPath* destinationIndexPath = coordinator.destinationIndexPath;
 
     self.dragEndAtNewIndex = YES;
@@ -1009,10 +1008,9 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
       _isNewGroupShiftingToDifferentFinalIndexPath = YES;
     }
     _isGroupBeingCreatedFromDragAndDrop = YES;
-    if ([dropItem.dragItem.localObject isKindOfClass:[TabGroupInfo class]]) {
-      [self.mutator mergeGroup:dropItem.dragItem.localObject
-           intoDestinationItem:destinationItem];
-    } else if ([destinationCell isKindOfClass:[GroupGridCell class]]) {
+    if ([destinationCell isKindOfClass:[GroupGridCell class]]) {
+      CHECK(
+          ![dropItem.dragItem.localObject isKindOfClass:[TabGroupInfo class]]);
       TabInfo* tabInfo = static_cast<TabInfo*>(dropItem.dragItem.localObject);
       [self.mutator addDroppedTab:tabInfo
                        sourceItem:sourceItem
@@ -1551,14 +1549,17 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
     [snapshot moveItemWithIdentifier:item
             beforeItemWithIdentifier:nextItemIdentifier];
   } else {
-    NSInteger section = [self.diffableDataSource
-        indexForSectionIdentifier:kGridOpenTabsSectionIdentifier];
-    NSIndexPath* lastIndexPath =
-        [NSIndexPath indexPathForItem:[self numberOfTabs] - 1
-                            inSection:section];
-    GridItemIdentifier* lastItem =
-        [self.diffableDataSource itemIdentifierForIndexPath:lastIndexPath];
-    if (lastItem == item) {
+    NSArray<GridItemIdentifier*>* items = [snapshot
+        itemIdentifiersInSectionWithIdentifier:kGridOpenTabsSectionIdentifier];
+    GridItemIdentifier* lastItem = items.lastObject;
+    if ([lastItem isEqual:item]) {
+      return;
+    }
+
+    // If there is no last item (empty section), append the item.
+    if (!lastItem) {
+      [snapshot appendItemsWithIdentifiers:@[ item ]
+                 intoSectionWithIdentifier:kGridOpenTabsSectionIdentifier];
       return;
     }
 
@@ -1801,7 +1802,13 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
   cell.delegate = self;
   cell.theme = self.theme;
   cell.itemIdentifier = groupItemIdentifier;
-  cell.groupColor = item.groupColor;
+  // TODO(crbug.com/481997646): Cleanup this groupColor flow once feature hits
+  // stable.
+  if (!IsTabGroupColorOnSurfaceEnabled()) {
+    cell.groupColor = item.groupColor;
+  } else {
+    cell.tabGroupColorPalette = item.tabGroupColorPalette;
+  }
   cell.tabsCount = item.numberOfTabsInGroup;
   cell.title = item.title;
   cell.accessibilityIdentifier = GroupGridCellAccessibilityIdentifier(index);
@@ -1824,7 +1831,7 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
   cell.activityLabelData =
       [self.gridProvider activityLabelDataForItem:groupItemIdentifier];
 
-  if (IsTabGridDragAndDropEnabled()) {
+  if (IsTabGridDragAndDropEnabled() && _highlightedGroupIndexPath) {
     NSUInteger newGroupIndexPath = _highlightedGroupIndexPath.item;
     if (_isNewGroupShiftingToDifferentFinalIndexPath &&
         _isGroupBeingCreatedFromDragAndDrop) {
@@ -2231,7 +2238,7 @@ typedef NS_ENUM(NSInteger, DragEntrySide) {
       }
       break;
     case DragEntrySideNone:
-      NOTREACHED();
+      return NO;
   }
   return YES;
 }

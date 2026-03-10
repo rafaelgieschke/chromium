@@ -109,6 +109,7 @@ class SESSIONS_EXPORT TabRestoreServiceHelper
   const Entries& entries() const;
   std::vector<LiveTab*> RestoreMostRecentEntry(LiveTabContext* context);
   void RemoveEntryById(SessionID id);
+  void RemoveLeastRecentlyUsedEntries(int num_to_remove);
   std::vector<LiveTab*> RestoreEntryById(LiveTabContext* context,
                                          SessionID id,
                                          WindowOpenDisposition disposition);
@@ -242,7 +243,12 @@ class SESSIONS_EXPORT TabRestoreServiceHelper
   // historical tab.
   bool restoring_;
 
-  base::ObserverList<TabRestoreServiceObserver>::Unchecked observer_list_;
+  // TODO(crbug.com/484371187): Investigate if reentrancy can be removed.
+  base::ObserverList<
+      TabRestoreServiceObserver,
+      /*check_empty=*/false,
+      base::ObserverListReentrancyPolicy::kAllowReentrancyUntriaged>::Unchecked
+      observer_list_;
 
   // Set of contexts that we've received a BrowserClosing method for but no
   // corresponding BrowserClosed. We cache the set of contexts closing to

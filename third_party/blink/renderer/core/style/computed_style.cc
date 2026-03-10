@@ -54,6 +54,7 @@
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/forms/html_legend_element.h"
 #include "third_party/blink/renderer/core/html/html_body_element.h"
+#include "third_party/blink/renderer/core/html/html_dialog_element.h"
 #include "third_party/blink/renderer/core/html/html_html_element.h"
 #include "third_party/blink/renderer/core/html/html_li_element.h"
 #include "third_party/blink/renderer/core/html/html_progress_element.h"
@@ -77,7 +78,6 @@
 #include "third_party/blink/renderer/core/style/shadow_list.h"
 #include "third_party/blink/renderer/core/style/shape_offset_path_operation.h"
 #include "third_party/blink/renderer/core/style/style_difference.h"
-#include "third_party/blink/renderer/core/style/style_fetched_image.h"
 #include "third_party/blink/renderer/core/style/style_generated_image.h"
 #include "third_party/blink/renderer/core/style/style_image.h"
 #include "third_party/blink/renderer/core/style/style_inherited_variables.h"
@@ -96,6 +96,7 @@
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/text/capitalize.h"
 #include "third_party/blink/renderer/platform/text/character.h"
+#include "third_party/blink/renderer/platform/text/layout_locale.h"
 #include "third_party/blink/renderer/platform/text/quotes_data.h"
 #include "third_party/blink/renderer/platform/transforms/rotate_transform_operation.h"
 #include "third_party/blink/renderer/platform/transforms/scale_transform_operation.h"
@@ -131,7 +132,7 @@ struct SameSizeAsComputedStyleBase
 
  private:
   Member<void*> pointers[10];
-  unsigned bitfields[5];
+  unsigned bitfields[6];
 };
 
 struct SameSizeAsComputedStyle : public SameSizeAsComputedStyleBase {
@@ -275,19 +276,16 @@ static bool DiffAffectsContainerQueries(const ComputedStyle& old_style,
 
 static bool DiffAffectsScrollAnimations(const ComputedStyle& old_style,
                                         const ComputedStyle& new_style) {
-  if (!base::ValuesEquivalent(old_style.ScrollTimelineName(),
-                              new_style.ScrollTimelineName()) ||
+  if ((old_style.ScrollTimelineName() != new_style.ScrollTimelineName()) ||
       (old_style.ScrollTimelineAxis() != new_style.ScrollTimelineAxis())) {
     return true;
   }
-  if (!base::ValuesEquivalent(old_style.ViewTimelineName(),
-                              new_style.ViewTimelineName()) ||
+  if ((old_style.ViewTimelineName() != new_style.ViewTimelineName()) ||
       (old_style.ViewTimelineAxis() != new_style.ViewTimelineAxis()) ||
       (old_style.ViewTimelineInset() != new_style.ViewTimelineInset())) {
     return true;
   }
-  if (!base::ValuesEquivalent(old_style.TimelineScope(),
-                              new_style.TimelineScope())) {
+  if (old_style.TimelineScope() != new_style.TimelineScope()) {
     return true;
   }
   return false;
@@ -298,22 +296,8 @@ static bool DiffNeedsFullLayoutForAnimationTriggers(
     const ComputedStyle& new_style) {
   const CSSAnimationData* old_animations = old_style.Animations();
   const CSSAnimationData* new_animations = new_style.Animations();
-  if (old_animations && new_animations) {
-    return (old_animations != new_animations) &&
-           !old_animations->AnimationsMatchForStyleRecalc(*new_animations);
-  } else if (old_animations || new_animations) {
-    // If one of the ComputedStyles didn't have CSSAnimationData and the other
-    // did, the other is only meaningfully different if it declared a named
-    // trigger.
-    const CSSAnimationData* animations =
-        new_animations ? new_animations : old_animations;
-    return std::any_of(animations->TimelineTriggerNameList().begin(),
-                       animations->TimelineTriggerNameList().end(),
-                       [](Member<const ScopedCSSName> trigger_name) {
-                         return trigger_name.Get();
-                       });
-  }
-  return false;
+  return CSSAnimationData::TimelineTriggerDataChanged(old_animations,
+                                                      new_animations);
 }
 
 bool ComputedStyle::NeedsReattachLayoutTree(const Element& element,
@@ -341,7 +325,8 @@ bool ComputedStyle::NeedsReattachLayoutTree(const Element& element,
   if (!old_style->ScrollMarkerGroupEqual(*new_style)) {
     return true;
   }
-  if (old_style->OverscrollArea() != new_style->OverscrollArea()) {
+  if (old_style->IsInternalOverscrollAreaAuto() !=
+      new_style->IsInternalOverscrollAreaAuto()) {
     return true;
   }
   // We need to perform a reattach if a "display: layout(foo)" has changed to a
@@ -389,6 +374,19 @@ bool ComputedStyle::NeedsReattachLayoutTree(const Element& element,
   if (old_style->ListStylePosition() != new_style->ListStylePosition()) {
     return true;
   }
+  return false;
+}
+
+bool ComputedStyle::NeedsReinsertLayoutTree(const ComputedStyle& old_style,
+                                            const ComputedStyle& new_style) {
+  if (old_style.IsFloating() != new_style.IsFloating()) {
+    return true;
+  }
+
+  if (old_style.HasOutOfFlowPosition() != new_style.HasOutOfFlowPosition()) {
+    return true;
+  }
+
   return false;
 }
 
@@ -474,7 +472,8 @@ ComputedStyle::ComputeDifferenceIgnoringInheritedFirstLineStyle(
     }
     return Difference::kPseudoElementStyle;
   }
-  if (old_style.OverscrollArea() != new_style.OverscrollArea()) {
+  if (old_style.IsInternalOverscrollAreaAuto() !=
+      new_style.IsInternalOverscrollAreaAuto()) {
     // TODO(crbug.com/447642032): Should we return kDescendantAffecting since
     // descendants may move into or out of a newly declared or no longer
     // declared overscroll area?
@@ -776,7 +775,7 @@ StyleDifference ComputedStyle::VisualInvalidationDiff(
   uint64_t field_diff = FieldInvalidationDiff(*this, other);
 
   if (DiffNeedsReshape(other, field_diff)) {
-    diff.SetNeedsReshape();
+    diff.needs_reshape = true;
     diff.SetNeedsFullLayout();
     diff.SetNeedsNormalPaintInvalidation();
   }
@@ -785,7 +784,7 @@ StyleDifference ComputedStyle::VisualInvalidationDiff(
       other.IsStackingContextWithoutContainment()) {
     diff.SetNeedsFullLayout();
     diff.SetNeedsNormalPaintInvalidation();
-    diff.SetZIndexChanged();
+    diff.z_index_changed = true;
   }
 
   if ((!diff.NeedsFullLayout() || !diff.NeedsNormalPaintInvalidation()) &&
@@ -794,16 +793,13 @@ StyleDifference ComputedStyle::VisualInvalidationDiff(
     diff.SetNeedsNormalPaintInvalidation();
   }
 
-  if (!diff.NeedsFullLayout() &&
-      DiffNeedsFullLayout(document, other, field_diff)) {
-    diff.SetNeedsFullLayout();
-  }
-
-  if (!diff.NeedsLayout()) {
-    if ((field_diff & kOutOfFlow) && HasOutOfFlowPosition()) {
-      diff.SetNeedsPositionedMovementLayout();
+  if (!diff.NeedsFullLayout()) {
+    if (DiffNeedsFullLayout(document, other, field_diff)) {
+      diff.SetNeedsFullLayout();
+    } else if ((field_diff & kOutOfFlow) && HasOutOfFlowPosition()) {
+      diff.SetNeedsPositionedLayout();
     } else if ((field_diff & kInset) && HasInFlowPosition()) {
-      diff.SetNeedsPositionedMovementLayout();
+      diff.SetNeedsPositionedLayout();
     }
   }
 
@@ -813,54 +809,50 @@ StyleDifference ComputedStyle::VisualInvalidationDiff(
   }
 
   if (DiffNeedsRecomputeVisualOverflow(other, field_diff)) {
-    diff.SetNeedsRecomputeVisualOverflow();
+    diff.needs_recompute_visual_overflow = true;
   }
 
   if (DiffCompositingReasonsChanged(other, field_diff)) {
-    diff.SetCompositingReasonsChanged();
+    diff.compositing_reasons_changed = true;
   }
 
   if (field_diff & kBackgroundColor) {
     // If the background color change is not due to a composited animation,
     // then paint invalidation is required; but we can defer the decision until
     // we know whether the color change will be rendered by the compositor.
-    diff.SetBackgroundColorChanged();
+    diff.background_color_changed = true;
   }
   if (field_diff & kBlendMode) {
-    diff.SetBlendModeChanged();
+    diff.blend_mode_changed = true;
   }
   if (field_diff & kBorderRadius) {
-    diff.SetBorderRadiusChanged();
+    diff.border_radius_changed = true;
   }
   if (field_diff & kBorderShape) {
-    diff.SetBorderShapeChanged();
+    diff.border_shape_changed = true;
   }
   if (field_diff & kClip) {
     bool has_clip = HasOutOfFlowPosition() && !HasAutoClip();
     bool other_has_clip = other.HasOutOfFlowPosition() && !other.HasAutoClip();
     if (has_clip != other_has_clip || (has_clip && Clip() != other.Clip())) {
-      diff.SetCSSClipChanged();
+      diff.clip_property_changed = true;
     }
   }
   if (field_diff & kClipPath) {
-    diff.SetClipPathChanged();
+    diff.clip_path_changed = true;
   }
   if (field_diff & kColor) {
-    diff.SetTextDecorationOrColorChanged();
+    diff.text_decoration_or_color_changed = true;
   }
   if (field_diff & kFilterData) {
-    diff.SetFilterChanged();
+    diff.filter_changed = true;
   }
-  if (field_diff & kHasTransform) {
-    if (HasTransform() != other.HasTransform()) {
-      diff.SetOtherTransformPropertyChanged();
-    }
-  }
+
   if (field_diff & kMask) {
-    diff.SetMaskChanged();
+    diff.mask_changed = true;
   }
   if (field_diff & kOpacity) {
-    diff.SetOpacityChanged();
+    diff.opacity_changed = true;
   }
   if (field_diff & kScrollbarColor) {
     if (UsedScrollbarColor() != other.UsedScrollbarColor()) {
@@ -876,16 +868,19 @@ StyleDifference ComputedStyle::VisualInvalidationDiff(
     }
   }
   if (field_diff & kTextDecoration) {
-    diff.SetTextDecorationOrColorChanged();
+    diff.text_decoration_or_color_changed = true;
   }
   if (field_diff & kTransformData) {
-    diff.SetTransformDataChanged();
+    diff.transform_data_changed = true;
   }
   if (field_diff & kTransformOther) {
-    diff.SetOtherTransformPropertyChanged();
-  }
-  if (field_diff & kTransformProperty) {
-    diff.SetTransformPropertyChanged();
+    diff.transform_changed = true;
+  } else if ((field_diff & kHasTransform) &&
+             HasTransform() != other.HasTransform()) {
+    diff.transform_changed = true;
+  } else if (field_diff & kTransformProperty) {
+    diff.only_transform_property_changed = true;
+    diff.transform_changed = true;
   }
   if (field_diff & kVisibility) {
     if ((Visibility() == EVisibility::kCollapse) !=
@@ -894,28 +889,28 @@ StyleDifference ComputedStyle::VisualInvalidationDiff(
     }
   }
   if (field_diff & kZIndex) {
-    diff.SetZIndexChanged();
+    diff.z_index_changed = true;
   }
 
   // If the (current)color changes and a filter or backdrop-filter uses it, the
   // filter or backdrop-filter needs to be updated. This reads
   // `diff.TextDecorationOrColorChanged()` and so needs to be after the setters,
   // above.
-  if (diff.TextDecorationOrColorChanged()) {
+  if (diff.text_decoration_or_color_changed) {
     if (HasFilter() && Filter().UsesCurrentColor()) {
-      diff.SetFilterChanged();
+      diff.filter_changed = true;
     }
     if (HasBackdropFilter() && BackdropFilter().UsesCurrentColor()) {
       // This could be optimized with a targeted backdrop-filter-changed
       // invalidation.
-      diff.SetCompositingReasonsChanged();
+      diff.compositing_reasons_changed = true;
     }
   }
 
   // The following condition needs to be at last, because it may depend on
   // conditions in diff computed above.
-  if ((field_diff & kScrollAnchor) || diff.TransformChanged()) {
-    diff.SetScrollAnchorDisablingPropertyChanged();
+  if ((field_diff & kScrollAnchor) || diff.transform_changed) {
+    diff.disable_scroll_anchoring = true;
   }
 
   // Cursors are not checked, since they will be set appropriately in response
@@ -1448,19 +1443,6 @@ InterpolationQuality ComputedStyle::GetInterpolationQuality() const {
   return GetDefaultInterpolationQuality();
 }
 
-void ComputedStyle::LoadDeferredImages(Document& document) const {
-  if (HasBackgroundImage()) {
-    for (const FillLayer* background_layer = &BackgroundLayers();
-         background_layer; background_layer = background_layer->Next()) {
-      if (StyleImage* image = background_layer->GetImage()) {
-        if (image->IsImageResource() && image->IsLazyloadPossiblyDeferred()) {
-          To<StyleFetchedImage>(image)->LoadDeferredImage(document);
-        }
-      }
-    }
-  }
-}
-
 ETransformBox ComputedStyle::UsedTransformBox(
     TransformBoxContext box_context) const {
   ETransformBox transform_box = TransformBox();
@@ -1973,113 +1955,15 @@ static String DisableNewGeorgianCapitalLetters(const String& text) {
 
 namespace {
 
-UChar32 FullwidthVariant(UChar32 code_point) {
-  // ASCII printable characters (U+0021..U+007E) to full-width (U+FF01..U+FF5E).
-  if (code_point >= 0x21 && code_point <= 0x7E) {
-    return code_point + 0xFEE0;
-  }
-
-  // Half-width Katakana (U+FF61..U+FF9F) to full-width Katakana.
-  // Katakana characters are contiguous, so we can use direct array indexing.
-  if (code_point >= 0xFF61 && code_point <= 0xFF9F) {
-    auto kKatakanaTable = std::to_array<UChar32>(
-        {0x3002, 0x300C, 0x300D, 0x3001, 0x30FB, 0x30F2, 0x30A1, 0x30A3,
-         0x30A5, 0x30A7, 0x30A9, 0x30E3, 0x30E5, 0x30E7, 0x30C3, 0x30FC,
-         0x30A2, 0x30A4, 0x30A6, 0x30A8, 0x30AA, 0x30AB, 0x30AD, 0x30AF,
-         0x30B1, 0x30B3, 0x30B5, 0x30B7, 0x30B9, 0x30BB, 0x30BD, 0x30BF,
-         0x30C1, 0x30C4, 0x30C6, 0x30C8, 0x30CA, 0x30CB, 0x30CC, 0x30CD,
-         0x30CE, 0x30CF, 0x30D2, 0x30D5, 0x30D8, 0x30DB, 0x30DE, 0x30DF,
-         0x30E0, 0x30E1, 0x30E2, 0x30E4, 0x30E6, 0x30E8, 0x30E9, 0x30EA,
-         0x30EB, 0x30EC, 0x30ED, 0x30EF, 0x30F3, 0x3099, 0x309A});
-    size_t index = code_point - 0xFF61;
-    return kKatakanaTable[index];
-  }
-
-  // Half-width Hangul to full-width Hangul mapping.
-  // Hangul characters have gaps, so we need a lookup table.
-  if ((code_point >= 0xFFA0 && code_point <= 0xFFBE) ||
-      (code_point >= 0xFFC2 && code_point <= 0xFFC7) ||
-      (code_point >= 0xFFCA && code_point <= 0xFFCF) ||
-      (code_point >= 0xFFD2 && code_point <= 0xFFD7) ||
-      (code_point >= 0xFFDA && code_point <= 0xFFDC)) {
-    static const struct {
-      UChar32 halfwidth;
-      UChar32 fullwidth;
-    } kHangulTable[] = {
-        {0xFFA0, 0x3164}, {0xFFA1, 0x3131}, {0xFFA2, 0x3132}, {0xFFA3, 0x3133},
-        {0xFFA4, 0x3134}, {0xFFA5, 0x3135}, {0xFFA6, 0x3136}, {0xFFA7, 0x3137},
-        {0xFFA8, 0x3138}, {0xFFA9, 0x3139}, {0xFFAA, 0x313A}, {0xFFAB, 0x313B},
-        {0xFFAC, 0x313C}, {0xFFAD, 0x313D}, {0xFFAE, 0x313E}, {0xFFAF, 0x313F},
-        {0xFFB0, 0x3140}, {0xFFB1, 0x3141}, {0xFFB2, 0x3142}, {0xFFB3, 0x3143},
-        {0xFFB4, 0x3144}, {0xFFB5, 0x3145}, {0xFFB6, 0x3146}, {0xFFB7, 0x3147},
-        {0xFFB8, 0x3148}, {0xFFB9, 0x3149}, {0xFFBA, 0x314A}, {0xFFBB, 0x314B},
-        {0xFFBC, 0x314C}, {0xFFBD, 0x314D}, {0xFFBE, 0x314E}, {0xFFC2, 0x314F},
-        {0xFFC3, 0x3150}, {0xFFC4, 0x3151}, {0xFFC5, 0x3152}, {0xFFC6, 0x3153},
-        {0xFFC7, 0x3154}, {0xFFCA, 0x3155}, {0xFFCB, 0x3156}, {0xFFCC, 0x3157},
-        {0xFFCD, 0x3158}, {0xFFCE, 0x3159}, {0xFFCF, 0x315A}, {0xFFD2, 0x315B},
-        {0xFFD3, 0x315C}, {0xFFD4, 0x315D}, {0xFFD5, 0x315E}, {0xFFD6, 0x315F},
-        {0xFFD7, 0x3160}, {0xFFDA, 0x3161}, {0xFFDB, 0x3162}, {0xFFDC, 0x3163},
-    };
-    for (const auto& entry : kHangulTable) {
-      if (entry.halfwidth == code_point) {
-        return entry.fullwidth;
-      }
-    }
-  }
-
-  // Special character mappings.
-  switch (code_point) {
-    case uchar::kSpace:
-      return uchar::kIdeographicSpace;
-    case 0x00A2:  // Cent sign
-      return 0xFFE0;
-    case 0x00A3:  // Pound sign
-      return 0xFFE1;
-    case 0x00AC:  // Not sign
-      return 0xFFE2;
-    case 0x00AF:  // Macron
-      return 0xFFE3;
-    case 0x00A6:  // Broken bar
-      return 0xFFE4;
-    case uchar::kYenSign:
-      return 0xFFE5;
-    case 0x20A9:  // Won sign
-      return 0xFFE6;
-    case 0x2985:  // Left white parenthesis
-      return 0xFF5F;
-    case 0x2986:  // Right white parenthesis
-      return 0xFF60;
-    case 0xFFE8:  // Halfwidth forms light vertical
-      return 0x2502;
-    case 0xFFE9:  // Halfwidth leftwards arrow
-      return 0x2190;
-    case 0xFFEA:  // Halfwidth upwards arrow
-      return 0x2191;
-    case 0xFFEB:  // Halfwidth rightwards arrow
-      return 0x2192;
-    case 0xFFEC:  // Halfwidth downwards arrow
-      return 0x2193;
-    case 0xFFED:  // Halfwidth black square
-      return uchar::kBlackSquare;
-    case 0xFFEE:  // Halfwidth white circle
-      return uchar::kWhiteCircle;
-  }
-
-  return code_point;
-}
-
 String ApplyFullwidthTransform(const String& text,
                                TextOffsetMap* offset_map,
                                bool preserve_white_space) {
   StringBuilder result;
   result.ReserveCapacity(text.length());
 
-  CodePointIterator begin(text);
-  CodePointIterator end = CodePointIterator::End(text);
-  for (auto it = begin; it != end; ++it) {
-    UChar32 code_point = *it;
-
-    // Surrogate pairs are not affected by full-width.
+  for (UChar32 code_point : text) {
+    // Non-BMP characters are not affected by full-width. Since all the
+    // transformations are from BMP to BMP, offset_map remains unchanged.
     if (!U_IS_BMP(code_point)) {
       result.Append(code_point);
       continue;
@@ -2092,16 +1976,40 @@ String ApplyFullwidthTransform(const String& text,
     if (code_point == uchar::kSpace && !preserve_white_space) {
       transformed_char = code_point;
     } else {
-      transformed_char = FullwidthVariant(code_point);
+      transformed_char = Character::FullwidthVariant(code_point);
     }
     result.Append(transformed_char);
   }
 
-  String transformed_string = result.ReleaseString();
-  if (offset_map) {
-    offset_map->Append(text.length(), transformed_string.length());
+  return result.ReleaseString();
+}
+
+String ApplyFullSizeKanaTransform(const String& text,
+                                  TextOffsetMap* offset_map) {
+  StringBuilder result;
+  result.ReserveCapacity(text.length());
+
+  wtf_size_t source_offset = 0;
+  wtf_size_t target_offset = 0;
+
+  for (UChar32 code_point : text) {
+    UChar32 transformed = Character::FullSizeKanaVariant(code_point);
+
+    wtf_size_t source_len = U16_LENGTH(code_point);
+    wtf_size_t target_len = U16_LENGTH(transformed);
+
+    source_offset += source_len;
+    target_offset += target_len;
+
+    // Update offset_map when the transform changes the UTF-16 length.
+    if (offset_map && source_len != target_len) {
+      offset_map->Append(source_offset, target_offset);
+    }
+
+    result.Append(transformed);
   }
-  return transformed_string;
+
+  return result.ReleaseString();
 }
 
 String ApplyMathAutoTransform(const String& text, TextOffsetMap* offset_map) {
@@ -2129,35 +2037,62 @@ String ApplyMathAutoTransform(const String& text, TextOffsetMap* offset_map) {
 String ComputedStyle::ApplyTextTransform(const String& text,
                                          UChar previous_character,
                                          TextOffsetMap* offset_map) const {
-  switch (TextTransform()) {
-    case ETextTransform::kNone:
-      return text;
-    case ETextTransform::kCapitalize: {
-      if (RuntimeEnabledFeatures::ICUCapitalizationEnabled()) {
-        const LayoutLocale* locale = GetFontDescription().Locale();
-        CaseMap case_map(locale ? locale->CaseMapLocale() : CaseMap::Locale());
-        return case_map.ToTitle(text, offset_map, previous_character);
-      }
-      return Capitalize(text, previous_character);
-    }
-    case ETextTransform::kUppercase: {
-      const LayoutLocale* locale = GetFontDescription().Locale();
-      CaseMap case_map(locale ? locale->CaseMapLocale() : CaseMap::Locale());
-      return DisableNewGeorgianCapitalLetters(
-          case_map.ToUpper(text, offset_map));
-    }
-    case ETextTransform::kLowercase: {
-      const LayoutLocale* locale = GetFontDescription().Locale();
-      CaseMap case_map(locale ? locale->CaseMapLocale() : CaseMap::Locale());
-      return case_map.ToLower(text, offset_map);
-    }
-    case ETextTransform::kFullWidth:
-      return ApplyFullwidthTransform(text, offset_map,
-                                     ShouldPreserveWhiteSpaces());
-    case ETextTransform::kMathAuto:
-      return ApplyMathAutoTransform(text, offset_map);
+  ETextTransform transform = TextTransform();
+
+  if (transform == ETextTransform::kNone) {
+    return text;
   }
-  NOTREACHED();
+  if (transform == ETextTransform::kMathAuto) {
+    return ApplyMathAutoTransform(text, offset_map);
+  }
+
+  String result = text;
+
+  // Apply transforms in spec order: case, then full-width, then full-size-kana.
+  if (EnumHasFlags(transform, ETextTransform::kCapitalize)) {
+    if (RuntimeEnabledFeatures::ICUCapitalizationEnabled()) {
+      const LayoutLocale* locale = GetFontDescription().Locale();
+      CaseMap case_map(locale ? locale->CaseMapLocale() : CaseMap::Locale());
+      result = case_map.ToTitle(result, offset_map, previous_character);
+    } else {
+      result = Capitalize(result, previous_character);
+    }
+  } else if (EnumHasFlags(transform, ETextTransform::kUppercase)) {
+    const LayoutLocale* locale = GetFontDescription().Locale();
+    CaseMap case_map(locale ? locale->CaseMapLocale() : CaseMap::Locale());
+    result =
+        DisableNewGeorgianCapitalLetters(case_map.ToUpper(result, offset_map));
+  } else if (EnumHasFlags(transform, ETextTransform::kLowercase)) {
+    const LayoutLocale* locale = GetFontDescription().Locale();
+    CaseMap case_map(locale ? locale->CaseMapLocale() : CaseMap::Locale());
+    result = case_map.ToLower(result, offset_map);
+  }
+
+  if (EnumHasFlags(transform, ETextTransform::kFullWidth)) {
+    result = ApplyFullwidthTransform(result, offset_map,
+                                     ShouldPreserveWhiteSpaces());
+  }
+
+  if (EnumHasFlags(transform, ETextTransform::kFullSizeKana)) {
+    // full-size-kana can change the UTF-16 length of the text.
+    // If a prior step already modified offset_map, we need to record the kana
+    // offsets separately because ApplyFullSizeKanaTransform will record offsets
+    // relative to its input (the intermediate string) and not the original.
+    if (offset_map && !offset_map->IsEmpty()) {
+      wtf_size_t intermediate_length = result.length();
+      TextOffsetMap kana_map;
+      result = ApplyFullSizeKanaTransform(result, &kana_map);
+      if (!kana_map.IsEmpty()) {
+        TextOffsetMap composed(text.length(), *offset_map, intermediate_length,
+                               kana_map, result.length());
+        *offset_map = std::move(composed);
+      }
+    } else {
+      result = ApplyFullSizeKanaTransform(result, offset_map);
+    }
+  }
+
+  return result;
 }
 
 const AtomicString& ComputedStyle::TextEmphasisMarkString() const {
@@ -2225,6 +2160,12 @@ LineLogicalSide ComputedStyle::GetTextEmphasisLineLogicalSide() const {
   if (RuntimeEnabledFeatures::TextEmphasisPositionAutoEnabled() &&
       position == TextEmphasisPosition::kAuto) {
     if (IsHorizontalWritingMode()) {
+      // In Chinese, emphasis marks appear below the text.
+      // https://drafts.csswg.org/css-text-decor/#text-emphasis-position-property
+      const LayoutLocale* locale = GetFontDescription().Locale();
+      if (locale && locale->IsMacrolanguageChinese()) {
+        return LineLogicalSide::kUnder;
+      }
       return LineLogicalSide::kOver;
     }
     switch (GetWritingMode()) {
@@ -3095,10 +3036,21 @@ bool ComputedStyle::GapRuleColorIsTransparent(
 }
 
 bool ComputedStyle::IsRenderedInTopLayer(const Element& element) const {
-  return StyleType() == kPseudoIdBackdrop ||
-         (element.IsInTopLayer() &&
-          (!RuntimeEnabledFeatures::OverlayPropertyEnabled() ||
-           Overlay() == EOverlay::kAuto));
+  if (RuntimeEnabledFeatures::OverlayPropertyEnabled()) {
+    return (element.IsInTopLayer() && Overlay() == EOverlay::kAuto) ||
+           StyleType() == kPseudoIdBackdrop;
+  }
+
+  if (StyleType() == kPseudoIdBackdrop) {
+    return true;
+  }
+  if (!element.IsInTopLayer()) {
+    return false;
+  }
+  if (element.IsRenderedInTopLayer()) {
+    return true;
+  }
+  return false;
 }
 
 bool ComputedStyle::ApplyControlFixedSize(const Node* node) const {
@@ -3121,11 +3073,16 @@ bool ComputedStyle::HasAnimationTrigger() const {
     return false;
   }
 
-  return std::any_of(data->TriggerAttachmentsList().begin(),
-                     data->TriggerAttachmentsList().end(),
-                     [](Member<StyleTriggerAttachmentVector> attachments_list) {
-                       return attachments_list.Get();
-                     });
+  return std::any_of(
+             data->TriggerAttachmentsList().begin(),
+             data->TriggerAttachmentsList().end(),
+             [](const Member<StyleTriggerAttachmentVector>& attachments_list) {
+               return attachments_list.Get();
+             }) ||
+         std::any_of(
+             data->TimelineTriggerNameList().begin(),
+             data->TimelineTriggerNameList().end(),
+             [](const Member<ScopedCSSName>& name) { return name.Get(); });
 }
 
 bool ComputedStyle::HasBaseEffectiveAppearance() const {

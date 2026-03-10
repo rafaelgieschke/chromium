@@ -8,6 +8,7 @@
 
 #include "base/auto_reset.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/no_destructor.h"
 #include "base/notreached.h"
 #include "base/time/time.h"
 #include "third_party/blink/public/common/features.h"
@@ -26,6 +27,7 @@
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_to_number.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "ui/gfx/geometry/size.h"
 #include "v8/include/v8.h"
@@ -69,7 +71,11 @@ class NullImageResourceInfo final
 
   void LoadDeferredImage(ResourceFetcher* fetcher) override {}
 
-  bool IsAdResource() const override { return false; }
+  const std::optional<AdProvenance>& GetAdProvenance() const override {
+    static const base::NoDestructor<std::optional<AdProvenance>>
+        kNullProvenance;
+    return *kNullProvenance;
+  }
 
   const HashSet<String>* GetUnsupportedImageMimeTypes() const override {
     return nullptr;
@@ -373,21 +379,25 @@ void ImageResourceContent::NotifyObservers(
 }
 
 scoped_refptr<Image> ImageResourceContent::CreateImage(bool is_multipart) {
-  String content_dpr_value =
-      info_->GetResponse().HttpHeaderField(http_names::kContentDPR);
-  wtf_size_t comma = content_dpr_value.ReverseFind(',');
+  const ResourceResponse& response = info_->GetResponse();
+  const AtomicString& content_dpr_header_value =
+      response.HttpHeaderField(http_names::kContentDPR);
+  StringView content_dpr_value = content_dpr_header_value;
+  wtf_size_t comma = content_dpr_value.rfind(',');
   if (comma != kNotFound && comma < content_dpr_value.length() - 1) {
-    content_dpr_value = content_dpr_value.Substring(comma + 1);
+    content_dpr_value = content_dpr_value.substr(comma + 1);
   }
-  device_pixel_ratio_header_value_ =
-      content_dpr_value.ToFloat(&has_device_pixel_ratio_header_value_);
+  auto optional_header_value = StringToFloat(content_dpr_value);
+  has_device_pixel_ratio_header_value_ = optional_header_value.has_value();
+  device_pixel_ratio_header_value_ = optional_header_value.value_or(0);
   if (!has_device_pixel_ratio_header_value_ ||
       device_pixel_ratio_header_value_ <= 0.0) {
     device_pixel_ratio_header_value_ = 1.0;
     has_device_pixel_ratio_header_value_ = false;
   }
-  if (info_->GetResponse().MimeType() == "image/svg+xml")
+  if (response.MimeType() == "image/svg+xml") {
     return SVGImage::Create(this, is_multipart);
+  }
   return BitmapImage::Create(this, is_multipart);
 }
 
@@ -748,8 +758,9 @@ void ImageResourceContent::LoadDeferredImage(ResourceFetcher* fetcher) {
   info_->LoadDeferredImage(fetcher);
 }
 
-bool ImageResourceContent::IsAdResource() const {
-  return info_->IsAdResource();
+const std::optional<AdProvenance>& ImageResourceContent::GetAdProvenance()
+    const {
+  return info_->GetAdProvenance();
 }
 
 void ImageResourceContent::RecordDecodedImageType(UseCounter* use_counter) {

@@ -15,6 +15,7 @@
 #include "base/containers/flat_map.h"
 #include "base/files/file_path.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/scoped_observation.h"
@@ -50,7 +51,13 @@ class Profile;
 namespace ash {
 class NetworkState;
 class NetworkStateHandler;
+class SchedulerConfigurationManager;
 }  // namespace ash
+
+namespace component_updater {
+class ComponentManagerAsh;
+class ComponentUpdateService;
+}  // namespace component_updater
 
 namespace guest_os {
 class GuestOsStabilityMonitor;
@@ -60,7 +67,6 @@ namespace crostini {
 
 extern const char kCrostiniStabilityHistogram[];
 
-class CrostiniUpgradeAvailableNotification;
 class CrostiniSshfs;
 
 class PendingAppListUpdatesObserver : public base::CheckedObserver {
@@ -106,28 +112,12 @@ class DiskImageProgressObserver {
                                    int progress) = 0;
 };
 
-class UpgradeContainerProgressObserver {
- public:
-  virtual void OnUpgradeContainerProgress(
-      const guest_os::GuestId& container_id,
-      UpgradeContainerProgressStatus status,
-      const std::vector<std::string>& messages) = 0;
-};
-
 class CrostiniDialogStatusObserver : public base::CheckedObserver {
  public:
   // Called when a Crostini dialog (installer, upgrader, etc.) opens or
   // closes.
   virtual void OnCrostiniDialogStatusChanged(DialogType dialog_type,
                                              bool open) = 0;
-};
-
-class CrostiniContainerPropertiesObserver : public base::CheckedObserver {
- public:
-  // Called when a container's OS release version changes.
-  virtual void OnContainerOsReleaseChanged(
-      const guest_os::GuestId& container_id,
-      bool can_upgrade) = 0;
 };
 
 class ContainerShutdownObserver : public base::CheckedObserver {
@@ -204,7 +194,17 @@ class CrostiniManager : public KeyedService,
 
   static CrostiniManager* GetForProfile(Profile* profile);
 
-  explicit CrostiniManager(Profile* profile);
+  // `component_update_service` and `scheduler_configuration_manager` must
+  // outlive `this`, but both of them may be null in unit tests.
+  // `shared_url_loader_factory` and `component_manager_ash` may be null in unit
+  // tests.
+  explicit CrostiniManager(
+      const component_updater::ComponentUpdateService* component_update_service,
+      scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
+      scoped_refptr<component_updater::ComponentManagerAsh>
+          component_manager_ash,
+      ash::SchedulerConfigurationManager* scheduler_configuration_manager,
+      Profile* profile);
 
   CrostiniManager(const CrostiniManager&) = delete;
   CrostiniManager& operator=(const CrostiniManager&) = delete;
@@ -221,10 +221,6 @@ class CrostiniManager : public KeyedService,
 
   // Returns true if concierge allows termina VM to be launched.
   static bool IsVmLaunchAllowed();
-
-  // Upgrades cros-termina component if the current version is not compatible.
-  // This is a no-op if `ash::features::kCrostiniUseDlc` is enabled.
-  void MaybeUpdateCrostini();
 
   // Installs termina using the DLC service.
   void InstallTermina(CrostiniResultCallback callback);
@@ -374,18 +370,6 @@ class CrostiniManager : public KeyedService,
   // CiceroneClient::CancelImportLxdContainer.
   void CancelImportLxdContainer(guest_os::GuestId key);
 
-  // Checks the arguments for upgrading an existing container via
-  // CiceroneClient::UpgradeContainer. An UpgradeProgressObserver should be used
-  // to monitor further results.
-  void UpgradeContainer(const guest_os::GuestId& key,
-                        ContainerVersion target_version,
-                        CrostiniResultCallback callback);
-
-  // Checks the arguments for canceling the upgrade of an existing container via
-  // CiceroneClient::CancelUpgradeContainer.
-  void CancelUpgradeContainer(const guest_os::GuestId& key,
-                              CrostiniResultCallback callback);
-
   // Asynchronously gets app icons as specified by their desktop file ids.
   // |callback| is called after the method call finishes.
   using GetContainerAppIconsCallback =
@@ -475,12 +459,6 @@ class CrostiniManager : public KeyedService,
   void AddDiskImageProgressObserver(DiskImageProgressObserver* observer);
   void RemoveDiskImageProgressObserver(DiskImageProgressObserver* observer);
 
-  // Add/remove observers for container upgrade
-  void AddUpgradeContainerProgressObserver(
-      UpgradeContainerProgressObserver* observer);
-  void RemoveUpgradeContainerProgressObserver(
-      UpgradeContainerProgressObserver* observer);
-
   // Add/remove vm shutdown observers.
   void AddVmShutdownObserver(ash::VmShutdownObserver* observer);
   void RemoveVmShutdownObserver(ash::VmShutdownObserver* observer);
@@ -526,9 +504,6 @@ class CrostiniManager : public KeyedService,
       override;
   void OnPendingAppListUpdates(
       const vm_tools::cicerone::PendingAppListUpdatesSignal& signal) override;
-  void OnUpgradeContainerProgress(
-      const vm_tools::cicerone::UpgradeContainerProgressSignal& signal)
-      override;
   void OnStartLxdProgress(
       const vm_tools::cicerone::StartLxdProgressSignal& signal) override;
 
@@ -581,18 +556,9 @@ class CrostiniManager : public KeyedService,
   void RemoveCrostiniDialogStatusObserver(
       CrostiniDialogStatusObserver* observer);
 
-  void AddCrostiniContainerPropertiesObserver(
-      CrostiniContainerPropertiesObserver* observer);
-  void RemoveCrostiniContainerPropertiesObserver(
-      CrostiniContainerPropertiesObserver* observer);
-
   void AddContainerShutdownObserver(ContainerShutdownObserver* observer);
   void RemoveContainerShutdownObserver(ContainerShutdownObserver* observer);
 
-  bool IsContainerUpgradeable(const guest_os::GuestId& container_id) const;
-  bool ShouldPromptContainerUpgrade(
-      const guest_os::GuestId& container_id) const;
-  void UpgradePromptShown(const guest_os::GuestId& container_id);
   bool IsUncleanStartup() const;
   void SetUncleanStartupForTesting(bool is_unclean_startup);
   void RemoveUncleanSshfsMounts();
@@ -740,17 +706,6 @@ class CrostiniManager : public KeyedService,
       std::optional<vm_tools::cicerone::CancelImportLxdContainerResponse>
           response);
 
-  // Callback for CiceroneClient::UpgradeContainer.
-  void OnUpgradeContainer(
-      CrostiniResultCallback callback,
-      std::optional<vm_tools::cicerone::UpgradeContainerResponse> response);
-
-  // Callback for CiceroneClient::CancelUpgradeContainer.
-  void OnCancelUpgradeContainer(
-      CrostiniResultCallback callback,
-      std::optional<vm_tools::cicerone::CancelUpgradeContainerResponse>
-          response);
-
   // Callback for CrostiniManager::LaunchContainerApplication.
   void OnLaunchContainerApplication(
       guest_os::launcher::SuccessCallback callback,
@@ -827,6 +782,13 @@ class CrostiniManager : public KeyedService,
 
   bool ShouldWarnAboutExpiredVersion(const guest_os::GuestId& container_id);
 
+  const raw_ptr<const component_updater::ComponentUpdateService>
+      component_update_service_;
+  const scoped_refptr<component_updater::ComponentManagerAsh>
+      component_manager_ash_;
+  const raw_ptr<ash::SchedulerConfigurationManager>
+      scheduler_configuration_manager_;
+
   raw_ptr<Profile> profile_;
   std::string owner_id_;
 
@@ -870,7 +832,6 @@ class CrostiniManager : public KeyedService,
   // container fails to start normally.
   std::map<guest_os::GuestId, vm_tools::cicerone::OsRelease>
       container_os_releases_;
-  std::set<guest_os::GuestId> container_upgrade_prompt_shown_;
 
   std::vector<RemoveCrostiniCallback> remove_crostini_callbacks_;
 
@@ -885,9 +846,6 @@ class CrostiniManager : public KeyedService,
   base::ObserverList<DiskImageProgressObserver>::UncheckedAndDanglingUntriaged
       disk_image_progress_observers_;
 
-  base::ObserverList<UpgradeContainerProgressObserver>::
-      UncheckedAndDanglingUntriaged upgrade_container_progress_observers_;
-
   base::ObserverList<ash::VmShutdownObserver> vm_shutdown_observers_;
   base::ObserverList<ash::VmStartingObserver> vm_starting_observers_;
 
@@ -900,8 +858,6 @@ class CrostiniManager : public KeyedService,
 
   base::ObserverList<CrostiniDialogStatusObserver>
       crostini_dialog_status_observers_;
-  base::ObserverList<CrostiniContainerPropertiesObserver>
-      crostini_container_properties_observers_;
 
   base::ObserverList<ContainerShutdownObserver> container_shutdown_observers_;
 
@@ -918,9 +874,6 @@ class CrostiniManager : public KeyedService,
       guest_os_stability_monitor_;
 
   std::unique_ptr<CrostiniLowDiskNotification> low_disk_notifier_;
-
-  std::unique_ptr<CrostiniUpgradeAvailableNotification>
-      upgrade_available_notification_;
 
   TerminaInstaller termina_installer_;
   BaguetteInstaller baguette_installer_;

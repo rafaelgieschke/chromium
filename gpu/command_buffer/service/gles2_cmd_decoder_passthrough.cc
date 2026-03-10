@@ -948,9 +948,6 @@ gpu::ContextResult GLES2DecoderPassthroughImpl::Initialize(
                    "missing GL_ANGLE_request_extension");
   FAIL_INIT_IF_NOT(feature_info_->feature_flags().khr_debug,
                    "missing GL_KHR_debug");
-  FAIL_INIT_IF_NOT(!IsES31ForTestingContextType(context_type) ||
-                       feature_info_->gl_version_info().IsAtLeastGLES(3, 1),
-                   "ES 3.1 context type requires an ES 3.1 ANGLE context");
 
 #undef FAIL_INIT_IF_NOT
 
@@ -988,12 +985,6 @@ gpu::ContextResult GLES2DecoderPassthroughImpl::Initialize(
     bound_buffers_[GL_COPY_WRITE_BUFFER] = 0;
     bound_buffers_[GL_TRANSFORM_FEEDBACK_BUFFER] = 0;
     bound_buffers_[GL_UNIFORM_BUFFER] = 0;
-  }
-  if (feature_info_->gl_version_info().IsAtLeastGLES(3, 1)) {
-    bound_buffers_[GL_ATOMIC_COUNTER_BUFFER] = 0;
-    bound_buffers_[GL_SHADER_STORAGE_BUFFER] = 0;
-    bound_buffers_[GL_DRAW_INDIRECT_BUFFER] = 0;
-    bound_buffers_[GL_DISPATCH_INDIRECT_BUFFER] = 0;
   }
   bound_element_array_buffer_dirty_ = false;
 
@@ -1205,7 +1196,7 @@ void GLES2DecoderPassthroughImpl::Destroy(bool have_context) {
   }
 
   if (have_context) {
-    api()->glDebugMessageCallbackFn(nullptr, nullptr);
+    api()->glDebugMessageCallbackKHRFn(nullptr, nullptr);
   }
 
   if (context_.get()) {
@@ -1299,7 +1290,8 @@ gpu::Capabilities GLES2DecoderPassthroughImpl::GetCapabilities() {
       feature_info_->feature_flags().oes_egl_image_external_essl3;
   caps.texture_format_bgra8888 =
       feature_info_->feature_flags().ext_texture_format_bgra8888;
-
+  caps.disable_mac_swangle_rgbx =
+      feature_info_->feature_flags().disable_mac_swangle_rgbx;
   caps.texture_format_etc1_npot =
       feature_info_->feature_flags().oes_compressed_etc1_rgb8_texture &&
       !feature_info_->workarounds().etc1_power_of_two_only;
@@ -1308,12 +1300,8 @@ gpu::Capabilities GLES2DecoderPassthroughImpl::GetCapabilities() {
   caps.texture_norm16 = feature_info_->feature_flags().ext_texture_norm16;
   caps.texture_half_float_linear =
       feature_info_->feature_flags().enable_texture_half_float_linear;
-  caps.image_ycbcr_420v =
-      feature_info_->feature_flags().chromium_image_ycbcr_420v;
   caps.image_ar30 = feature_info_->feature_flags().chromium_image_ar30;
   caps.image_ab30 = feature_info_->feature_flags().chromium_image_ab30;
-  caps.image_ycbcr_p010 =
-      feature_info_->feature_flags().chromium_image_ycbcr_p010;
   if (feature_info_->workarounds().webgl_or_caps_max_texture_size) {
     caps.max_texture_size =
         std::min(caps.max_texture_size,
@@ -1328,12 +1316,8 @@ gpu::Capabilities GLES2DecoderPassthroughImpl::GetCapabilities() {
   // Technically, YUV readback is handled on the client side, but enable it here
   // so that clients can use this to detect support.
   caps.supports_yuv_readback = true;
-  caps.chromium_gpu_fence = feature_info_->feature_flags().chromium_gpu_fence;
   caps.mesa_framebuffer_flip_y =
       feature_info_->feature_flags().mesa_framebuffer_flip_y;
-
-  caps.gpu_memory_buffer_formats =
-      feature_info_->feature_flags().gpu_memory_buffer_formats;
 
 #if BUILDFLAG(IS_CHROMEOS)
   PopulateDRMCapabilities(&caps, feature_info_.get());
@@ -1541,6 +1525,11 @@ gpu::gles2::ErrorState* GLES2DecoderPassthroughImpl::GetErrorState() {
   return nullptr;
 }
 
+void GLES2DecoderPassthroughImpl::BindFramebuffer(unsigned target,
+                                                  uint32_t service_id) const {
+  NOTREACHED();
+}
+
 void GLES2DecoderPassthroughImpl::WaitForReadPixels(
     base::OnceClosure callback) {}
 
@@ -1739,8 +1728,6 @@ error::Error GLES2DecoderPassthroughImpl::PatchGetNumericResults(GLenum pname,
     case GL_COPY_READ_BUFFER_BINDING:
     case GL_COPY_WRITE_BUFFER_BINDING:
     case GL_UNIFORM_BUFFER_BINDING:
-    case GL_DISPATCH_INDIRECT_BUFFER_BINDING:
-    case GL_DRAW_INDIRECT_BUFFER_BINDING:
       if (*params != 0 &&
           !GetClientID(&resources_->buffer_id_map, *params, params)) {
         return error::kInvalidArguments;
@@ -1979,15 +1966,9 @@ bool GLES2DecoderPassthroughImpl::LazySharedContextState::Initialize() {
   attribs.robust_resource_initialization = true;
   attribs.robust_buffer_access = true;
   attribs.allow_client_arrays = false;
+  attribs.allow_es_version_fallback = true;
   auto gl_context = gl::init::CreateGLContext(impl_->context_->share_group(),
                                               gl_surface.get(), attribs);
-  if (!gl_context) {
-    LOG(ERROR) << "Failed to create GLES3 context, fallback to GLES2.";
-    attribs.client_major_es_version = 2;
-    attribs.client_minor_es_version = 0;
-    gl_context = gl::init::CreateGLContext(impl_->context_->share_group(),
-                                           gl_surface.get(), attribs);
-  }
   if (!gl_context) {
     impl_->InsertError(
         GL_INVALID_OPERATION,
@@ -2012,9 +1993,8 @@ bool GLES2DecoderPassthroughImpl::LazySharedContextState::Initialize() {
       std::move(gl_context),
       /*use_virtualized_gl_contexts=*/false, base::DoNothing(),
       GrContextType::kGL);
-  auto feature_info = base::MakeRefCounted<gles2::FeatureInfo>(
-      workarounds, group->gpu_feature_info());
-  if (!shared_context_state_->InitializeGL(gpu_preferences, feature_info)) {
+  if (!shared_context_state_->InitializeGL(gpu_preferences, workarounds,
+                                           group->gpu_feature_info())) {
     impl_->InsertError(GL_INVALID_OPERATION,
                        "ContextResult::kFatalFailure: Failed to Initialize GL "
                        "for SharedContextState");

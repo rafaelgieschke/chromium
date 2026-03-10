@@ -29,6 +29,8 @@ namespace {
 struct ProfileTypeChoiceTestParam {
   PixelTestParam pixel_test_param;
   bool decline_signin_cta_experiment_enabled = false;
+  bool use_primary_and_tonal_buttons_for_promos = false;
+  bool use_refreshed_ui = false;
 };
 
 // To be passed as 4th argument to `INSTANTIATE_TEST_SUITE_P()`, allows the test
@@ -42,6 +44,13 @@ std::string ParamToTestSuffix(
 // Permutations of supported parameters.
 const ProfileTypeChoiceTestParam kTestParams[] = {
     {.pixel_test_param = {.test_suffix = "Regular"}},
+    {.pixel_test_param = {.test_suffix = "RegularUsePrimaryAndTonalButtons"},
+     .use_primary_and_tonal_buttons_for_promos = true},
+    {.pixel_test_param = {.test_suffix = "RegularRefreshedUI"},
+     .use_refreshed_ui = true},
+    {.pixel_test_param = {.test_suffix = "RegularRefreshedUIDarkMode",
+                          .use_dark_theme = true},
+     .use_refreshed_ui = true},
     {.pixel_test_param = {.test_suffix = "DarkRtlSmall",
                           .use_dark_theme = true,
                           .use_right_to_left_language = true,
@@ -68,9 +77,12 @@ class ProfileTypeChoiceUIPixelTest
  public:
   ProfileTypeChoiceUIPixelTest()
       : ProfilesPixelTestBaseT<UiBrowserTest>(GetParam().pixel_test_param) {
-    scoped_feature_list_.InitWithFeatureState(
-        switches::kProfileCreationDeclineSigninCTAExperiment,
-        GetParam().decline_signin_cta_experiment_enabled);
+    scoped_feature_list_.InitWithFeatureStates(
+        {{switches::kProfileCreationDeclineSigninCTAExperiment,
+          GetParam().decline_signin_cta_experiment_enabled},
+         {switches::kUsePrimaryAndTonalButtonsForPromos,
+          GetParam().use_primary_and_tonal_buttons_for_promos},
+         {switches::kFirstRunDesktopRefresh, GetParam().use_refreshed_ui}});
   }
 
   void ShowUi(const std::string& name) override {

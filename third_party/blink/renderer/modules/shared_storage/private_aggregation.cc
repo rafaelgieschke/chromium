@@ -151,7 +151,7 @@ void PrivateAggregation::contributeToHistogramOnEvent(
   }
 
   // If event does not start with "reserved.", throw a TypeError.
-  if (!event.StartsWith("reserved.")) {
+  if (!event.starts_with("reserved.")) {
     exception_state.ThrowTypeError("event must begin with \"reserved.\"");
     return;
   }
@@ -339,7 +339,7 @@ PrivateAggregation::ParseContribution(
     filtering_id = absl::Uint128Low64(*filtering_id_128);
 
     int64_t operation_id = global_scope_->GetCurrentOperationId();
-    CHECK(base::Contains(operation_states_, operation_id));
+    CHECK(operation_states_.Contains(operation_id));
     OperationState* operation_state = operation_states_.at(operation_id);
 
     if (static_cast<size_t>(std::bit_width(*filtering_id)) >

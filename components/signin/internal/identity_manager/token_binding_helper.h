@@ -114,6 +114,8 @@ class TokenBindingHelper {
   //
   // Unlike `SetBindingKey()`, this method does not add `wrapped_binding_key`
   // to the in-memory cache.
+  //
+  // `wrapped_binding_key` must not be empty.
   void CopyBindingKeyFromAnotherTokenService(
       base::span<const uint8_t> wrapped_binding_key);
 
@@ -144,11 +146,8 @@ class TokenBindingHelper {
   void OnGetAllKeysForGarbageCollection(
       absl::flat_hash_set<std::vector<uint8_t>> known_wrapped_keys_in_db,
       unexportable_keys::ServiceErrorOr<
-          std::vector<unexportable_keys::UnexportableKeyId>> result);
-
-  void DoGarbageCollection(
-      absl::flat_hash_set<std::vector<uint8_t>> known_wrapped_keys_in_db,
-      std::vector<unexportable_keys::UnexportableKeyId> all_key_ids);
+          std::vector<unexportable_keys::UnexportableKeyId>>
+          all_key_ids_or_error);
 
   const raw_ref<unexportable_keys::UnexportableKeyService>
       unexportable_key_service_;

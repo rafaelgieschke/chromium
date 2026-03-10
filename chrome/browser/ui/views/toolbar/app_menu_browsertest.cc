@@ -4,13 +4,14 @@
 
 #include "chrome/browser/ui/views/toolbar/app_menu.h"
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 
 #include "base/auto_reset.h"
-#include "base/containers/contains.h"
+#include "base/check_deref.h"
 #include "base/containers/fixed_flat_map.h"
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
@@ -51,21 +52,28 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/test/base/chrome_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/commerce/core/commerce_feature_list.h"
 #include "components/password_manager/core/common/password_manager_features.h"
+#include "components/prefs/pref_service.h"
 #include "components/signin/public/base/signin_pref_names.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "components/signin/public/identity_manager/identity_test_utils.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "ui/accessibility/ax_action_data.h"
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_runner.h"
 #include "ui/views/controls/menu/menu_scroll_view_container.h"
 #include "ui/views/controls/menu/submenu_view.h"
+#include "ui/views/view.h"
 
 namespace {
+using testing::AllOf;
+using testing::Contains;
+using testing::Eq;
+using testing::Pointee;
+using testing::Property;
 
 class AppMenuBrowserTest : public UiBrowserTest {
  public:
@@ -75,8 +83,7 @@ class AppMenuBrowserTest : public UiBrowserTest {
     // disruptive notification revocation (or other SH feature).
     scoped_feature_list_.InitWithFeatures(
         {}, /*disabled_features=*/{
-            features::kSafetyHubDisruptiveNotificationRevocation,
-            commerce::kProductSpecifications});
+            features::kSafetyHubDisruptiveNotificationRevocation});
   }
 
   // UiBrowserTest:
@@ -210,11 +217,12 @@ IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest, ShowWithRecentlyClosedWindow) {
           base::FilePath(), base::FilePath().AppendASCII("simple.html")),
       ui::PAGE_TRANSITION_TYPED);
   EXPECT_TRUE(content::WaitForLoadStop(new_contents));
+  ui_test_utils::BrowserDestroyedObserver observer(second_browser);
   chrome::CloseWindow(second_browser);
-  ui_test_utils::WaitForBrowserToClose(second_browser);
-  EXPECT_TRUE(base::Contains(tab_restore_service->entries(),
-                             sessions::tab_restore::Type::WINDOW,
-                             &sessions::tab_restore::Entry::type));
+  observer.Wait();
+  EXPECT_TRUE(std::ranges::contains(tab_restore_service->entries(),
+                                    sessions::tab_restore::Type::WINDOW,
+                                    &sessions::tab_restore::Entry::type));
 
   // Show the AppMenu.
   menu_button()->ShowMenu(views::MenuRunner::NO_FLAGS);
@@ -256,7 +264,13 @@ IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest,
   ShowAndVerifyUi();
 }
 
-IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest, InvokeUi_main_guest) {
+// TODO(crbug.com/484789570): Flaky on Windows 10 x64 builds.
+#if BUILDFLAG(IS_WIN) && defined(ARCH_CPU_X86_64)
+#define MAYBE_InvokeUi_main_guest DISABLED_InvokeUi_main_guest
+#else
+#define MAYBE_InvokeUi_main_guest InvokeUi_main_guest
+#endif
+IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest, MAYBE_InvokeUi_main_guest) {
 // TODO(crbug.com/40899974): ChromeOS specific profile logic still needs to be
 // updated, setup this test for a Guest user session with appropriate command
 // line switches afterwards.
@@ -291,6 +305,70 @@ IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest, AppMenuViewAccessibleProperties) {
   ASSERT_TRUE(app_menu_view);
   app_menu_view->GetViewAccessibility().GetAccessibleNodeData(&data);
   EXPECT_EQ(data.role, ax::mojom::Role::kMenu);
+}
+
+IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest, FullscreenButtonState) {
+  menu_button()->ShowMenu(views::MenuRunner::NO_FLAGS);
+  views::View& zoom_view =
+      CHECK_DEREF(menu_button()->app_menu()->GetZoomAppMenuViewForTest());
+
+  EXPECT_THAT(
+      zoom_view.GetChildrenInZOrder(),
+      Contains(Pointee(AllOf(
+          Property(&views::View::GetTooltipText, Eq(u"Full screen")),
+          Property(&views::View::GetViewAccessibility,
+                   Property(&views::ViewAccessibility::GetCachedName,
+                            ::testing::Truly([](std::u16string_view value) {
+                              return value.starts_with(u"Full screen");
+                            }))),
+          Property(&views::View::GetEnabled, Eq(true))))));
+
+  browser()->GetBrowserView().SetCanFullscreen(false);
+
+  EXPECT_THAT(
+      zoom_view.GetChildrenInZOrder(),
+      Contains(Pointee(AllOf(
+          Property(&views::View::GetTooltipText, Eq(u"Full screen disabled")),
+          Property(&views::View::GetViewAccessibility,
+                   Property(&views::ViewAccessibility::GetCachedName,
+                            ::testing::Truly([](std::u16string_view value) {
+                              return value.starts_with(u"Full screen disabled");
+                            }))),
+          Property(&views::View::GetEnabled, Eq(false))))));
+}
+
+IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest, FullscreenButtonStateInFullscreen) {
+  chrome::ToggleFullscreenMode(browser());
+  ASSERT_TRUE(browser()->GetBrowserView().IsFullscreen());
+
+  menu_button()->ShowMenu(views::MenuRunner::NO_FLAGS);
+  views::View& zoom_view =
+      CHECK_DEREF(menu_button()->app_menu()->GetZoomAppMenuViewForTest());
+
+  EXPECT_THAT(
+      zoom_view.GetChildrenInZOrder(),
+      Contains(Pointee(AllOf(
+          Property(&views::View::GetTooltipText, Eq(u"Exit full screen")),
+          Property(&views::View::GetViewAccessibility,
+                   Property(&views::ViewAccessibility::GetCachedName,
+                            ::testing::Truly([](std::u16string_view value) {
+                              return value.starts_with(u"Exit full screen");
+                            }))),
+          Property(&views::View::GetEnabled, Eq(true))))));
+
+  // User should not be trapped in fullscreen mode so button is still enabled
+  browser()->GetBrowserView().SetCanFullscreen(false);
+
+  EXPECT_THAT(
+      zoom_view.GetChildrenInZOrder(),
+      Contains(Pointee(AllOf(
+          Property(&views::View::GetTooltipText, Eq(u"Exit full screen")),
+          Property(&views::View::GetViewAccessibility,
+                   Property(&views::ViewAccessibility::GetCachedName,
+                            ::testing::Truly([](std::u16string_view value) {
+                              return value.starts_with(u"Exit full screen");
+                            }))),
+          Property(&views::View::GetEnabled, Eq(true))))));
 }
 
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
@@ -359,23 +437,6 @@ IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest,
 }
 
 #endif
-
-// Test case for the comparison table submenu under bookmarks. Only appears when
-// the Compare feature is enabled.
-class AppMenuBrowserTestCompareOnly : public AppMenuBrowserTest {
- public:
-  AppMenuBrowserTestCompareOnly() {
-    scoped_feature_list_.InitAndEnableFeature(commerce::kProductSpecifications);
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-IN_PROC_BROWSER_TEST_F(AppMenuBrowserTestCompareOnly,
-                       InvokeUi_bookmarks_comparison_tables) {
-  ShowAndVerifyUi();
-}
 
 // Test case for Safety Hub notification.
 IN_PROC_BROWSER_TEST_F(AppMenuBrowserTest, Safety_Hub_shown_notification) {

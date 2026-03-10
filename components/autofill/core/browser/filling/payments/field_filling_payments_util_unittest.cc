@@ -114,9 +114,11 @@ void TestFillingExpirationMonth(const std::vector<const char*>& values,
   // Try a single-digit month.
   CreditCard credit_card = test::GetCreditCard();
   credit_card.SetExpirationMonth(3);
-  std::u16string value_to_fill = GetFillingValueForCreditCard(
-      credit_card, kAppLocale, mojom::ActionPersistence::kFill, field,
-      /*is_cvc_filling_supported=*/true);
+  std::u16string value_to_fill =
+      GetFillingValueAndTypeForCreditCard(
+          credit_card, kAppLocale, mojom::ActionPersistence::kFill, field,
+          /*is_cvc_filling_supported=*/true)
+          .value;
 
   ASSERT_FALSE(value_to_fill.empty());
   content_index = GetIndexOfValue(field.options(), value_to_fill);
@@ -124,9 +126,11 @@ void TestFillingExpirationMonth(const std::vector<const char*>& values,
 
   // Try a two-digit month.
   credit_card.SetExpirationMonth(11);
-  value_to_fill = GetFillingValueForCreditCard(
-      credit_card, kAppLocale, mojom::ActionPersistence::kFill, field,
-      /*is_cvc_filling_supported=*/true);
+  value_to_fill =
+      GetFillingValueAndTypeForCreditCard(
+          credit_card, kAppLocale, mojom::ActionPersistence::kFill, field,
+          /*is_cvc_filling_supported=*/true)
+          .value;
 
   ASSERT_FALSE(value_to_fill.empty());
   content_index = GetIndexOfValue(field.options(), value_to_fill);
@@ -152,6 +156,18 @@ size_t GetNumberOffset(size_t index, const CreditCardTestCase& test) {
 class FieldFillingPaymentsUtilTest : public testing::Test {
  public:
   FieldFillingPaymentsUtilTest() = default;
+
+  std::u16string GetFillingValueForCreditCard(
+      const CreditCard& credit_card,
+      const std::string& app_locale,
+      mojom::ActionPersistence action_persistence,
+      const AutofillField& field,
+      bool is_cvc_filling_supported) {
+    return GetFillingValueAndTypeForCreditCard(credit_card, app_locale,
+                                               action_persistence, field,
+                                               is_cvc_filling_supported)
+        .value;
+  }
 
  private:
   test::AutofillUnitTestEnvironment autofill_test_environment_;
@@ -1469,7 +1485,8 @@ TEST_F(FieldFillingPaymentsUtilTest,
 
   EXPECT_FALSE(WillFillCreditCardNumberOrCvc(
       form_data.fields(), form_structure.fields(), *form_structure.fields()[0],
-      /*card_has_cvc=*/true));
+      AutofillTriggerSource::kPopup, /*card_has_cvc=*/true,
+      AutocompleteUnrecognizedBehavior::kSuggestionsSuppressed));
 }
 
 // Verify that `WillFillCreditCardNumberOrCvc` returns false on a form where
@@ -1490,7 +1507,8 @@ TEST_F(FieldFillingPaymentsUtilTest,
 
   EXPECT_FALSE(WillFillCreditCardNumberOrCvc(
       form_data.fields(), form_structure.fields(), *form_structure.fields()[0],
-      /*card_has_cvc=*/true));
+      AutofillTriggerSource::kPopup, /*card_has_cvc=*/true,
+      AutocompleteUnrecognizedBehavior::kSuggestionsSuppressed));
 }
 
 // Verify that `WillFillCreditCardNumberOrCvc` returns false on a form where
@@ -1502,16 +1520,18 @@ TEST_F(FieldFillingPaymentsUtilTest,
                                      .label = u"First Name on Card"},
                                     {.role = CREDIT_CARD_NUMBER,
                                      .label = u"Card Number",
-                                     .is_autofilled = true,
+                                     .value = u"4111111111111111",
                                      .properties_mask = kUserTyped}}});
 
   FormStructure form_structure(form_data);
   test_api(form_structure)
       .SetFieldTypes({CREDIT_CARD_NAME_FIRST, CREDIT_CARD_NUMBER});
+  form_structure.field(1)->AddFieldModifier(FieldModifier::kAutofill);
 
   EXPECT_FALSE(WillFillCreditCardNumberOrCvc(
       form_data.fields(), form_structure.fields(), *form_structure.fields()[0],
-      /*card_has_cvc=*/true));
+      AutofillTriggerSource::kPopup, /*card_has_cvc=*/true,
+      AutocompleteUnrecognizedBehavior::kSuggestionsSuppressed));
 }
 
 // Verify that `WillFillCreditCardNumberOrCvc` return true on a form where the
@@ -1531,7 +1551,8 @@ TEST_F(FieldFillingPaymentsUtilTest,
 
   EXPECT_TRUE(WillFillCreditCardNumberOrCvc(
       form_data.fields(), form_structure.fields(), *form_structure.fields()[0],
-      /*card_has_cvc=*/true));
+      AutofillTriggerSource::kPopup, /*card_has_cvc=*/true,
+      AutocompleteUnrecognizedBehavior::kSuggestionsSuppressed));
 }
 
 // Verify that `WillFillCreditCardNumberOrCvc` return true on a form where the
@@ -1557,7 +1578,8 @@ TEST_F(FieldFillingPaymentsUtilTest,
 
   EXPECT_TRUE(WillFillCreditCardNumberOrCvc(
       form_data.fields(), form_structure.fields(), *form_structure.fields()[0],
-      /*card_has_cvc=*/true));
+      AutofillTriggerSource::kPopup, /*card_has_cvc=*/true,
+      AutocompleteUnrecognizedBehavior::kSuggestionsSuppressed));
 }
 
 // Verify that `WillFillCreditCardNumberOrCvc` returns true on a form with only
@@ -1574,7 +1596,8 @@ TEST_F(FieldFillingPaymentsUtilTest,
 
   EXPECT_TRUE(WillFillCreditCardNumberOrCvc(
       form_data.fields(), form_structure.fields(), *form_structure.fields()[0],
-      /*card_has_cvc=*/true));
+      AutofillTriggerSource::kPopup, /*card_has_cvc=*/true,
+      AutocompleteUnrecognizedBehavior::kSuggestionsSuppressed));
 }
 
 // Verify that `WillFillCreditCardNumberOrCvc` returns true on a form with only
@@ -1590,7 +1613,8 @@ TEST_F(FieldFillingPaymentsUtilTest,
 
   EXPECT_TRUE(WillFillCreditCardNumberOrCvc(
       form_data.fields(), form_structure.fields(), *form_structure.fields()[0],
-      /*card_has_cvc=*/true));
+      AutofillTriggerSource::kPopup, /*card_has_cvc=*/true,
+      AutocompleteUnrecognizedBehavior::kSuggestionsSuppressed));
 }
 
 // Verify that `WillFillCreditCardNumberOrCvc` returns false on a form where
@@ -1614,7 +1638,8 @@ TEST_F(FieldFillingPaymentsUtilTest,
 
   EXPECT_FALSE(WillFillCreditCardNumberOrCvc(
       form_data.fields(), form_structure.fields(), *form_structure.fields()[0],
-      /*card_has_cvc=*/true));
+      AutofillTriggerSource::kPopup, /*card_has_cvc=*/true,
+      AutocompleteUnrecognizedBehavior::kSuggestionsSuppressed));
 }
 
 // Verify that `WillFillCreditCardNumberOrCvc` returns true on a form where
@@ -1634,7 +1659,8 @@ TEST_F(FieldFillingPaymentsUtilTest,
 
   EXPECT_TRUE(WillFillCreditCardNumberOrCvc(
       form_data.fields(), form_structure.fields(), *form_structure.fields()[0],
-      /*card_has_cvc=*/true));
+      AutofillTriggerSource::kPopup, /*card_has_cvc=*/true,
+      AutocompleteUnrecognizedBehavior::kSuggestionsSuppressed));
 }
 
 // Verify that `WillFillCreditCardNumberOrCvc` returns false on a form where
@@ -1654,7 +1680,8 @@ TEST_F(FieldFillingPaymentsUtilTest,
 
   EXPECT_FALSE(WillFillCreditCardNumberOrCvc(
       form_data.fields(), form_structure.fields(), *form_structure.fields()[0],
-      /*card_has_cvc=*/false));
+      AutofillTriggerSource::kPopup, /*card_has_cvc=*/false,
+      AutocompleteUnrecognizedBehavior::kSuggestionsSuppressed));
 }
 
 }  // namespace

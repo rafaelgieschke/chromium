@@ -230,7 +230,7 @@ bool AndroidAutofillClient::IsAutofillProfileEnabled() const {
   NOTREACHED();
 }
 
-bool AndroidAutofillClient::IsWalletStorageEnabled() const {
+bool AndroidAutofillClient::IsWalletPublicPassStorageEnabled() const {
   return false;
 }
 
@@ -266,13 +266,6 @@ bool AndroidAutofillClient::IsContextSecure() const {
          !net::IsCertStatusError(ssl_status.cert_status) &&
          !(ssl_status.content_status &
            content::SSLStatus::RAN_INSECURE_CONTENT);
-}
-
-autofill::FormInteractionsFlowId
-AndroidAutofillClient::GetCurrentFormInteractionsFlowId() {
-  // Currently not in use here. See `ChromeAutofillClient` for a proper
-  // implementation.
-  return {};
 }
 
 autofill::autofill_metrics::FormInteractionsUkmLogger&

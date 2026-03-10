@@ -2712,7 +2712,7 @@ IN_PROC_BROWSER_TEST_P(HttpsUpgradesBrowserTest, BadHttpsFollowedByGoodHttps) {
   // connections to ensure a fresh connection (and certificate validation) for
   // the next navigation. See https://crbug.com/1150592. A deeper fix for this
   // issue would be to unify certificate bypass logic which is currently split
-  // between the net stack and content layer; see https://crbug.com/488043.
+  // between the net stack and content layer; see https://crbug.com/40418163.
   // See also: SSLUITest.BadCertFollowedByGoodCert.
   state->RevokeUserAllowExceptionsHard(http_url.GetHost());
 
@@ -3091,7 +3091,7 @@ IN_PROC_BROWSER_TEST_P(HttpsUpgradesBrowserTest,
   // Artificially add the pref that gets mapped from the enterprise policy.
   auto* profile = Profile::FromBrowserContext(contents->GetBrowserContext());
   auto* prefs = profile->GetPrefs();
-  base::Value::List allowlist;
+  base::ListValue allowlist;
   allowlist.Append("foo.com");
   allowlist.Append("[*.]bar.com");
   allowlist.Append(http_server()->GetIPLiteralString());
@@ -3194,7 +3194,7 @@ IN_PROC_BROWSER_TEST_P(
 
   // Artificially add the pref that gets mapped from the enterprise policy.
   auto* prefs = profile->GetPrefs();
-  base::Value::List allowlist;
+  base::ListValue allowlist;
   allowlist.Append("bad-https.com");
   prefs->SetList(prefs::kHttpAllowlist, std::move(allowlist));
 

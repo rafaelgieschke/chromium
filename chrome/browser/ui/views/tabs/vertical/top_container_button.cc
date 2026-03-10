@@ -4,10 +4,12 @@
 
 #include "chrome/browser/ui/views/tabs/vertical/top_container_button.h"
 
+#include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_ink_drop_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/views/actions/action_view_interface.h"
+#include "ui/views/widget/widget.h"
 
 namespace {
 class TopContainerButtonActionViewInterface
@@ -20,6 +22,13 @@ class TopContainerButtonActionViewInterface
 
   void ActionItemChangedImpl(actions::ActionItem* action_item) override {
     ButtonActionViewInterface::ActionItemChangedImpl(action_item);
+    if (action_item->GetImage().IsVectorIcon()) {
+      action_view_->UpdateIcon(action_item->GetImage());
+    }
+  }
+
+  void OnViewChangedImpl(actions::ActionItem* action_item) override {
+    ButtonActionViewInterface::OnViewChangedImpl(action_item);
     if (action_item->GetImage().IsVectorIcon()) {
       action_view_->UpdateIcon(action_item->GetImage());
     }
@@ -40,7 +49,7 @@ void TopContainerButton::UpdateIcon(const ui::ImageModel& icon_image) {
 
   const ui::ImageModel image_model = ui::ImageModel::FromVectorIcon(
       *icon_image.GetVectorIcon().vector_icon(), GetForegroundColor(),
-      GetLayoutConstant(VERTICAL_TAB_STRIP_TOP_BUTTON_ICON_SIZE));
+      GetLayoutConstant(LayoutConstant::kVerticalTabStripTopButtonIconSize));
 
   SetImageModel(views::Button::STATE_NORMAL, image_model);
   SetImageModel(views::Button::STATE_HOVERED, image_model);
@@ -60,8 +69,8 @@ void TopContainerButton::RemovedFromWidget() {
 
 ui::ColorId TopContainerButton::GetForegroundColor() const {
   return GetWidget() && GetWidget()->ShouldPaintAsActive()
-             ? kColorNewTabButtonCRForegroundFrameActive
-             : kColorNewTabButtonCRForegroundFrameInactive;
+             ? kColorTabForegroundInactiveFrameActive
+             : kColorTabForegroundInactiveFrameInactive;
 }
 
 std::unique_ptr<views::ActionViewInterface>

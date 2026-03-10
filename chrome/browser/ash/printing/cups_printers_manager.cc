@@ -4,11 +4,13 @@
 
 #include "chrome/browser/ash/printing/cups_printers_manager.h"
 
+#include <algorithm>
 #include <map>
 #include <optional>
 #include <utility>
 
 #include "ash/constants/ash_features.h"
+#include "ash/constants/ash_pref_names.h"
 #include "ash/public/cpp/network_config_service.h"
 #include "base/containers/fixed_flat_map.h"
 #include "base/containers/flat_set.h"
@@ -47,7 +49,6 @@
 #include "chrome/browser/ash/scanning/zeroconf_scanner_detector.h"
 #include "chrome/browser/printing/print_preview_sticky_settings.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/common/pref_names.h"
 #include "chromeos/ash/components/dbus/dlcservice/dlcservice_client.h"
 #include "chromeos/ash/components/dbus/printscanmgr/printscanmgr_client.h"
 #include "chromeos/ash/components/settings/cros_settings.h"
@@ -213,7 +214,7 @@ class CupsPrintersManagerImpl
 
     print_servers_manager_->AddObserver(this);
 
-    user_printers_allowed_.Init(prefs::kUserPrintersAllowed, pref_service);
+    user_printers_allowed_.Init(ash::prefs::kUserPrintersAllowed, pref_service);
   }
 
   ~CupsPrintersManagerImpl() override = default;
@@ -534,7 +535,7 @@ class CupsPrintersManagerImpl
       // Query every printer that is either saved or recently used.
       if (printers_.IsPrinterInClass(chromeos::PrinterClass::kSaved,
                                      printer.id()) ||
-          base::Contains(recently_used_printers, printer.id())) {
+          std::ranges::contains(recently_used_printers, printer.id())) {
         FetchPrinterStatus(printer.id(),
                            /*PrinterStatusCallback=*/base::DoNothing());
         ++printers_queried;
@@ -860,7 +861,7 @@ class CupsPrintersManagerImpl
   }
 
   // TODO(baileyberro): Remove the need for this function by pushing additional
-  // logic into PrintersMap. https://crbug.com/956172
+  // logic into PrintersMap. https://crbug.com/216048433
   void ResetNearbyPrintersLists() {
     printers_.Clear(PrinterClass::kAutomatic);
     printers_.Clear(PrinterClass::kDiscovered);
@@ -1355,10 +1356,10 @@ std::unique_ptr<CupsPrintersManager> CupsPrintersManager::CreateForTesting(
 void CupsPrintersManager::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(
-      prefs::kUserPrintersAllowed, true,
+      ash::prefs::kUserPrintersAllowed, true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
-  registry->RegisterBooleanPref(prefs::kPrintingSendUsernameAndFilenameEnabled,
-                                false);
+  registry->RegisterBooleanPref(
+      ash::prefs::kPrintingSendUsernameAndFilenameEnabled, false);
   PrintServersProvider::RegisterProfilePrefs(registry);
 }
 

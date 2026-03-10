@@ -41,10 +41,9 @@ import {getHtml} from './item.html.js';
 
 export interface DownloadsItemElement {
   $: {
-    'controlled-by': HTMLElement,
-    'file-icon': HTMLImageElement,
-    'file-link': HTMLAnchorElement,
-    'url': HTMLAnchorElement,
+    controlledBy: HTMLElement,
+    fileIcon: HTMLImageElement,
+    fileLink: HTMLAnchorElement,
   };
 }
 
@@ -98,7 +97,6 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       // </if>
 
       useFileIcon_: {type: Boolean},
-      showInitiatorOrigin_: {type: Boolean},
     };
   }
 
@@ -115,18 +113,11 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
   protected accessor showDeepScan_: boolean = false;
   protected accessor showOpenAnyway_: boolean = false;
   protected accessor useFileIcon_: boolean = false;
-  protected accessor showInitiatorOrigin_: boolean =
-      loadTimeData.getBoolean('showInitiatorOrigin');
   private restoreFocusAfterCancel_: boolean = false;
   private accessor displayType_: DisplayType = DisplayType.NORMAL;
   private accessor completelyOnDisk_: boolean = true;
   protected accessor shouldLinkFilename_: boolean = true;
   override overrideCustomEquivalent: boolean = true;
-
-  override firstUpdated() {
-    this.setAttribute('role', 'row');
-    this.mojoHandler_ = BrowserProxy.getInstance().handler;
-  }
 
   override willUpdate(changedProperties: PropertyValues<this>) {
     super.willUpdate(changedProperties);
@@ -144,6 +135,11 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       this.showOpenAnyway_ = this.computeShowOpenAnyway_();
       this.displayType_ = this.computeDisplayType_();
     }
+  }
+
+  override firstUpdated() {
+    this.setAttribute('role', 'row');
+    this.mojoHandler_ = BrowserProxy.getInstance().handler;
   }
 
   override updated(changedProperties: PropertyValues<this>) {
@@ -171,7 +167,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
   }
 
   getFileIcon(): HTMLImageElement {
-    return this.$['file-icon'];
+    return this.$.fileIcon;
   }
 
   getMoreActionsButton(): CrIconButtonElement|null {
@@ -185,13 +181,6 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
         '#more-actions-menu');
     assert(!!menu);
     return menu;
-  }
-
-  /**
-   * @return A JS string of the display URL.
-   */
-  protected getDisplayUrlStr_(): string {
-    return this.data ? this.data.displayUrl : '';
   }
 
   protected computeClass_(): string {
@@ -268,6 +257,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       case DangerType.kDeepScannedOpenedDangerous:
       case DangerType.kBlockedScanFailed:
       case DangerType.kForcedSaveToGdrive:
+      case DangerType.kForcedSaveToOnedrive:
         return true;
       default:
         assertNotReached('Unhandled DangerType encountered');
@@ -304,6 +294,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       case DangerType.kDeepScannedOpenedDangerous:
       case DangerType.kBlockedScanFailed:
       case DangerType.kForcedSaveToGdrive:
+      case DangerType.kForcedSaveToOnedrive:
         return true;
       default:
         assertNotReached('Unhandled DangerType encountered');
@@ -382,6 +373,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       case DangerType.kDeepScannedOpenedDangerous:
       case DangerType.kBlockedScanFailed:
       case DangerType.kForcedSaveToGdrive:
+      case DangerType.kForcedSaveToOnedrive:
         return false;
       default:
         assertNotReached('Unhandled DangerType encountered');
@@ -450,6 +442,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       case DangerType.kBlockedTooLarge:
       case DangerType.kSensitiveContentBlock:
       case DangerType.kForcedSaveToGdrive:
+      case DangerType.kForcedSaveToOnedrive:
         return DisplayType.ERROR;
       default:
         assertNotReached('Unhandled DangerType encountered');
@@ -529,6 +522,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
           case DangerType.kDeepScannedSafe:
           case DangerType.kBlockedScanFailed:
           case DangerType.kForcedSaveToGdrive:
+          case DangerType.kForcedSaveToOnedrive:
             return '';
           default:
             assertNotReached('Unhandled DangerType encountered');
@@ -584,6 +578,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
           case DangerType.kDeepScannedOpenedDangerous:
           case DangerType.kBlockedScanFailed:
           case DangerType.kForcedSaveToGdrive:
+          case DangerType.kForcedSaveToOnedrive:
             return '';
           default:
             assertNotReached('Unhandled DangerType encountered');
@@ -618,8 +613,9 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
             return '';
           case DangerType.kSensitiveContentBlock:
             return loadTimeData.getString('sensitiveContentBlockedDesc');
+          case DangerType.kForcedSaveToOnedrive:
           case DangerType.kForcedSaveToGdrive:
-            return loadTimeData.getString('forcedSaveToGdriveDesc');
+            return loadTimeData.getString('forcedSaveToCloudDesc');
           case DangerType.kDeepScannedFailed:
           case DangerType.kDeepScannedSafe:
           case DangerType.kDeepScannedOpenedDangerous:
@@ -707,6 +703,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
         case DangerType.kBlockedTooLarge:
         case DangerType.kBlockedPasswordProtected:
         case DangerType.kForcedSaveToGdrive:
+        case DangerType.kForcedSaveToOnedrive:
           return 'cr:error';
         case DangerType.kNoApplicableDangerType:
         case DangerType.kDangerousFile:
@@ -937,6 +934,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       case DangerType.kDeepScannedOpenedDangerous:
       case DangerType.kBlockedScanFailed:
       case DangerType.kForcedSaveToGdrive:
+      case DangerType.kForcedSaveToOnedrive:
         return false;
       default:
         assertNotReached('Unhandled DangerType encountered');
@@ -1025,9 +1023,9 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
 
   private updateControlledBy_() {
     const controlledBy = this.computeControlledBy_();
-    this.$['controlled-by'].innerHTML = sanitizeInnerHtml(controlledBy);
+    this.$.controlledBy.innerHTML = sanitizeInnerHtml(controlledBy);
     if (controlledBy) {
-      const link = this.shadowRoot.querySelector('#controlled-by a');
+      const link = this.shadowRoot.querySelector('#controlledBy a');
       link!.setAttribute('focus-row-control', '');
       link!.setAttribute('focus-type', 'controlledBy');
     }
@@ -1043,8 +1041,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
 
   private updateUiForStateChange_() {
     const removeFileUrlLinks = () => {
-      this.$.url.removeAttribute('href');
-      this.$['file-link'].removeAttribute('href');
+      this.$.fileLink.removeAttribute('href');
     };
 
     if (!this.data) {
@@ -1066,16 +1063,14 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       return;
     }
 
-    // The file is not dangerous. Link the url if supplied.
-    if (this.data.url) {
-      this.$.url.href = this.data.url.url;
-    } else {
+    // Remove file url links if a url was not supplied.
+    if (!this.data.url) {
       removeFileUrlLinks();
     }
 
     const path = this.data.filePath;
     IconLoaderImpl.getInstance()
-        .loadIcon(this.$['file-icon'], path)
+        .loadIcon(this.$.fileIcon, path)
         .then(success => {
           if (!!this.data && path === this.data.filePath &&
               this.data.state !== State.kAsyncScanning) {
@@ -1098,7 +1093,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       return;
     }
     let copied = true;
-    navigator.clipboard.writeText(this.data.url.url)
+    navigator.clipboard.writeText(this.data.url)
         .catch(error => {
           console.error('Unable to copy to clipboard:', error);
           copied = false;
@@ -1165,7 +1160,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
     this.getMoreActionsMenu().close();
   }
 
-  protected onDragStart_(e: Event) {
+  protected onDragstart_(e: Event) {
     e.preventDefault();
     this.mojoHandler_!.drag(this.dataId_());
   }
@@ -1211,10 +1206,19 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
       return;
     }
     if (copied) {
-      const pieces = loadTimeData.getSubstitutedStringPieces(
-                         loadTimeData.getString('toastCopiedDownloadLink'),
-                         this.data.url.url) as unknown as
-          Array<{collapsible: boolean, value: string, arg: string}>;
+      let pieces;
+      if (this.data.url.startsWith('data:')) {
+        pieces = [{
+          collapsible: false,
+          value: loadTimeData.getString('toastCopiedLink'),
+          arg: '',
+        }];
+      } else {
+        pieces = loadTimeData.getSubstitutedStringPieces(
+                     loadTimeData.getString('toastCopiedDownloadLink'),
+                     this.data.url) as unknown as
+            Array<{collapsible: boolean, value: string, arg: string}>;
+      }
       pieces.forEach(p => {
         p.collapsible = !!p.arg;
       });
@@ -1265,11 +1269,7 @@ export class DownloadsItemElement extends DownloadsItemElementBase {
   }
 
   private notifySaveDangerousClick_() {
-    this.dispatchEvent(new CustomEvent('save-dangerous-click', {
-      bubbles: true,
-      composed: true,
-      detail: {id: this.dataId_()},
-    }));
+    this.fire('save-dangerous-click', {id: this.dataId_()});
   }
 
   protected onSaveDangerousClick_() {

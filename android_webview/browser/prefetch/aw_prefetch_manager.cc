@@ -7,6 +7,8 @@
 
 #include <optional>
 
+#include "android_webview/browser/metrics/aw_metrics_service_accessor.h"
+#include "android_webview/browser/metrics/aw_metrics_service_client.h"
 #include "android_webview/browser/prefetch/aw_preloading_utils.h"
 #include "android_webview/common/aw_features.h"
 #include "base/android/jni_string.h"
@@ -128,6 +130,11 @@ int AwPrefetchManager::StartPrefetchRequest(
   }
   std::optional<net::HttpNoVarySearchData> expected_no_vary_search =
       GetExpectedNoVarySearchFromPrefetchParameters(env, prefetch_params);
+
+  std::optional<int> variations_id =
+      GetVariationsIdFromPrefetchParameters(env, prefetch_params);
+  SetOrClearExternalPrefetchExperiment(variations_id);
+
   std::unique_ptr<content::PrefetchRequestStatusListener>
       request_status_listener =
           std::make_unique<AwPrefetchRequestStatusListener>(java_obj_, callback,
@@ -138,48 +145,50 @@ int AwPrefetchManager::StartPrefetchRequest(
   // the purpose of deduping prefetch requests on the application's behalf.
   // TODO(crbug.com/393344309): Apply deduping to all prefetch requests (not
   // just WebView).
-  if (!browser_context_->IsPrefetchDuplicate(pf_url, expected_no_vary_search)) {
-    // Make room for the new prefetch request by evicting the older ones.
-    if (all_prefetches_map_.size() >= max_prefetches_) {
-      int num_prefetches_to_evict =
-          all_prefetches_map_.size() - max_prefetches_ + 1;
-      auto it = all_prefetches_map_.begin();
-
-      while (num_prefetches_to_evict > 0 && it != all_prefetches_map_.end()) {
-        // Because the keys should be sequential based on when the prefetch
-        // associated with it was added, a standard iteration should always
-        // prioritize removing the oldest entry.
-        it = all_prefetches_map_.erase(it);
-        num_prefetches_to_evict--;
-      }
-    }
-
-    std::unique_ptr<content::PrefetchHandle> prefetch_handle =
-        browser_context_->StartBrowserPrefetchRequest(
-            pf_url, AW_PREFETCH_METRICS_SUFFIX,
-            GetIsJavaScriptEnabledFromPrefetchParameters(env, prefetch_params),
-            expected_no_vary_search,
-            base::FeatureList::IsEnabled(
-                ::features::kWebViewPrefetchHighestPrefetchPriority)
-                ? std::optional(content::PrefetchPriority::kHighest)
-                : std::nullopt,
-            additional_headers, std::move(request_status_listener),
-            base::Seconds(ttl_in_sec_),
-            /*should_append_variations_header=*/false,
-            base::FeatureList::IsEnabled(
-                kWebViewPrefetchDisableBlockUntilHeadTimeout),
-            should_bypass_http_cache);
-
-    if (prefetch_handle) {
-      return AddPrefetchHandle(std::move(prefetch_handle));
-    }
-  } else {
+  if (browser_context_->IsPrefetchDuplicate(pf_url, expected_no_vary_search)) {
     request_status_listener->OnPrefetchStartFailedDuplicate();
+    return NO_PREFETCH_KEY;
   }
-  return NO_PREFETCH_KEY;
+
+  // Make room for the new prefetch request by evicting the older ones.
+  if (all_prefetches_map_.size() >= max_prefetches_) {
+    int num_prefetches_to_evict =
+        all_prefetches_map_.size() - max_prefetches_ + 1;
+    auto it = all_prefetches_map_.begin();
+
+    while (num_prefetches_to_evict > 0 && it != all_prefetches_map_.end()) {
+      // Because the keys should be sequential based on when the prefetch
+      // associated with it was added, a standard iteration should always
+      // prioritize removing the oldest entry.
+      it = all_prefetches_map_.erase(it);
+      num_prefetches_to_evict--;
+    }
+  }
+
+  std::unique_ptr<content::PrefetchHandle> prefetch_handle =
+      browser_context_->StartBrowserPrefetchRequest(
+          pf_url, AW_PREFETCH_METRICS_SUFFIX,
+          GetIsJavaScriptEnabledFromPrefetchParameters(env, prefetch_params),
+          expected_no_vary_search,
+          base::FeatureList::IsEnabled(
+              ::features::kWebViewPrefetchHighestPrefetchPriority)
+              ? std::optional(content::PrefetchPriority::kHighest)
+              : std::nullopt,
+          additional_headers, std::move(request_status_listener),
+          base::Seconds(ttl_in_sec_),
+          /*should_append_variations_header=*/false,
+          base::FeatureList::IsEnabled(
+              kWebViewPrefetchDisableBlockUntilHeadTimeout),
+          should_bypass_http_cache);
+
+  if (prefetch_handle) {
+    return AddPrefetchHandle(std::move(prefetch_handle));
+  } else {
+    return NO_PREFETCH_KEY;
+  }
 }
 
-void AwPrefetchManager::CancelPrefetch(JNIEnv* env, jint prefetch_key) {
+void AwPrefetchManager::CancelPrefetch(JNIEnv* env, int32_t prefetch_key) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   TRACE_EVENT0("android_webview", "AwPrefetchManager::CancelPrefetch");
   if (prefetch_key == NO_PREFETCH_KEY) {
@@ -193,19 +202,33 @@ void AwPrefetchManager::CancelPrefetch(JNIEnv* env, jint prefetch_key) {
   }
 }
 
+void AwPrefetchManager::SetOrClearExternalPrefetchExperiment(
+    std::optional<int> variations_id) {
+  std::vector<int> experiment_ids;
+  if (variations_id.has_value()) {
+    experiment_ids.push_back(variations_id.value());
+  }
+
+  // Always invoke registration to ensure the metrics state is synchronized
+  // with the current request. Providing an empty ID list is necessary to
+  // clear state from previous requests if the current one lacks a
+  // Variations ID.
+  AwMetricsServiceAccessor::RegisterExternalExperiment(experiment_ids);
+}
+
 bool AwPrefetchManager::GetIsPrefetchInCacheForTesting(JNIEnv* env,
-                                                       jint prefetch_key) {
+                                                       int32_t prefetch_key) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return all_prefetches_map_.find(prefetch_key) != all_prefetches_map_.end();
 }
 
-static jint JNI_AwPrefetchManager_GetNoPrefetchKey(JNIEnv* env) {
+static int32_t JNI_AwPrefetchManager_GetNoPrefetchKey(JNIEnv* env) {
   return NO_PREFETCH_KEY;
 }
 
-static jboolean JNI_AwPrefetchManager_IsSecPurposeForPrefetch(
+static bool JNI_AwPrefetchManager_IsSecPurposeForPrefetch(
     JNIEnv* env,
-    std::string& sec_purpose_header_value) {
+    const std::string& sec_purpose_header_value) {
   return AwPrefetchManager::IsSecPurposeForPrefetch(sec_purpose_header_value);
 }
 

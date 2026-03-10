@@ -31,6 +31,8 @@ class SharedImageCopyManager;
 class SharedImageFactory;
 
 // TODO(kylechar): Merge with OzoneImageBacking::AccessStream enum.
+//
+// LINT.IfChange(SharedImageAccessStream)
 enum class SharedImageAccessStream {
   kSkia,
   kOverlay,
@@ -39,13 +41,20 @@ enum class SharedImageAccessStream {
   kDawnBuffer,
   kMemory,
   kVaapi,
-  kWebNNTensor
+  kWebNNTensor,
+  kVulkan,
+  kMaxValue = kVulkan
 };
+// LINT.ThenChange(//tools/metrics/histograms/metadata/gpu/enums.xml:SharedImageAccessStream)
+
+GPU_GLES2_EXPORT std::ostream& operator<<(
+    std::ostream& os,
+    SharedImageAccessStream access_stream);
 
 // Used to represent what access streams a backing can be used for.
 using AccessStreamSet = base::EnumSet<SharedImageAccessStream,
                                       SharedImageAccessStream::kSkia,
-                                      SharedImageAccessStream::kWebNNTensor>;
+                                      SharedImageAccessStream::kVulkan>;
 
 // A CompoundImageBacking is a specialized container that manages one or more
 // underlying SharedImageBacking instances of different types. It serves as a
@@ -108,8 +117,8 @@ class GPU_GLES2_EXPORT CompoundImageBacking
   using CreateBackingCallback =
       base::OnceCallback<void(std::unique_ptr<SharedImageBacking>&)>;
 
-  static bool IsValidSharedMemoryBufferFormat(const gfx::Size& size,
-                                              viz::SharedImageFormat format);
+  static bool IsValidSharedMemoryFormat(const gfx::Size& size,
+                                        viz::SharedImageFormat format);
 
   // Remove the SCANOUT flag if |kAllowShmOverlays|.
   static SharedImageUsageSet GetGpuSharedImageUsage(SharedImageUsageSet usage);
@@ -153,13 +162,27 @@ class GPU_GLES2_EXPORT CompoundImageBacking
       std::string debug_label,
       gfx::BufferUsage buffer_usage);
 
+  // Wraps a backing in a CompoundImageBacking. This is used to enable
+  // CompoundImageBacking as the default, where it serves as the sole backing.
+  // To achieve this, SharedImageFactory creates the standard backing and then
+  // wraps it using this method.
+  // TODO(crbug.com/448962784): Once CompoundImageBacking is fully enabled by
+  // default, it will be directly creating underlying backing itself and
+  // SharedImageFactory will be refactored to move most of backing creation
+  // logic inside CompoundImageBacking.
+  static std::unique_ptr<SharedImageBacking> WrapExternalBacking(
+      SharedImageFactory* shared_image_factory,
+      scoped_refptr<SharedImageCopyManager> copy_manager,
+      std::unique_ptr<SharedImageBacking> backing);
+
   ~CompoundImageBacking() override;
 
   // Called by wrapped representations before access. This will update
   // the backing that is going to be accessed if most recent pixels are in
   // a different backing.
   void NotifyBeginAccess(SharedImageBacking* backing,
-                         RepresentationAccessMode mode);
+                         RepresentationAccessMode mode,
+                         SharedImageAccessStream stream);
 
   // Called by wrapped representations during EndAccess(). This will update the
   // CompoundImageBacking's clear rect with the accessed backing's clear rect it
@@ -168,6 +191,7 @@ class GPU_GLES2_EXPORT CompoundImageBacking
                        RepresentationAccessMode mode);
 
   // SharedImageBacking implementation.
+  void OnContextLost() override;
   SharedImageBackingType GetType() const override;
   void Update(std::unique_ptr<gfx::GpuFence> in_fence) override;
   bool CopyToGpuMemoryBuffer() override;
@@ -242,6 +266,19 @@ class GPU_GLES2_EXPORT CompoundImageBacking
   std::unique_ptr<MemoryImageRepresentation> ProduceMemory(
       SharedImageManager* manager,
       MemoryTypeTracker* tracker) override;
+  std::unique_ptr<VideoImageRepresentation> ProduceVideo(
+      SharedImageManager* manager,
+      MemoryTypeTracker* tracker,
+      VideoDevice device) override;
+
+#if BUILDFLAG(ENABLE_VULKAN)
+  std::unique_ptr<VulkanImageRepresentation> ProduceVulkan(
+      SharedImageManager* manager,
+      MemoryTypeTracker* tracker,
+      gpu::VulkanDeviceQueue* vulkan_device_queue,
+      gpu::VulkanImplementation& vulkan_impl,
+      bool needs_detiling) override;
+#endif
 
  private:
   friend class CompoundImageBackingTest;
@@ -322,6 +359,12 @@ class GPU_GLES2_EXPORT CompoundImageBacking
       scoped_refptr<SharedImageCopyManager> copy_manager,
       std::optional<gfx::BufferUsage> buffer_usage = std::nullopt);
 
+  CompoundImageBacking(bool is_thread_safe,
+                       std::optional<gfx::BufferUsage> buffer_usage,
+                       std::unique_ptr<SharedImageBacking> backing,
+                       scoped_refptr<SharedImageCopyManager> copy_manager,
+                       base::WeakPtr<SharedImageFactory> shared_image_factory);
+
   base::trace_event::MemoryAllocatorDump* OnMemoryDump(
       const std::string& dump_name,
       base::trace_event::MemoryAllocatorDumpGuid client_guid,
@@ -344,13 +387,16 @@ class GPU_GLES2_EXPORT CompoundImageBacking
   // data. This method finds the first element which has most recent data.
   ElementHolder* GetElementWithLatestContent();
 
-  // Gets or allocates a backing for a given |stream|.
-  // If a backing with a given |stream| is present, it will either return the
+  // Gets or allocates a backing for a given `stream` and `params`.
+  // It finds a backing that supports the given `stream` and is compatible
+  // with the context information in `params` by calling `SupportsAccess()`.
+  // If a compatible backing is present, it will either return the
   // backing with the latest content OR will return any supported backing (the
   // first one it finds).
   // If no backing is found, then it will allocate an appropriate backing which
-  // can support the |stream|.
-  SharedImageBacking* GetOrAllocateBacking(SharedImageAccessStream stream);
+  // can support the `stream`.
+  SharedImageBacking* GetOrAllocateBacking(SharedImageAccessStream stream,
+                                           const AccessParams& params);
 
   // Returns the gpu backing from the list of |element_| which has a shm and a
   // gpu backing.
@@ -367,6 +413,7 @@ class GPU_GLES2_EXPORT CompoundImageBacking
   void CreateBackingFromBackingFactory(
       base::WeakPtr<SharedImageBackingFactory> factory,
       std::string debug_label,
+      SharedImageUsageSet usage,
       std::unique_ptr<SharedImageBacking>& backing);
 
   void OnCopyToGpuMemoryBufferComplete(bool success);
@@ -380,7 +427,7 @@ class GPU_GLES2_EXPORT CompoundImageBacking
   // thread-safe.
   base::WeakPtr<SharedImageFactory> shared_image_factory_;
 
-  uint32_t latest_content_id_ = 1;
+  uint32_t latest_content_id_ GUARDED_BY(lock_) = 1;
 
   // Holds all of the "element" backings that make up this compound backing. For
   // each there is a backing, set of streams and tracking for latest content.
@@ -392,11 +439,15 @@ class GPU_GLES2_EXPORT CompoundImageBacking
   // As of now, CompoundImageBacking only has 2 backings,i.e., 1 shm and 1 gpu
   // backing. In future, it will evolve into a dynamic CompoundImageBacking
   // where it can have any number of gpu backings and at most 1 cpu backing.
-  std::vector<ElementHolder> elements_;
+  std::vector<ElementHolder> elements_ GUARDED_BY(lock_);
 
   base::OnceCallback<void(bool)> pending_copy_to_gmb_callback_;
   scoped_refptr<SharedImageCopyManager> copy_manager_;
   bool has_shm_backing_ = false;
+  // Tracks the maximum number of SharedImageBacking elements that were
+  // allocated within this CompoundImageBacking instance during its lifetime.
+  // This value is recorded in a UMA histogram in the destructor.
+  size_t max_elements_allocated_ = 0;
 };
 
 }  // namespace gpu

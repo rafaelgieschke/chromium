@@ -471,6 +471,22 @@ TEST_F(AutofillPopupControllerImplTest,
   Mock::VerifyAndClearExpectations(client().popup_view());
 }
 
+// Tests that focus loss does not hide the popup if the
+// `AutofillSuggestionsIgnoreFocusLoss` parameter is set to `true`.
+TEST_F(AutofillPopupControllerImplTest,
+       PopupDoesNotHideOnFocusLossIfParameterIsSet) {
+  ShowSuggestions(manager(), {SuggestionType::kFillAutofillAi},
+                  AutofillSuggestionTriggerSource::kFormControlElementClicked,
+                  AutofillSuggestionsIgnoreFocusLoss(true));
+
+  ON_CALL(*client().popup_view(), HasFocus).WillByDefault(Return(false));
+  EXPECT_CALL(*client().popup_view(), Hide).Times(0);
+  client().suggestion_controller(manager()).Hide(
+      SuggestionHidingReason::kFocusChanged);
+
+  Mock::VerifyAndClearExpectations(client().popup_view());
+}
+
 TEST_F(AutofillPopupControllerImplTest,
        PopupDoesntHideOnEndEditingFromRendererIfViewIsFocused) {
   ShowSuggestions(manager(), {SuggestionType::kAddressEntry});
@@ -529,6 +545,23 @@ TEST_F(AutofillPopupControllerImplTest, HideInMainFrameOnZoomChange) {
   zoom_controller->SetZoomLevel(zoom_controller->GetZoomLevel() + 1.0);
   // Verify and clear before TearDown() closes the popup.
   Mock::VerifyAndClearExpectations(&client().suggestion_controller(manager()));
+}
+
+TEST_F(AutofillPopupControllerImplTest, AtMemoryShowsSearchBarAndNoFiltering) {
+  AutofillPopupController& controller =
+      client().suggestion_controller(manager());
+  manager().external_delegate().OnQuery(
+      FormData(), FormFieldData(), gfx::Rect(),
+      AutofillSuggestionTriggerSource::kAtMemory,
+      /*update_datalist=*/false);
+  ShowSuggestions(manager(),
+                  {Suggestion(u"abc", SuggestionType::kAtMemorySearchResult)},
+                  AutofillSuggestionTriggerSource::kAtMemory);
+
+  EXPECT_EQ(controller.GetMainFillingProduct(), FillingProduct::kAtMemory);
+
+  controller.SetFilter(AutofillPopupController::SuggestionFilter(u"nono"));
+  EXPECT_EQ(controller.GetSuggestions().size(), 0u);
 }
 
 TEST_F(AutofillPopupControllerImplTest,
@@ -1028,8 +1061,8 @@ class AutofillPopupControllerImplTestAccessibility
 
  protected:
   content::ScopedAccessibilityModeOverride accessibility_mode_override_;
-  MockAxPlatformNodeDelegate mock_ax_platform_node_delegate_;
-  MockAxPlatformNode mock_ax_platform_node_;
+  NiceMock<MockAxPlatformNodeDelegate> mock_ax_platform_node_delegate_;
+  NiceMock<MockAxPlatformNode> mock_ax_platform_node_;
   ui::AXTreeID test_tree_id_ = ui::AXTreeID::CreateNewAXTreeID();
 };
 

@@ -52,15 +52,22 @@ AtomicString::AtomicString(const UChar* chars)
 AtomicString::AtomicString(const StringView& string_view)
     : string_(AtomicStringTable::Instance().Add(string_view)) {}
 
-scoped_refptr<StringImpl> AtomicString::AddSlowCase(
-    scoped_refptr<StringImpl>&& string) {
-  DCHECK(!string->IsAtomic());
+String AtomicString::AddSlowCase(String&& string) {
+  DCHECK(!string.Impl()->IsAtomic());
   return AtomicStringTable::Instance().Add(std::move(string));
 }
 
-scoped_refptr<StringImpl> AtomicString::AddSlowCase(StringImpl* string) {
+String AtomicString::AddSlowCase(StringImpl* string) {
   DCHECK(!string->IsAtomic());
   return AtomicStringTable::Instance().Add(string);
+}
+
+bool AtomicString::contains(const StringView& value) const {
+  return string_.find(value) != npos;
+}
+
+bool AtomicString::ContainsIgnoringAsciiCase(const StringView& value) const {
+  return string_.FindIgnoringAsciiCase(value) != npos;
 }
 
 AtomicString AtomicString::FromUTF8(base::span<const uint8_t> bytes) {
@@ -87,13 +94,13 @@ AtomicString AtomicString::FromUTF8(std::string_view utf8_string) {
 }
 
 AtomicString AtomicString::LowerASCII(AtomicString source) {
-  if (source.IsLowerASCII()) [[likely]] {
+  if (source.ContainsNoAsciiUpper()) [[likely]] {
     return source;
   }
   StringImpl* impl = source.Impl();
-  // if impl is null, then IsLowerASCII() should have returned true.
+  // if impl is null, then ContainsNoAsciiUpper() should have returned true.
   DCHECK(impl);
-  scoped_refptr<StringImpl> new_impl = impl->LowerASCII();
+  String new_impl = impl->LowerASCII();
   return AtomicString(String(std::move(new_impl)));
 }
 
@@ -101,12 +108,12 @@ AtomicString AtomicString::LowerASCII() const {
   return AtomicString::LowerASCII(*this);
 }
 
-AtomicString AtomicString::UpperASCII() const {
+AtomicString AtomicString::ToAsciiUpper() const {
   StringImpl* impl = Impl();
   if (!impl) [[unlikely]] {
     return *this;
   }
-  return AtomicString(impl->UpperASCII());
+  return AtomicString(impl->ToAsciiUpper());
 }
 
 AtomicString AtomicString::Number(double number, unsigned precision) {

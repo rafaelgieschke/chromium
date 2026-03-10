@@ -4,9 +4,9 @@
 
 #include "components/optimization_guide/core/model_execution/performance_class.h"
 
+#include <algorithm>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/functional/callback_helpers.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/string_number_conversions.h"
@@ -33,6 +33,13 @@ BASE_FEATURE(kOnDeviceModelCpuImageInput, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Whether audio input is enabled for CPU backend.
 BASE_FEATURE(kOnDeviceModelCpuAudioInput, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Whether audio input is enabled for GPU backend.
+BASE_FEATURE(kOnDeviceModelGpuAudioInput, base::FEATURE_ENABLED_BY_DEFAULT);
+
+// Minimum VRAM required for audio input support (6GB).
+const base::FeatureParam<int> kOnDeviceModelAudioInputVramMin{
+    &kOnDeviceModelGpuAudioInput, "on_device_model_audio_input_vram_min", 6144};
 
 // Commandline switch to force a particular performance class.
 const char kOverridePerformanceClassSwitch[] =
@@ -147,8 +154,8 @@ bool IsPerformanceClassCompatible(
   std::vector<std::string_view> perf_classes_list = base::SplitStringPiece(
       perf_classes_string, ",", base::WhitespaceHandling::TRIM_WHITESPACE,
       base::SplitResult::SPLIT_WANT_NONEMPTY);
-  return base::Contains(perf_classes_list,
-                        base::ToString(static_cast<int>(performance_class)));
+  return std::ranges::contains(
+      perf_classes_list, base::ToString(static_cast<int>(performance_class)));
 }
 
 OnDeviceModelPerformanceClass PerformanceClassFromPref(
@@ -172,6 +179,11 @@ void UpdatePerformanceClassPref(
   local_state->SetString(
       model_execution::prefs::localstate::kOnDevicePerformanceClassVersion,
       version_info::GetVersionNumber());
+}
+
+void UpdateVramPref(PrefService* local_state, uint64_t vram_mb) {
+  local_state->SetUint64(model_execution::prefs::localstate::kOnDeviceVramMb,
+                         vram_mb);
 }
 
 void UpdateDeviceInfoPrefs(PrefService* local_state,
@@ -278,12 +290,18 @@ bool PerformanceClassifier::SupportsImageInput() const {
 }
 
 bool PerformanceClassifier::SupportsAudioInput() const {
-  return (IsDeviceGPUCapable() &&
-          IsPerformanceClassCompatible(
-              features::kPerformanceClassListForAudioInput.Get(),
-              GetPerformanceClass())) ||
-         (IsDeviceCapable() &&
-          base::FeatureList::IsEnabled(kOnDeviceModelCpuAudioInput));
+  // Check if the device is GPU capable and has enough VRAM.
+  if (IsDeviceGPUCapable() &&
+      base::FeatureList::IsEnabled(kOnDeviceModelGpuAudioInput)) {
+    uint64_t vram_mb = local_state_->GetUint64(
+        model_execution::prefs::localstate::kOnDeviceVramMb);
+    return vram_mb >=
+           static_cast<uint64_t>(kOnDeviceModelAudioInputVramMin.Get());
+  }
+
+  // Check if the device is CPU capable and the feature is enabled.
+  return on_device_model::IsCpuCapable() &&
+         base::FeatureList::IsEnabled(kOnDeviceModelCpuAudioInput);
 }
 
 std::vector<proto::OnDeviceModelPerformanceHint>
@@ -336,7 +354,10 @@ void PerformanceClassifier::OnDeviceAndPerformanceInfo(
     base::UmaHistogramEnumeration(
         "OptimizationGuide.ModelExecution.OnDeviceModelPerformanceClass",
         performance_class);
+    base::UmaHistogramMemoryLargeMB(
+        "OptimizationGuide.OnDeviceModel.DetectedVram", perf_info->vram_mb);
     UpdatePerformanceClassPref(local_state_, performance_class);
+    UpdateVramPref(local_state_, perf_info->vram_mb);
     UpdateDeviceInfoPrefs(local_state_, device_info->vendor_id,
                           device_info->device_id, device_info->driver_version,
                           device_info->supports_fp16);

@@ -16,7 +16,6 @@
 #import "base/base64.h"
 #import "base/check.h"
 #import "base/command_line.h"
-#import "base/debug/dump_without_crashing.h"
 #import "base/feature_list.h"
 #import "base/files/file_path.h"
 #import "base/functional/bind.h"
@@ -29,12 +28,10 @@
 #import "base/path_service.h"
 #import "base/process/process_metrics.h"
 #import "base/rand_util.h"
-#import "base/strings/safe_sprintf.h"
 #import "base/task/thread_pool.h"
 #import "base/threading/platform_thread.h"
 #import "components/application_locale_storage/application_locale_storage.h"
 #import "components/country_codes/country_codes.h"
-#import "components/crash/core/common/crash_key.h"
 #import "components/crash/core/common/crash_keys.h"
 #import "components/history/core/browser/history_service.h"
 #import "components/keyed_service/core/service_access_type.h"
@@ -77,6 +74,7 @@
 #import "components/variations/variations_associated_data.h"
 #import "components/version_info/version_info.h"
 #import "google_apis/google_api_keys.h"
+#import "ios/chrome/browser/crash_report/model/crash_helper.h"
 #import "ios/chrome/browser/first_run/public/features.h"
 #import "ios/chrome/browser/history/model/history_service_factory.h"
 #import "ios/chrome/browser/metrics/model/demographics_client.h"
@@ -87,6 +85,7 @@
 #import "ios/chrome/browser/metrics/model/ios_feed_activity_metrics_provider.h"
 #import "ios/chrome/browser/metrics/model/ios_profile_session_metrics_provider.h"
 #import "ios/chrome/browser/metrics/model/ios_push_notifications_metrics_provider.h"
+#import "ios/chrome/browser/metrics/model/mobile_session_crash_helper_metrics_provider.h"
 #import "ios/chrome/browser/metrics/model/mobile_session_shutdown_metrics_provider.h"
 #import "ios/chrome/browser/regional_capabilities/model/ios_regional_capabilities_metrics_provider.h"
 #import "ios/chrome/browser/regional_capabilities/model/regional_capabilities_service_factory.h"
@@ -500,17 +499,6 @@ void IOSChromeMetricsServiceClient::CollectFinalHistograms() {
             "Memory.Browser.MemoryFootprint.Background", footprint_mb);
         break;
     }
-  } else {
-    // Max kern_return_t is 0x100 = 256, plus trailing null.
-    // (https://opensource.apple.com/source/xnu/xnu-792.25.20/osfmk/mach/kern_return.h)
-    // TODO(crbug.com/40866217): Remove this when done debugging the uncaught
-    // memory regression.
-    static crash_reporter::CrashKeyString<4> task_info_kern_return(
-        "task-info-kern-return");
-    char kr_buf[4];
-    base::strings::SafeSPrintf(kr_buf, "%d", result.error());
-    task_info_kern_return.Set(kr_buf);
-    base::debug::DumpWithoutCrashing();
   }
 
   int open_tabs_count = 0;
@@ -533,6 +521,10 @@ void IOSChromeMetricsServiceClient::CollectFinalHistograms() {
 }
 
 void IOSChromeMetricsServiceClient::RegisterForNotifications() {
+  crash_helper_subscription_ =
+      crash_helper::AddProcessIntermediateDumpsFinishedCallback(
+          base::BindRepeating(
+              &mobile_session_metrics::OnProcessIntermediateDumpsFinished));
   omnibox_url_opened_subscription_ =
       OmniboxEventGlobalTracker::GetInstance()->RegisterCallback(
           base::BindRepeating(

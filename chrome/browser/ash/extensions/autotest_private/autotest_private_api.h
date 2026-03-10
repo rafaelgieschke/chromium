@@ -441,6 +441,7 @@ class AutotestPrivateGetClipboardTextDataFunction : public ExtensionFunction {
  private:
   ~AutotestPrivateGetClipboardTextDataFunction() override;
   ResponseAction Run() override;
+  void OnTextRead(std::u16string data);
 };
 
 class AutotestPrivateSetClipboardTextDataFunction
@@ -626,7 +627,7 @@ class AutotestPrivateGetPrinterListFunction
   // ash::CupsPrintersManager::Observer
   void OnEnterprisePrintersInitialized() override;
 
-  base::Value::List results_;
+  base::ListValue results_;
   std::unique_ptr<ash::CupsPrintersManager> printers_manager_;
   base::OneShotTimer timeout_timer_;
 };

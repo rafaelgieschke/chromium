@@ -277,8 +277,19 @@ public interface SyncService {
     /**
      * Acknowledges the bookmarks limit exceeded error. The error will not be shown to the user
      * again.
+     *
+     * @param source The UI surface that triggered the acknowledgment.
      */
-    void acknowledgeBookmarksLimitExceededError();
+    void acknowledgeBookmarksLimitExceededError(
+            @BookmarksLimitExceededHelpClickedSource int source);
+
+    /**
+     * @return The limit for the number of bookmarks.
+     */
+    // LINT.IfChange(SyncBookmarksLimit)
+    int SYNC_BOOKMARKS_LIMIT = 100000;
+
+    // LINT.ThenChange(//components/sync_bookmarks/constants.h:SyncBookmarksLimit)
 
     /**
      * @return Whether the user should be offered to opt in to trusted vault encryption.

@@ -20,6 +20,7 @@ import org.chromium.base.Log;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.ui.native_page.NativePage;
 import org.chromium.chrome.browser.util.ChromeFileProvider;
 import org.chromium.components.embedder_support.util.UrlConstants;
@@ -316,6 +317,30 @@ public class PdfUtils {
     }
 
     /**
+     * Extracts a valid HTTP(S) URL from a PDF page URL for re-downloading.
+     *
+     * <p>This method decodes the provided {@code originalUrl} and verifies that the result uses a
+     * supported scheme (HTTP or HTTPS).
+     *
+     * @param originalUrl The original, potentially encoded, URL string to process.
+     * @return The decoded URL string if it is a valid HTTP(S) URL; {@code null} otherwise.
+     */
+    public static @Nullable String getPdfReDownloadUrl(String originalUrl) {
+        String decodedUrl = decodePdfPageUrl(originalUrl);
+
+        if (decodedUrl == null) {
+            return null;
+        }
+
+        if (decodedUrl.startsWith(UrlConstants.HTTP_URL_PREFIX)
+                || decodedUrl.startsWith(UrlConstants.HTTPS_URL_PREFIX)) {
+            return decodedUrl;
+        }
+
+        return null;
+    }
+
+    /**
      * Encode content uri if it is PDF MIME type.
      *
      * @param uri The uri to be encoded.
@@ -333,6 +358,16 @@ public class PdfUtils {
             return PdfUtils.encodePdfPageUrl(uri);
         }
         return null;
+    }
+
+    /**
+     * Checks whether the inline PDF V2 feature is enabled.
+     *
+     * @return {@code true} if the inline PDF V2 feature is enabled, {@code false} otherwise.
+     */
+    public static boolean isInlinePdfV2Enabled() {
+        // TODO(crbug.com/484388543): Add a check for minimum SDK version.
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.INLINE_PDF_V2);
     }
 
     static void recordPdfLoad() {

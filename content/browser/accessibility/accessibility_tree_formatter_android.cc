@@ -5,6 +5,7 @@
 #include "content/browser/accessibility/accessibility_tree_formatter_android.h"
 
 #include <string>
+#include <string_view>
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
@@ -96,27 +97,27 @@ AccessibilityTreeFormatterAndroid::AccessibilityTreeFormatterAndroid() {}
 
 AccessibilityTreeFormatterAndroid::~AccessibilityTreeFormatterAndroid() {}
 
-base::Value::Dict AccessibilityTreeFormatterAndroid::BuildTree(
+base::DictValue AccessibilityTreeFormatterAndroid::BuildTree(
     ui::AXPlatformNodeDelegate* root) const {
   if (!root) {
-    return base::Value::Dict();
+    return base::DictValue();
   }
 
   // XXX: Android formatter should walk native Android tree (not internal one).
-  base::Value::Dict dict;
+  base::DictValue dict;
   RecursiveBuildTree(*root, &dict);
   return dict;
 }
 
-base::Value::Dict AccessibilityTreeFormatterAndroid::BuildTreeForSelector(
+base::DictValue AccessibilityTreeFormatterAndroid::BuildTreeForSelector(
     const AXTreeSelector& selector) const {
   NOTREACHED();
 }
 
-base::Value::Dict AccessibilityTreeFormatterAndroid::BuildNode(
+base::DictValue AccessibilityTreeFormatterAndroid::BuildNode(
     ui::AXPlatformNodeDelegate* node) const {
   CHECK(node);
-  base::Value::Dict dict;
+  base::DictValue dict;
   AddProperties(*node, &dict);
   return dict;
 }
@@ -131,7 +132,7 @@ void AccessibilityTreeFormatterAndroid::AddDefaultFilters(
 
 void AccessibilityTreeFormatterAndroid::RecursiveBuildTree(
     const ui::AXPlatformNodeDelegate& node,
-    base::Value::Dict* dict) const {
+    base::DictValue* dict) const {
   if (!ShouldDumpNode(node)) {
     return;
   }
@@ -141,7 +142,7 @@ void AccessibilityTreeFormatterAndroid::RecursiveBuildTree(
     return;
   }
 
-  base::Value::List children;
+  base::ListValue children;
 
   const BrowserAccessibilityAndroid* android_node =
       static_cast<const BrowserAccessibilityAndroid*>(&node);
@@ -149,7 +150,7 @@ void AccessibilityTreeFormatterAndroid::RecursiveBuildTree(
   for (size_t i = 0; i < android_node->PlatformChildCount(); ++i) {
     ui::BrowserAccessibility* child_node = android_node->PlatformGetChild(i);
     CHECK(child_node);
-    base::Value::Dict child_dict;
+    base::DictValue child_dict;
     RecursiveBuildTree(*child_node, &child_dict);
     children.Append(std::move(child_dict));
   }
@@ -158,7 +159,7 @@ void AccessibilityTreeFormatterAndroid::RecursiveBuildTree(
 
 void AccessibilityTreeFormatterAndroid::AddProperties(
     const ui::AXPlatformNodeDelegate& node,
-    base::Value::Dict* dict) const {
+    base::DictValue* dict) const {
   dict->Set("id", node.GetId());
 
   const BrowserAccessibilityAndroid* android_node =
@@ -196,15 +197,16 @@ void AccessibilityTreeFormatterAndroid::AddProperties(
   dict->Set("table_header", android_node->IsTableHeader());
 
   // String attributes.
-  dict->Set("name", android_node->GetTextContentUTF16());
-  dict->Set("hint", android_node->GetHint());
-  dict->Set("tooltip_text", android_node->GetTooltipText());
-  dict->Set("role_description", android_node->GetRoleDescription());
-  dict->Set("state_description", android_node->GetStateDescription());
-  dict->Set("container_title", android_node->GetContainerTitle());
-  dict->Set("content_description", android_node->GetContentDescription());
+  dict->Set("name", android_node->GetAndroidText());
+  dict->Set("hint", android_node->GetAndroidHint());
+  dict->Set("tooltip_text", android_node->GetAndroidTooltipText());
+  dict->Set("role_description", android_node->GetAndroidRoleDescription());
+  dict->Set("state_description", android_node->GetAndroidStateDescription());
+  dict->Set("container_title", android_node->GetAndroidContainerTitle());
+  dict->Set("content_description",
+            android_node->GetAndroidContentDescription());
   dict->Set("supplemental_description",
-            android_node->GetSupplementalDescription());
+            android_node->GetAndroidSupplementalDescription());
 
   // Int attributes.
   dict->Set("item_index", android_node->GetItemIndex());
@@ -234,7 +236,7 @@ void AccessibilityTreeFormatterAndroid::AddProperties(
 }
 
 std::string AccessibilityTreeFormatterAndroid::ProcessTreeForOutput(
-    const base::Value::Dict& dict) const {
+    const base::DictValue& dict) const {
   const std::string* error_value = dict.FindString("error");
   if (error_value) {
     return *error_value;
@@ -274,10 +276,23 @@ std::string AccessibilityTreeFormatterAndroid::ProcessTreeForOutput(
         true, StringPrintf("%s='%s'", attribute_name, value->c_str()), &line);
   }
 
+  // TODO(crbug.com/489414511): Move empty value filtering upstream into
+  // AccessibilityTreeFormatterAndroid::AddProperties. Instead of globally
+  // dropping 0s here to reduce dump test noise, properties should be added
+  // conditionally (e.g., using std::optional for indices). Until then,
+  // hardcoded exceptions are required below to preserve valid 0-based
+  // coordinates.
+  bool is_collection_item = dict.FindBool("collection_item").value_or(false);
   for (const char* attribute_name : INT_ATTRIBUTES) {
     int value = dict.FindInt(attribute_name).value_or(0);
     if (value == 0) {
-      continue;
+      std::string_view attr_view(attribute_name);
+      bool is_zero_based_index = attr_view == "item_index" ||
+                                 attr_view == "row_index" ||
+                                 attr_view == "column_index";
+      if (!is_zero_based_index || !is_collection_item) {
+        continue;
+      }
     }
     WriteAttribute(true, StringPrintf("%s=%d", attribute_name, value), &line);
   }

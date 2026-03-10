@@ -249,10 +249,10 @@ void AutofillHandler::SetAddresses(
   }
 
   std::vector<autofill::AutofillProfile> test_address_for_countries;
-  base::Value::List profiles;
+  base::ListValue profiles;
 
   for (const auto& address : *addresses) {
-    base::Value::Dict address_fields;
+    base::DictValue address_fields;
     for (const auto& field : *address->GetFields()) {
       address_fields.Set(field->GetName(), field->GetValue());
     }
@@ -358,7 +358,7 @@ void AutofillHandler::OnFillOrPreviewForm(
           autofill::GetFillingValueAndTypeForProfile(
               *profile_used_to_fill_form, locale, field->Type(), *field,
               manager.client().GetAddressNormalizer(), &failure_to_fill)
-              .first;
+              .value;
     }
     filled_fields_to_be_sent_to_devtools->push_back(
         protocol::Autofill::FilledField::Create()

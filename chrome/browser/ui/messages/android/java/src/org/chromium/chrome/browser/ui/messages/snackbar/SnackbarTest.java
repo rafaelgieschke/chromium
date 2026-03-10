@@ -25,10 +25,8 @@ import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
 import org.chromium.base.test.BaseActivityTestRule;
 import org.chromium.base.test.util.Batch;
+import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CriteriaHelper;
-import org.chromium.base.test.util.DisabledTest;
-import org.chromium.base.test.util.Features.EnableFeatures;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager.SnackbarController;
 import org.chromium.chrome.browser.ui.messages.test.R;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -43,10 +41,14 @@ import java.util.function.Supplier;
 @Batch(Batch.UNIT_TESTS)
 public class SnackbarTest {
     private SnackbarManager mManager;
+    private final CallbackHelper mShowingHelper = new CallbackHelper();
+    private final CallbackHelper mDismissHelper = new CallbackHelper();
     private final SnackbarController mDefaultController =
             new SnackbarController() {
                 @Override
-                public void onDismissNoAction(Object actionData) {}
+                public void onDismissNoAction(Object actionData) {
+                    mDismissHelper.notifyCalled();
+                }
 
                 @Override
                 public void onAction(Object actionData) {}
@@ -57,6 +59,7 @@ public class SnackbarTest {
                 @Override
                 public void onDismissNoAction(Object actionData) {
                     mDismissed = true;
+                    mDismissHelper.notifyCalled();
                 }
 
                 @Override
@@ -73,12 +76,14 @@ public class SnackbarTest {
     private static FrameLayout sAlternateParent2;
     private boolean mDismissed;
     private boolean mActionClicked;
+    private final CallbackHelper mActionHelper = new CallbackHelper();
 
     private final SnackbarController mActionController =
             new SnackbarController() {
                 @Override
                 public void onAction(Object actionData) {
                     mActionClicked = true;
+                    mActionHelper.notifyCalled();
                 }
             };
 
@@ -113,7 +118,16 @@ public class SnackbarTest {
         PostTask.runOrPostTask(
                 TaskTraits.UI_DEFAULT,
                 () -> {
-                    mManager = new SnackbarManager(sActivity, sMainParent, null);
+                    mManager =
+                            new SnackbarManager(
+                                    sActivity,
+                                    sMainParent,
+                                    null,
+                                    null,
+                                    ((BlankUiTestActivity) sActivity).getModalDialogManager());
+                    mManager.isShowingSupplier()
+                            .addSyncObserverAndPostIfNonNull(
+                                    (showing) -> mShowingHelper.notifyCalled());
                     mManager.dismissAllSnackbars();
                     AccessibilityState.setIsPerformGesturesEnabledForTesting(false);
                 });
@@ -121,8 +135,8 @@ public class SnackbarTest {
 
     @Test
     @MediumTest
-    @DisabledTest(message = "crbug.com/439617848")
     public void testStackQueuePersistentOrder() {
+        SnackbarManager.setDurationForTesting(100);
         final Snackbar stackbar =
                 Snackbar.make(
                         "stack",
@@ -181,6 +195,7 @@ public class SnackbarTest {
     @Test
     @SmallTest
     public void testPersistentQueueStackOrder() {
+        SnackbarManager.setDurationForTesting(100);
         final Snackbar stackbar =
                 Snackbar.make(
                         "stack",
@@ -365,7 +380,6 @@ public class SnackbarTest {
 
     @Test
     @SmallTest
-    @EnableFeatures(ChromeFeatureList.FLOATING_SNACKBAR)
     public void testOverrideParent_BeforeShowing_FloatingSnackbar() {
         final Snackbar snackbar =
                 Snackbar.make(
@@ -412,7 +426,6 @@ public class SnackbarTest {
 
     @Test
     @SmallTest
-    @EnableFeatures(ChromeFeatureList.FLOATING_SNACKBAR)
     public void testOverrideParent_WhileShowing_FloatingSnackbar() {
         final Snackbar snackbar =
                 Snackbar.make(
@@ -614,7 +627,83 @@ public class SnackbarTest {
         pollSnackbarCondition("Snackbar did not time out.", () -> !mManager.isShowing());
     }
 
-    void pollSnackbarCondition(String message, Supplier<Boolean> condition) {
+    @Test
+    @SmallTest
+    public void testSnackbarPersistsWithModalDialog() throws Exception {
+        int timeout = 400;
+        SnackbarManager.setDurationForTesting(timeout);
+        final Snackbar snackbar =
+                Snackbar.make(
+                        "stack",
+                        mDismissController,
+                        Snackbar.TYPE_ACTION,
+                        Snackbar.UMA_TEST_SNACKBAR);
+        mDismissed = false;
+        PostTask.runOrPostTask(
+                TaskTraits.UI_DEFAULT,
+                () -> {
+                    mManager.showSnackbar(snackbar);
+                    // Simulate a modal dialog being shown.
+                    mManager.onDialogShown(null);
+                });
+
+        // Wait for the duration of the timeout.
+        TimeUnit.MILLISECONDS.sleep(timeout + 100);
+
+        // Simulate the modal dialog being dismissed.
+        PostTask.runOrPostTask(TaskTraits.UI_DEFAULT, () -> mManager.onLastDialogDismissed());
+
+        // Should not immediately time out.
+        Assert.assertFalse(
+                "Snackbar should not immediately time out after modal dialog was dismissed.",
+                mDismissed);
+
+        // Now it should time out. This must be run from outside UI thread.
+        TimeUnit.MILLISECONDS.sleep(timeout + 200);
+
+        pollSnackbarCondition("Snackbar should eventually time out.", () -> !mManager.isShowing());
+    }
+
+    @Test
+    @SmallTest
+    public void testSnackbarShownDuringModalDialog() throws Exception {
+        int timeout = 400;
+        SnackbarManager.setDurationForTesting(timeout);
+        final Snackbar snackbar =
+                Snackbar.make(
+                        "stack",
+                        mDismissController,
+                        Snackbar.TYPE_ACTION,
+                        Snackbar.UMA_TEST_SNACKBAR);
+        mDismissed = false;
+
+        // Simulate a modal dialog being shown before the snackbar.
+        PostTask.runOrPostTask(
+                TaskTraits.UI_DEFAULT,
+                () -> {
+                    mManager.onDialogShown(null);
+
+                    mManager.showSnackbar(snackbar);
+                });
+
+        // Wait for the duration of the timeout.
+        TimeUnit.MILLISECONDS.sleep(timeout + 100);
+
+        // Simulate the modal dialog being dismissed.
+        PostTask.runOrPostTask(TaskTraits.UI_DEFAULT, () -> mManager.onLastDialogDismissed());
+
+        // Should not immediately time out.
+        pollSnackbarCondition(
+                "Snackbar should not immediately time out after modal dialog was" + " dismissed.",
+                () -> !mDismissed);
+
+        // Now it should time out. This must be run from outside UI thread.
+        TimeUnit.MILLISECONDS.sleep(timeout + 100);
+        pollSnackbarCondition(
+                "Snackbar should eventually time out", () -> !mManager.isShowing() && mDismissed);
+    }
+
+    private void pollSnackbarCondition(String message, Supplier<Boolean> condition) {
         CriteriaHelper.pollUiThread(condition::get, message);
     }
 }

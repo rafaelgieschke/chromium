@@ -20,6 +20,8 @@ class ActorInternalsUIConfig
  public:
   ActorInternalsUIConfig()
       : DefaultInternalWebUIConfig(chrome::kChromeUIActorInternalsHost) {}
+
+  bool IsWebUIEnabled(content::BrowserContext* browser_context) override;
 };
 
 // The UI for chrome://actor-internals/

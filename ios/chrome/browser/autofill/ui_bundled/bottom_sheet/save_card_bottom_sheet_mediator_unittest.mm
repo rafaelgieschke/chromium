@@ -20,6 +20,7 @@
 #import "components/autofill/core/browser/payments/payments_autofill_client.h"
 #import "components/autofill/core/browser/payments/test_legal_message_line.h"
 #import "components/autofill/core/browser/test_utils/autofill_test_utils.h"
+#import "components/autofill/core/common/autofill_payments_features.h"
 #import "components/autofill/ios/browser/credit_card_save_metrics_ios.h"
 #import "components/grit/components_scaled_resources.h"
 #import "components/strings/grit/components_strings.h"
@@ -39,6 +40,9 @@
 
 namespace {
 
+using ::testing::AllOf;
+using ::testing::Field;
+using ::testing::Optional;
 using LegacySaveCardPromptResult =
     autofill::autofill_metrics::LegacySaveCardPromptResult;
 using SaveCardPromptOffer = autofill::autofill_metrics::SaveCardPromptOffer;
@@ -48,19 +52,20 @@ using SaveCreditCardPromptResultIOS =
 
 constexpr std::string_view kSaveCreditCardPromptOfferBaseHistogram =
     "Autofill.SaveCreditCardPromptOffer.IOS";
-const std::string kSaveCreditCardPromptResultIOSPrefix =
+constexpr std::string_view kSaveCreditCardPromptResultIOSPrefix =
     "Autofill.SaveCreditCardPromptResult.IOS.Server.BottomSheet.NumStrikes.0."
     "NoFixFlow";
-const std::string kSaveCreditCardPromptResultIOSPrefixForLocalSave =
+constexpr std::string_view kSaveCreditCardPromptResultIOSPrefixForLocalSave =
     "Autofill.SaveCreditCardPromptResult.IOS.Local.BottomSheet.NumStrikes.0."
     "NoFixFlow";
-const std::string kCreditCardUploadLoadingShownPrefix =
+constexpr std::string_view kSavingWithoutCvcSuffix = ".SavingWithoutCvc";
+constexpr std::string_view kCreditCardUploadLoadingShownPrefix =
     "Autofill.CreditCardUpload.LoadingShown";
-const std::string kCreditCardUploadLoadingResultPrefix =
+constexpr std::string_view kCreditCardUploadLoadingResultPrefix =
     "Autofill.CreditCardUpload.LoadingResult";
-const std::string kCreditCardUploadSuccessConfirmationShownPrefix =
+constexpr std::string_view kCreditCardUploadSuccessConfirmationShownPrefix =
     "Autofill.CreditCardUpload.ConfirmationShown";
-const std::string kCreditCardUploadSuccessConfirmationResultPrefix =
+constexpr std::string_view kCreditCardUploadSuccessConfirmationResultPrefix =
     "Autofill.CreditCardUpload.ConfirmationResult";
 
 autofill::AutofillSaveCardUiInfo CreateAutofillSaveCardUiInfo(bool for_upload) {
@@ -136,7 +141,9 @@ class MockSaveCardBottomSheetModel : public autofill::SaveCardBottomSheetModel {
       std::variant<autofill::payments::PaymentsAutofillClient::
                        LocalSaveCardPromptCallback,
                    autofill::payments::PaymentsAutofillClient::
-                       UploadSaveCardPromptCallback> save_card_callback,
+                       UploadSaveCardPromptCallback,
+                   autofill::payments::PaymentsAutofillClient::
+                       CardSaveAndFillDialogCallback> save_card_callback,
       autofill::payments::PaymentsAutofillClient::SaveCreditCardOptions options)
       : SaveCardBottomSheetModel(
             std::move(ui_info),
@@ -146,6 +153,11 @@ class MockSaveCardBottomSheetModel : public autofill::SaveCardBottomSheetModel {
 
   MOCK_METHOD(void, OnAccepted, (), (override));
   MOCK_METHOD(void, OnCanceled, (), (override));
+  MOCK_METHOD(void,
+              OnUpdatedAndAcceptedForSaveAndFill,
+              (autofill::payments::PaymentsAutofillClient::
+                   UserProvidedCardSaveAndFillDetails details),
+              (override));
 };
 
 class SaveCardBottomSheetMediatorTest : public PlatformTest {
@@ -158,7 +170,9 @@ class SaveCardBottomSheetMediatorTest : public PlatformTest {
     using Variant = std::variant<
         autofill::payments::PaymentsAutofillClient::LocalSaveCardPromptCallback,
         autofill::payments::PaymentsAutofillClient::
-            UploadSaveCardPromptCallback>;
+            UploadSaveCardPromptCallback,
+        autofill::payments::PaymentsAutofillClient::
+            CardSaveAndFillDialogCallback>;
     std::unique_ptr<MockSaveCardBottomSheetModel> model =
         std::make_unique<MockSaveCardBottomSheetModel>(
             CreateAutofillSaveCardUiInfo(for_upload),
@@ -241,25 +255,42 @@ TEST_F(SaveCardBottomSheetMediatorTest, SetConsumer) {
   }
 
   histogram_tester.ExpectUniqueSample(
-      base::StrCat(
-          {kSaveCreditCardPromptOfferBaseHistogram, ".Server.BottomSheet"}),
+      base::StrCat({kSaveCreditCardPromptOfferBaseHistogram,
+                    ".Server.BottomSheet", kSavingWithoutCvcSuffix}),
       SaveCardPromptOffer::kShown,
       /*expected_count=*/1);
   histogram_tester.ExpectUniqueSample(
       base::StrCat({kSaveCreditCardPromptOfferBaseHistogram,
-                    ".Server.BottomSheet.NumStrikes.0.NoFixFlow"}),
+                    ".Server.BottomSheet.NumStrikes.0.NoFixFlow",
+                    kSavingWithoutCvcSuffix}),
       SaveCardPromptOffer::kShown,
       /*expected_count=*/1);
 
-  histogram_tester.ExpectUniqueSample(kSaveCreditCardPromptResultIOSPrefix,
-                                      SaveCreditCardPromptResultIOS::kShown,
-                                      /*expected_count=*/1);
+  histogram_tester.ExpectUniqueSample(
+      base::StrCat(
+          {kSaveCreditCardPromptResultIOSPrefix, kSavingWithoutCvcSuffix}),
+      SaveCreditCardPromptResultIOS::kShown,
+      /*expected_count=*/1);
+}
+
+// Test that mediator provides logoType and logoAccessibilityLabel as a data
+// source for upload save bottomsheet with Wallet branding.
+TEST_F(SaveCardBottomSheetMediatorTest, DataSource) {
+  base::test::ScopedFeatureList feature_list(
+      autofill::features::kAutofillEnableWalletBranding);
+  EXPECT_EQ(kGoogleWalletLogo, mediator_.logoType);
+  EXPECT_NSEQ(base::SysUTF16ToNSString(l10n_util::GetStringUTF16(
+                  IDS_AUTOFILL_GOOGLE_WALLET_LOGO_ACCESSIBLE_NAME)),
+              mediator_.logoAccessibilityLabel);
 }
 
 // Test that mediator provides logoType and logoAccessibilityLabel as a data
 // source for upload save bottomsheet.
-TEST_F(SaveCardBottomSheetMediatorTest, DataSource) {
-  EXPECT_EQ(kGooglePayLogo, mediator_.logoType);
+TEST_F(SaveCardBottomSheetMediatorTest, DataSource_BrandingFlagOff) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndDisableFeature(
+      autofill::features::kAutofillEnableWalletBranding);
+  EXPECT_EQ(kGoogleWalletLogo, mediator_.logoType);
   EXPECT_NSEQ(base::SysUTF16ToNSString(l10n_util::GetStringUTF16(
                   IDS_AUTOFILL_GOOGLE_PAY_LOGO_ACCESSIBLE_NAME)),
               mediator_.logoAccessibilityLabel);
@@ -296,9 +327,11 @@ TEST_F(SaveCardBottomSheetMediatorTest,
 
   [mediator_ didAccept];
 
-  histogram_tester.ExpectUniqueSample(kSaveCreditCardPromptResultIOSPrefix,
-                                      SaveCreditCardPromptResultIOS::kAccepted,
-                                      /*expected_count=*/1);
+  histogram_tester.ExpectUniqueSample(
+      base::StrCat(
+          {kSaveCreditCardPromptResultIOSPrefix, kSavingWithoutCvcSuffix}),
+      SaveCreditCardPromptResultIOS::kAccepted,
+      /*expected_count=*/1);
   histogram_tester.ExpectUniqueSample(kCreditCardUploadLoadingShownPrefix, true,
                                       1);
 }
@@ -422,9 +455,11 @@ TEST_F(SaveCardBottomSheetMediatorTest, OnCancelLogs_DeniedMetric) {
 
   [mediator_ didCancel];
 
-  histogram_tester.ExpectUniqueSample(kSaveCreditCardPromptResultIOSPrefix,
-                                      SaveCreditCardPromptResultIOS::kDenied,
-                                      /*expected_count=*/1);
+  histogram_tester.ExpectUniqueSample(
+      base::StrCat(
+          {kSaveCreditCardPromptResultIOSPrefix, kSavingWithoutCvcSuffix}),
+      SaveCreditCardPromptResultIOS::kDenied,
+      /*expected_count=*/1);
 }
 
 // Test that `OnCanceled` is called on the model when bottomsheet is dismissed
@@ -450,7 +485,8 @@ TEST_F(SaveCardBottomSheetMediatorTest,
   [mediator_ onBottomSheetDismissedWithLinkClicked:YES];
 
   histogram_tester.ExpectUniqueSample(
-      kSaveCreditCardPromptResultIOSPrefix,
+      base::StrCat(
+          {kSaveCreditCardPromptResultIOSPrefix, kSavingWithoutCvcSuffix}),
       SaveCreditCardPromptResultIOS::kLinkClicked,
       /*expected_count=*/1);
 }
@@ -477,9 +513,11 @@ TEST_F(SaveCardBottomSheetMediatorTest,
             autofill::SaveCardBottomSheetModel::SaveCardState::kOffered);
   [mediator_ onBottomSheetDismissedWithLinkClicked:NO];
 
-  histogram_tester.ExpectUniqueSample(kSaveCreditCardPromptResultIOSPrefix,
-                                      SaveCreditCardPromptResultIOS::kSwiped,
-                                      /*expected_count=*/1);
+  histogram_tester.ExpectUniqueSample(
+      base::StrCat(
+          {kSaveCreditCardPromptResultIOSPrefix, kSavingWithoutCvcSuffix}),
+      SaveCreditCardPromptResultIOS::kSwiped,
+      /*expected_count=*/1);
 }
 
 // Test that `onBottomSheetDismissedWithLinkClicked` is a no-op when bottomsheet
@@ -496,18 +534,22 @@ TEST_F(SaveCardBottomSheetMediatorTest,
             autofill::SaveCardBottomSheetModel::SaveCardState::kOffered);
 
   // Pressing `No thanks` cancel button logs bottomsheet result `kDenied`.
-  histogram_tester.ExpectUniqueSample(kSaveCreditCardPromptResultIOSPrefix,
-                                      SaveCreditCardPromptResultIOS::kDenied,
-                                      /*expected_count=*/1);
+  histogram_tester.ExpectUniqueSample(
+      base::StrCat(
+          {kSaveCreditCardPromptResultIOSPrefix, kSavingWithoutCvcSuffix}),
+      SaveCreditCardPromptResultIOS::kDenied,
+      /*expected_count=*/1);
 
   // Verify `onBottomSheetDismissedWithLinkClicked` doesn't call `OnCanceled` on
   // the model again and bottomsheet result is not logged.
   EXPECT_CALL(*model_, OnCanceled()).Times(0);
   [mediator_ onBottomSheetDismissedWithLinkClicked:NO];
 
-  histogram_tester.ExpectBucketCount(kSaveCreditCardPromptResultIOSPrefix,
-                                     SaveCreditCardPromptResultIOS::kSwiped,
-                                     /*expected_count=*/0);
+  histogram_tester.ExpectBucketCount(
+      base::StrCat(
+          {kSaveCreditCardPromptResultIOSPrefix, kSavingWithoutCvcSuffix}),
+      SaveCreditCardPromptResultIOS::kSwiped,
+      /*expected_count=*/0);
 }
 
 // Test that bottomsheet dismissal in progress state is logged with loading
@@ -556,6 +598,49 @@ TEST_F(SaveCardBottomSheetMediatorTest,
       LegacySaveCardPromptResult::kClosed, 1);
 }
 
+// Tests that `onUpdatedAndAcceptedForSaveAndFill` calls the corresponding
+// method on the model.
+TEST_F(SaveCardBottomSheetMediatorTest, OnUpdatedAndAcceptedForSaveAndFill) {
+  autofill::payments::PaymentsAutofillClient::UserProvidedCardSaveAndFillDetails
+      details;
+  details.card_number = u"5555555555554444";
+  details.cardholder_name = u"John Doe";
+  details.expiration_date_month = u"12";
+  details.expiration_date_year = u"2030";
+  details.security_code = u"123";
+  details.nickname = u"My Test Card";
+
+  // Expect the model to receive the call with the correct details.
+  EXPECT_CALL(
+      *model_,
+      OnUpdatedAndAcceptedForSaveAndFill(testing::AllOf(
+          testing::Field(&autofill::payments::PaymentsAutofillClient::
+                             UserProvidedCardSaveAndFillDetails::card_number,
+                         u"5555555555554444"),
+          testing::Field(
+              &autofill::payments::PaymentsAutofillClient::
+                  UserProvidedCardSaveAndFillDetails::cardholder_name,
+              u"John Doe"),
+          testing::Field(
+              &autofill::payments::PaymentsAutofillClient::
+                  UserProvidedCardSaveAndFillDetails::expiration_date_month,
+              u"12"),
+          testing::Field(
+              &autofill::payments::PaymentsAutofillClient::
+                  UserProvidedCardSaveAndFillDetails::expiration_date_year,
+              u"2030"),
+          testing::Field(&autofill::payments::PaymentsAutofillClient::
+                             UserProvidedCardSaveAndFillDetails::security_code,
+                         testing::Optional(std::u16string(u"123"))),
+          testing::Field(&autofill::payments::PaymentsAutofillClient::
+                             UserProvidedCardSaveAndFillDetails::nickname,
+                         testing::Optional(std::u16string(u"My Test Card"))))));
+
+  // Pass by value using std::move, matching the updated performance
+  // improvement.
+  [mediator_ onUpdatedAndAcceptedForSaveAndFill:std::move(details)];
+}
+
 class SaveCardBottomSheetMediatorTestForLocalSave
     : public SaveCardBottomSheetMediatorTest {
  public:
@@ -573,17 +658,19 @@ TEST_F(SaveCardBottomSheetMediatorTestForLocalSave, SetConsumer) {
   ASSERT_EQ(nil, consumer.legalMessages);
 
   histogram_tester.ExpectUniqueSample(
-      base::StrCat(
-          {kSaveCreditCardPromptOfferBaseHistogram, ".Local.BottomSheet"}),
+      base::StrCat({kSaveCreditCardPromptOfferBaseHistogram,
+                    ".Local.BottomSheet", kSavingWithoutCvcSuffix}),
       SaveCardPromptOffer::kShown,
       /*expected_count=*/1);
   histogram_tester.ExpectUniqueSample(
       base::StrCat({kSaveCreditCardPromptOfferBaseHistogram,
-                    ".Local.BottomSheet.NumStrikes.0.NoFixFlow"}),
+                    ".Local.BottomSheet.NumStrikes.0.NoFixFlow",
+                    kSavingWithoutCvcSuffix}),
       SaveCardPromptOffer::kShown,
       /*expected_count=*/1);
   histogram_tester.ExpectUniqueSample(
-      kSaveCreditCardPromptResultIOSPrefixForLocalSave,
+      base::StrCat({kSaveCreditCardPromptResultIOSPrefixForLocalSave,
+                    kSavingWithoutCvcSuffix}),
       SaveCreditCardPromptResultIOS::kShown,
       /*expected_count=*/1);
 }
@@ -614,7 +701,8 @@ TEST_F(SaveCardBottomSheetMediatorTestForLocalSave,
   [mediator_ didAccept];
 
   histogram_tester.ExpectUniqueSample(
-      kSaveCreditCardPromptResultIOSPrefixForLocalSave,
+      base::StrCat({kSaveCreditCardPromptResultIOSPrefixForLocalSave,
+                    kSavingWithoutCvcSuffix}),
       SaveCreditCardPromptResultIOS::kAccepted,
       /*expected_count=*/1);
 }
@@ -708,6 +796,35 @@ TEST_F(SaveCardBottomSheetMediatorTestForLocalSave,
       LegacySaveCardPromptResult::kClosed, 1);
 }
 
+// Test that actionType returns kSaveScanAndFill when initialized for scan and
+// fill.
+TEST_F(SaveCardBottomSheetMediatorTest, ActionTypeForScanAndFill) {
+  using Variant = std::variant<
+      autofill::payments::PaymentsAutofillClient::LocalSaveCardPromptCallback,
+      autofill::payments::PaymentsAutofillClient::UploadSaveCardPromptCallback,
+      autofill::payments::PaymentsAutofillClient::
+          CardSaveAndFillDialogCallback>;
+
+  std::unique_ptr<autofill::SaveCardBottomSheetModel> model =
+      std::make_unique<MockSaveCardBottomSheetModel>(
+          CreateAutofillSaveCardUiInfo(/*for_upload=*/false),
+          Variant(static_cast<autofill::payments::PaymentsAutofillClient::
+                                  CardSaveAndFillDialogCallback>(
+              base::DoNothing())),
+          autofill::payments::PaymentsAutofillClient::SaveCreditCardOptions()
+              .with_num_strikes(0));
+
+  SaveCardBottomSheetMediator* scan_and_fill_mediator =
+      [[SaveCardBottomSheetMediator alloc]
+                  initWithUIModel:std::move(model)
+          autofillCommandsHandler:mock_autofill_commands_handler_];
+
+  EXPECT_EQ([scan_and_fill_mediator actionType],
+            SaveCardActionType::kSaveScanAndFill);
+
+  [scan_and_fill_mediator disconnect];
+}
+
 class SaveCardBottomSheetMediatorMetricsTestWithCardSaveType
     : public SaveCardBottomSheetMediatorTest,
       public testing::WithParamInterface<
@@ -722,7 +839,7 @@ class SaveCardBottomSheetMediatorMetricsTestWithCardSaveType
     return save_type == autofill::payments::PaymentsAutofillClient::
                             CardSaveType::kCardSaveWithCvc
                ? ".SavingWithCvc"
-               : "";
+               : ".SavingWithoutCvc";
   }
 };
 

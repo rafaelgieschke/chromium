@@ -92,6 +92,8 @@
 #include "ui/base/ui_base_switches.h"
 #include "url/gurl.h"
 #include "url/origin.h"
+#include "url/url_canon.h"
+#include "url/url_constants.h"
 
 #if BUILDFLAG(IS_ANDROID)
 #include "base/android/apk_assets.h"
@@ -481,12 +483,15 @@ ShellContentBrowserClient::GetWebContentsViewDelegate(
   return CreateShellWebContentsViewDelegate(web_contents);
 }
 
-bool ShellContentBrowserClient::IsIsolatedContextAllowedForUrl(
+bool ShellContentBrowserClient::ShouldUrlUseApplicationIsolationLevel(
     BrowserContext* browser_context,
-    const GURL& lock_url) {
-  static base::flat_set<url::Origin> isolated_context_origins =
-      GetIsolatedContextOriginSetFromFlag();
-  return isolated_context_origins.contains(url::Origin::Create(lock_url));
+    const GURL& url) {
+  static auto kIsolatedContextOrigins = GetIsolatedContextOriginSetFromFlag();
+
+  GURL::Replacements replacements;
+  replacements.ClearPort();
+  return kIsolatedContextOrigins.contains(
+      url::Origin::Create(url.ReplaceComponents(replacements)));
 }
 
 bool ShellContentBrowserClient::IsSharedStorageAllowed(
@@ -651,8 +656,8 @@ std::unique_ptr<LoginDelegate> ShellContentBrowserClient::CreateLoginDelegate(
   return nullptr;
 }
 
-base::Value::Dict ShellContentBrowserClient::GetNetLogConstants() {
-  base::Value::Dict client_constants;
+base::DictValue ShellContentBrowserClient::GetNetLogConstants() {
+  base::DictValue client_constants;
   client_constants.Set("name", "content_shell");
   base::CommandLine::StringType command_line =
       base::CommandLine::ForCurrentProcess()->GetCommandLineString();
@@ -661,7 +666,7 @@ base::Value::Dict ShellContentBrowserClient::GetNetLogConstants() {
 #else
   client_constants.Set("command_line", command_line);
 #endif
-  base::Value::Dict constants;
+  base::DictValue constants;
   constants.Set("clientInfo", std::move(client_constants));
   return constants;
 }
@@ -853,23 +858,6 @@ void ShellContentBrowserClient::OnWebContentsCreated(
 void ShellContentBrowserClient::CreateFeatureListAndFieldTrials() {
   GetSharedState().local_state = CreateLocalState();
   SetupFieldTrials();
-}
-
-std::optional<network::ParsedPermissionsPolicy>
-ShellContentBrowserClient::GetPermissionsPolicyForIsolatedWebApp(
-    WebContents* web_contents,
-    const url::Origin& app_origin) {
-  network::ParsedPermissionsPolicyDeclaration coi_decl(
-      network::mojom::PermissionsPolicyFeature::kCrossOriginIsolated,
-      /*allowed_origins=*/{},
-      /*self_if_matches=*/std::nullopt,
-      /*matches_all_origins=*/true, /*matches_opaque_src=*/false);
-
-  network::ParsedPermissionsPolicyDeclaration socket_decl(
-      network::mojom::PermissionsPolicyFeature::kDirectSockets,
-      /*allowed_origins=*/{}, app_origin,
-      /*matches_all_origins=*/false, /*matches_opaque_src=*/false);
-  return {{coi_decl, socket_decl}};
 }
 
 // Tests may install their own ShellContentBrowserClient, track the list here.

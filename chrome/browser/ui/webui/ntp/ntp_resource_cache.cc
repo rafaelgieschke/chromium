@@ -30,7 +30,6 @@
 #include "chrome/browser/ui/webui/webui_util_desktop.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/channel_info.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/branded_strings.h"
@@ -232,7 +231,7 @@ void NTPResourceCache::Invalidate() {
 void NTPResourceCache::CreateNewTabIncognitoHTML(
     const content::WebContents::Getter& wc_getter) {
   ui::TemplateReplacements replacements;
-  base::Value::Dict localized_strings;
+  base::DictValue localized_strings;
 
   // Ensure passing off-the-record profile; |profile_| is not an OTR profile.
   DCHECK(!profile_->IsOffTheRecord());
@@ -284,7 +283,7 @@ void NTPResourceCache::CreateNewTabIncognitoHTML(
 }
 
 void NTPResourceCache::CreateNewTabGuestHTML() {
-  base::Value::Dict localized_strings;
+  base::DictValue localized_strings;
   localized_strings.Set("title", l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE));
   const char* guest_tab_link = kLearnMoreGuestSessionUrl;
   int guest_tab_idr = IDR_GUEST_TAB_HTML;

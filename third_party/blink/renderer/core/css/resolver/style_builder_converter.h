@@ -46,8 +46,8 @@
 #include "third_party/blink/renderer/core/style/basic_shapes.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
+#include "third_party/blink/renderer/core/style/flow_tolerance.h"
 #include "third_party/blink/renderer/core/style/grid_area.h"
-#include "third_party/blink/renderer/core/style/item_tolerance.h"
 #include "third_party/blink/renderer/core/style/named_grid_lines_map.h"
 #include "third_party/blink/renderer/core/style/ordered_named_grid_lines.h"
 #include "third_party/blink/renderer/core/style/scroll_marker_group.h"
@@ -57,6 +57,7 @@
 #include "third_party/blink/renderer/core/style/style_offset_rotation.h"
 #include "third_party/blink/renderer/core/style/style_overflow_clip_margin.h"
 #include "third_party/blink/renderer/core/style/style_reflection.h"
+#include "third_party/blink/renderer/core/style/style_timeline_scope.h"
 #include "third_party/blink/renderer/core/style/style_trigger_scope.h"
 #include "third_party/blink/renderer/core/style/style_view_transition_group.h"
 #include "third_party/blink/renderer/core/style/style_view_transition_name.h"
@@ -219,8 +220,10 @@ class StyleBuilderConverter {
                                             const CSSValue&);
   static GridTrackList ConvertGridTrackSizeList(StyleResolverState&,
                                                 const CSSValue&);
-  static ItemTolerance ConvertItemTolerance(const StyleResolverState&,
+  static FlowTolerance ConvertFlowTolerance(const StyleResolverState&,
                                             const CSSValue&);
+  static GridLanesDirection ConvertGridLanesDirection(const StyleResolverState&,
+                                                      const CSSValue&);
   static StyleHyphenateLimitChars ConvertHyphenateLimitChars(
       StyleResolverState&,
       const CSSValue&);
@@ -229,6 +232,7 @@ class StyleBuilderConverter {
   template <typename T>
   static T ConvertLineWidth(StyleResolverState&, const CSSValue&);
   static int ConvertBorderWidth(const StyleResolverState&, const CSSValue&);
+  static int ConvertOutlineOffset(const StyleResolverState&, const CSSValue&);
   static uint16_t ConvertColumnRuleWidth(StyleResolverState&, const CSSValue&);
   static Superellipse ConvertCornerShape(const StyleResolverState&,
                                          const CSSValue&);
@@ -250,6 +254,7 @@ class StyleBuilderConverter {
   static TabSize ConvertLengthOrTabSpaces(StyleResolverState&, const CSSValue&);
   static Length ConvertLineHeight(StyleResolverState&, const CSSValue&);
   static float ConvertNumberOrPercentage(StyleResolverState&, const CSSValue&);
+  static float ConvertPathLength(StyleResolverState&, const CSSValue&);
   static int ConvertInteger(StyleResolverState&, const CSSValue&);
   template <int NoneValue = 0>
   static int ConvertIntegerOrNone(StyleResolverState&, const CSSValue&);
@@ -261,6 +266,10 @@ class StyleBuilderConverter {
                                                    const CSSValue&);
   static ScopedCSSName* ConvertCustomIdent(StyleResolverState&,
                                            const CSSValue&);
+  static AtomicString ConvertNoneOrCustomIdentUnscoped(StyleResolverState&,
+                                                       const CSSValue&);
+  static AtomicString ConvertCustomIdentUnscoped(StyleResolverState&,
+                                                 const CSSValue&);
   static StylePositionAnchor ConvertPositionAnchor(StyleResolverState&,
                                                    const CSSValue&);
   static PositionVisibility ConvertPositionVisibility(StyleResolverState& state,
@@ -438,9 +447,9 @@ class StyleBuilderConverter {
                                                       const CSSValue&);
   static Vector<TimelineInset> ConvertViewTimelineInset(StyleResolverState&,
                                                         const CSSValue&);
-  static ScopedCSSNameList* ConvertViewTimelineName(StyleResolverState&,
-                                                    const CSSValue&);
-  static ScopedCSSNameList* ConvertTimelineScope(StyleResolverState&,
+  static Vector<AtomicString> ConvertViewTimelineName(StyleResolverState&,
+                                                      const CSSValue&);
+  static StyleTimelineScope ConvertTimelineScope(StyleResolverState&,
                                                  const CSSValue&);
 
   static PositionArea ConvertPositionArea(StyleResolverState&,
@@ -578,7 +587,7 @@ struct ResolveColorValueContext {
   STACK_ALLOCATED();
 
  public:
-  const CSSToLengthConversionData& conversion_data;
+  const CSSLengthResolver& length_resolver;
   const TextLinkColors& text_link_colors;
   const mojom::blink::ColorScheme used_color_scheme =
       mojom::blink::ColorScheme::kLight;

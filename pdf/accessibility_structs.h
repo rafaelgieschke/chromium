@@ -74,17 +74,22 @@ enum class AccessibilityTextDirection {
   kMaxValue = kBottomToTop,
 };
 
+// A consecutive range of text run indices not associated with any structure
+// element, inclusive of both `start` and `end`.
+struct UnassociatedTextRunRange {
+  size_t start;
+  size_t end;
+};
+
 struct AccessibilityTextRunInfo {
   AccessibilityTextRunInfo();
   AccessibilityTextRunInfo(uint32_t start_index,
                            uint32_t len,
-                           const std::string& tag_type,
                            const gfx::RectF& bounds,
                            AccessibilityTextDirection direction,
                            const AccessibilityTextStyleInfo& style);
   AccessibilityTextRunInfo(uint32_t start_index,
                            uint32_t len,
-                           const std::string& tag_type,
                            const gfx::RectF& bounds,
                            AccessibilityTextDirection direction,
                            const AccessibilityTextStyleInfo& style,
@@ -94,10 +99,6 @@ struct AccessibilityTextRunInfo {
 
   uint32_t start_index = 0;
   uint32_t len = 0;
-  // One of various types defined in a PDF tag, such as "Span", "P", "H1", "LI",
-  // etc.
-  // TODO(crbug.com/40707542): Remove in favor of AccessibilityStructureElement.
-  std::string tag_type;
   gfx::RectF bounds;
   AccessibilityTextDirection direction = AccessibilityTextDirection::kNone;
   AccessibilityTextStyleInfo style;
@@ -150,8 +151,13 @@ struct AccessibilityStructureElement {
 
   std::vector<raw_ptr<AccessibilityTextRunInfo, VectorExperimental>>
       associated_text_runs_if_available;
-
   std::unique_ptr<AccessibilityImageInfo> associated_image_if_available;
+
+  // Only used on the node which is the root of a PDF page: ranges of text runs
+  // within a page that are not associated with a structured element. These text
+  // runs form "unstructured" text within a page that will need to be
+  // interleaved with structured content.
+  std::vector<UnassociatedTextRunRange> unassociated_text_run_ranges_for_page;
 
   std::vector<std::unique_ptr<AccessibilityStructureElement>> children;
   raw_ptr<AccessibilityStructureElement> parent = nullptr;

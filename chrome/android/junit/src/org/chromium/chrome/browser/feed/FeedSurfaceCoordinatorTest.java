@@ -7,20 +7,22 @@ package org.chromium.chrome.browser.feed;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import static org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils.NtpBackgroundImageType.CHROME_COLOR;
-import static org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils.NtpBackgroundImageType.IMAGE_FROM_DISK;
+import static org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils.NtpBackgroundType.CHROME_COLOR;
+import static org.chromium.chrome.browser.ntp_customization.NtpCustomizationUtils.NtpBackgroundType.IMAGE_FROM_DISK;
 
 import android.app.Activity;
 import android.content.res.Configuration;
@@ -49,16 +51,15 @@ import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.Robolectric;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowLog;
-import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.LocaleUtils;
-import org.chromium.base.supplier.ObservableSupplierImpl;
 import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.chrome.R;
@@ -68,9 +69,11 @@ import org.chromium.chrome.browser.feed.sections.SectionHeaderListProperties;
 import org.chromium.chrome.browser.feed.webfeed.WebFeedBridge;
 import org.chromium.chrome.browser.feed.webfeed.WebFeedBridgeJni;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.magic_stack.ModuleRegistry;
 import org.chromium.chrome.browser.ntp.NewTabPageLaunchOrigin;
 import org.chromium.chrome.browser.ntp.cards.SignInPromo;
 import org.chromium.chrome.browser.ntp_customization.NtpCustomizationConfigManager;
+import org.chromium.chrome.browser.ntp_customization.policy.NtpCustomizationPolicyManager;
 import org.chromium.chrome.browser.ntp_customization.theme.NtpBackgroundImageCoordinator;
 import org.chromium.chrome.browser.ntp_customization.theme.upload_image.BackgroundImageInfo;
 import org.chromium.chrome.browser.preferences.Pref;
@@ -120,7 +123,7 @@ import java.util.function.Supplier;
     ChromeFeatureList.FEED_CONTAINMENT,
     ChromeFeatureList.FEED_HEADER_REMOVAL
 })
-@EnableFeatures({ChromeFeatureList.UNO_PHASE_2_FOLLOW_UP, SigninFeatures.ENABLE_SEAMLESS_SIGNIN})
+@EnableFeatures({SigninFeatures.ENABLE_SEAMLESS_SIGNIN})
 public class FeedSurfaceCoordinatorTest {
     private static final @SurfaceType int SURFACE_TYPE = SurfaceType.NEW_TAB_PAGE;
     private static final long SURFACE_CREATION_TIME_NS = 1234L;
@@ -213,6 +216,7 @@ public class FeedSurfaceCoordinatorTest {
     @Mock private Tracker mTracker;
     @Mock private ScrollableContainerDelegate mScrollableContainerDelegate;
     @Mock private EdgeToEdgeController mEdgeToEdgeController;
+    @Mock private ModuleRegistry mModuleRegistry;
     @Captor private ArgumentCaptor<EdgeToEdgePadAdjuster> mEdgePadAdjusterCaptor;
 
     @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
@@ -221,8 +225,8 @@ public class FeedSurfaceCoordinatorTest {
             ObservableSuppliers.createNonNull(0);
     private FeedSurfaceMediator mMediatorSpy;
     private int mTabStripHeight;
-    private final ObservableSupplierImpl<EdgeToEdgeController> mEdgeToEdgeSupplier =
-            new ObservableSupplierImpl<>();
+    private final SettableMonotonicObservableSupplier<EdgeToEdgeController> mEdgeToEdgeSupplier =
+            ObservableSuppliers.createMonotonic();
 
     @Before
     @SuppressWarnings("DirectInvocationOnMock")
@@ -290,7 +294,6 @@ public class FeedSurfaceCoordinatorTest {
         mCoordinator.setMediatorForTesting(mMediatorSpy);
 
         // Print logs to stdout.
-        ShadowLog.stream = System.out;
 
         mBitmap = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888);
         mBackgroundImageInfo =
@@ -517,7 +520,7 @@ public class FeedSurfaceCoordinatorTest {
     public void testSetBackground_withImageFromDisk_delegatesToView() {
         mCoordinator.setBackgroundImageCoordinatorForTesting(mBackgroundImageCoordinator);
         NtpCustomizationConfigManager configManager = NtpCustomizationConfigManager.getInstance();
-        configManager.setBackgroundImageTypeForTesting(CHROME_COLOR);
+        configManager.setBackgroundTypeForTesting(CHROME_COLOR);
 
         configManager.onUploadedImageSelected(mBitmap, mBackgroundImageInfo);
 
@@ -525,6 +528,20 @@ public class FeedSurfaceCoordinatorTest {
         verify(mBackgroundImageCoordinator)
                 .setBackground(eq(mBitmap), eq(mBackgroundImageInfo), eq(IMAGE_FROM_DISK));
         configManager.resetForTesting();
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.NEW_TAB_PAGE_CUSTOMIZATION_V2)
+    public void testSetBackground_disabledByPolicy() {
+        assertNotNull(mCoordinator.getNtpBackgroundImageCoordinatorForTesting());
+        mCoordinator.destroy();
+
+        NtpCustomizationPolicyManager policyManager = mock(NtpCustomizationPolicyManager.class);
+        NtpCustomizationPolicyManager.setInstanceForTesting(policyManager);
+        when(policyManager.isNtpCustomBackgroundEnabled()).thenReturn(false);
+
+        mCoordinator = createCoordinator(mRecyclerView);
+        assertNull(mCoordinator.getNtpBackgroundImageCoordinatorForTesting());
     }
 
     @Test
@@ -549,7 +566,7 @@ public class FeedSurfaceCoordinatorTest {
                 View.MeasureSpec.makeMeasureSpec(oldWidth, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(oldHeight, View.MeasureSpec.EXACTLY));
         rootView.layout(0, 0, oldWidth, oldHeight);
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         // Verify that the RecyclerView has been laid out with the correct dimensions before
         // resizing.
@@ -577,11 +594,20 @@ public class FeedSurfaceCoordinatorTest {
         assertEquals(View.INVISIBLE, recyclerView.getVisibility());
         assertEquals(View.VISIBLE, snapshotOverlay.getVisibility());
         // Let the posted tasks run, which should hide the overlay and show the RecyclerView.
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         // After the delay, RecyclerView should be visible again, and the snapshot overlay gone.
         assertEquals(View.VISIBLE, recyclerView.getVisibility());
         assertEquals(View.GONE, snapshotOverlay.getVisibility());
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.NEW_TAB_PAGE_CUSTOMIZATION_V2)
+    @Config(qualifiers = "sw600dp")
+    public void testNtpCustomizationButtonCreated() {
+        assertNotNull(
+                "NTP customization button should be created.",
+                mCoordinator.getNtpCustomizationButtonForTesting());
     }
 
     private boolean hasStreamBound() {
@@ -619,8 +645,9 @@ public class FeedSurfaceCoordinatorTest {
                 null,
                 false,
                 /* viewportView= */ null,
-                mFeedActionDelegate,
+                () -> mFeedActionDelegate,
                 mTabStripHeightSupplier,
-                mEdgeToEdgeSupplier);
+                mEdgeToEdgeSupplier,
+                mModuleRegistry);
     }
 }

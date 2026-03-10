@@ -131,7 +131,6 @@
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/component_updater/smart_dim_component_installer.h"
 #include "chrome/browser/extensions/component_loader.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/policy/chrome_policy_conversions_client.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
@@ -279,8 +278,7 @@ NOINLINE int AccessArray(const int arr[], const int* index) {
   return UNSAFE_TODO(arr[*index]);
 }
 
-base::Value::List GetHostPermissions(const Extension* ext,
-                                     bool effective_perm) {
+base::ListValue GetHostPermissions(const Extension* ext, bool effective_perm) {
   const PermissionsData* permissions_data = ext->permissions_data();
 
   const URLPatternSet* pattern_set = nullptr;
@@ -292,7 +290,7 @@ base::Value::List GetHostPermissions(const Extension* ext,
     pattern_set = &permissions_data->active_permissions().explicit_hosts();
   }
 
-  base::Value::List permissions;
+  base::ListValue permissions;
   for (const auto& perm : *pattern_set) {
     permissions.Append(perm.GetAsString());
   }
@@ -300,8 +298,8 @@ base::Value::List GetHostPermissions(const Extension* ext,
   return permissions;
 }
 
-base::Value::List GetAPIPermissions(const Extension* ext) {
-  base::Value::List permissions;
+base::ListValue GetAPIPermissions(const Extension* ext) {
+  base::ListValue permissions;
   std::set<std::string> perm_list =
       ext->permissions_data()->active_permissions().GetAPIsAsStrings();
   for (const auto& perm : perm_list) {
@@ -333,9 +331,9 @@ std::string ConvertToString(message_center::NotificationType type) {
   return "unknown";
 }
 
-base::Value::Dict MakeDictionaryFromNotification(
+base::DictValue MakeDictionaryFromNotification(
     const message_center::Notification& notification) {
-  return base::Value::Dict()
+  return base::DictValue()
       .Set("id", notification.id())
       .Set("type", ConvertToString(notification.type()))
       .Set("title", notification.title())
@@ -556,7 +554,7 @@ std::string SetAllowedPref(Profile* profile,
     DCHECK(value.is_list());
   } else if (pref_name == ash::prefs::kEnableAutoScreenLock) {
     DCHECK(value.is_bool());
-  } else if (pref_name == prefs::kLanguagePreloadEngines) {
+  } else if (pref_name == ash::prefs::kLanguagePreloadEngines) {
     DCHECK(value.is_string());
   } else if (pref_name == plugin_vm::prefs::kPluginVmCameraAllowed) {
     DCHECK(value.is_bool());
@@ -1305,7 +1303,7 @@ AutotestPrivateLogoutFunction::~AutotestPrivateLogoutFunction() = default;
 ExtensionFunction::ResponseAction AutotestPrivateLogoutFunction::Run() {
   DVLOG(1) << "AutotestPrivateLogoutFunction";
   if (!IsTestMode(browser_context())) {
-    chrome::AttemptUserExit();
+    session_manager::SessionManager::Get()->RequestSignOut();
   }
   return RespondNow(NoArguments());
 }
@@ -1319,7 +1317,7 @@ AutotestPrivateRestartFunction::~AutotestPrivateRestartFunction() = default;
 ExtensionFunction::ResponseAction AutotestPrivateRestartFunction::Run() {
   DVLOG(1) << "AutotestPrivateRestartFunction";
   if (!IsTestMode(browser_context())) {
-    chrome::AttemptRestart();
+    session_manager::SessionManager::Get()->RequestRestart();
   }
   return RespondNow(NoArguments());
 }
@@ -1337,7 +1335,7 @@ ExtensionFunction::ResponseAction AutotestPrivateShutdownFunction::Run() {
   DVLOG(1) << "AutotestPrivateShutdownFunction " << params->force;
 
   if (!IsTestMode(browser_context())) {
-    chrome::AttemptExit();
+    session_manager::SessionManager::Get()->RequestSignOut();
   }
   return RespondNow(NoArguments());
 }
@@ -1351,7 +1349,7 @@ AutotestPrivateLoginStatusFunction::~AutotestPrivateLoginStatusFunction() =
 
 ExtensionFunction::ResponseAction AutotestPrivateLoginStatusFunction::Run() {
   DVLOG(1) << "AutotestPrivateLoginStatusFunction";
-  base::Value::Dict result;
+  base::DictValue result;
   const user_manager::UserManager* user_manager =
       user_manager::UserManager::Get();
 
@@ -1472,7 +1470,7 @@ ExtensionFunction::ResponseAction
 AutotestPrivateGetAllEnterprisePoliciesFunction::Run() {
   DVLOG(1) << "AutotestPrivateGetAllEnterprisePoliciesFunction";
 
-  base::Value::Dict all_policies_dict =
+  base::DictValue all_policies_dict =
       policy::PolicyConversions(
           std::make_unique<policy::ChromePolicyConversionsClient>(
               browser_context()))
@@ -1558,7 +1556,7 @@ AutotestPrivateGetExtensionsInfoFunction::Run() {
   ExtensionActionManager* extension_action_manager =
       ExtensionActionManager::Get(browser_context());
 
-  base::Value::List extensions_values;
+  base::ListValue extensions_values;
   ExtensionList all;
   all.insert(all.end(), extensions.begin(), extensions.end());
   all.insert(all.end(), disabled_extensions.begin(), disabled_extensions.end());
@@ -1570,7 +1568,7 @@ AutotestPrivateGetExtensionsInfoFunction::Run() {
         extension_action_manager->GetExtensionAction(*extension);
 
     extensions_values.Append(
-        base::Value::Dict()
+        base::DictValue()
             .Set("id", id)
             .Set("version", extension->VersionString())
             .Set("name", extension->name())
@@ -1597,7 +1595,7 @@ AutotestPrivateGetExtensionsInfoFunction::Run() {
   }
 
   return RespondNow(WithArguments(
-      base::Value::Dict().Set("extensions", std::move(extensions_values))));
+      base::DictValue().Set("extensions", std::move(extensions_values))));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -1781,7 +1779,7 @@ AutotestPrivateGetVisibleNotificationsFunction::Run() {
 
   message_center::NotificationList::Notifications notification_set =
       message_center::MessageCenter::Get()->GetVisibleNotifications();
-  base::Value::List values;
+  base::ListValue values;
   for (message_center::Notification* notification : notification_set) {
     values.Append(MakeDictionaryFromNotification(*notification));
   }
@@ -1998,7 +1996,7 @@ ExtensionFunction::ResponseAction AutotestPrivateGetArcAppFunction::Run() {
   }
 
   return RespondNow(WithArguments(
-      base::Value::Dict()
+      base::DictValue()
           .Set("name", std::move(app_info->name))
           .Set("packageName", std::move(app_info->package_name))
           .Set("activity", std::move(app_info->activity))
@@ -2084,7 +2082,7 @@ ExtensionFunction::ResponseAction AutotestPrivateGetArcPackageFunction::Run() {
     return RespondNow(Error("ARC is not available"));
   }
 
-  base::Value::Dict package_value;
+  base::DictValue package_value;
   {
     const std::unique_ptr<ArcAppListPrefs::PackageInfo> package_info =
         prefs->GetPackage(params->package_name);
@@ -2393,15 +2391,21 @@ AutotestPrivateGetClipboardTextDataFunction::
 
 ExtensionFunction::ResponseAction
 AutotestPrivateGetClipboardTextDataFunction::Run() {
-  std::u16string data;
   // This clipboard data read is initiated an extension API, then the user
   // shouldn't see a notification if the clipboard is restricted by the rules of
   // data leak prevention policy.
   ui::DataTransferEndpoint data_dst = ui::DataTransferEndpoint(
       ui::EndpointType::kDefault, {.notify_if_restricted = false});
   ui::Clipboard::GetForCurrentThread()->ReadText(
-      ui::ClipboardBuffer::kCopyPaste, &data_dst, &data);
-  return RespondNow(WithArguments(data));
+      ui::ClipboardBuffer::kCopyPaste, std::move(data_dst),
+      base::BindOnce(&AutotestPrivateGetClipboardTextDataFunction::OnTextRead,
+                     this));
+  return RespondLater();
+}
+
+void AutotestPrivateGetClipboardTextDataFunction::OnTextRead(
+    std::u16string data) {
+  Respond(WithArguments(data));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2817,7 +2821,7 @@ ExtensionFunction::ResponseAction AutotestPrivateTakeScreenshotFunction::Run() {
   DVLOG(1) << "AutotestPrivateTakeScreenshotFunction";
   auto grabber = std::make_unique<ui::ScreenshotGrabber>();
   auto* const grabber_ptr = grabber.get();
-  // TODO(mash): Fix for mash, http://crbug.com/557397
+  // TODO(mash): Fix for mash, http://crbug.com/40445154
   aura::Window* primary_root = ash::Shell::GetPrimaryRootWindow();
   // Pass the ScreenshotGrabber to the callback so that it stays alive for the
   // duration of the operation, it'll then get deallocated when the callback
@@ -2971,7 +2975,7 @@ void AutotestPrivateGetPrinterListFunction::OnEnterprisePrintersInitialized() {
     std::vector<chromeos::Printer> printer_list =
         printers_manager_->GetPrinters(type);
     for (const auto& printer : printer_list) {
-      results_.Append(base::Value::Dict()
+      results_.Append(base::DictValue()
                           .Set("printerName", printer.display_name())
                           .Set("printerId", printer.id())
                           .Set("printerType", GetPrinterType(type)));
@@ -4352,7 +4356,7 @@ AutotestPrivateInstallPWAForCurrentURLFunction::Run() {
   content::WebContents* web_contents = browser->GetActiveWebContents();
 
   webapps::AppBannerManager* app_banner_manager =
-      webapps::AppBannerManagerDesktop::FromWebContents(web_contents);
+      webapps::AppBannerManager::FromWebContents(web_contents);
   if (!app_banner_manager) {
     return RespondNow(Error("Failed to create AppBannerManager"));
   }
@@ -4622,12 +4626,12 @@ AutotestPrivateGetDesksInfoFunction::~AutotestPrivateGetDesksInfoFunction() =
 ExtensionFunction::ResponseAction AutotestPrivateGetDesksInfoFunction::Run() {
   ash::AutotestDesksApi::DesksInfo desks_info =
       ash::AutotestDesksApi().GetDesksInfo();
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("activeDeskIndex", desks_info.active_desk_index);
   result.Set("numDesks", desks_info.num_desks);
   result.Set("isAnimating", desks_info.is_animating);
 
-  base::Value::List desk_containers;
+  base::ListValue desk_containers;
   for (std::string& desk_container : desks_info.desk_containers) {
     desk_containers.Append(std::move(desk_container));
   }
@@ -5108,9 +5112,9 @@ AutotestPrivateSetWindowBoundsFunction::
 
 namespace {
 
-base::Value::Dict BuildSetWindowBoundsResult(const gfx::Rect& bounds_in_display,
-                                             int64_t display_id) {
-  base::Value::Dict result;
+base::DictValue BuildSetWindowBoundsResult(const gfx::Rect& bounds_in_display,
+                                           int64_t display_id) {
+  base::DictValue result;
   result.Set("bounds", ToBoundsDictionary(bounds_in_display).ToValue());
   result.Set("displayId", base::NumberToString(display_id));
   return result;
@@ -5818,7 +5822,7 @@ void AutotestPrivateGetAccessTokenFunction::OnAccessToken(
     Respond(Error("Failed to get access token: *", error.ToString()));
     return;
   }
-  base::Value::Dict token_dict;
+  base::DictValue token_dict;
   token_dict.Set("accessToken", token_info.token);
   token_dict.Set(
       "expirationTimeUnixMs",
@@ -5956,7 +5960,7 @@ void AutotestPrivateMakeFuseboxTempDirFunction::OnMakeTempDir(
     Respond(Error(error_message));
     return;
   }
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("fuseboxFilePath", fusebox_file_path);
   dict.Set("underlyingFilePath", underlying_file_path);
   Respond(WithArguments(std::move(dict)));
@@ -6415,7 +6419,7 @@ AutotestPrivateGetCurrentInputMethodDescriptorFunction::Run() {
   ash::input_method::InputMethodDescriptor descriptor =
       manager->GetActiveIMEState()->GetCurrentInputMethod();
 
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set("keyboardLayout", descriptor.keyboard_layout());
   return RespondNow(WithArguments(std::move(dict)));
 }
@@ -6628,7 +6632,7 @@ void AutotestPrivateAPI::OnClipboardDataChanged() {
   std::unique_ptr<Event> event(
       new Event(events::AUTOTESTPRIVATE_ON_CLIPBOARD_DATA_CHANGED,
                 api::autotest_private::OnClipboardDataChanged::kEventName,
-                base::Value::List()));
+                base::ListValue()));
   event_router->BroadcastEvent(std::move(event));
 }
 

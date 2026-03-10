@@ -254,7 +254,7 @@ void LayoutText::StyleDidChange(
   if (!old_style && text_autosizer)
     text_autosizer->Record(this);
 
-  if (diff.NeedsReshape()) {
+  if (diff.needs_reshape) {
     valid_ng_items_ = false;
     SetNeedsCollectInlines();
   }
@@ -264,17 +264,10 @@ void LayoutText::StyleDidChange(
 
 void LayoutText::RemoveAndDestroyTextBoxes() {
   NOT_DESTROYED();
-  if (!DocumentBeingDestroyed()) {
-    if (Parent()) {
-      Parent()->DirtyLinesFromChangedChild(this);
-    }
-    if (FirstInlineFragmentItemIndex()) {
-      DetachAxHooksIfNeeded();
-      FragmentItems::LayoutObjectWillBeDestroyed(*this);
-      ClearFirstInlineFragmentItemIndex();
-    }
-  } else if (FirstInlineFragmentItemIndex()) {
+
+  if (FirstInlineFragmentItemIndex()) {
     DetachAxHooksIfNeeded();
+    FragmentItems::LayoutObjectWillBeDestroyed(*this);
     ClearFirstInlineFragmentItemIndex();
   }
   DeleteTextBoxes();
@@ -295,8 +288,12 @@ void LayoutText::WillBeDestroyed() {
   }
 
   RemoveAndDestroyTextBoxes();
-  LayoutObject::WillBeDestroyed();
+
   valid_ng_items_ = false;
+
+  // We skip invoking LayoutObject::WillBeDestroyed as all of the logic (except
+  // for removing from the tree) doesn't apply to LayoutText.
+  Remove();
 
 #if DCHECK_IS_ON()
   if (IsInLayoutNGInlineFormattingContext())
@@ -666,7 +663,7 @@ void LayoutText::AbsoluteQuadsForRange(Vector<gfx::QuadF>& quads,
       }
     }
     if (!found_non_collapsed_quad)
-      quads.AppendVector(collapsed_quads_candidates);
+      quads.append_range(collapsed_quads_candidates);
     return;
   }
 }
@@ -1053,10 +1050,10 @@ void LayoutText::TextDidChange() {
 void LayoutText::TextDidChangeWithoutInvalidation() {
   NOT_DESTROYED();
   TextOffsetMap offset_map;
-  bool is_password_echo_enabled =
-      GetDocument().GetSettings() &&
-      GetDocument().GetSettings()->GetPasswordEchoEnabledPhysical() &&
-      GetDocument().GetSettings()->GetPasswordEchoEnabledTouch();
+  Settings* settings = GetDocument().GetSettings();
+  const bool is_password_echo_enabled =
+      settings && (settings->GetPasswordEchoEnabledPhysical() ||
+                   settings->GetPasswordEchoEnabledTouch());
   String original_text =
       (RuntimeEnabledFeatures::UseOriginalDomOffsetsForOffsetMapEnabled() &&
        !OriginalText().empty() && is_password_echo_enabled)

@@ -35,7 +35,6 @@
 #include <utility>
 
 #include "base/auto_reset.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
@@ -782,7 +781,7 @@ ResourceLoadPriority ResourceFetcher::AdjustImagePriority(
   }
 
   // Only records HTTP family URLs (e.g. Exclude data URLs).
-  if (resource_request.Url().ProtocolIsInHTTPFamily()) {
+  if (resource_request.Url().ProtocolIsInHttpFamily()) {
     MaybeRecordBoostImagePriorityReason(priority_so_far != new_priority,
                                         is_potentially_lcp_element,
                                         is_small_image);
@@ -1054,6 +1053,16 @@ Resource* ResourceFetcher::CreateResourceForStaticData(
     // TODO(yhirano): Consider removing this.
     if (!IsSupportedMimeType(response.MimeType().Utf8())) {
       return nullptr;
+    }
+
+    if (data && data->size()) {
+      // For cases where size limit is violated, including the URL in the report
+      // would send the large data. Use an empty URL in the report for now. This
+      // needs to be resolved by the spec.
+      // TODO(crbug.com/475522251): update report URL once behavior is defined
+      // in spec.
+      Context().CheckGuardrailsPolicyForAssetSize(
+          GuardrailPolicyAssetType::kData, data->size(), NullUrl());
     }
   } else {
     ArchiveResource* archive_resource =
@@ -1958,7 +1967,7 @@ void ResourceFetcher::InsertAsPreloadIfNecessary(Resource* resource,
     return;
   }
   PreloadKey key(params.Url(), type);
-  if (base::Contains(preloads_, key)) {
+  if (preloads_.Contains(key)) {
     return;
   }
 
@@ -2116,8 +2125,18 @@ ResourceFetcher::DetermineRevalidationPolicyInternal(
             "Use the existing resource due to cache-mode: 'force-cache'."};
   }
 
-  // Don't reuse resources with Cache-control: no-store.
-  if (existing_resource.HasCacheControlNoStoreHeader()) {
+  const bool is_available_image_in_fetcher =
+      type == ResourceType::kImage &&
+      &existing_resource == cached_resource_in_fetcher;
+  const bool can_reuse_no_store_image =
+      is_available_image_in_fetcher &&
+      base::FeatureList::IsEnabled(
+          features::kReuseNoStoreImageOnSameSrcReassignment);
+
+  // Respect no-store except when the kill-switchable same-document image reuse
+  // behavior is enabled.
+  if (existing_resource.HasCacheControlNoStoreHeader() &&
+      !can_reuse_no_store_image) {
     return {RevalidationPolicy::kReload,
             "Reload due to cache-control: no-store."};
   }
@@ -2156,8 +2175,7 @@ ResourceFetcher::DetermineRevalidationPolicyInternal(
   // List of available images logic allows images to be re-used without cache
   // validation. We restrict this only to images from memory cache which are the
   // same as the version in the current document.
-  if (type == ResourceType::kImage &&
-      &existing_resource == cached_resource_in_fetcher) {
+  if (is_available_image_in_fetcher) {
     return {RevalidationPolicy::kUse,
             "Images can be reused without cache validation."};
   }
@@ -2263,7 +2281,7 @@ void ResourceFetcher::PopulateResourceRequestPermissionsPolicy(
     // policies, this might be removed.
     request->permissions_policy =
         *network::PermissionsPolicy::CreateFromParsedPolicy(
-            {}, {}, url::Origin::Create(request->url));
+            {}, url::Origin::Create(request->url));
   }
 }
 
@@ -2565,7 +2583,7 @@ void ResourceFetcher::HandleLoaderError(Resource* resource,
   PendingResourceTimingInfo info = resource_timing_info_map_.Take(resource);
 
   if (!info.is_null()) {
-    if (resource->GetResourceRequest().Url().ProtocolIsInHTTPFamily() ||
+    if (resource->GetResourceRequest().Url().ProtocolIsInHttpFamily() ||
         (resource->GetResourceRequest().GetWebBundleTokenParams() &&
          resource->GetResourceRequest()
              .GetWebBundleTokenParams()
@@ -3244,7 +3262,7 @@ void ResourceFetcher::StartSpeculativeImageDecodes() {
 
 void ResourceFetcher::MaybeRecordLCPPSubresourceMetrics(
     const KURL& document_url) {
-  if (!document_url.IsValid() || !document_url.ProtocolIsInHTTPFamily()) {
+  if (!document_url.IsValid() || !document_url.ProtocolIsInHttpFamily()) {
     return;
   }
 
@@ -3347,7 +3365,8 @@ bool ResourceFetcher::IsPotentiallyUnusedPreload(
       break;
   }
 
-  return base::Contains(context_->GetPotentiallyUnusedPreloads(), params.Url());
+  return std::ranges::contains(context_->GetPotentiallyUnusedPreloads(),
+                               params.Url());
 }
 
 void ResourceFetcher::Trace(Visitor* visitor) const {

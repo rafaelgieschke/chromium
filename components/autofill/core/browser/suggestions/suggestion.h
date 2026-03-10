@@ -18,6 +18,7 @@
 #include "base/types/strong_alias.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/data_model/autofill_ai/entity_instance.h"
+#include "components/autofill/core/browser/data_model/payments/bnpl_issuer.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/suggestions/suggestion_type.h"
 #include "components/autofill/core/browser/webdata/autocomplete/autocomplete_entry.h"
@@ -112,8 +113,7 @@ struct Suggestion {
     PaymentsPayload();
     PaymentsPayload(std::u16string main_text_content_description,
                     bool should_display_terms_available,
-                    Guid guid,
-                    bool is_local_payments_method);
+                    Guid guid);
     PaymentsPayload(const PaymentsPayload&);
     PaymentsPayload(PaymentsPayload&&);
     PaymentsPayload& operator=(const PaymentsPayload&);
@@ -136,9 +136,6 @@ struct Suggestion {
 
     // Payments method identifier associated with suggestion.
     Guid guid;
-
-    // If true, the payments method associated with the suggestion is local.
-    bool is_local_payments_method = false;
 
     // The amount of the payment as extracted from the page. For example, used
     // for BNPL suggestions to confirm the amount is in the supported range for
@@ -195,8 +192,25 @@ struct Suggestion {
     std::map<FieldType, std::u16string> fields;
   };
 
+  struct AtMemoryPayload final {
+    AtMemoryPayload();
+    explicit AtMemoryPayload(std::u16string value);
+    AtMemoryPayload(const AtMemoryPayload&);
+    AtMemoryPayload(AtMemoryPayload&&);
+    AtMemoryPayload& operator=(const AtMemoryPayload&);
+    AtMemoryPayload& operator=(AtMemoryPayload&&);
+    ~AtMemoryPayload();
+
+    friend bool operator==(const AtMemoryPayload&,
+                           const AtMemoryPayload&) = default;
+
+    // Text to fill in the trigger field upon accepting the suggestion.
+    std::u16string value;
+  };
+
   using IsLoading = base::StrongAlias<class IsLoadingTag, bool>;
   using InstrumentId = base::StrongAlias<class InstrumentIdTag, uint64_t>;
+  using BnplIssuer = base::StrongAlias<class BnplIssuerTag, BnplIssuer>;
   using Payload = std::variant<Guid,
                                InstrumentId,
                                AutofillProfilePayload,
@@ -206,7 +220,9 @@ struct Suggestion {
                                AutofillAiPayload,
                                PaymentsPayload,
                                IdentityCredentialPayload,
-                               AutocompleteEntry>;
+                               AutocompleteEntry,
+                               BnplIssuer,
+                               AtMemoryPayload>;
 
   // This struct is used to provide password suggestions with custom icons,
   // using the favicon of the website associated with the credentials. While
@@ -346,7 +362,15 @@ struct Suggestion {
     kCardVerve,
     kCardVisa,
     kIban,
-    kBnpl,
+    kBnplGeneric,
+    kBnplAffirmLinked,
+    kBnplAffirmUnlinked,
+    kBnplAfterpayLinked,
+    kBnplAfterpayUnlinked,
+    kBnplZipLinked,
+    kBnplZipUnlinked,
+    kBnplKlarnaLinked,
+    kBnplKlarnaUnlinked,
     kSaveAndFill,
     kAndroidMessages,
   };
@@ -383,25 +407,20 @@ struct Suggestion {
     kUnacceptableWithDeactivatedStyle,
   };
 
-  // TODO(crbug.com/335194240): Consolidate expected param types for these
-  // constructors. Some expect UTF16 strings and others UTF8, while internally
-  // we only use UTF16. The ones expecting UTF8 are only used by tests and could
-  // be easily refactored.
   explicit Suggestion(SuggestionType type);
   Suggestion(std::u16string main_text, SuggestionType type);
-  // Constructor for unit tests. It will convert the strings from UTF-8 to
-  // UTF-16.
-  Suggestion(std::string_view main_text,
-             std::string_view label,
+  // Constructor for unit tests.
+  Suggestion(std::u16string main_text,
+             std::u16string label,
              Icon icon,
              SuggestionType type);
-  Suggestion(std::string_view main_text,
+  Suggestion(std::u16string_view main_text,
              std::vector<std::vector<Text>> labels,
              Icon icon,
              SuggestionType type);
-  Suggestion(std::string_view main_text,
-             base::span<const std::string> minor_text_labels,
-             std::string_view label,
+  Suggestion(std::u16string_view main_text,
+             base::span<const std::u16string> minor_text_labels,
+             std::u16string_view label,
              Icon icon,
              SuggestionType type);
   Suggestion(const Suggestion& other);
@@ -450,7 +469,10 @@ struct Suggestion {
         return std::holds_alternative<Guid>(payload) ||
                std::holds_alternative<PaymentsPayload>(payload);
       case SuggestionType::kBnplEntry:
-        return std::holds_alternative<PaymentsPayload>(payload);
+        return std::holds_alternative<PaymentsPayload>(payload) ||
+               std::holds_alternative<BnplIssuer>(payload);
+      case SuggestionType::kAtMemorySearchResult:
+        return std::holds_alternative<AtMemoryPayload>(payload);
       case SuggestionType::kDevtoolsTestAddressEntry:
       default:
         return std::holds_alternative<Guid>(payload) ||
@@ -463,10 +485,8 @@ struct Suggestion {
 
   // Payload generated by the backend layer. This payload contains the
   // information required for further actions after the suggestion is
-  // selected/accepted. It can be either a GUID that identifies the exact
-  // autofill profile that generated this suggestion, or a GURL that the
-  // suggestion should navigate to upon being accepted, or a text that should be
-  // shown other than main_text.
+  // selected/accepted. Depending on the suggestion type, this may contain a
+  // profile GUID, a destination URL, or some other specialized Payload variant.
   Payload payload;
 
   // Determines popup identifier for the suggestion.
@@ -557,6 +577,11 @@ struct Suggestion {
   // `SuggestionType::kAddressEntryOnTyping`, specifies the `FieldType` used to
   // build the suggestion's `main_text`.
   std::optional<FieldType> field_by_field_filling_type_used;
+
+  // Used by `SuggestionType::kLoadingThrobber` to determine the size of the
+  // loading suggestion. It represents the number of suggestions (assumed to be
+  // two-line suggestions) expected to load to provide a smoother UI transition.
+  std::optional<int> expected_number_of_suggestions;
 
   // How the suggestion should be handled by the filtration logic, see the enum
   // values doc for details.

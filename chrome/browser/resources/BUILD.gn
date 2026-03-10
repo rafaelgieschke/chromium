@@ -19,6 +19,10 @@ assert(!is_fuchsia, "Fuchsia shouldn't use anything in //chrome")
 
 group("resources") {
   public_deps = [
+    "contextual_tasks:resources",
+    "glic:resources",
+    "glic/fre:resources",
+    "glic/shared:resources",
     "saved_tab_groups_unsupported:resources",
     "segmentation_internals:resources",
     "//components/enterprise/connectors/resources",
@@ -39,16 +43,15 @@ group("resources") {
       "autofill_ml_internals:resources",
       "bookmarks:resources",
       "certificate_manager:resources",
-      "commerce/product_specifications:resources",
-      "contextual_tasks:resources",
+      "content_annotator_internals:resources",
       "data_sharing:resources",
       "downloads:resources",
       "feedback:resources",
       "gaia_auth_host:resources",
+      "glic/selection_overlay:resources",
       "history:resources",
       "inspect:resources",
       "key_value_pair_viewer_shared:resources",
-      "legion_internals:resources",
       "lens/overlay:resources",
       "lens/shared:resources",
       "management:resources",
@@ -60,10 +63,9 @@ group("resources") {
       "new_tab_shared:resources",
       "omnibox_popup:resources",
       "password_manager:resources",
-      "privacy_sandbox:resources",
       "privacy_sandbox/internals:resources",
+      "private_ai_internals:resources",
       "profile_internals:resources",
-      "reload_button:resources",
       "search_engine_choice:resources",
       "settings:resources",
       "settings_shared:resources",
@@ -84,6 +86,7 @@ group("resources") {
       "web_app_internals:resources",
       "webui_browser:resources",
       "webui_gallery:resources",
+      "webui_toolbar:resources",
       "whats_new:resources",
       "//components/browser_apis/tab_strip/resources",
     ]
@@ -121,6 +124,10 @@ group("resources") {
     public_deps += [ "discards:resources" ]
   }
 
+  if (is_win || is_mac || is_linux || is_chromeos) {
+    public_deps += [ "skills:resources" ]
+  }
+
   if (is_win || is_mac || is_linux) {
     public_deps += [
       "app_home:resources",
@@ -134,9 +141,13 @@ group("resources") {
 
   if (!is_android && !is_chromeos) {
     public_deps += [
-      "inline_login:resources",
+      "default_browser/default_browser_modal:resources",
       "signin/profile_picker:resources",
     ]
+  }
+
+  if (is_win) {
+    public_deps += [ "inline_login:resources" ]
   }
 
   if (enable_dice_support) {
@@ -173,14 +184,6 @@ group("resources") {
 
   if (enable_compose) {
     public_deps += [ "compose:resources" ]
-  }
-
-  if (enable_glic) {
-    public_deps += [
-      "glic:resources",
-      "glic/fre:resources",
-      "glic/shared:resources",
-    ]
   }
 
   if (enterprise_watermark) {
@@ -222,7 +225,7 @@ if (enable_extensions_core) {
     # build time so we include them as explicit dependencies here
     if (is_chromeos) {
       deps = [
-        "chromeos/accessibility/braille_ime:ts_build",
+        "chromeos/accessibility/braille_ime:build_ts",
         "chromeos/contact_center_insights:generate_ccaas_deps",
         "chromeos/desk_api:generate_desk_api_bundle",
       ]
@@ -284,8 +287,10 @@ if (!is_android) {
 group("dev_ui_resources") {
   public_deps = [
     "accessibility:resources",
+    "actor_internals:resources",
     "bluetooth_internals:resources",
     "browsing_topics:resources",
+    "chrome_finds_internals:resources",
     "components:resources",
     "device_log:resources",
     "engagement:resources",
@@ -298,6 +303,7 @@ group("dev_ui_resources") {
     "predictors:resources",
     "privacy_sandbox/internals:resources",
     "usb_internals:resources",
+    "webnn_internals:resources",
     "//components/commerce/core/internals/resources",
     "//components/data_sharing/data_sharing_internals/resources",
     "//components/download/resources/download_internals:resources",
@@ -330,7 +336,6 @@ group("dev_ui_resources") {
     ]
   } else {
     public_deps += [
-      "actor_internals:resources",
       "color_pipeline_internals:resources",
       "infobar_internals:resources",
       "media_router/internals:resources",
@@ -358,8 +363,10 @@ repack("dev_ui_paks") {
 
   sources = [
     "$root_gen_dir/chrome/accessibility_resources.pak",
+    "$root_gen_dir/chrome/actor_internals_resources.pak",
     "$root_gen_dir/chrome/bluetooth_internals_resources.pak",
     "$root_gen_dir/chrome/browsing_topics_internals_resources.pak",
+    "$root_gen_dir/chrome/chrome_finds_internals_resources.pak",
     "$root_gen_dir/chrome/components_resources.pak",
     "$root_gen_dir/chrome/device_log_resources.pak",
     "$root_gen_dir/chrome/engagement_resources.pak",
@@ -404,7 +411,6 @@ repack("dev_ui_paks") {
     ]
   } else {
     sources += [
-      "$root_gen_dir/chrome/actor_internals_resources.pak",
       "$root_gen_dir/chrome/color_pipeline_internals_resources.pak",
       "$root_gen_dir/chrome/infobar_internals_resources.pak",
       "$root_gen_dir/chrome/media_router_internals_resources.pak",

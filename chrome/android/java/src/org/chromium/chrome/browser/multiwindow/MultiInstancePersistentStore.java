@@ -10,9 +10,9 @@ import org.chromium.build.annotations.MonotonicNonNull;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.incognito.IncognitoUtils;
-import org.chromium.chrome.browser.multiwindow.MultiInstanceManager.SupportedProfileType;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
+import org.chromium.chrome.browser.tabmodel.SupportedProfileType;
 
 import java.util.HashSet;
 import java.util.Map;
@@ -74,7 +74,9 @@ class MultiInstancePersistentStore {
         removeTabCount(instanceId);
         removeIncognitoSelected(instanceId);
         removeLastAccessedTime(instanceId);
+        removeClosureTime(instanceId);
         removeProfileType(instanceId);
+        removeLatestPersistentStateId(instanceId);
         removeMarkedForDeletion(instanceId);
     }
 
@@ -84,6 +86,14 @@ class MultiInstancePersistentStore {
 
     static void writeLastAccessedTime(int instanceId) {
         getManager().writeLong(lastAccessedTimeKey(instanceId), TimeUtils.currentTimeMillis());
+    }
+
+    static long readClosureTime(int instanceId) {
+        return getManager().readLong(closureTimeKey(instanceId));
+    }
+
+    static void writeClosureTime(int instanceId) {
+        getManager().writeLong(closureTimeKey(instanceId), TimeUtils.currentTimeMillis());
     }
 
     static Map<String, Integer> readTaskMap() {
@@ -161,6 +171,18 @@ class MultiInstancePersistentStore {
         }
     }
 
+    static boolean containsLatestPersistentStateId(int instanceId) {
+        return getManager().contains(latestPersistentStateIdKey(instanceId));
+    }
+
+    static int readLatestPersistentStateId(int instanceId) {
+        return getManager().readInt(latestPersistentStateIdKey(instanceId));
+    }
+
+    static void writeLatestPersistentStateId(int instanceId, int latestPersistentStateHash) {
+        getManager().writeInt(latestPersistentStateIdKey(instanceId), latestPersistentStateHash);
+    }
+
     static boolean readIncognitoSelected(int instanceId) {
         return getManager().readBoolean(incognitoSelectedKey(instanceId), false);
     }
@@ -179,6 +201,10 @@ class MultiInstancePersistentStore {
 
     private static void removeLastAccessedTime(int instanceId) {
         getManager().removeKey(lastAccessedTimeKey(instanceId));
+    }
+
+    private static void removeClosureTime(int instanceId) {
+        getManager().removeKey(closureTimeKey(instanceId));
     }
 
     private static void removeTabCount(int instanceId) {
@@ -203,6 +229,10 @@ class MultiInstancePersistentStore {
         getManager().removeKey(profileTypeKey(instanceId));
     }
 
+    private static void removeLatestPersistentStateId(int instanceId) {
+        getManager().removeKey(latestPersistentStateIdKey(instanceId));
+    }
+
     private static void removeIncognitoSelected(int instanceId) {
         getManager().removeKey(incognitoSelectedKey(instanceId));
     }
@@ -213,6 +243,11 @@ class MultiInstancePersistentStore {
 
     private static String lastAccessedTimeKey(int instanceId) {
         return ChromePreferenceKeys.MULTI_INSTANCE_LAST_ACCESSED_TIME.createKey(
+                String.valueOf(instanceId));
+    }
+
+    private static String closureTimeKey(int instanceId) {
+        return ChromePreferenceKeys.MULTI_INSTANCE_CLOSURE_TIME.createKey(
                 String.valueOf(instanceId));
     }
 
@@ -249,6 +284,11 @@ class MultiInstancePersistentStore {
 
     private static String profileTypeKey(int instanceId) {
         return ChromePreferenceKeys.MULTI_INSTANCE_PROFILE_TYPE.createKey(
+                String.valueOf(instanceId));
+    }
+
+    private static String latestPersistentStateIdKey(int instanceId) {
+        return ChromePreferenceKeys.MULTI_INSTANCE_LATEST_PERSISTENT_STATE_ID.createKey(
                 String.valueOf(instanceId));
     }
 

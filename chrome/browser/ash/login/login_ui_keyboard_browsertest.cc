@@ -2,6 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
 #include <memory>
 
 #include "ash/constants/ash_features.h"
@@ -9,11 +10,11 @@
 #include "ash/public/cpp/login_screen_test_api.h"
 #include "base/check_deref.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/location.h"
 #include "base/run_loop.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/scoped_feature_list.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/ash/input_method/input_method_persistence.h"
 #include "chrome/browser/ash/login/lock/screen_locker_tester.h"
 #include "chrome/browser/ash/login/lock_screen_utils.h"
@@ -449,8 +450,9 @@ IN_PROC_BROWSER_TEST_F(LoginUIDevicePolicyUserAdding, PolicyNotHonored) {
             default_input_methods);
 
   EXPECT_EQ(user_adding_ime_state->GetAllowedInputMethodIds().size(), 0u);
-  EXPECT_FALSE(base::Contains(user_adding_ime_state->GetEnabledInputMethodIds(),
-                              allowed_input_method.front()));
+  EXPECT_FALSE(
+      std::ranges::contains(user_adding_ime_state->GetEnabledInputMethodIds(),
+                            allowed_input_method.front()));
 }
 
 class FirstLoginKeyboardTest : public LoginManagerTest {

@@ -25,9 +25,10 @@ import androidx.preference.PreferenceScreen;
 
 import org.chromium.base.CallbackUtils;
 import org.chromium.base.ContextUtils;
-import org.chromium.base.supplier.ObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
+import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.OneshotSupplier;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
@@ -36,6 +37,8 @@ import org.chromium.chrome.browser.settings.ChromeBaseSettingsFragment;
 import org.chromium.chrome.browser.settings.ChromeManagedPreferenceDelegate;
 import org.chromium.chrome.browser.settings.SettingsNavigationFactory;
 import org.chromium.chrome.browser.settings.search.ChromeBaseSearchIndexProvider;
+import org.chromium.chrome.browser.signin.SigninAndHistorySyncActivityLauncherImpl;
+import org.chromium.chrome.browser.signin.services.BadgeConfig;
 import org.chromium.chrome.browser.signin.services.DisplayableProfileData;
 import org.chromium.chrome.browser.signin.services.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.services.ProfileDataCache;
@@ -109,7 +112,8 @@ public class AccountManagementFragment extends ChromeBaseSettingsFragment
     private SyncService mSyncService;
     private SyncService.@Nullable SyncSetupInProgressHandle mSyncSetupInProgressHandle;
     private @Nullable OneshotSupplier<SnackbarManager> mSnackbarManagerSupplier;
-    private final ObservableSupplierImpl<String> mPageTitle = new ObservableSupplierImpl<>();
+    private final SettableMonotonicObservableSupplier<String> mPageTitle =
+            ObservableSuppliers.createMonotonic();
 
     @Override
     public void onCreatePreferences(@Nullable Bundle savedState, @Nullable String rootKey) {
@@ -128,7 +132,7 @@ public class AccountManagementFragment extends ChromeBaseSettingsFragment
     }
 
     @Override
-    public ObservableSupplier<String> getPageTitle() {
+    public MonotonicObservableSupplier<String> getPageTitle() {
         return mPageTitle;
     }
 
@@ -250,6 +254,7 @@ public class AccountManagementFragment extends ChromeBaseSettingsFragment
                                 getActivity().getSupportFragmentManager(),
                                 ((ModalDialogManagerHolder) getActivity()).getModalDialogManager(),
                                 assertNonNull(assumeNonNull(mSnackbarManagerSupplier).get()),
+                                SigninAndHistorySyncActivityLauncherImpl.get(),
                                 SignoutReason.USER_CLICKED_SIGNOUT_SETTINGS,
                                 /* showConfirmDialog= */ false,
                                 CallbackUtils.emptyRunnable());
@@ -315,6 +320,7 @@ public class AccountManagementFragment extends ChromeBaseSettingsFragment
             }
         }
         accountsCategory.addPreference(createAddAccountPreference());
+        notifyPreferencesUpdated();
     }
 
     private Preference createAccountPreference(CoreAccountInfo coreAccountInfo) {
@@ -330,10 +336,7 @@ public class AccountManagementFragment extends ChromeBaseSettingsFragment
 
         accountPreference.setOnPreferenceClickListener(
                 SyncSettingsUtils.toOnClickListener(
-                        this,
-                        () ->
-                                SigninUtils.openSettingsForAccount(
-                                        getActivity(), coreAccountInfo.getEmail())));
+                        this, () -> SigninUtils.openSettingsForAllAccounts(getActivity())));
 
         return accountPreference;
     }
@@ -425,11 +428,10 @@ public class AccountManagementFragment extends ChromeBaseSettingsFragment
                                 Context context = getContext();
                                 if (isChild && context != null) {
                                     mProfileDataCache.setBadge(
-                                            assumeNonNull(childAccount).getEmail(),
-                                            ProfileDataCache
-                                                    .createDefaultSizeChildAccountBadgeConfig(
-                                                            context,
-                                                            R.drawable.ic_account_child_20dp));
+                                            assumeNonNull(childAccount).getId(),
+                                            BadgeConfig.create(R.drawable.ic_account_child_20dp)
+                                                    .withDefaultSizeChildAccountConfig()
+                                                    .build(context));
                                 }
                             });
         }
@@ -437,7 +439,7 @@ public class AccountManagementFragment extends ChromeBaseSettingsFragment
 
     // ProfileDataCache.Observer implementation:
     @Override
-    public void onProfileDataUpdated(String accountEmail) {
+    public void onProfileDataUpdated(DisplayableProfileData profileData) {
         AccountManagerFacadeProvider.getInstance().getAccounts().then(this::updateAccountsList);
     }
 
@@ -459,10 +461,7 @@ public class AccountManagementFragment extends ChromeBaseSettingsFragment
         switch (error) {
             case UserActionableError.SIGN_IN_NEEDS_UPDATE:
                 AccountManagerFacadeProvider.getInstance()
-                        .updateCredentials(
-                                CoreAccountInfo.getAndroidAccountFrom(mSignedInCoreAccountInfo),
-                                getActivity(),
-                                null);
+                        .updateCredentials(mSignedInCoreAccountInfo, getActivity(), null);
                 return;
             case UserActionableError.NEEDS_CLIENT_UPGRADE:
                 // Opens the client in play store for update.
@@ -499,6 +498,11 @@ public class AccountManagementFragment extends ChromeBaseSettingsFragment
             default:
                 return;
         }
+    }
+
+    @Override
+    public void onIdentityErrorCardVisibilityChanged() {
+        notifyPreferencesUpdated();
     }
 
     /**
@@ -569,7 +573,8 @@ public class AccountManagementFragment extends ChromeBaseSettingsFragment
         arguments.putInt(SHOW_GAIA_SERVICE_TYPE_EXTRA, serviceType);
         SettingsNavigation settingsNavigation =
                 SettingsNavigationFactory.createSettingsNavigation();
-        settingsNavigation.startSettings(context, AccountManagementFragment.class, arguments);
+        settingsNavigation.startSettings(
+                context, AccountManagementFragment.class, arguments, /* addToBackStack= */ true);
     }
 
     private void closeDialogIfOpen(String tag) {
@@ -597,9 +602,8 @@ public class AccountManagementFragment extends ChromeBaseSettingsFragment
         return assumeNonNull(IdentityServicesProvider.get().getSigninManager(getProfile()));
     }
 
-    // TODO(crbug.com/444470792): Determine what pieces of logic are dynamic and need handling.
     public static final ChromeBaseSearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
             new ChromeBaseSearchIndexProvider(
                     AccountManagementFragment.class.getName(),
-                    R.xml.account_management_preferences);
+                    ChromeBaseSearchIndexProvider.INDEX_OPT_OUT);
 }

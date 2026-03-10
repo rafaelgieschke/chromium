@@ -19,6 +19,8 @@ class ToyTabStripModelAdapter : public TabStripModelAdapter {
   ToyTabStripModelAdapter operator=(const ToyTabStripModelAdapter&&) = delete;
   ~ToyTabStripModelAdapter() override = default;
 
+  std::string GetWindowId() const override { return "1"; }
+
   void AddModelObserver(TabStripModelObserver* observer) override;
   void RemoveModelObserver(TabStripModelObserver* observer) override;
   void AddCollectionObserver(
@@ -26,7 +28,6 @@ class ToyTabStripModelAdapter : public TabStripModelAdapter {
   void RemoveCollectionObserver(
       tabs::TabCollectionObserver* collection_observer) override;
   std::vector<tabs::TabHandle> GetTabs() const override;
-  TabRendererData GetTabRendererData(int index) const override;
   tabs_api::converters::TabStates GetTabStates(
       tabs::TabHandle handle) const override;
   const ui::ColorProvider& GetColorProvider() const override;
@@ -51,8 +52,12 @@ class ToyTabStripModelAdapter : public TabStripModelAdapter {
       tab_groups::TabGroupId group_id) const override;
   tabs_api::Position GetPositionForAbsoluteIndex(
       int absolute_index) const override;
+  tabs_api::Path GetPathForCollection(
+      tabs::TabCollectionHandle collection_handle) const override;
   InsertionParams CalculateInsertionParams(
       const std::optional<tabs_api::Position>& pos) const override;
+  void ReplaceTabInSplit(tabs::TabHandle tab_to_replace,
+                         int tab_to_insert_index) override;
   const tabs::TabCollection* GetRoot() const override;
 
  private:

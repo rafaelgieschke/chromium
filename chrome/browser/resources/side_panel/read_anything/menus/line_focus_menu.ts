@@ -6,15 +6,14 @@ import './simple_action_menu.js';
 
 import {WebUiListenerMixinLit} from '//resources/cr_elements/web_ui_listener_mixin_lit.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
-import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
+import {CrLitElement, type PropertyValues} from '//resources/lit/v3_0/lit.rollup.js';
 
-import type {SettingsPrefs, ShowAtConfigPrefs} from '../content/read_anything_types.js';
+import {DEFAULT_SETTINGS, getLineFocusValues, LineFocusMovement, LineFocusStyle, type SettingsPrefs, type ShowAtConfigPrefs, ToolbarEvent} from '../content/read_anything_types.js';
 import {ReadAnythingSettingsChange} from '../shared/metrics_browser_proxy.js';
 import {ReadAnythingLogger} from '../shared/read_anything_logger.js';
 
 import {getHtml} from './line_focus_menu.html.js';
-import type {MenuStateItem} from './menu_util.js';
-import {getIndexOfSetting} from './menu_util.js';
+import type {MenuStateItem, ToolbarMenu} from './menu_util.js';
 import type {SimpleActionMenuElement} from './simple_action_menu.js';
 
 export interface LineFocusMenuElement {
@@ -26,7 +25,8 @@ export interface LineFocusMenuElement {
 const LineFocusMenuElementBase = WebUiListenerMixinLit(CrLitElement);
 
 // Stores and propagates the data for the color theme menu.
-export class LineFocusMenuElement extends LineFocusMenuElementBase {
+export class LineFocusMenuElement extends LineFocusMenuElementBase implements
+    ToolbarMenu {
   static get is() {
     return 'line-focus-menu';
   }
@@ -39,49 +39,93 @@ export class LineFocusMenuElement extends LineFocusMenuElementBase {
     return {
       settingsPrefs: {type: Object},
       nonModal: {type: Boolean},
+      lineFocusStyle: {type: Object},
+      lineFocusMovement: {type: Object},
     };
   }
 
-  accessor settingsPrefs: SettingsPrefs = {
-    letterSpacing: 0,
-    lineSpacing: 0,
-    theme: 0,
-    speechRate: 0,
-    font: '',
-    highlightGranularity: 0,
-    lineFocus: 0,
-  };
+  accessor settingsPrefs: SettingsPrefs = DEFAULT_SETTINGS;
   accessor nonModal: boolean = false;
+  accessor lineFocusStyle: LineFocusStyle|null = null;
+  accessor lineFocusMovement: LineFocusMovement|null = null;
 
-  protected options_: Array<MenuStateItem<number>> = [
+  private styleOptions_: Array<MenuStateItem<LineFocusStyle>> = [
     {
+      header: {
+        title: loadTimeData.getString('lineFocusStyleHeading'),
+        separator: false,
+      },
       title: loadTimeData.getString('lineFocusOffTitle'),
-      data: chrome.readingMode.lineFocusOff,
+      data: LineFocusStyle.OFF,
+      eventName: ToolbarEvent.LINE_FOCUS_STYLE,
+    },
+    {
+      title: loadTimeData.getString('lineFocusUnderlineTitle'),
+      data: LineFocusStyle.UNDERLINE,
+      eventName: ToolbarEvent.LINE_FOCUS_STYLE,
     },
     {
       title: loadTimeData.getString('lineFocusOneLineTitle'),
-      data: chrome.readingMode.lineFocusOneLineWindow,
-      header: loadTimeData.getString('lineFocusWindowHeading'),
+      data: LineFocusStyle.SMALL_WINDOW,
+      eventName: ToolbarEvent.LINE_FOCUS_STYLE,
     },
     {
       title: loadTimeData.getString('lineFocusThreeLineTitle'),
-      data: chrome.readingMode.lineFocusThreeLineWindow,
+      data: LineFocusStyle.MEDIUM_WINDOW,
+      eventName: ToolbarEvent.LINE_FOCUS_STYLE,
     },
     {
       title: loadTimeData.getString('lineFocusFiveLineTitle'),
-      data: chrome.readingMode.lineFocusFiveLineWindow,
+      data: LineFocusStyle.LARGE_WINDOW,
+      eventName: ToolbarEvent.LINE_FOCUS_STYLE,
     },
+  ];
+
+  private movementOptions_: Array<MenuStateItem<LineFocusMovement>> = [
     {
-      title: loadTimeData.getString('lineFocusStaticLineTitle'),
-      data: chrome.readingMode.lineFocusStaticLine,
-      header: loadTimeData.getString('lineFocusLineHeading'),
+      header: {
+        title: loadTimeData.getString('lineFocusMovementHeading'),
+        separator: true,
+      },
+      title: loadTimeData.getString('lineFocusStaticTitle'),
+      data: LineFocusMovement.STATIC,
+      eventName: ToolbarEvent.LINE_FOCUS_MOVEMENT,
     },
     {
       title: loadTimeData.getString('lineFocusCursorLineTitle'),
-      data: chrome.readingMode.lineFocusCursorLine,
+      data: LineFocusMovement.CURSOR,
+      eventName: ToolbarEvent.LINE_FOCUS_MOVEMENT,
     },
   ];
+  protected options_: Array<MenuStateItem<LineFocusStyle|LineFocusMovement>> = [
+    ...this.styleOptions_,
+    ...this.movementOptions_,
+  ];
   private logger_: ReadAnythingLogger = ReadAnythingLogger.getInstance();
+
+  override willUpdate(changedProperties: PropertyValues<this>) {
+    super.willUpdate(changedProperties);
+
+    if (changedProperties.has('settingsPrefs')) {
+      this.restoreFromPrefs_();
+    }
+
+    if (changedProperties.has('lineFocusStyle') &&
+        this.lineFocusStyle !== null) {
+      this.updateOptionsForStyle_(this.lineFocusStyle);
+    }
+    if (changedProperties.has('lineFocusMovement') &&
+        this.lineFocusMovement !== null) {
+      this.updateOptionsForMovement_(this.lineFocusMovement);
+    }
+    if (changedProperties.has('lineFocusStyle') ||
+        changedProperties.has('lineFocusMovement')) {
+      this.options_ = [
+        ...this.styleOptions_,
+        ...this.movementOptions_,
+      ];
+    }
+  }
 
   open(anchor: HTMLElement, showAtConfig?: ShowAtConfigPrefs) {
     this.$.menu.open(anchor, showAtConfig);
@@ -91,14 +135,39 @@ export class LineFocusMenuElement extends LineFocusMenuElementBase {
     this.$.menu.close();
   }
 
-  protected restoredLineFocusIndex_(): number {
-    return getIndexOfSetting(this.options_, this.settingsPrefs['lineFocus']);
+  private restoreFromPrefs_(): void {
+    const lineFocusValues = getLineFocusValues();
+    const lineFocus = lineFocusValues[this.settingsPrefs['lineFocus']];
+    if (lineFocus) {
+      this.updateOptionsForStyle_(lineFocus.style);
+      this.updateOptionsForMovement_(lineFocus.movement);
+      this.options_ = [
+        ...this.styleOptions_,
+        ...this.movementOptions_,
+      ];
+    }
   }
 
-  protected onLineFocusChange_(event: CustomEvent<{data: number}>) {
-    chrome.readingMode.onLineFocusChanged(event.detail.data);
+  protected onLineFocusStyleChange_() {
     this.logger_.logTextSettingsChange(
-        ReadAnythingSettingsChange.LINE_FOCUS_CHANGE);
+        ReadAnythingSettingsChange.LINE_FOCUS_STYLE_CHANGE);
+  }
+
+  protected onLineFocusMovementChange_() {
+    this.logger_.logTextSettingsChange(
+        ReadAnythingSettingsChange.LINE_FOCUS_MOVEMENT_CHANGE);
+  }
+
+  private updateOptionsForStyle_(newStyle: LineFocusStyle) {
+    this.styleOptions_.forEach(option => {
+      option.selected = option.data === newStyle;
+    });
+  }
+
+  private updateOptionsForMovement_(newMovement: LineFocusMovement) {
+    this.movementOptions_.forEach(option => {
+      option.selected = option.data === newMovement;
+    });
   }
 }
 

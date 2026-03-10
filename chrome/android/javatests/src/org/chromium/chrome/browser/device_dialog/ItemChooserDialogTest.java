@@ -934,6 +934,29 @@ public class ItemChooserDialogTest implements ItemChooserDialog.ItemSelectedCall
 
     @Test
     @SmallTest
+    public void testPressCancelButton() {
+        Dialog dialog =
+                ThreadUtils.runOnUiThreadBlocking(
+                        () -> {
+                            Dialog dialog1 = mChooserDialog.getDialogForTesting();
+                            Assert.assertTrue(dialog1.isShowing());
+
+                            return dialog1;
+                        });
+
+        Button cancelButton = (Button) dialog.findViewById(R.id.negative);
+        CriteriaHelper.pollUiThread(
+                () -> Criteria.checkThat(cancelButton.getVisibility(), Matchers.is(View.VISIBLE)));
+        CriteriaHelper.pollUiThread(
+                () -> Criteria.checkThat(cancelButton.getWidth(), Matchers.greaterThan(0)));
+        CriteriaHelper.pollUiThread(
+                () -> Criteria.checkThat(cancelButton.getHeight(), Matchers.greaterThan(0)));
+        TouchCommon.singleClickView(cancelButton);
+        CriteriaHelper.pollUiThread(() -> Criteria.checkThat(mLastSelectedId, Matchers.is("")));
+    }
+
+    @Test
+    @SmallTest
     public void testListHeight() {
         // 500 * .3 is 150, which is 48 * 3.125. 48 * 3.5 is 168.
         Assert.assertEquals(168, ItemChooserDialog.getListHeight(500, 1.0f));

@@ -355,11 +355,17 @@ public @interface FeatureConstants {
     /** An IPH feature to show on a card menu on the FeedNewTabPage. */
     String FEED_CARD_MENU_FEATURE = "IPH_FeedCardMenu";
 
+    /** Used to track user engagement with the fusebox attachment button. */
+    String FUSEBOX_ATTACHMENT_FEATURE = "IPH_FuseboxAttachment";
+
     /** An IPH feature to prompt users to pull-to-refresh feed. */
     String FEED_SWIPE_REFRESH_FEATURE = "IPH_FeedSwipeRefresh";
 
     /** A generic IPH feature to always trigger help UI when asked. */
     String GENERIC_ALWAYS_TRIGGER_HELP_UI_FEATURE = "IPH_GenericAlwaysTriggerHelpUiFeature";
+
+    /** An IPH feature to show on the Glic Promo on Android. */
+    String GLIC_PROMO_ANDROID_FEATURE = "IPH_GlicPromoAndroid";
 
     /**
      * An IPH feature prompting user to tap on identity disc to navigate to "Sync and Google

@@ -9,8 +9,7 @@ import '//resources/cr_elements/icons.html.js';
 import './color_data.js';
 
 import {ColorChangeUpdater} from 'chrome://resources/cr_components/color_change_listener/colors_css_updater.js';
-import {CrContainerShadowMixinLit} from 'chrome://resources/cr_elements/cr_container_shadow_mixin_lit.js';
-import type {CrMenuSelector} from 'chrome://resources/cr_elements/cr_menu_selector/cr_menu_selector.js';
+import type {CrMenuSelectorElement} from 'chrome://resources/cr_elements/cr_menu_selector/cr_menu_selector.js';
 import {CrLitElement} from 'chrome://resources/lit/v3_0/lit.rollup.js';
 
 import {getCss} from './app.css.js';
@@ -21,18 +20,14 @@ import type {ThemeData, ThemeSection} from './color_data.js';
 export interface ColorPipelineInternalsAppElement {
   $: {
     content: HTMLElement,
-    menu: CrMenuSelector,
+    menu: CrMenuSelectorElement,
   };
 }
 
 const CSS_PREFIX: string = '--color-sys-';
 const CC_PREFIX: string = 'kColorSys';
 
-const ColorPipelineInternalsAppElementBase =
-    CrContainerShadowMixinLit(CrLitElement);
-
-export class ColorPipelineInternalsAppElement extends
-    ColorPipelineInternalsAppElementBase {
+export class ColorPipelineInternalsAppElement extends CrLitElement {
   static get is() {
     return 'color-pipeline-internals-app';
   }
@@ -89,7 +84,7 @@ export class ColorPipelineInternalsAppElement extends
     event.preventDefault();
   }
 
-  protected onSelectorActivate_(event: CustomEvent<{selected: string}>) {
+  protected onSelectorIronActivate_(event: CustomEvent<{selected: string}>) {
     const url = event.detail.selected;
     this.$.menu.selected = url;
     const idx = url.lastIndexOf('#');
@@ -117,7 +112,7 @@ export class ColorPipelineInternalsAppElement extends
         ` border: 1px solid var(${foreground});`;
   }
 
-  protected updateColorInfo_(e: MouseEvent) {
+  protected onColorMouseenter_(e: MouseEvent) {
     const el = e.target as HTMLElement;
     this.currentColor_ = el.querySelector('p')!.innerText;
 
@@ -156,15 +151,14 @@ export class ColorPipelineInternalsAppElement extends
     }
   }
 
-  protected clearColorInfo_() {
+  protected onColorMouseleave_() {
     this.currentColor_ = '';
   }
 }
 
-
 declare global {
   interface HTMLElementTagNameMap {
-    'color-internals-app': ColorPipelineInternalsAppElement;
+    'color-pipeline-internals-app': ColorPipelineInternalsAppElement;
   }
 }
 

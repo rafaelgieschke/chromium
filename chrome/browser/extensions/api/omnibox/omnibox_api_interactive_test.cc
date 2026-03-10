@@ -98,8 +98,9 @@ using ExpectedMatchComponents = std::vector<ExpectedMatchComponent>;
 void VerifyMatchComponents(const ExpectedMatchComponents& expected,
                            const AutocompleteMatch& match) {
   std::u16string expected_string;
-  for (const auto& component : expected)
+  for (const auto& component : expected) {
     expected_string += component.text;
+  }
 
   EXPECT_EQ(expected_string, match.contents);
 
@@ -365,7 +366,7 @@ IN_PROC_BROWSER_TEST_P(OmniboxApiTest, OnInputEntered) {
     AutocompleteInput input(input_string, metrics::OmniboxEventProto::NTP,
                             ChromeAutocompleteSchemeClassifier(profile()));
     autocomplete_controller->Start(input);
-    location_bar->GetOmniboxController()->edit_model()->OpenSelectionForTesting(
+    location_bar->GetOmniboxController()->edit_model()->OpenCurrentSelection(
         base::TimeTicks(), disposition);
     WaitForAutocompleteDone();
   };
@@ -386,7 +387,7 @@ IN_PROC_BROWSER_TEST_P(OmniboxApiTest, OnInputEntered) {
 
 // Tests receiving suggestions from and sending input to the incognito context
 // of an incognito split mode extension.
-// Regression test for https://crbug.com/100927.
+// Regression test for https://crbug.com/40100987.
 IN_PROC_BROWSER_TEST_P(OmniboxApiTest, IncognitoSplitMode) {
   static constexpr char kManifest[] =
       R"({
@@ -476,7 +477,7 @@ IN_PROC_BROWSER_TEST_P(OmniboxApiTest, IncognitoSplitMode) {
     GetLocationBar(browser())
         ->GetOmniboxController()
         ->edit_model()
-        ->OpenSelectionForTesting();
+        ->OpenCurrentSelection();
   }
   {
     AutocompleteInput input(
@@ -486,7 +487,7 @@ IN_PROC_BROWSER_TEST_P(OmniboxApiTest, IncognitoSplitMode) {
     GetLocationBar(incognito_browser)
         ->GetOmniboxController()
         ->edit_model()
-        ->OpenSelectionForTesting();
+        ->OpenCurrentSelection();
   }
 
   EXPECT_TRUE(on_the_record_listener.WaitUntilSatisfied());
@@ -532,7 +533,7 @@ IN_PROC_BROWSER_TEST_P(OmniboxApiBackgroundPageTest, MAYBE_PopupStaysClosed) {
                           ChromeAutocompleteSchemeClassifier(profile()));
   autocomplete_controller->Start(input);
 
-  location_bar->GetOmniboxController()->edit_model()->OpenSelectionForTesting();
+  location_bar->GetOmniboxController()->edit_model()->OpenCurrentSelection();
   WaitForAutocompleteDone();
   EXPECT_TRUE(autocomplete_controller->done());
   // This checks that the keyword provider (via javascript)
@@ -1070,7 +1071,7 @@ IN_PROC_BROWSER_TEST_F(UnscopedOmniboxApiTest,
       profile(), *extension,
       PermissionSet(api_permissions.Clone(), ManifestPermissionSet(),
                     URLPatternSet(), URLPatternSet()),
-      PermissionsUpdater::RemoveType::REMOVE_SOFT);
+      PermissionsUpdater::RemoveType::kSoft);
   EXPECT_FALSE(
       turl_service->GetUnscopedModeExtensionIds().contains(extension_id));
 }
@@ -1313,7 +1314,7 @@ IN_PROC_BROWSER_TEST_F(UnscopedOmniboxApiTest, OnInputEntered) {
 
   // Select the suggestion created by the extension, which will trigger the
   // `onInputEntered` event.
-  location_bar->GetOmniboxController()->edit_model()->OpenSelectionForTesting(
+  location_bar->GetOmniboxController()->edit_model()->OpenCurrentSelection(
       base::TimeTicks(), WindowOpenDisposition::CURRENT_TAB);
 
   ASSERT_TRUE(listener.WaitUntilSatisfied());
@@ -1652,9 +1653,8 @@ IN_PROC_BROWSER_TEST_F(UnscopedOmniboxApiTest, MultipleUnscopedExtensions) {
               result.match_at(1).provider->type());
     EXPECT_EQ(omnibox::GROUP_UNSCOPED_EXTENSION_1,
               result.match_at(1).suggestion_group_id);
-    EXPECT_TRUE(base::Contains(extension_names,
-                               result.GetHeaderForSuggestionGroup(
-                                   *result.match_at(1).suggestion_group_id)));
+    EXPECT_TRUE(extension_names.contains(result.GetHeaderForSuggestionGroup(
+        *result.match_at(1).suggestion_group_id)));
     extension_names.erase(result.GetHeaderForSuggestionGroup(
         *result.match_at(1).suggestion_group_id));
   }
@@ -1663,9 +1663,8 @@ IN_PROC_BROWSER_TEST_F(UnscopedOmniboxApiTest, MultipleUnscopedExtensions) {
               result.match_at(2).provider->type());
     EXPECT_EQ(omnibox::GROUP_UNSCOPED_EXTENSION_2,
               result.match_at(2).suggestion_group_id);
-    EXPECT_TRUE(base::Contains(extension_names,
-                               result.GetHeaderForSuggestionGroup(
-                                   *result.match_at(2).suggestion_group_id)));
+    EXPECT_TRUE(extension_names.contains(result.GetHeaderForSuggestionGroup(
+        *result.match_at(2).suggestion_group_id)));
   }
 }
 

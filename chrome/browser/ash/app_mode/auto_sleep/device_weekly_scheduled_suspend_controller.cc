@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "ash/constants/ash_pref_names.h"
 #include "base/check.h"
 #include "base/check_op.h"
 #include "base/functional/bind.h"
@@ -21,7 +22,6 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chrome/browser/ash/app_mode/auto_sleep/weekly_interval_timer.h"
-#include "chrome/common/pref_names.h"
 #include "chromeos/ash/components/policy/weekly_time/weekly_time_interval.h"
 #include "chromeos/dbus/power/power_manager_client.h"
 #include "components/prefs/pref_service.h"
@@ -36,7 +36,7 @@ namespace {
 // Extracts a vector of WeeklyTimeInterval objects from the policy config.
 // Returns a vector containing nullptr for invalid dictionary entries.
 std::vector<std::unique_ptr<WeeklyTimeInterval>>
-GetPolicyConfigAsWeeklyTimeIntervals(const base::Value::List& policy_config) {
+GetPolicyConfigAsWeeklyTimeIntervals(const base::ListValue& policy_config) {
   std::vector<std::unique_ptr<WeeklyTimeInterval>> intervals;
   std::ranges::transform(policy_config, std::back_inserter(intervals),
                          [](const base::Value& value) {
@@ -62,7 +62,7 @@ bool IntervalsDoNotOverlap(
   return true;
 }
 
-bool AllWeeklyTimeIntervalsAreValid(const base::Value::List& policy_config) {
+bool AllWeeklyTimeIntervalsAreValid(const base::ListValue& policy_config) {
   std::vector<std::unique_ptr<WeeklyTimeInterval>> intervals =
       GetPolicyConfigAsWeeklyTimeIntervals(policy_config);
   bool all_intervals_valid = true;
@@ -79,7 +79,7 @@ bool AllWeeklyTimeIntervalsAreValid(const base::Value::List& policy_config) {
 
 std::vector<std::unique_ptr<WeeklyIntervalTimer>> BuildIntervalTimersFromConfig(
     WeeklyIntervalTimer::Factory* interval_timer_factory,
-    const base::Value::List& policy_config,
+    const base::ListValue& policy_config,
     const base::RepeatingCallback<void(base::TimeDelta)>& on_start_callback) {
   std::vector<std::unique_ptr<WeeklyTimeInterval>> intervals =
       GetPolicyConfigAsWeeklyTimeIntervals(policy_config);
@@ -103,7 +103,7 @@ DeviceWeeklyScheduledSuspendController::DeviceWeeklyScheduledSuspendController(
           std::make_unique<WeeklyIntervalTimer::Factory>()) {
   pref_change_registrar_.Init(pref_service);
   pref_change_registrar_.Add(
-      prefs::kDeviceWeeklyScheduledSuspend,
+      ash::prefs::kDeviceWeeklyScheduledSuspend,
       base::BindRepeating(&DeviceWeeklyScheduledSuspendController::
                               OnDeviceWeeklyScheduledSuspendUpdate,
                           weak_factory_.GetWeakPtr()));
@@ -177,9 +177,9 @@ void DeviceWeeklyScheduledSuspendController::
   if (!power_manager_available_) {
     return;
   }
-  const base::Value::List& policy_config =
+  const base::ListValue& policy_config =
       pref_change_registrar_.prefs()->GetList(
-          prefs::kDeviceWeeklyScheduledSuspend);
+          ash::prefs::kDeviceWeeklyScheduledSuspend);
 
   device_suspension_timers_.clear();
 

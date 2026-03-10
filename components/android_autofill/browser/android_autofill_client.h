@@ -126,11 +126,10 @@ class AndroidAutofillClient : public autofill::ContentAutofillClient {
   void HideAutofillSuggestions(autofill::SuggestionHidingReason reason) final;
   bool IsAutofillEnabled() const final;
   bool IsAutofillProfileEnabled() const final;
-  bool IsWalletStorageEnabled() const final;
+  bool IsWalletPublicPassStorageEnabled() const final;
   bool IsAutocompleteEnabled() const final;
   bool IsPasswordManagerEnabled() const final;
   bool IsContextSecure() const final;
-  autofill::FormInteractionsFlowId GetCurrentFormInteractionsFlowId() final;
   autofill::autofill_metrics::FormInteractionsUkmLogger&
   GetFormInteractionsUkmLogger() final;
 

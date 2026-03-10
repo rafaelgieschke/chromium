@@ -24,11 +24,10 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.annotation.Config;
-import org.robolectric.annotation.LooperMode;
 import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.supplier.ObservableSuppliers;
-import org.chromium.base.supplier.SettableObservableSupplier;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.browser_controls.BottomControlsStacker;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.ControlsPosition;
@@ -40,7 +39,6 @@ import org.chromium.ui.base.TestActivity;
 /** Unit tests for {@link ToolbarProgressBarLayer}. */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
-@LooperMode(LooperMode.Mode.PAUSED)
 public class ToolbarProgressBarLayerTest {
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
 
@@ -60,7 +58,7 @@ public class ToolbarProgressBarLayerTest {
 
     private ToolbarProgressBarLayer mLayer;
     private @ControlsPosition int mTestControlPosition = ControlsPosition.NONE;
-    private SettableObservableSupplier<Integer> mBookmarkBarIdSupplier;
+    private SettableMonotonicObservableSupplier<Integer> mBookmarkBarIdSupplier;
 
     @Before
     public void setUp() {

@@ -117,7 +117,7 @@ void PaymentsNetworkInterface::GetCardUploadDetails(
   GetCardUploadDetailsCallback callback_with_latency_metrics = base::BindOnce(
       [](GetCardUploadDetailsCallback callback, base::TimeTicks start_time,
          PaymentsRpcResult result, const std::u16string& context_token,
-         std::unique_ptr<base::Value::Dict> legal_message,
+         std::unique_ptr<base::DictValue> legal_message,
          std::vector<std::pair<int, int>> supported_card_bin_ranges) {
         autofill_metrics::LogGetCardUploadDetailsRequestLatencyMetric(
             base::TimeTicks::Now() - start_time,
@@ -147,15 +147,17 @@ void PaymentsNetworkInterface::UploadCard(
 
 void PaymentsNetworkInterface::GetIbanUploadDetails(
     const std::string& app_locale,
+    const std::vector<ClientBehaviorConstants>& client_behavior_signals,
     int64_t billing_customer_number,
     const std::string& country_code,
     base::OnceCallback<void(PaymentsRpcResult,
                             const std::u16string& validation_regex,
                             const std::u16string& context_token,
-                            std::unique_ptr<base::Value::Dict>)> callback) {
+                            std::unique_ptr<base::DictValue>)> callback) {
   IssueRequest(std::make_unique<GetIbanUploadDetailsRequest>(
       account_info_getter_->IsSyncFeatureEnabledForPaymentsServerMetrics(),
-      app_locale, billing_customer_number, country_code, std::move(callback)));
+      app_locale, client_behavior_signals, billing_customer_number,
+      country_code, std::move(callback)));
 }
 
 void PaymentsNetworkInterface::UploadIban(

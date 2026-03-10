@@ -6,12 +6,12 @@
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
@@ -66,7 +66,7 @@ class ZoomLevelChangeObserver {
   ZoomLevelChangeObserver& operator=(const ZoomLevelChangeObserver&) = delete;
 
   void BlockUntilZoomLevelForHostHasChanged(const std::string& host) {
-    while (!base::Contains(changed_hosts_, host)) {
+    while (!std::ranges::contains(changed_hosts_, host)) {
       message_loop_runner_->Run();
       message_loop_runner_ = new content::MessageLoopRunner;
     }
@@ -122,11 +122,11 @@ class HostZoomMapBrowserTest : public InProcessBrowserTest {
 
   std::vector<std::string> GetHostsWithZoomLevelsFromPrefs() {
     PrefService* prefs = browser()->profile()->GetPrefs();
-    const base::Value::Dict& dictionaries =
+    const base::DictValue& dictionaries =
         prefs->GetDict(prefs::kPartitionPerHostZoomLevels);
     std::string partition_key =
         ChromeZoomLevelPrefs::GetPartitionKeyForTesting(base::FilePath());
-    const base::Value::Dict* values =
+    const base::DictValue* values =
         dictionaries.FindDictByDottedPath(partition_key);
     std::vector<std::string> results;
     if (values) {
@@ -229,7 +229,7 @@ class HostZoomMapSanitizationBrowserTest
       const HostZoomMapSanitizationBrowserTest&) = delete;
 };
 
-// Regression test for crbug.com/437392
+// Regression test for crbug.com/40395972
 IN_PROC_BROWSER_TEST_F(HostZoomMapBrowserTest, ZoomEventsWorkForOffTheRecord) {
   GURL test_url(url::kAboutBlankURL);
   std::string test_host(test_url.GetHost());
@@ -279,7 +279,7 @@ IN_PROC_BROWSER_TEST_F(
 }
 #endif
 
-// Regression test for crbug.com/364399.
+// Regression test for crbug.com/40361379.
 IN_PROC_BROWSER_TEST_F(HostZoomMapBrowserTest, ToggleDefaultZoomLevel) {
   const double default_zoom_level = blink::ZoomFactorToZoomLevel(1.5);
 
@@ -318,7 +318,7 @@ IN_PROC_BROWSER_TEST_F(HostZoomMapBrowserTest, ToggleDefaultZoomLevel) {
   EXPECT_TRUE(GetHostsWithZoomLevelsFromPrefs().empty());
 }
 
-// Test that garbage data from crbug.com/364399 is cleared up on startup.
+// Test that garbage data from crbug.com/40361379 is cleared up on startup.
 IN_PROC_BROWSER_TEST_F(HostZoomMapSanitizationBrowserTest, ClearOnStartup) {
   EXPECT_THAT(GetHostsWithZoomLevels(), testing::ElementsAre("host2"));
   EXPECT_THAT(GetHostsWithZoomLevelsFromPrefs(), testing::ElementsAre("host2"));

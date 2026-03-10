@@ -112,6 +112,7 @@ bool IsDownloadSecuritySensitive(safe_browsing::DownloadCheckResult result) {
     case Result::BLOCKED_SCAN_FAILED:
     case Result::IMMEDIATE_DEEP_SCAN:
     case Result::FORCE_SAVE_TO_GDRIVE:
+    case Result::FORCE_SAVE_TO_ONEDRIVE:
       return false;
   }
   NOTREACHED();
@@ -851,7 +852,6 @@ int DownloadProtectionService::GetDownloadAttributionUserGestureLimit(
   return kDownloadAttributionUserGestureLimit;
 }
 
-#if !BUILDFLAG(IS_ANDROID)
 void DownloadProtectionService::RequestFinished(DeepScanningRequest* request) {
   auto it = std::ranges::find_if(deep_scanning_requests_,
                                  base::MatchesUniquePtr(request));
@@ -866,7 +866,6 @@ DownloadProtectionService::GetBinaryUploadService(
   return enterprise_connectors::GetBinaryUploadServiceForConnector(profile,
                                                                    settings);
 }
-#endif
 
 void DownloadProtectionService::MaybeCheckMetadataAfterDeepScanning(
     download::DownloadItem* item,

@@ -26,6 +26,7 @@
 #include "third_party/blink/public/common/messaging/transferable_message.h"
 #include "third_party/blink/public/common/service_worker/extended_service_worker_status_code.h"
 #include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
+#include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration.mojom-forward.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration_options.mojom-forward.h"
 
@@ -161,8 +162,11 @@ class CONTENT_EXPORT ServiceWorkerContext {
 
   using WarmUpServiceWorkerCallback = base::OnceClosure;
 
-  using StartWorkerCallback = base::OnceCallback<
-      void(int64_t version_id, int process_id, int thread_id)>;
+  using StartWorkerCallback =
+      base::OnceCallback<void(int64_t version_id,
+                              int process_id,
+                              int thread_id,
+                              const blink::ServiceWorkerToken& token)>;
 
   // Returns true if |url| is within the service worker |scope|.
   static bool ScopeMatches(const GURL& scope, const GURL& url);
@@ -340,6 +344,14 @@ class CONTENT_EXPORT ServiceWorkerContext {
   virtual bool IsLiveRunningServiceWorker(
       int64_t service_worker_version_id) = 0;
 
+  // Returns true if the ServiceWorkerVersion for `service_worker_version_id` is
+  // live (starting or running) and its associated worker instance matches the
+  // `token`. This can be used to ensure that IPC messages are not from a stale
+  // worker instance that has already been stopped.
+  virtual bool IsLiveServiceWorkerWithToken(
+      int64_t service_worker_version_id,
+      const blink::ServiceWorkerToken& token) = 0;
+
   // Returns the InterfaceProvider for the worker specified by
   // `service_worker_version_id`. The caller can use InterfaceProvider to bind
   // interfaces exposed by the Service Worker. CHECKs if
@@ -358,6 +370,11 @@ class CONTENT_EXPORT ServiceWorkerContext {
   // ServiceWorkerContextCore::force_update_on_page_load() for details.
   virtual void SetForceUpdateOnPageLoadForTesting(
       bool force_update_on_page_load) = 0;
+
+  // Adds `message` to a service worker's DevTools console.
+  virtual void AddMessageToConsole(int64_t service_worker_version_id,
+                                   blink::mojom::ConsoleMessageLevel level,
+                                   const std::string& message) = 0;
 
  protected:
   ServiceWorkerContext() {}

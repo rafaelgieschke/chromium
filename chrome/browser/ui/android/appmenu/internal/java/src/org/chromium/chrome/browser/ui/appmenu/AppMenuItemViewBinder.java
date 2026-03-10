@@ -5,15 +5,18 @@
 package org.chromium.chrome.browser.ui.appmenu;
 
 import android.annotation.SuppressLint;
+import android.content.Context;
 import android.content.res.ColorStateList;
 import android.content.res.TypedArray;
 import android.graphics.drawable.Drawable;
 import android.text.TextUtils;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.ImageButton;
 import android.widget.TextView;
 
 import androidx.annotation.ColorRes;
+import androidx.annotation.Px;
 import androidx.appcompat.content.res.AppCompatResources;
 import androidx.core.graphics.drawable.DrawableCompat;
 import androidx.core.widget.ImageViewCompat;
@@ -28,6 +31,7 @@ import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter;
 import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter.HighlightParams;
 import org.chromium.components.browser_ui.widget.highlight.ViewHighlighter.HighlightShape;
 import org.chromium.ui.UiUtils;
+import org.chromium.ui.hierarchicalmenu.MenuItemWithSubmenuView;
 import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -228,6 +232,33 @@ class AppMenuItemViewBinder {
         }
     }
 
+    public static @Px int getIconRowItemPixelHeight(Context context, PropertyModel model) {
+        TypedArray a =
+                context.obtainStyledAttributes(
+                        new int[] {R.attr.minInteractTargetSize, R.attr.appMenuIconRowPadding});
+        int itemRowHeight = a.getDimensionPixelSize(0, 0);
+        int iconRowPadding = a.getDimensionPixelSize(1, 0);
+        a.recycle();
+
+        return itemRowHeight + 2 * iconRowPadding;
+    }
+
+    private static @Px int getListItemHeight(Context context) {
+        TypedArray a = context.obtainStyledAttributes(new int[] {R.attr.listItemHeight});
+        int height = a.getDimensionPixelSize(0, 0);
+        a.recycle();
+
+        return height;
+    }
+
+    public static @Px int getSubmenuHeaderPixelHeight(Context context, PropertyModel model) {
+        if (model.get(AppMenuSubmenuHeaderItemProperties.SHOULD_SHOW_ICON_ROW)) {
+            return getIconRowItemPixelHeight(context, model);
+        } else {
+            return getListItemHeight(context);
+        }
+    }
+
     public static void bindItemWithSubmenu(PropertyModel model, View view, PropertyKey key) {
         if (key == AppMenuItemProperties.MENU_ITEM_ID) {
             int id = model.get(AppMenuItemProperties.MENU_ITEM_ID);
@@ -247,6 +278,9 @@ class AppMenuItemViewBinder {
             } else {
                 ViewHighlighter.turnOffHighlight(view);
             }
+        } else if (key == AppMenuItemWithSubmenuProperties.IS_EXPANDED) {
+            ((MenuItemWithSubmenuView) view)
+                    .setIsExpanded(model.get(AppMenuItemWithSubmenuProperties.IS_EXPANDED));
         } else if (key == AppMenuItemProperties.ICON) {
             setIcon(view, model);
         } else if (key == AppMenuItemWithSubmenuProperties.CLICK_LISTENER) {
@@ -274,6 +308,11 @@ class AppMenuItemViewBinder {
             view.setOnClickListener(model.get(AppMenuItemWithSubmenuProperties.CLICK_LISTENER));
         } else if (key == AppMenuItemProperties.KEY_LISTENER) {
             view.setOnKeyListener(model.get(AppMenuItemProperties.KEY_LISTENER));
+        } else if (key == AppMenuSubmenuHeaderItemProperties.SHOULD_SHOW_ICON_ROW) {
+            ViewGroup.LayoutParams params = view.getLayoutParams();
+            assert params != null;
+            params.height = getSubmenuHeaderPixelHeight(view.getContext(), model);
+            view.setLayoutParams(params);
         }
     }
 
@@ -291,12 +330,19 @@ class AppMenuItemViewBinder {
         ChromeImageView imageView = view.findViewById(R.id.menu_item_icon);
 
         @ColorRes int colorResId = model.get(AppMenuItemProperties.ICON_COLOR_RES);
-        if (colorResId == 0) {
+        ColorStateList tintList = null;
+        boolean noTint = model.get(AppMenuItemProperties.ICON_NO_TINT);
+
+        if (noTint) {
+            // No-op: If noTint is true, we do not want the default grey tint. tintList = null;
+        } else if (colorResId == 0) {
             // If there is no color assigned to the icon, use the default color.
             colorResId = R.color.default_icon_color_secondary_tint_list;
+            tintList = AppCompatResources.getColorStateList(imageView.getContext(), colorResId);
+        } else {
+            // User the specific color requested.
+            tintList = AppCompatResources.getColorStateList(imageView.getContext(), colorResId);
         }
-        ColorStateList tintList =
-                AppCompatResources.getColorStateList(imageView.getContext(), colorResId);
 
         if (model.get(AppMenuItemProperties.ICON_SHOW_BADGE)) {
             // Draw the icon with a red badge on top.

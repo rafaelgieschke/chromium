@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/functional/callback_helpers.h"
 #include "base/strings/escape.h"
 #include "base/strings/utf_string_conversions.h"
@@ -20,6 +19,7 @@
 #include "base/timer/elapsed_timer.h"
 #include "build/build_config.h"
 #include "build/chromecast_buildflags.h"
+#include "content/browser/accessibility/accessibility_test_helpers.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -78,7 +78,7 @@ class CrossPlatformAccessibilityBrowserTest : public ContentBrowserTest {
   void RecursiveAssertUniqueIds(const ui::AXNode* node,
                                 absl::flat_hash_set<int>* ids) const {
     ASSERT_TRUE(ids);
-    ASSERT_FALSE(base::Contains(*ids, node->id()));
+    ASSERT_FALSE(ids->contains(node->id()));
     ids->insert(node->id());
     for (const ui::AXNode* child : node->children()) {
       RecursiveAssertUniqueIds(child, ids);
@@ -138,59 +138,13 @@ class CrossPlatformAccessibilityBrowserTest : public ContentBrowserTest {
   }
 
   ui::BrowserAccessibility* FindNode(const std::string& name_or_value) {
-    return FindNodeInSubtree(*GetManager()->GetBrowserAccessibilityRoot(),
-                             name_or_value);
-  }
-
-  ui::BrowserAccessibility* FindNodeInSubtree(
-      ui::BrowserAccessibility& node,
-      const std::string& name_or_value) {
-    const std::string& name =
-        node.GetStringAttribute(ax::mojom::StringAttribute::kName);
-    // Note that in the case of a text field,
-    // "BrowserAccessibility::GetValueForControl" has the added functionality
-    // of computing the value of an ARIA text box from its inner text.
-    //
-    // <div contenteditable="true" role="textbox">Hello world.</div>
-    // Will expose no HTML value attribute, but some screen readers, such as
-    // Jaws, VoiceOver and Talkback, require one to be computed.
-    const std::string& value = base::UTF16ToUTF8(node.GetValueForControl());
-    if (name == name_or_value || value == name_or_value) {
-      return &node;
-    }
-
-    for (unsigned int i = 0; i < node.PlatformChildCount(); ++i) {
-      ui::BrowserAccessibility* result =
-          FindNodeInSubtree(*node.PlatformGetChild(i), name_or_value);
-      if (result) {
-        return result;
-      }
-    }
-
-    return nullptr;
+    return FindFirstAccessibilityNodeWithNameOrValue(
+        *GetManager()->GetBrowserAccessibilityRoot(), name_or_value);
   }
 
   ui::BrowserAccessibility* FindFirstNodeWithRole(ax::mojom::Role role_value) {
-    return FindFirstNodeWithRoleInSubtree(
+    return FindFirstAccessibilityNodeWithRole(
         *GetManager()->GetBrowserAccessibilityRoot(), role_value);
-  }
-
-  ui::BrowserAccessibility* FindFirstNodeWithRoleInSubtree(
-      ui::BrowserAccessibility& node,
-      ax::mojom::Role role_value) {
-    if (node.GetRole() == role_value) {
-      return &node;
-    }
-
-    for (unsigned int i = 0; i < node.PlatformChildCount(); ++i) {
-      ui::BrowserAccessibility* result =
-          FindFirstNodeWithRoleInSubtree(*node.PlatformGetChild(i), role_value);
-      if (result) {
-        return result;
-      }
-    }
-
-    return nullptr;
   }
 
   void PressTabAndWaitForFocusChange() {
@@ -3197,6 +3151,36 @@ IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
   manager->ScrollToMakeVisible(*button_node, gfx::Rect());
 
   EXPECT_EQ(manager->GetAccessibilityFocus(), button_node);
+}
+#endif  // !BUILDFLAG(IS_ANDROID)
+
+#if !BUILDFLAG(IS_ANDROID)
+IN_PROC_BROWSER_TEST_F(CrossPlatformAccessibilityBrowserTest,
+                       TestAccessibilityFocusInIframe) {
+  LoadInitialAccessibilityTreeFromHtml(R"HTML(
+      <!DOCTYPE html>
+      <html>
+      <body>
+        <iframe srcdoc="
+          <!DOCTYPE html>
+          <html>
+          <body>
+            <button>ok</button>
+          </body>
+          </html>
+        "></iframe>
+      </body>
+      </html>)HTML");
+
+  WaitForAccessibilityTreeToContainNodeWithName(shell()->web_contents(), "ok");
+
+  ui::BrowserAccessibility* button_node = FindNode("ok");
+  ASSERT_NE(button_node, nullptr);
+
+  ui::BrowserAccessibilityManager* manager = button_node->manager();
+  manager->ScrollToMakeVisible(*button_node, gfx::Rect());
+
+  EXPECT_EQ(GetManager()->GetAccessibilityFocus(), button_node);
 }
 #endif  // !BUILDFLAG(IS_ANDROID)
 

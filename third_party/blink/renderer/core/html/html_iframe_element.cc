@@ -60,6 +60,7 @@
 #include "third_party/blink/renderer/platform/network/content_security_policy_parsers.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_to_number.h"
 
 namespace blink {
 
@@ -126,7 +127,7 @@ DOMFeaturePolicy* HTMLIFrameElement::featurePolicy() {
   if (!policy_ && GetExecutionContext()) {
     policy_ = MakeGarbageCollected<IFramePolicy>(
         GetExecutionContext(), GetFramePolicy().container_policy,
-        GetOriginForPermissionsPolicy());
+        *MakeOriginForPermissionsPolicy());
   }
   return policy_.Get();
 }
@@ -154,7 +155,7 @@ void HTMLIFrameElement::CollectStyleForPresentationAttribute(
     // LocalFrame border doesn't really match the HTML4 spec definition for
     // iframes. It simply adds a presentational hint that the border should be
     // off if set to zero.
-    if (!value.ToInt()) {
+    if (!StringToIntLoose(value).value_or(0)) {
       // Add a rule that nulls out our border width.
       for (CSSPropertyID property_id :
            {CSSPropertyID::kBorderTopWidth, CSSPropertyID::kBorderBottomWidth,
@@ -188,18 +189,18 @@ void HTMLIFrameElement::ParseAttribute(
       FrameOwnerPropertiesChanged();
       should_call_did_change_attributes = true;
     }
-    if (name_.Contains('\n')) {
+    if (name_.contains('\n')) {
       UseCounter::Count(GetDocument(), WebFeature::kFrameNameContainsNewline);
     }
-    if (name_.Contains('<')) {
+    if (name_.contains('<')) {
       UseCounter::Count(GetDocument(), WebFeature::kFrameNameContainsBrace);
     }
-    if (name_.Contains('\n') && name_.Contains('<')) {
+    if (name_.contains('\n') && name_.contains('<')) {
       UseCounter::Count(GetDocument(), WebFeature::kDanglingMarkupInWindowName);
-      if (!name_.EndsWith('>')) {
+      if (!name_.ends_with('>')) {
         UseCounter::Count(GetDocument(),
                           WebFeature::kDanglingMarkupInWindowNameNotEndsWithGT);
-        if (!name_.EndsWith('\n')) {
+        if (!name_.ends_with('\n')) {
           UseCounter::Count(
               GetDocument(),
               WebFeature::kDanglingMarkupInWindowNameNotEndsWithNewLineOrGT);
@@ -258,7 +259,7 @@ void HTMLIFrameElement::ParseAttribute(
     }
   } else if (name == html_names::kCspAttr) {
     static const size_t kMaxLengthCSPAttribute = 4096;
-    if (value && (value.Contains('\n') || value.Contains('\r') ||
+    if (value && (value.contains('\n') || value.contains('\r') ||
                   !MatchesTheSerializedCSPGrammar(value.GetString()))) {
       // TODO(antoniosartori): It would be safer to block loading iframes with
       // invalid 'csp' attribute.
@@ -454,15 +455,15 @@ network::ParsedPermissionsPolicy HTMLIFrameElement::ConstructContainerPolicy()
   }
 
   scoped_refptr<const SecurityOrigin> src_origin =
-      GetOriginForPermissionsPolicy();
-  scoped_refptr<const SecurityOrigin> self_origin =
+      MakeOriginForPermissionsPolicy();
+  const SecurityOrigin* self_origin =
       GetExecutionContext()->GetSecurityOrigin();
 
   PolicyParserMessageBuffer logger;
 
   // Start with the allow attribute
   network::ParsedPermissionsPolicy container_policy =
-      PermissionsPolicyParser::ParseAttribute(allow_, self_origin, src_origin,
+      PermissionsPolicyParser::ParseAttribute(allow_, *self_origin, *src_origin,
                                               logger, GetExecutionContext());
 
   // Process the allow* attributes. These only take effect if the corresponding
@@ -502,7 +503,7 @@ network::ParsedPermissionsPolicy HTMLIFrameElement::ConstructContainerPolicy()
   // Update the JavaScript policy object associated with this iframe, if it
   // exists.
   if (policy_) {
-    policy_->UpdateContainerPolicy(container_policy, src_origin);
+    policy_->UpdateContainerPolicy(container_policy, *src_origin);
   }
 
   for (const auto& message : logger.GetMessages()) {
@@ -630,7 +631,7 @@ void HTMLIFrameElement::DidChangeAttributes() {
       ParseContentSecurityPolicies(
           required_csp_,
           network::mojom::blink::ContentSecurityPolicyType::kEnforce,
-          network::mojom::blink::ContentSecurityPolicySource::kHTTP, KURL());
+          network::mojom::blink::ContentSecurityPolicySource::kHTTP, NullUrl());
   DCHECK_LE(csp.size(), 1u);
 
   auto attributes = mojom::blink::IframeAttributes::New();
@@ -675,7 +676,7 @@ void HTMLIFrameElement::CheckPotentialPermissionsPolicyViolation() {
   }
 
   scoped_refptr<const SecurityOrigin> src_origin =
-      GetOriginForPermissionsPolicy();
+      MakeOriginForPermissionsPolicy();
   url::Origin src = src_origin->ToUrlOrigin();
   network::ParsedPermissionsPolicy container_policy =
       ConstructContainerPolicy();
@@ -721,9 +722,8 @@ void HTMLIFrameElement::NaturalSizingInfoChanged() {
   }
 }
 
-const V8UnionStringOrTrustedHTML* HTMLIFrameElement::srcdoc() const {
-  return MakeGarbageCollected<V8UnionStringOrTrustedHTML>(
-      getAttribute(html_names::kSrcdocAttr));
+String HTMLIFrameElement::srcdoc() const {
+  return getAttribute(html_names::kSrcdocAttr);
 }
 
 void HTMLIFrameElement::setSrcdoc(const V8UnionStringOrTrustedHTML* value,

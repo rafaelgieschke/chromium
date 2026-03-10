@@ -14,6 +14,7 @@
 #include "base/time/time.h"
 #include "base/types/strong_alias.h"
 #include "build/build_config.h"
+#include "chrome/browser/background/glic/glic_background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/download/download_core_service.h"
@@ -40,6 +41,7 @@
 #if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ash/boot_times_recorder/boot_times_recorder.h"
 #include "chrome/browser/lifetime/application_lifetime_chromeos.h"
+#include "chromeos/ash/components/login/session/session_termination_manager.h"
 #else  // !BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/ui/profiles/profile_picker.h"
 #endif  // BUILDFLAG(IS_CHROMEOS)
@@ -52,10 +54,6 @@
 #include "chrome/browser/sessions/session_data_service.h"
 #include "chrome/browser/sessions/session_data_service_factory.h"
 #endif  // BUILDFLAG(ENABLE_SESSION_SERVICE)
-
-#if BUILDFLAG(ENABLE_GLIC)
-#include "chrome/browser/background/glic/glic_background_mode_manager.h"
-#endif
 
 namespace chrome {
 
@@ -91,10 +89,11 @@ void AttemptRestartInternal(IgnoreUnloadHandlers ignore_unload_handlers) {
   KeepAliveRegistry::GetInstance()->SetRestarting();
 
 #if BUILDFLAG(IS_CHROMEOS)
-  DCHECK(!chrome::IsSendingStopRequestToSessionManager());
+  DCHECK(
+      !ash::SessionTerminationManager::IsSendingStopRequestToSessionManager());
 
   ash::BootTimesRecorder::Get()->set_restart_requested();
-  chrome::SetSendStopRequestToSessionManager(false);
+  ash::SessionTerminationManager::SetSendStopRequestToSessionManager(false);
 
   // If an update is pending StopSession() will trigger a system reboot,
   // which in turn will send SIGTERM to Chrome, and that ends up processing
@@ -128,13 +127,11 @@ void ShutdownIfNoBrowsers() {
   // Tell everyone that we are shutting down.
   browser_shutdown::SetTryingToQuit(true);
 
-#if BUILDFLAG(ENABLE_GLIC)
   auto* glic_background_mode_manager =
       glic::GlicBackgroundModeManager::GetInstance();
   if (glic_background_mode_manager) {
     glic_background_mode_manager->ExitBackgroundMode();
   }
-#endif
 
 #if BUILDFLAG(ENABLE_SESSION_SERVICE)
   // If ShuttingDownWithoutClosingBrowsers() returns true, the session

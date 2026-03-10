@@ -15,8 +15,10 @@
 #include "base/unguessable_token.h"
 #include "chrome/browser/web_applications/web_app_install_manager.h"
 #include "chrome/browser/web_applications/web_app_install_manager_observer.h"
+#include "chrome/browser/web_applications/web_app_registrar_observer.h"
 #include "components/tabs/public/tab_interface.h"
 #include "components/webapps/common/web_app_id.h"
+#include "content/public/browser/page_manifest_manager.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
 
@@ -31,12 +33,14 @@ class LaunchQueue;
 namespace web_app {
 
 class WebAppProvider;
+class WebAppRegistrar;
 class WebAppBrowserController;
 
 // Per-tab web app helper. Allows to associate a tab (web page) with a web app.
 class WebAppTabHelper : public content::WebContentsUserData<WebAppTabHelper>,
                         public content::WebContentsObserver,
-                        public WebAppInstallManagerObserver {
+                        public WebAppInstallManagerObserver,
+                        public WebAppRegistrarObserver {
  public:
   // `contents` can be different from `tab->GetContents()` during tab discard.
   // TODO(https://crbug.com/347770670): This method can be simplified to not
@@ -108,6 +112,9 @@ class WebAppTabHelper : public content::WebContentsUserData<WebAppTabHelper>,
   // Note: If we are in an app window, this is not guaranteed to match
   // `window_app_id()` - for example, if the web contents of an app navigates
   // out of scope of the app, this will be std::nullopt.
+  //
+  // Note: Isolated Web Apps don't 'control' browser app tab
+  // even if they have scope extended url that includes this tab.
   const std::optional<webapps::AppId>& app_id() const { return app_id_; }
 
   // Returns the installed web app window that contains this tab, or
@@ -157,13 +164,18 @@ class WebAppTabHelper : public content::WebContentsUserData<WebAppTabHelper>,
       const webapps::AppId& uninstalled_app_id) override;
   void OnWebAppInstallManagerDestroyed() override;
 
-  void ResetTabSubscriptions(tabs::TabInterface* tab);
+  // WebAppRegistrarObserver:
+  void OnWebAppPendingMigrationInfoChanged(const webapps::AppId& app_id,
+                                           bool has_pending_migration) override;
+  void OnAppRegistrarDestroyed() override;
 
   // Sets the state of this tab helper. This will call
   // `WebAppUiManager::OnAssociatedAppChanged` if the id has changed, and
   // `UpdateAudioFocusGroupId()` if either has changed.
   void SetState(std::optional<webapps::AppId> app_id,
                 std::optional<webapps::AppId> window_app_id);
+
+  void MaybeShowBlockedMigrationInfoBar();
 
   // Runs any logic when the associated app is added, changed or removed.
   void OnAssociatedAppChanged(
@@ -198,6 +210,9 @@ class WebAppTabHelper : public content::WebContentsUserData<WebAppTabHelper>,
   // app, and we are in the window of the preinstall app.
   void MaybeSchedulePreinstallUpdate();
 
+  void OnManifestSpecifiedOnPrimaryPage(
+      const content::PageManifestManager::ManifestResult& result);
+
   std::optional<webapps::AppId> app_id_;
   std::optional<webapps::AppId> window_app_id_;
 
@@ -231,7 +246,11 @@ class WebAppTabHelper : public content::WebContentsUserData<WebAppTabHelper>,
 
   base::ScopedObservation<WebAppInstallManager, WebAppInstallManagerObserver>
       observation_{this};
+  base::ScopedObservation<WebAppRegistrar, WebAppRegistrarObserver>
+      registrar_observation_{this};
   raw_ptr<WebAppProvider> provider_ = nullptr;
+
+  base::CallbackListSubscription get_all_specified_manifests_subscription_;
 
   base::WeakPtrFactory<WebAppTabHelper> weak_factory_{this};
 

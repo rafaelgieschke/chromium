@@ -122,10 +122,15 @@ public class InstalledWebappPermissionManagerTest {
         setClientLocationPermission(false);
         setStoredLocationPermission(ContentSetting.ALLOW);
 
-        assertEquals(
-                ContentSetting.BLOCK,
-                InstalledWebappPermissionManager.getPermission(mType, mOrigin));
-        verifyLocationPermissionUpdated(ContentSetting.BLOCK);
+        // Android R+ returns ASK for blocked permissions to support one-time permissions.
+        boolean isAndroidRPlus = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R;
+        int expected = isAndroidRPlus ? ContentSetting.ASK : ContentSetting.BLOCK;
+        assertEquals(expected, InstalledWebappPermissionManager.getPermission(mType, mOrigin));
+        if (isAndroidRPlus) {
+            verifyPermissionNotUpdated();
+        } else {
+            verifyLocationPermissionUpdated(ContentSetting.BLOCK);
+        }
     }
 
     @Test

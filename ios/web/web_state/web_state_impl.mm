@@ -9,6 +9,7 @@
 
 #import <string_view>
 
+#import "base/check.h"
 #import "base/compiler_specific.h"
 #import "base/debug/dump_without_crashing.h"
 #import "base/feature_list.h"
@@ -293,7 +294,7 @@ bool WebStateImpl::HasWebUI() const {
 
 void WebStateImpl::HandleWebUIMessage(const GURL& source_url,
                                       std::string_view message,
-                                      const base::Value::List& args) {
+                                      const base::ListValue& args) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   RealizedState()->HandleWebUIMessage(source_url, message, args);
 }
@@ -404,10 +405,17 @@ WebState* WebStateImpl::CreateNewWebState(const GURL& url,
 
 void WebStateImpl::OnAuthRequired(NSURLProtectionSpace* protection_space,
                                   NSURLCredential* proposed_credential,
-                                  WebStateDelegate::AuthCallback callback) {
+                                  WebStateDelegate::HTTPAuthCallback callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   RealizedState()->OnAuthRequired(protection_space, proposed_credential,
                                   std::move(callback));
+}
+
+void WebStateImpl::OnAuthRequired(
+    NSURLProtectionSpace* protection_space,
+    WebStateDelegate::ClientCertAuthCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  RealizedState()->OnAuthRequired(protection_space, std::move(callback));
 }
 
 void WebStateImpl::CancelDialogs() {
@@ -1024,6 +1032,7 @@ WebStateImpl::RealizedWebState* WebStateImpl::RealizedState() {
 
 void WebStateImpl::AddWebStateImplMarker() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   // Store an empty base::SupportsUserData::Data that mark the current instance
   // as a WebStateImpl. Need to be done before anything else, so that casting
   // can safely be performed even before the end of the constructor.

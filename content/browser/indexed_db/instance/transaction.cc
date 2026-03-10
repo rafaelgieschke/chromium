@@ -10,11 +10,9 @@
 #include <optional>
 #include <set>
 #include <string>
-#include <tuple>
 #include <utility>
 #include <vector>
 
-#include "base/auto_reset.h"
 #include "base/check.h"
 #include "base/check_op.h"
 #include "base/functional/bind.h"
@@ -238,17 +236,7 @@ Status Transaction::Abort(const DatabaseError& error) {
   preemptive_task_queue_ = {};
   pending_preemptive_events_ = 0;
   task_queue_ = {};
-
-  // Backing store resources (held via cursors) must be released
-  // before script callbacks are fired, as the script callbacks may
-  // release references and allow the backing store itself to be
-  // released, and order is critical.
-  CloseOpenCursors();
   backing_store_transaction_.reset();
-
-  // Transactions must also be marked as completed before the
-  // front-end is notified, as the transaction completion unblocks
-  // operations like closing connections.
   locks_receiver_.locks.clear();
   locks_receiver_.CancelLockRequest();
 
@@ -338,8 +326,6 @@ void Transaction::Start() {
     return;
   }
   CHECK_EQ(CREATED, state_);
-  std::optional scheduling_priority_at_last_state_change =
-      scheduling_priority_at_last_state_change_;
   SetState(STARTED);
   CHECK(!locks_receiver_.locks.empty());
   diagnostics_.start_time = base::Time::Now();
@@ -356,30 +342,15 @@ void Transaction::Start() {
     case blink::mojom::IDBTransactionMode::ReadOnly:
       base::UmaHistogramMediumTimes(
           "WebCore.IndexedDB.Transaction.ReadOnly.TimeQueued", time_queued);
-      if (scheduling_priority_at_last_state_change == 0) {
-        base::UmaHistogramMediumTimes(
-            "WebCore.IndexedDB.Transaction.ReadOnly.TimeQueued.Foreground",
-            time_queued);
-      }
       break;
     case blink::mojom::IDBTransactionMode::ReadWrite:
       base::UmaHistogramMediumTimes(
           "WebCore.IndexedDB.Transaction.ReadWrite.TimeQueued", time_queued);
-      if (scheduling_priority_at_last_state_change == 0) {
-        base::UmaHistogramMediumTimes(
-            "WebCore.IndexedDB.Transaction.ReadWrite.TimeQueued.Foreground",
-            time_queued);
-      }
       break;
     case blink::mojom::IDBTransactionMode::VersionChange:
       base::UmaHistogramMediumTimes(
           "WebCore.IndexedDB.Transaction.VersionChange.TimeQueued",
           time_queued);
-      if (scheduling_priority_at_last_state_change == 0) {
-        base::UmaHistogramMediumTimes(
-            "WebCore.IndexedDB.Transaction.VersionChange.TimeQueued.Foreground",
-            time_queued);
-      }
       break;
   }
 
@@ -458,16 +429,12 @@ void Transaction::Put(int64_t object_store_id,
                       blink::mojom::IDBPutMode mode,
                       std::vector<IndexedDBIndexKeys> index_keys,
                       blink::mojom::IDBTransaction::PutCallback callback) {
-  if (!IsAcceptingRequests()) {
-    return;
-  }
-
   if (mode_ == blink::mojom::IDBTransactionMode::ReadOnly) {
     receiver_.ReportBadMessage("Attempted to Put on readonly txn.");
     return;
   }
 
-  if (!connection()->IsConnected()) {
+  if (!IsAcceptingRequests() || !connection()->IsConnected()) {
     DatabaseError error(blink::mojom::IDBException::kUnknownError,
                         "Not connected.");
     std::move(callback).Run(
@@ -532,16 +499,16 @@ Status Transaction::DoPut(int64_t object_store_id,
   bool key_was_generated = false;
   in_flight_memory_ -= value.SizeEstimate();
   CHECK(in_flight_memory_.IsValid());
-  auto on_put_error = [&txn](blink::mojom::IDBTransaction::PutCallback callback,
+  auto on_put_error = [this](blink::mojom::IDBTransaction::PutCallback callback,
                              blink::mojom::IDBException code,
                              const std::u16string& message) {
-    txn->IncrementNumErrorsSent();
+    IncrementNumErrorsSent();
     std::move(callback).Run(
         blink::mojom::IDBTransactionPutResult::NewErrorResult(
             blink::mojom::IDBError::New(code, message)));
   };
 
-  const blink::IndexedDBObjectStoreMetadata* object_store =
+  const IndexedDBObjectStoreMetadata* object_store =
       connection()->database()->GetObjectStoreMetadataIfExists(object_store_id);
   if (!object_store) {
     std::move(bad_message_callback).Run("Invalid object_store_id");
@@ -598,15 +565,23 @@ Status Transaction::DoPut(int64_t object_store_id,
 
   // Before this point, don't do any mutation. After this point, rollback the
   // transaction in case of error.
-  ASSIGN_OR_RETURN(BackingStore::RecordIdentifier new_record,
-                   BackingStoreTransaction()->PutRecord(object_store_id, key,
-                                                        std::move(value)));
+  StatusOr<BackingStore::RecordIdentifier> new_record =
+      BackingStoreTransaction()->PutRecord(object_store_id, key,
+                                           std::move(value));
+  // Only LevelDB can return an InvalidArgument, so simplify to
+  // `ASSIGN_OR_RETURN` when SQLite is the only backing store.
+  if (!new_record.has_value()) {
+    if (new_record.error().IsInvalidArgument()) {
+      std::move(bad_message_callback).Run(new_record.error().ToString());
+    }
+    return new_record.error();
+  }
 
   {
     TRACE_EVENT1("IndexedDB", "Database::PutOperation.UpdateIndexes", "txn.id",
                  id());
     for (const auto& writer : index_writers) {
-      writer->WriteIndexKeys(new_record, BackingStoreTransaction(),
+      writer->WriteIndexKeys(*new_record, BackingStoreTransaction(),
                              object_store_id);
     }
   }
@@ -666,8 +641,7 @@ Status Transaction::DoSetIndexKeys(int64_t object_store_id,
                                    IndexedDBIndexKeys index_keys,
                                    Transaction* transaction) {
   CHECK_EQ(this, transaction);
-  TRACE_EVENT1("IndexedDB", "Database::SetIndexKeysOperation", "txn.id",
-               transaction->id());
+  TRACE_EVENT1("IndexedDB", "Database::SetIndexKeysOperation", "txn.id", id());
   CHECK_EQ(mode(), blink::mojom::IDBTransactionMode::VersionChange);
 
   ASSIGN_OR_RETURN(std::optional<BackingStore::RecordIdentifier> found_record,
@@ -729,7 +703,7 @@ void Transaction::SetIndexKeysDone() {
           [](mojo::ReportBadMessageCallback report_bad_message_callback,
              Transaction& transaction) {
             if (transaction.pending_preemptive_events_ == 0) {
-              constexpr const std::string_view kErrorMessage =
+              constexpr std::string_view kErrorMessage =
                   "SetIndexKeysDone called without beginning indexing";
               std::move(report_bad_message_callback).Run(kErrorMessage);
               return Status::InvalidArgument(kErrorMessage);
@@ -792,6 +766,10 @@ bool Transaction::CreateExternalObjects(
         total_blob_size += info->size;
 
         if (info->file) {
+          if (info->file->last_modified.ToDeltaSinceWindowsEpoch() <
+              base::TimeDelta()) {
+            return false;
+          }
           (*external_objects)[i] = IndexedDBExternalObject(
               std::move(info->blob), info->file->name, info->mime_type,
               info->file->last_modified, info->size);
@@ -819,7 +797,7 @@ void Transaction::BlobWriteComplete(base::TimeTicks start_time, Status result) {
   CHECK_EQ(state_, COMMITTING);
 
   LogStatus(result, "IndexedDB.BackingStore.WriteBlobs",
-            bucket_context_->in_memory());
+            bucket_context_->GetHistogramSuffix());
 
   if (!result.ok()) {
     Status status = Abort(
@@ -834,7 +812,7 @@ void Transaction::BlobWriteComplete(base::TimeTicks start_time, Status result) {
 
   LogDuration(base::TimeTicks::Now() - start_time,
               "IndexedDB.BackendDuration.WriteBlobs",
-              bucket_context_->in_memory());
+              bucket_context_->GetHistogramSuffix());
   ScheduleTask(
       /*operation_name_for_metrics=*/{},
       base::IgnoreArgs<Transaction*>(base::BindOnce(
@@ -921,7 +899,7 @@ Status Transaction::DoPendingCommit() {
                   },
                   ptr_factory_.GetWeakPtr())),
           "IndexedDB.BackingStore.CommitPhaseOne",
-          bucket_context_->in_memory()));
+          bucket_context_->GetHistogramSuffix()));
   commit_synchronous_duration_ = timer.Elapsed();
   if (async_work_in_progress) {
     return Status::OK();
@@ -937,8 +915,6 @@ Status Transaction::CommitPhaseTwo() {
 
   CHECK_EQ(state_, COMMITTING);
 
-  std::optional scheduling_priority_at_last_state_change =
-      scheduling_priority_at_last_state_change_;
   SetState(FINISHED);
 
   Status s;
@@ -949,13 +925,13 @@ Status Transaction::CommitPhaseTwo() {
     base::ElapsedTimer timer;
     s = LogStatus(backing_store_transaction_->CommitPhaseTwo(),
                   "IndexedDB.BackingStore.CommitPhaseTwo",
-                  bucket_context_->in_memory());
+                  bucket_context_->GetHistogramSuffix());
     commit_synchronous_duration_ += timer.Elapsed();
 
     if (s.ok()) {
       LogDuration(commit_synchronous_duration_,
                   "IndexedDB.BackendDuration.CommitTransaction",
-                  bucket_context_->in_memory());
+                  bucket_context_->GetHistogramSuffix());
     }
 
     // This measurement includes the time it takes to commit to the backing
@@ -967,31 +943,15 @@ Status Transaction::CommitPhaseTwo() {
       case blink::mojom::IDBTransactionMode::ReadOnly:
         base::UmaHistogramMediumTimes(
             "WebCore.IndexedDB.Transaction.ReadOnly.TimeActive2", active_time);
-        if (scheduling_priority_at_last_state_change == 0) {
-          base::UmaHistogramMediumTimes(
-              "WebCore.IndexedDB.Transaction.ReadOnly.TimeActive2.Foreground",
-              active_time);
-        }
         break;
       case blink::mojom::IDBTransactionMode::ReadWrite:
         base::UmaHistogramMediumTimes(
             "WebCore.IndexedDB.Transaction.ReadWrite.TimeActive2", active_time);
-        if (scheduling_priority_at_last_state_change == 0) {
-          base::UmaHistogramMediumTimes(
-              "WebCore.IndexedDB.Transaction.ReadWrite.TimeActive2.Foreground",
-              active_time);
-        }
         break;
       case blink::mojom::IDBTransactionMode::VersionChange:
         base::UmaHistogramMediumTimes(
             "WebCore.IndexedDB.Transaction.VersionChange.TimeActive2",
             active_time);
-        if (scheduling_priority_at_last_state_change == 0) {
-          base::UmaHistogramMediumTimes(
-              "WebCore.IndexedDB.Transaction.VersionChange.TimeActive2."
-              "Foreground",
-              active_time);
-        }
         break;
       default:
         NOTREACHED();
@@ -1013,6 +973,13 @@ Status Transaction::CommitPhaseTwo() {
   locks_receiver_.locks.clear();
 
   if (committed) {
+    if (mode() != blink::mojom::IDBTransactionMode::ReadOnly) {
+      const bool did_sync =
+          mode() == blink::mojom::IDBTransactionMode::VersionChange ||
+          durability_ == blink::mojom::IDBTransactionDurability::Strict;
+      bucket_context_->delegate().on_files_written.Run(did_sync);
+    }
+
     {
       TRACE_EVENT1("IndexedDB",
                    "Transaction::CommitPhaseTwo.TransactionCompleteCallbacks",
@@ -1020,12 +987,6 @@ Status Transaction::CommitPhaseTwo() {
       connection()->callbacks()->OnComplete(*this);
     }
 
-    if (mode() != blink::mojom::IDBTransactionMode::ReadOnly) {
-      const bool did_sync =
-          mode() == blink::mojom::IDBTransactionMode::VersionChange ||
-          durability_ == blink::mojom::IDBTransactionDurability::Strict;
-      bucket_context_->delegate().on_files_written.Run(did_sync);
-    }
     return s;
   }
 
@@ -1060,9 +1021,9 @@ Status Transaction::RunTasks() {
     IDB_RETURN_IF_ERROR(LogStatus(
         backing_store_transaction_->Begin(std::move(locks_receiver_.locks)),
         "IndexedDB.BackingStore.BeginTransaction",
-        bucket_context_->in_memory()));
+        bucket_context_->GetHistogramSuffix()));
     LogDuration(timer.Elapsed(), "IndexedDB.BackendDuration.BeginTransaction",
-                bucket_context_->in_memory());
+                bucket_context_->GetHistogramSuffix());
     backing_store_transaction_begun_ = true;
   }
 
@@ -1091,18 +1052,18 @@ Status Transaction::RunTasks() {
         task.verify ? std::move(task.verify).Run(*this) : Status::OK();
     if (result.ok()) {
       // The operation may invalidate the bucket context handle.
-      bool in_memory = bucket_context_->in_memory();
+      std::string_view histogram_suffix = bucket_context_->GetHistogramSuffix();
       result = std::move(task.operation).Run(this);
       if (!task.operation_name_for_metrics.empty()) {
         LogStatus(result,
                   base::StrCat({"IndexedDB.BackingStore.",
                                 task.operation_name_for_metrics}),
-                  in_memory);
+                  histogram_suffix);
         if (result.ok()) {
           LogDuration(timer.Elapsed(),
                       base::StrCat({"IndexedDB.BackendDuration.",
                                     task.operation_name_for_metrics}),
-                      in_memory);
+                      histogram_suffix);
         }
       }
     }
@@ -1195,7 +1156,7 @@ void Transaction::TimeoutFired() {
   CHECK(!diagnostics_.mojo_receiver_disconnected, base::NotFatalUntil::M145);
   CHECK(task_queue_.empty(), base::NotFatalUntil::M145);
   CHECK(preemptive_task_queue_.empty(), base::NotFatalUntil::M145);
-  CHECK(connection_.get() != nullptr);
+  CHECK(connection_);
 
   const size_t num_transactions_across_all_connections =
       database_->GetNumTransactionsAcrossAllConnections();
@@ -1269,6 +1230,9 @@ void Transaction::SetState(State state) {
         connection_->scheduling_priority();
   } else {
     scheduling_priority_at_last_state_change_ = std::nullopt;
+  }
+  if (!IsAcceptingRequests()) {
+    CloseOpenCursors();
   }
   NotifyOfIdbInternalsRelevantChange();
 }

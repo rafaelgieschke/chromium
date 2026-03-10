@@ -52,12 +52,12 @@ std::optional<float> RunQueryAndGetResult(UkmDatabase* database,
   database->RunReadOnlyQueries(
       std::move(queries),
       base::BindOnce(
-          [](base::OnceClosure quit, std::optional<float>* output, bool success,
-             processing::IndexedTensors tensor) {
-            if (success) {
-              EXPECT_EQ(1u, tensor.size());
-              EXPECT_EQ(1u, tensor.at(0).size());
-              *output = tensor.at(0)[0].float_val;
+          [](base::OnceClosure quit, std::optional<float>* output,
+             std::optional<processing::IndexedTensors> tensor) {
+            if (tensor.has_value()) {
+              EXPECT_EQ(1u, tensor->size());
+              EXPECT_EQ(1u, tensor->at(0).size());
+              *output = tensor->at(0)[0].float_val;
             }
             std::move(quit).Run();
           },
@@ -123,6 +123,7 @@ void UkmDataManagerTestUtils::SetupForProfile(ProfileIOS* profile) {
 }
 
 void UkmDataManagerTestUtils::WillDestroyProfile(ProfileIOS* profile) {
+  history_service_ = nullptr;
   UkmDatabaseClientHolder::SetUkmClientForTesting(profile, nullptr);
 }
 

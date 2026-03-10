@@ -28,6 +28,7 @@
 #import "ios/chrome/browser/shared/public/commands/quick_delete_commands.h"
 #import "ios/chrome/browser/shared/public/commands/tab_grid_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
+#import "ios/chrome/browser/shared/ui/util/color_palette/tab_group_color_palette.h"
 #import "ios/chrome/browser/snapshots/model/snapshot_browser_agent.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_collection_consumer.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/grid/activity_label_data.h"
@@ -260,6 +261,7 @@ using ScopedTabGroupSyncObservation =
 }
 
 - (void)newTabButtonTapped:(id)sender {
+  CHECK(!IsChromeNextIaEnabled());
   // Ignore the tap if the current page is disabled for some reason, by policy
   // for instance. This is to avoid situations where the tap action from an
   // enabled page can make it to a disabled page by releasing the
@@ -343,6 +345,7 @@ using ScopedTabGroupSyncObservation =
     toolbarsConfiguration.newTabButton = YES;
     toolbarsConfiguration.searchButton = YES;
     toolbarsConfiguration.selectTabsButton = [self hasRegularTabs];
+    toolbarsConfiguration.closeOtherTabsButton = [self canCloseOtherTabs];
     toolbarsConfiguration.undoButton = [self canUndoCloseRegularOrInactiveTabs];
   }
 
@@ -429,6 +432,24 @@ using ScopedTabGroupSyncObservation =
 
 - (BOOL)canCloseTabs {
   return _tabsCloser && _tabsCloser->CanCloseTabs();
+}
+
+// Returns YES if "Close Other Tabs" should be enabled.
+- (BOOL)canCloseOtherTabs {
+  if (!IsCloseOtherTabsEnabled()) {
+    return NO;
+  }
+  if (!self.webStateList) {
+    return NO;
+  }
+  int activeIndex = self.webStateList->active_index();
+  if (activeIndex == WebStateList::kInvalidIndex) {
+    return NO;
+  }
+  if (self.webStateList->IsWebStatePinnedAt(activeIndex)) {
+    return self.webStateList->regular_tabs_count() > 0;
+  }
+  return self.webStateList->regular_tabs_count() > 1;
 }
 
 - (BOOL)canUndoCloseTabs {
@@ -560,8 +581,12 @@ using ScopedTabGroupSyncObservation =
     return nil;
   }
 
-  UIColor* groupColor =
-      tab_groups::ColorForTabGroupColorId(tabGroup->GetColor());
+  UIColor* groupColor;
+  if (IsTabGroupColorOnSurfaceEnabled()) {
+    groupColor = [TabGroupColorPalette commonColor:tabGroup->GetColor()];
+  } else {
+    groupColor = tab_groups::ColorForTabGroupColorId(tabGroup->GetColor());
+  }
   return
       [self.regularDelegate facePileProviderForGroupID:collaborationID.value()
                                             groupColor:groupColor];

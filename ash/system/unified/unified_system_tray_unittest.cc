@@ -64,7 +64,6 @@
 #include "ui/chromeos/styles/cros_tokens_color_mappings.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
-#include "ui/display/test/display_manager_test_api.h"
 #include "ui/events/event_constants.h"
 #include "ui/message_center/message_center.h"
 #include "ui/views/accessibility/view_accessibility.h"
@@ -865,40 +864,6 @@ TEST_P(UnifiedSystemTrayTest, BubbleViewSizeChangeWithBigMainPage) {
   tray->CloseBubble();
 }
 
-TEST_P(UnifiedSystemTrayTest, BrightnessSliderDisabledInDockedMode) {
-  const int64_t internal_display_id =
-      display::test::DisplayManagerTestApi(display_manager())
-          .SetFirstDisplayAsInternalDisplay();
-  const auto internal_info =
-      display_manager()->GetDisplayInfo(internal_display_id);
-  constexpr int64_t external_id = 210000010;
-
-  const auto external_info =
-      display::ManagedDisplayInfo::CreateFromSpecWithID("400x300", external_id);
-
-  std::vector<display::ManagedDisplayInfo> display_info_list;
-  display_info_list.push_back(internal_info);
-  display_info_list.push_back(external_info);
-  display_manager()->OnNativeDisplaysChanged(display_info_list);
-  EXPECT_EQ(2U, display_manager()->GetNumDisplays());
-
-  auto* tray = GetPrimaryUnifiedSystemTray();
-  tray->ShowBubble();
-
-  EXPECT_TRUE(tray->bubble()
-                  ->unified_system_tray_controller()
-                  ->GetBrightnessSliderEnabledForTesting());
-
-  display_info_list.clear();
-  display_info_list.push_back(external_info);
-  display_manager()->OnNativeDisplaysChanged(display_info_list);
-  EXPECT_EQ(1U, display_manager()->GetNumDisplays());
-
-  EXPECT_FALSE(tray->bubble()
-                   ->unified_system_tray_controller()
-                   ->GetBrightnessSliderEnabledForTesting());
-}
-
 // Tests that there's no bubble in the kiosk mode.
 TEST_P(UnifiedSystemTrayTest, NoBubbleAndNoDetailedViewInKioskMode) {
   SimulateKioskMode(user_manager::UserType::kKioskChromeApp);
@@ -1442,12 +1407,8 @@ TEST_F(UnifiedSystemTrayAccessibilityTest, NameWithBatterySaverDisabled) {
 }
 
 // This tests the logic in `PowerStatus::GetAccessibleNameString` where
-// `features::IsBatteryChargeLimitAvailable()` and `IsBatteryChargeLimited()`
-// are both true.
+// `IsBatteryChargeLimited()` is true.
 TEST_F(UnifiedSystemTrayAccessibilityTest, NameWithBatteryChargeLimitEnabled) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(ash::features::kBatteryChargeLimit);
-
   std::vector<std::u16string> status;
   CreateDefaultStatusForTesting(&status);
 

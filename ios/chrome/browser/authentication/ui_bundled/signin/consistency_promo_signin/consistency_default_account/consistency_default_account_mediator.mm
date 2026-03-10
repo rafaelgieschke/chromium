@@ -21,7 +21,7 @@
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_utils.h"
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
-#import "ios/chrome/browser/signin/model/avatar_provider.h"
+#import "ios/chrome/browser/signin/model/avatar/avatar_provider.h"
 #import "ios/chrome/browser/signin/model/chrome_account_manager_service.h"
 #import "ios/chrome/browser/signin/model/system_identity.h"
 #import "ios/chrome/grit/ios_branded_strings.h"
@@ -95,30 +95,20 @@ NSString* GetPromoLabelString(
       // No text.
       return nil;
     case signin_metrics::AccessPoint::kStartPage:
-    case signin_metrics::AccessPoint::kNtpLink:
     case signin_metrics::AccessPoint::kMenu:
-    case signin_metrics::AccessPoint::kSupervisedUser:
     case signin_metrics::AccessPoint::kExtensionInstallBubble:
     case signin_metrics::AccessPoint::kExtensions:
     case signin_metrics::AccessPoint::kBookmarkBubble:
     case signin_metrics::AccessPoint::kBookmarkManager:
     case signin_metrics::AccessPoint::kAvatarBubbleSignIn:
     case signin_metrics::AccessPoint::kUserManager:
-    case signin_metrics::AccessPoint::kDevicesPage:
     case signin_metrics::AccessPoint::kFullscreenSigninPromo:
-    case signin_metrics::AccessPoint::kUnknown:
     case signin_metrics::AccessPoint::kPasswordBubble:
     case signin_metrics::AccessPoint::kAutofillDropdown:
     case signin_metrics::AccessPoint::kResigninInfobar:
-    case signin_metrics::AccessPoint::kTabSwitcher:
     case signin_metrics::AccessPoint::kMachineLogon:
-    case signin_metrics::AccessPoint::kGoogleServicesSettings:
-    case signin_metrics::AccessPoint::kSyncErrorCard:
     case signin_metrics::AccessPoint::kForcedSignin:
-    case signin_metrics::AccessPoint::kAccountRenamed:
     case signin_metrics::AccessPoint::kSafetyCheck:
-    case signin_metrics::AccessPoint::kKaleidoscope:
-    case signin_metrics::AccessPoint::kEnterpriseSignoutCoordinator:
     case signin_metrics::AccessPoint::kSigninInterceptFirstRunExperience:
     case signin_metrics::AccessPoint::kSettingsSyncOffRow:
     case signin_metrics::AccessPoint::kPostDeviceRestoreSigninPromo:
@@ -129,7 +119,6 @@ NSString* GetPromoLabelString(
     case signin_metrics::AccessPoint::kReadingList:
     case signin_metrics::AccessPoint::kReauthInfoBar:
     case signin_metrics::AccessPoint::kAccountConsistencyService:
-    case signin_metrics::AccessPoint::kSearchCompanion:
     case signin_metrics::AccessPoint::kSaveToDriveIos:
     case signin_metrics::AccessPoint::kSaveToPhotosIos:
     case signin_metrics::AccessPoint::kChromeSigninInterceptBubble:
@@ -139,7 +128,6 @@ NSString* GetPromoLabelString(
     case signin_metrics::AccessPoint::kSigninChoiceRemembered:
     case signin_metrics::AccessPoint::kProfileMenuSignoutConfirmationPrompt:
     case signin_metrics::AccessPoint::kSettingsSignoutConfirmationPrompt:
-    case signin_metrics::AccessPoint::kNtpIdentityDisc:
     case signin_metrics::AccessPoint::kOidcRedirectionInterception:
     case signin_metrics::AccessPoint::kWebauthnModalDialog:
     case signin_metrics::AccessPoint::kAvatarBubbleSignInWithSyncPromo:
@@ -169,6 +157,12 @@ NSString* GetPromoLabelString(
     case signin_metrics::AccessPoint::kNtpFeaturePromo:
     case signin_metrics::AccessPoint::kEnterpriseDialogAfterSigninInterception:
     case signin_metrics::AccessPoint::kCredentialExchangeImport:
+    case signin_metrics::AccessPoint::kSetSyncConsentFromSyncInternals:
+    case signin_metrics::AccessPoint::kIosChromeWebView:
+    case signin_metrics::AccessPoint::kAshUserSessionManager:
+    case signin_metrics::AccessPoint::kAshChromeSessionManager:
+    case signin_metrics::AccessPoint::kAvatarPillExpandPromo:
+    case signin_metrics::AccessPoint::kSearchAIModeBubble:
       // Nothing prevents instantiating ConsistencyDefaultAccountViewController
       // with an arbitrary entry point, API-wise. In doubt, no label is a good,
       // generic default that fits all entry points.
@@ -356,14 +350,10 @@ NSString* GetPromoLabelString(
 #pragma mark -  IdentityManagerObserver
 
 - (void)onAccountsOnDeviceChanged {
-  if (base::FeatureList::IsEnabled(switches::kEnableIdentityInAuthError)) {
-    if (_accountManagerService &&
-        !_accountManagerService->IsValidIdentity(self.selectedIdentity)) {
-      // The currently selected identity is not valid anymore. Let’s select the
-      // default identity instead.
-      [self selectDefaultIdentity];
-    }
-  } else {
+  if (_accountManagerService &&
+      !_accountManagerService->IsValidIdentity(self.selectedIdentity.gaiaId)) {
+    // The currently selected identity is not valid anymore. Let’s select the
+    // default identity instead.
     [self selectDefaultIdentity];
   }
 }

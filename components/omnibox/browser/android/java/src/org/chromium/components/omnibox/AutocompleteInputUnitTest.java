@@ -6,21 +6,35 @@ package org.chromium.components.omnibox;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.verify;
 
+import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.Mock;
+import org.mockito.junit.MockitoJUnit;
+import org.mockito.junit.MockitoRule;
 
+import org.chromium.base.Callback;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.components.metrics.OmniboxEventProtos.OmniboxEventProto.PageClassification;
+import org.chromium.components.omnibox.ToolModeProto.ToolMode;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
-/** Tests for {@link AutocompleteMediator}. */
+/** Tests for {@link AutocompleteInput}. */
 @RunWith(BaseRobolectricTestRunner.class)
 public class AutocompleteInputUnitTest {
+    @Rule public final MockitoRule mMockitoRule = MockitoJUnit.rule();
+
+    @Mock private Callback<Integer> mToolModeCallback;
 
     private final AutocompleteInput mInput = new AutocompleteInput();
 
@@ -38,6 +52,16 @@ public class AutocompleteInputUnitTest {
                     mInput.isInCacheableContext(),
                     allowedPageClasses.contains(pageClass.getNumber()));
         }
+    }
+
+    @Test
+    public void testReset_clearsKeyword() {
+        AutocompleteInput input = new AutocompleteInput();
+        input.setSiteSearchData(new AutocompleteInput.SiteSearchData("history", "Search history"));
+        assertEquals("history", input.getSiteSearchData().keyword);
+
+        input.reset();
+        assertEquals(null, input.getSiteSearchData());
     }
 
     @Test
@@ -95,7 +119,7 @@ public class AutocompleteInputUnitTest {
         assertEquals("", mInput.getUserText());
 
         mInput.setUserText(null);
-        assertEquals(null, mInput.getUserText());
+        assertEquals("", mInput.getUserText());
     }
 
     @Test
@@ -207,6 +231,45 @@ public class AutocompleteInputUnitTest {
     }
 
     @Test
+    public void getPageClassification_forFuseboxRequests() {
+        Map<Integer, Integer> testCases =
+                Map.of(
+                        // NTP
+                        PageClassification.INSTANT_NTP_WITH_OMNIBOX_AS_STARTING_FOCUS_VALUE,
+                        PageClassification.NTP_OMNIBOX_COMPOSEBOX_VALUE,
+                        // SRP
+                        PageClassification.SEARCH_RESULT_PAGE_NO_SEARCH_TERM_REPLACEMENT_VALUE,
+                        PageClassification.SRP_OMNIBOX_COMPOSEBOX_VALUE,
+                        // Web
+                        PageClassification.OTHER_VALUE, //
+                        PageClassification.OTHER_OMNIBOX_COMPOSEBOX_VALUE);
+
+        for (var requestType :
+                List.of(
+                        AutocompleteRequestType.AI_MODE,
+                        AutocompleteRequestType.IMAGE_GENERATION)) {
+            mInput.setRequestType(requestType);
+            for (var givePageClass : PageClassification.values()) {
+                Integer wantPageClass = testCases.getOrDefault(givePageClass.getNumber(), null);
+                String message =
+                        String.format(
+                                "Unexpected results in mode %d for page class %s",
+                                requestType, givePageClass.name());
+
+                if (wantPageClass != null) {
+                    // Page classes known to Fusebox.
+                    mInput.setPageClassification(givePageClass.getNumber());
+                    assertEquals(message, (int) wantPageClass, mInput.getPageClassification());
+                } else {
+                    // These page classes not recognized by Fusebox.
+                    mInput.setPageClassification(givePageClass.getNumber());
+                    assertThrows(message, AssertionError.class, mInput::getPageClassification);
+                }
+            }
+        }
+    }
+
+    @Test
     public void setUserText_edgeCases() {
         // Test setting text to exactly one space
         mInput.setUserText(" ");
@@ -272,5 +335,34 @@ public class AutocompleteInputUnitTest {
         assertTrue(mInput.isInCacheableContext());
         assertTrue(mInput.isInZeroPrefixContext());
         assertFalse(mInput.allowExactKeywordMatch());
+    }
+
+    @Test
+    public void testGetToolMode() {
+        assertEquals(
+                ToolMode.TOOL_MODE_UNSPECIFIED_VALUE,
+                mInput.getToolModeSupplier().get().intValue());
+        mInput.setRequestType(AutocompleteRequestType.IMAGE_GENERATION);
+        assertEquals(
+                ToolMode.TOOL_MODE_IMAGE_GEN_VALUE, mInput.getToolModeSupplier().get().intValue());
+        mInput.setHasAttachments(true);
+        assertEquals(
+                ToolMode.TOOL_MODE_IMAGE_GEN_UPLOAD_VALUE,
+                mInput.getToolModeSupplier().get().intValue());
+    }
+
+    @Test
+    public void testToolModeObservations() {
+        mInput.getToolModeSupplier().addSyncObserverAndCallIfNonNull(mToolModeCallback);
+        verify(mToolModeCallback).onResult(ToolMode.TOOL_MODE_UNSPECIFIED_VALUE);
+
+        mInput.setRequestType(AutocompleteRequestType.IMAGE_GENERATION);
+        verify(mToolModeCallback).onResult(ToolMode.TOOL_MODE_IMAGE_GEN_VALUE);
+
+        mInput.setHasAttachments(true);
+        verify(mToolModeCallback).onResult(ToolMode.TOOL_MODE_IMAGE_GEN_UPLOAD_VALUE);
+
+        mInput.reset();
+        verify(mToolModeCallback, atLeastOnce()).onResult(ToolMode.TOOL_MODE_UNSPECIFIED_VALUE);
     }
 }

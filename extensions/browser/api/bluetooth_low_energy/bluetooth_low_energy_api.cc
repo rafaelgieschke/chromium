@@ -8,7 +8,6 @@
 
 #include <algorithm>
 #include <iterator>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -35,6 +34,7 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/switches.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
 
 using content::BrowserContext;
 using content::BrowserThread;
@@ -631,7 +631,7 @@ void BluetoothLowEnergyGetCharacteristicsFunction::DoWork() {
   // Manually construct the result instead of using
   // apibtle::GetCharacteristics::Result::Create as it doesn't convert lists of
   // enums correctly.
-  base::Value::List result;
+  base::ListValue result;
   for (apibtle::Characteristic& characteristic : characteristic_list) {
     result.Append(apibtle::CharacteristicToValue(characteristic));
   }
@@ -733,7 +733,7 @@ void BluetoothLowEnergyGetDescriptorsFunction::DoWork() {
   // Manually construct the result instead of using
   // apibtle::GetDescriptors::Result::Create as it doesn't convert lists of
   // enums correctly.
-  base::Value::List result;
+  base::ListValue result;
   for (apibtle::Descriptor& descriptor : descriptor_list) {
     result.Append(apibtle::DescriptorToValue(descriptor));
   }
@@ -1011,7 +1011,7 @@ void BluetoothLowEnergyAdvertisementFunction::RemoveAdvertisement(
   advertisements_manager_->Remove(extension_id(), advertisement_id);
 }
 
-const std::unordered_set<int>*
+const absl::flat_hash_set<int>*
 BluetoothLowEnergyAdvertisementFunction::GetAdvertisementIds() {
   return advertisements_manager_->GetResourceIds(extension_id());
 }
@@ -1188,7 +1188,7 @@ void BluetoothLowEnergyResetAdvertisingFunction::DoWork() {
     return;
   }
 
-  const std::unordered_set<int>* advertisement_ids = GetAdvertisementIds();
+  const absl::flat_hash_set<int>* advertisement_ids = GetAdvertisementIds();
   if (!advertisement_ids || advertisement_ids->empty()) {
     EmptyResponse();
     return;
@@ -1196,7 +1196,7 @@ void BluetoothLowEnergyResetAdvertisingFunction::DoWork() {
 
   // Copy the hash set, as RemoveAdvertisement can change advertisement_ids
   // while we are iterating over it.
-  std::unordered_set<int> advertisement_ids_tmp = *advertisement_ids;
+  absl::flat_hash_set<int> advertisement_ids_tmp = *advertisement_ids;
   for (int advertisement_id : advertisement_ids_tmp) {
     RemoveAdvertisement(advertisement_id);
   }

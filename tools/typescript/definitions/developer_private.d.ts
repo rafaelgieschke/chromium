@@ -205,7 +205,6 @@ declare global {
       export interface Permissions {
         simplePermissions: chrome.developerPrivate.Permission[];
         runtimeHostPermissions?: RuntimeHostPermissions;
-        canAccessSiteData: boolean;
       }
 
       export interface ExtensionInfo {
@@ -382,9 +381,7 @@ declare global {
       }
 
       export interface RequestFileSourceResponse {
-        highlight: string;
-        beforeHighlight: string;
-        afterHighlight: string;
+        source?: ErrorFileSource;
         title: string;
         message: string;
       }

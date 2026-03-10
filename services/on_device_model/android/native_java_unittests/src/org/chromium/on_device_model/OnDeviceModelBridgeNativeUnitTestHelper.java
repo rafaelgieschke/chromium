@@ -97,6 +97,24 @@ public class OnDeviceModelBridgeNativeUnitTestHelper {
         }
 
         @Override
+        public void getSizeInTokens(InputPiece[] inputPieces, SessionResponder responder) {
+            int tokenSize = 0;
+            for (InputPiece inputPiece : inputPieces) {
+                switch (inputPiece.which()) {
+                    case InputPiece.Tag.Text:
+                        tokenSize += inputPiece.getText().length();
+                        break;
+                }
+            }
+            final int finalTokenSize = tokenSize;
+            if (mCallbackOnDifferentThread) {
+                new Thread(() -> responder.onSizeInTokensResult(finalTokenSize)).start();
+            } else {
+                responder.onSizeInTokensResult(finalTokenSize);
+            }
+        }
+
+        @Override
         public void onNativeDestroyed() {
             mNativeDestroyed = true;
         }
@@ -137,6 +155,11 @@ public class OnDeviceModelBridgeNativeUnitTestHelper {
         }
 
         @Override
+        public void checkStatus(DownloaderResponder responder) {
+            mResponder = responder;
+        }
+
+        @Override
         public void onNativeDestroyed() {
             mNativeDestroyed = true;
         }
@@ -161,6 +184,16 @@ public class OnDeviceModelBridgeNativeUnitTestHelper {
                             .start();
                 } else {
                     mResponder.onUnavailable(reason);
+                }
+            }
+        }
+
+        public void onStatusCheckResult(@ModelStatus int modelStatus) {
+            if (!mNativeDestroyed) {
+                if (mCallbackOnDifferentThread) {
+                    new Thread(() -> mResponder.onStatusCheckResult(modelStatus)).start();
+                } else {
+                    mResponder.onStatusCheckResult(modelStatus);
                 }
             }
         }
@@ -226,6 +259,31 @@ public class OnDeviceModelBridgeNativeUnitTestHelper {
         assertEquals(requirePersistentMode, downloaderBackend.mParams.requirePersistentMode);
     }
 
+    /**
+     * Sets a default AiCoreFactory that uses upstream (dummy) implementations. This factory returns
+     * AiCoreSessionBackendUpstreamImpl and AiCoreModelDownloaderBackendUpstreamImpl which report
+     * API_NOT_AVAILABLE. Use this for tests that need to verify behavior when MLKit is not
+     * available.
+     */
+    @CalledByNative
+    public static void setDefaultAiCoreFactory() {
+        ServiceLoaderUtil.setInstanceForTesting(
+                AiCoreFactory.class,
+                new AiCoreFactory() {
+                    @Override
+                    public AiCoreSessionBackend createSessionBackend(
+                            ModelExecutionFeature feature, SessionParams params) {
+                        return new AiCoreSessionBackendUpstreamImpl();
+                    }
+
+                    @Override
+                    public AiCoreModelDownloaderBackend createModelDownloader(
+                            ModelExecutionFeature feature, DownloaderParams params) {
+                        return new AiCoreModelDownloaderBackendUpstreamImpl();
+                    }
+                });
+    }
+
     @CalledByNative
     public void setMockAiCoreFactory() {
         mMockAiCoreFactory = new MockAiCoreFactory();
@@ -265,5 +323,10 @@ public class OnDeviceModelBridgeNativeUnitTestHelper {
     @CalledByNative
     public void triggerDownloaderOnUnavailable(int reason) {
         mMockAiCoreFactory.mDownloaderBackend.onUnavailable(reason);
+    }
+
+    @CalledByNative
+    public void triggerDownloaderOnStatusCheckResult(int modelStatus) {
+        mMockAiCoreFactory.mDownloaderBackend.onStatusCheckResult(modelStatus);
     }
 }

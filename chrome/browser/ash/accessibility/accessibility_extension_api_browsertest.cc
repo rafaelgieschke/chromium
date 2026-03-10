@@ -10,6 +10,7 @@
 #include "ash/shell.h"
 #include "ash/system/accessibility/facegaze_bubble_controller.h"
 #include "ash/system/accessibility/facegaze_bubble_view.h"
+#include "ash/webui/settings/public/constants/routes_util.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/test/scoped_feature_list.h"
@@ -20,10 +21,8 @@
 #include "chrome/browser/ash/system_web_apps/system_web_app_manager.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/webui_url_constants.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -47,9 +46,9 @@ using ContextType = extensions::browser_test_util::ContextType;
 
 class AccessibilityPrivateApiTest
     : public extensions::ExtensionApiTest,
-      public testing::WithParamInterface<ApiTestConfig> {
+      public testing::WithParamInterface<ContextType> {
  public:
-  AccessibilityPrivateApiTest() : ExtensionApiTest(GetParam().context_type()) {}
+  AccessibilityPrivateApiTest() : ExtensionApiTest(GetParam()) {}
   ~AccessibilityPrivateApiTest() override = default;
   AccessibilityPrivateApiTest& operator=(const AccessibilityPrivateApiTest&) =
       delete;
@@ -72,13 +71,7 @@ class AccessibilityPrivateApiTest
   }
 
   [[nodiscard]] bool RunSubtest(const char* subtest) {
-    std::string path;
-    if (GetParam().version() == ManifestVersion::kTwo) {
-      path = "accessibility_private";
-    } else {
-      path = "accessibility_private/mv3";
-    }
-
+    std::string path = "accessibility_private";
     return RunExtensionTest(path.c_str(), {.custom_arg = subtest});
   }
 
@@ -138,8 +131,9 @@ IN_PROC_BROWSER_TEST_P(AccessibilityPrivateApiTest, OpenSettingsSubpage) {
 
   EXPECT_TRUE(WaitForLoadStop(web_contents));
 
-  EXPECT_EQ(GURL(chrome::GetOSSettingsUrl("manageAccessibility/tts")),
-            web_contents->GetLastCommittedURL());
+  EXPECT_EQ(
+      GURL(chromeos::settings::GetOSSettingsUrl("manageAccessibility/tts")),
+      web_contents->GetLastCommittedURL());
 }
 
 IN_PROC_BROWSER_TEST_P(AccessibilityPrivateApiTest,
@@ -543,41 +537,16 @@ IN_PROC_BROWSER_TEST_P(AccessibilityPrivateApiTest, UpdateFaceGazeBubble) {
   ASSERT_TRUE(result_catcher.GetNextResult()) << result_catcher.message();
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    PersistentBackground,
-    AccessibilityPrivateApiTest,
-    ::testing::Values(ApiTestConfig(ContextType::kPersistentBackground,
-                                    ManifestVersion::kTwo)));
-INSTANTIATE_TEST_SUITE_P(
-    PersistentBackground,
-    AccessibilityPrivateApiFeatureDisabledTest,
-    ::testing::Values(ApiTestConfig(ContextType::kPersistentBackground,
-                                    ManifestVersion::kTwo)));
-INSTANTIATE_TEST_SUITE_P(
-    PersistentBackground,
-    AccessibilityPrivateApiFeatureEnabledTest,
-    ::testing::Values(ApiTestConfig(ContextType::kPersistentBackground,
-                                    ManifestVersion::kTwo)));
-INSTANTIATE_TEST_SUITE_P(
-    ServiceWorker,
-    AccessibilityPrivateApiTest,
-    ::testing::Values(ApiTestConfig(ContextType::kServiceWorker,
-                                    ManifestVersion::kTwo)));
-INSTANTIATE_TEST_SUITE_P(
-    ServiceWorker,
-    AccessibilityPrivateApiFeatureDisabledTest,
-    ::testing::Values(ApiTestConfig(ContextType::kServiceWorker,
-                                    ManifestVersion::kTwo)));
-INSTANTIATE_TEST_SUITE_P(
-    ServiceWorker,
-    AccessibilityPrivateApiFeatureEnabledTest,
-    ::testing::Values(ApiTestConfig(ContextType::kServiceWorker,
-                                    ManifestVersion::kTwo)));
+INSTANTIATE_TEST_SUITE_P(ServiceWorker,
+                         AccessibilityPrivateApiTest,
+                         ::testing::Values(ContextType::kServiceWorker));
 
-INSTANTIATE_TEST_SUITE_P(
-    ManifestV3,
-    AccessibilityPrivateApiTest,
-    ::testing::Values(ApiTestConfig(ContextType::kNone,
-                                    ManifestVersion::kThree)));
+INSTANTIATE_TEST_SUITE_P(ServiceWorker,
+                         AccessibilityPrivateApiFeatureDisabledTest,
+                         ::testing::Values(ContextType::kServiceWorker));
+
+INSTANTIATE_TEST_SUITE_P(ServiceWorker,
+                         AccessibilityPrivateApiFeatureEnabledTest,
+                         ::testing::Values(ContextType::kServiceWorker));
 
 }  // namespace ash

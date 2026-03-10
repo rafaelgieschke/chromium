@@ -9,7 +9,6 @@
 <translation id="101823271612280837">已停止錄製。無法在平板模式下使用遊戲資訊主頁。</translation>
 <translation id="1024364763893396229">儲存 <ph name="NAME" /></translation>
 <translation id="1032891413405719768">觸控筆電量偏低</translation>
-<translation id="1036073649888683237">如要管理通知，請前往「設定」應用程式</translation>
 <translation id="1036348656032585052">關閉</translation>
 <translation id="1037492556044956303">已新增 <ph name="DEVICE_NAME" /></translation>
 <translation id="1038106730571050514">顯示搜尋建議</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">第 <ph name="INDEX" /> 張近期相片，共 <ph name="TOTAL_COUNT" /> 張。</translation>
 <translation id="2201687081523799384">收合 Google Tasks</translation>
 <translation id="2208323208084708176">整合桌面模式</translation>
-<translation id="2210311543574621570">按住 Ctrl + V 鍵即可查看剪貼簿。你可以在 chrome://flags 中停用 #clipboard-history-longpress 旗標，關閉這個快速鍵。</translation>
 <translation id="2215920961700443347">沒有網際網路連線。請連線到網際網路，然後再試一次。</translation>
 <translation id="2222841058024245321">桌面 7</translation>
 <translation id="2223384056430485343">在分割畫面中</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">安裝應用程式</translation>
 <translation id="2482878487686419369">通知</translation>
 <translation id="2484513351006226581">按下 <ph name="KEYBOARD_SHORTCUT" />可切換鍵盤配置。</translation>
+<translation id="2485422356828889247">解除安裝</translation>
 <translation id="2486214324139475545">「<ph name="DESK_NAME" />」預覽。使用中的桌面。</translation>
 <translation id="2486405091093637109">「<ph name="DISPLAY_NAME" />」的解析度已變更為 <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz)。如未在 <ph name="TIMEOUT_SECONDS" />內確認，系統將還原先前的設定。</translation>
 <translation id="2487915095798731898">加入</translation>
@@ -938,7 +937,7 @@
 <translation id="4193857202545160520">顯示點擊次數和鍵盤快速鍵</translation>
 <translation id="4193969623755915875">在「探索」應用程式中使用<ph name="NEW_SHORTCUT" />開啟「說明」。</translation>
 <translation id="4195579532193195633">目前版本 <ph name="VERSION_NAME" /> (<ph name="OFFICIAL_STATUS" />) <ph name="CHANNEL_NAME" /> <ph name="PROCESSOR_VARIATION" /></translation>
-<translation id="4195814663415092787">繼續瀏覽上次開啟的網頁</translation>
+<translation id="4195814663415092787">繼續先前進度</translation>
 <translation id="4195877955194704651">自動點擊按鈕</translation>
 <translation id="4197790712631116042">關閉</translation>
 <translation id="4201033867194214117">「<ph name="FEATURE_NAME" />」無法使用。</translation>
@@ -2191,7 +2190,6 @@
 <translation id="8241650983304689286">將分頁加入新的分割畫面</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />，訊號強度 <ph name="SIGNAL_STRENGTH" />，手機電量：<ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">顯示所有 Google 雲端硬碟內容</translation>
-<translation id="8257510091797044096">設定裝置</translation>
 <translation id="8261506727792406068">刪除</translation>
 <translation id="8262312463845990408">切換播放</translation>
 <translation id="8268302343625273732">查看 Google Classroom 中的所有作業</translation>

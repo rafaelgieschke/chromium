@@ -116,7 +116,7 @@ class PasswordsPrivateDelegateImpl
       content::WebContents* web_contents) override;
   api::passwords_private::ExportProgressStatus GetExportProgressStatus()
       override;
-  bool IsAccountStorageEnabled() override;
+  bool IsAccountStorageActive() override;
   // TODO(crbug.com/40138722): Mimic the signature in PasswordFeatureManager.
   void SetAccountStorageEnabled(bool enabled,
                                 content::WebContents* web_contents) override;
@@ -130,6 +130,8 @@ class PasswordsPrivateDelegateImpl
   bool UnmuteInsecureCredential(
       const api::passwords_private::PasswordUiEntry& credential) override;
   void StartPasswordCheck(StartPasswordCheckCallback callback) override;
+  void StartPasswordChange(int credential_id,
+                           content::WebContents* web_contents) override;
   api::passwords_private::PasswordCheckStatus GetPasswordCheckStatus() override;
   password_manager::InsecureCredentialsManager* GetInsecureCredentialsManager()
       override;

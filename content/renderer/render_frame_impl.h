@@ -72,6 +72,7 @@
 #include "services/network/public/mojom/url_response_head.mojom-forward.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/mojom/interface_provider.mojom.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
 #include "third_party/blink/public/common/frame/frame_owner_element_type.h"
@@ -441,7 +442,6 @@ class CONTENT_EXPORT RenderFrameImpl
       const blink::DocumentToken& document_token,
       const base::UnguessableToken& devtools_navigation_token,
       const base::Uuid& base_auction_nonce,
-      const std::optional<network::ParsedPermissionsPolicy>& permissions_policy,
       blink::mojom::PolicyContainerPtr policy_container,
       mojo::PendingRemote<blink::mojom::CodeCacheHost> code_cache_host,
       mojo::PendingRemote<blink::mojom::CodeCacheHost>
@@ -919,7 +919,7 @@ class CONTENT_EXPORT RenderFrameImpl
   // MHTML to the handle has been completed in the file thread.
   void OnWriteMHTMLComplete(
       SerializeAsMHTMLCallback callback,
-      std::unordered_set<std::string> serialized_resources_uri_digests,
+      absl::flat_hash_set<std::string> serialized_resources_uri_digests,
       mojom::MhtmlSaveStatus save_status);
 
   // Requests that the browser process navigates to |url|.
@@ -961,10 +961,13 @@ class CONTENT_EXPORT RenderFrameImpl
 
   // Sends a `BeginNavigation()` mojo IPC via the mojom::FrameHost interface to
   // the browser.
-  void BeginNavigationInternal(std::unique_ptr<blink::WebNavigationInfo> info,
-                               bool is_history_navigation_in_new_child_frame,
-                               base::TimeTicks renderer_before_unload_start,
-                               base::TimeTicks renderer_before_unload_end);
+  void BeginNavigationInternal(
+      std::unique_ptr<blink::WebNavigationInfo> info,
+      bool is_history_navigation_in_new_child_frame,
+      base::TimeTicks renderer_before_unload_start,
+      base::TimeTicks renderer_before_unload_end,
+      base::TimeTicks before_unload_dialog_opened_time,
+      base::TimeTicks before_unload_dialog_closed_time);
 
   // TODO(crbug.com/40546539): When creating a new browsing context, Blink
   // always populates it with an initial empty document synchronously, as
@@ -1257,7 +1260,13 @@ class CONTENT_EXPORT RenderFrameImpl
   base::flat_map<std::string, bool> history_subframe_unique_names_;
 
   // All the registered observers.
-  base::ObserverList<RenderFrameObserver>::Unchecked observers_;
+  // TODO(crbug.com/484371187): Investigate if reentrancy can be removed.
+  base::ObserverList<
+      RenderFrameObserver,
+      /*check_empty=*/false,
+      /*reentrancy=*/
+      base::ObserverListReentrancyPolicy::kAllowReentrancyUntriaged>::Unchecked
+      observers_;
 
   // The callback to send the feature usage to the browser process through
   // PageLoadMetrics.
@@ -1593,6 +1602,11 @@ class CONTENT_EXPORT RenderFrameImpl
   // Used by DevTools to defer async client navigations for the duration of
   // handling a CDP command.
   ClientNavigationThrottler client_navigation_throttler_;
+
+  // Set to true if the RenderFrameImpl committed an initial WebUI, which is a
+  // subset of topchrome WebUIs that are loaded and shown from the initial
+  // browser startup, e.g. the reload button.
+  bool is_initial_webui_ = false;
 
   base::WeakPtrFactory<RenderFrameImpl> weak_factory_{this};
 };

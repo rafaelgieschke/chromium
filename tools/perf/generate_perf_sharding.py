@@ -119,9 +119,7 @@ def _AddBuilderPlatformSelectionArgs(parser):
 
 
 def _DumpJson(data, output_path):
-  with open(output_path, 'w',
-            newline='') if sys.version_info.major == 3 else open(
-                output_path, 'wb') as output_file:
+  with open(output_path, 'w', newline='') as output_file:
     json.dump(data, output_file, indent=4, separators=(',', ': '))
     output_file.write('\n')
 
@@ -291,7 +289,7 @@ def _ParseBenchmarks(shard_map_path):
     if executables := benchmarks_in_shard.get('executables'):
       all_benchmarks |= set(executables.keys())
     if crossbench := benchmarks_in_shard.get('crossbench'):
-      all_benchmarks |= {b['display_name'] for b in crossbench.values()}
+      all_benchmarks |= set(crossbench.keys())
   return frozenset(all_benchmarks)
 
 

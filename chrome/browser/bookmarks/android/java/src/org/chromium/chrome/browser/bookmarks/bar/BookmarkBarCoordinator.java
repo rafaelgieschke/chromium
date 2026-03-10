@@ -28,8 +28,8 @@ import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.chromium.base.Callback;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.base.supplier.NullableObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.bookmarks.BookmarkManagerOpener;
@@ -143,11 +143,11 @@ public class BookmarkBarCoordinator
             ResourceManager resourceManager,
             BrowserControlsStateProvider browserControlsStateProvider,
             Callback<@Nullable Void> heightChangeCallback,
-            ObservableSupplier<Profile> profileSupplier,
+            MonotonicObservableSupplier<Profile> profileSupplier,
             ViewStub viewStub,
             @Nullable Tab currentTab,
             BookmarkOpener bookmarkOpener,
-            ObservableSupplier<BookmarkManagerOpener> bookmarkManagerOpenerSupplier,
+            MonotonicObservableSupplier<BookmarkManagerOpener> bookmarkManagerOpenerSupplier,
             TopControlsStacker topControlsStacker,
             NullableObservableSupplier<Tab> currentTabSupplier,
             TopUiThemeColorProvider topUiThemeColorProvider) {
@@ -748,8 +748,8 @@ public class BookmarkBarCoordinator
         private final Runnable mPostAnimationRunnable;
         private boolean mIsDestroyed;
 
-        BookmarkButtonItemAnimator(Runnable mPostAnimationRunnable) {
-            this.mPostAnimationRunnable = mPostAnimationRunnable;
+        BookmarkButtonItemAnimator(Runnable postAnimationRunnable) {
+            mPostAnimationRunnable = postAnimationRunnable;
         }
 
         @Override

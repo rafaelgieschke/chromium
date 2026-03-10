@@ -5,7 +5,9 @@
 #include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_scheduler_impl.h"
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -30,6 +32,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "cc/base/features.h"
 #include "components/performance_manager/scenario_api/performance_scenario_observer.h"
 #include "components/performance_manager/scenario_api/performance_scenario_test_support.h"
 #include "components/performance_manager/scenario_api/performance_scenarios.h"
@@ -131,6 +134,7 @@ class MockWidgetSchedulerDelegate : public WidgetScheduler::Delegate {
 
   MOCK_METHOD(void, RequestBeginMainFrameNotExpected, (bool));
   MOCK_METHOD(bool, AreMainFramesPausedOrDeferred, (), (const, override));
+  MOCK_METHOD(void, RequestEfficientScheduling, (bool), (const, override));
 };
 
 }  // namespace
@@ -360,10 +364,6 @@ class MainThreadSchedulerImplForTest : public MainThreadSchedulerImpl {
       std::move(on_microtask_checkpoint_).Run();
   }
 
-  void SetCurrentUseCase(UseCase use_case) {
-    SetCurrentUseCaseForTest(use_case);
-  }
-
   UseCase ComputeCurrentUseCase(base::TimeTicks now,
                                 base::TimeDelta* expected_use_case_duration)
       const override EXCLUSIVE_LOCKS_REQUIRED(any_thread_lock_) {
@@ -412,6 +412,8 @@ class MainThreadSchedulerImplTest : public testing::Test {
   ~MainThreadSchedulerImplTest() override = default;
 
   void SetUp() override {
+    // Used to reset the thread type, since tests can change it.
+    thread_type_ = base::PlatformThread::GetCurrentThreadType();
     CreateTestTaskRunner();
     Initialize(std::make_unique<MainThreadSchedulerImplForTest>(
         base::sequence_manager::SequenceManagerForTest::Create(
@@ -422,7 +424,8 @@ class MainThreadSchedulerImplTest : public testing::Test {
                 .Build())));
 
 #if BUILDFLAG(IS_ANDROID)
-    if (base::FeatureList::IsEnabled(kRestrictMainThreadBigCoreAffinity)) {
+    if (base::IsEligibleForBigCoreAffinityChange() &&
+        base::FeatureList::IsEnabled(kRestrictMainThreadBigCoreAffinity)) {
       // Checking early, as the forced update below will reset it.
       EXPECT_TRUE(scheduler_->main_thread_only_for_testing().affinity_boost);
     }
@@ -432,8 +435,6 @@ class MainThreadSchedulerImplTest : public testing::Test {
     scheduler_->update_policy_count_ = 0;
     scheduler_->use_cases_.clear();
     scheduler_->use_case_override_ = std::nullopt;
-    // Used to reset the thread type, since tests can change it.
-    thread_type_ = base::PlatformThread::GetCurrentThreadType();
   }
 
   void CreateTestTaskRunner() {
@@ -1005,6 +1006,15 @@ class MainThreadSchedulerImplTest : public testing::Test {
           NOTREACHED();
       }
     }
+  }
+
+  void SetUseCaseAndUpdatePolicy(UseCase use_case) {
+    scheduler_->use_case_override_ = use_case;
+    scheduler_->UpdatePolicyForTesting();
+  }
+
+  float BusyLoopScaleFactor() const {
+    return scheduler_->main_thread_only().busy_loop_scale_factor;
   }
 
  protected:
@@ -4459,10 +4469,6 @@ INSTANTIATE_TEST_SUITE_P(
     });
 
 TEST_F(MainThreadSchedulerImplTest, ThreadPriorityUseCaseChangesScrolling) {
-  // The initial thread type outside of tests is kDisplayCritical.
-  base::PlatformThread::SetCurrentThreadType(
-      base::ThreadType::kDisplayCritical);
-
   base::test::ScopedFeatureList feature_list;
   feature_list.InitAndEnableFeature(kLowerPriorityForCompositorGestures);
 
@@ -4476,7 +4482,7 @@ TEST_F(MainThreadSchedulerImplTest, ThreadPriorityUseCaseChangesScrolling) {
   test_task_runner_->AdvanceMockTickClock(base::Seconds(1));
   ForceUpdatePolicyAndGetCurrentUseCase();
   EXPECT_EQ(base::PlatformThread::GetCurrentThreadType(),
-            base::ThreadType::kDisplayCritical);
+            base::ThreadType::kPresentation);
 
   // Compositor gesture, lower priority.
   SimulateCompositorGestureStart(TouchEventPolicy::kDontSendTouchStart);
@@ -4484,7 +4490,7 @@ TEST_F(MainThreadSchedulerImplTest, ThreadPriorityUseCaseChangesScrolling) {
   EXPECT_EQ(base::PlatformThread::GetCurrentThreadType(),
             base::ThreadType::kDefault);
 
-  // As soon as there is another use case, go back to kDisplayCritical.
+  // As soon as there is another use case, go back to kPresentation.
   SimulateMainThreadGestureStart(
       TouchEventPolicy::kSendTouchStart,
       blink::WebInputEvent::Type::kGestureScrollBegin);
@@ -4494,15 +4500,11 @@ TEST_F(MainThreadSchedulerImplTest, ThreadPriorityUseCaseChangesScrolling) {
   EXPECT_NE(ForceUpdatePolicyAndGetCurrentUseCase(),
             UseCase::kCompositorGesture);
   EXPECT_EQ(base::PlatformThread::GetCurrentThreadType(),
-            base::ThreadType::kDisplayCritical);
+            base::ThreadType::kPresentation);
 }
 
 TEST_F(MainThreadSchedulerImplTest,
        ThreadPriorityUseCaseChangesMainThreadScrolling) {
-  // The initial thread type outside of tests is kDisplayCritical.
-  base::PlatformThread::SetCurrentThreadType(
-      base::ThreadType::kDisplayCritical);
-
   base::test::ScopedFeatureList feature_list;
   feature_list.InitAndEnableFeature(kLowerPriorityForCompositorGestures);
 
@@ -4524,6 +4526,9 @@ class MainThreadSchedulerImplAffinityBoostTest
  protected:
   void SetUp() override {
     MainThreadSchedulerImplTest::SetUp();
+    // Need at least 3 different core types to become eligible.
+    base::SetMaxFrequencyPerProcessorOverrideForTesting(
+        &fake_cpu_max_frequencies);
     ThreadAffinityBoost::SetTaskRunnerForTesting(task_runner_.get());
     ThreadAffinityBoost::SetCanRunOnBigCoreOverrideForTesting(&override_);
     calls_count_ = 0;
@@ -4531,14 +4536,12 @@ class MainThreadSchedulerImplAffinityBoostTest
   }
 
   void TearDown() override {
+    base::SetMaxFrequencyPerProcessorOverrideForTesting(
+        &fake_cpu_max_frequencies);
     ThreadAffinityBoost::SetCanRunOnBigCoreOverrideForTesting(nullptr);
     ThreadAffinityBoost::SetTaskRunnerForTesting(nullptr);
+    base::SetMaxFrequencyPerProcessorOverrideForTesting(nullptr);
     MainThreadSchedulerImplTest::TearDown();
-  }
-
-  void SetUseCaseAndUpdatePolicy(UseCase use_case) {
-    scheduler_->use_case_override_ = use_case;
-    scheduler_->UpdatePolicyForTesting();
   }
 
   scoped_refptr<base::TestMockTimeTaskRunner> task_runner_ =
@@ -4552,6 +4555,8 @@ class MainThreadSchedulerImplAffinityBoostTest
             calls_count_++;
             can_run_ = allowed;
           });
+  std::vector<uint64_t> fake_cpu_max_frequencies = {1000000000, 2000000000,
+                                                    3000000000ull};
 };
 
 TEST_F(MainThreadSchedulerImplAffinityBoostTest, Simple) {
@@ -4689,6 +4694,205 @@ TEST_F(MainThreadSchedulerImplAffinityBoostTest,
 }
 
 #endif  // BUILDFLAG(IS_ANDROID)
+
+struct BusyLoopOnRendererMainTestConfig {
+  bool is_feature_enabled;
+  bool is_120hz_display;
+
+  // Used to generate test names
+  struct PrintToStringParamName {
+    std::string operator()(
+        const testing::TestParamInfo<BusyLoopOnRendererMainTestConfig>& info)
+        const {
+      std::stringstream ss;
+      ss << "Feature"
+         << (info.param.is_feature_enabled ? "Enabled" : "Disabled") << "On"
+         << (info.param.is_120hz_display ? "120" : "60") << "HzDisplay";
+      return ss.str();
+    }
+  };
+};
+
+class BusyLoopOnRendererMainTest
+    : public MainThreadSchedulerImplTest,
+      public ::testing::WithParamInterface<BusyLoopOnRendererMainTestConfig> {
+ protected:
+  BusyLoopOnRendererMainTest() = default;
+
+  void SetUp() override {
+    feature_list_.Reset();
+    if (IsFeatureEnabled()) {
+      feature_list_.InitAndEnableFeature(kBusyLoopOnRendererMain);
+    } else {
+      feature_list_.InitAndDisableFeature(kBusyLoopOnRendererMain);
+    }
+    ::features::SetIsEligibleForThrottleMainFrameTo60Hz(Is120HzDisplay());
+
+    MainThreadSchedulerImplTest::SetUp();
+  }
+
+  void CheckScaleFactor(
+      base::FunctionRef<::testing::AssertionResult(UseCase, float)>
+          check_scale_factor) {
+    for (UseCase use_case : kAllUseCases) {
+      SetUseCaseAndUpdatePolicy(use_case);
+      EXPECT_TRUE(check_scale_factor(use_case, BusyLoopScaleFactor()));
+    }
+    SetUseCaseAndUpdatePolicy(UseCase::kNone);
+  }
+
+  void CheckScaleFactorIsAlwaysZero() {
+    CheckScaleFactor([](UseCase use_case, float scale_factor) {
+      if (scale_factor == 0.f) {
+        return ::testing::AssertionSuccess();
+      }
+      return ::testing::AssertionFailure()
+             << "scale factor is " << scale_factor << "for use case "
+             << UseCaseToString(use_case).value;
+    });
+  }
+
+  void SetRendererBackgrounded(bool is_background) {
+    scheduler_->SetRendererBackgrounded(is_background);
+    SetUseCaseAndUpdatePolicy(UseCase::kNone);
+  }
+
+  bool IsFeatureEnabled() const { return GetParam().is_feature_enabled; }
+  bool Is120HzDisplay() const { return GetParam().is_120hz_display; }
+
+ private:
+  static constexpr auto kAllUseCases =
+      base::EnumSet<UseCase, UseCase::kNone, UseCase::kMaxValue>::All();
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    ,  // Empty to simplify gtest output
+    BusyLoopOnRendererMainTest,
+    ::testing::ValuesIn(std::vector<BusyLoopOnRendererMainTestConfig>(
+        {{.is_feature_enabled = true, .is_120hz_display = true},
+         {.is_feature_enabled = true, .is_120hz_display = false},
+         {.is_feature_enabled = false, .is_120hz_display = true},
+         {.is_feature_enabled = false, .is_120hz_display = false}})),
+    BusyLoopOnRendererMainTestConfig::PrintToStringParamName());
+
+TEST_P(BusyLoopOnRendererMainTest, BackgroundRendererDoesNotBusyLoop) {
+  SetRendererBackgrounded(true);
+  CheckScaleFactorIsAlwaysZero();
+
+  SetRendererBackgrounded(false);
+  if (!IsFeatureEnabled() || !Is120HzDisplay()) {
+    CheckScaleFactorIsAlwaysZero();
+  } else {
+    CheckScaleFactor([](UseCase use_case, float scale_factor) {
+      if (scale_factor > 0.f) {
+        return ::testing::AssertionSuccess();
+      }
+      return ::testing::AssertionFailure()
+             << "scale factor is " << scale_factor << ", "
+             << "expected non-zero value for use case "
+             << UseCaseToString(use_case).value;
+    });
+  }
+
+  SetRendererBackgrounded(true);
+  CheckScaleFactorIsAlwaysZero();
+}
+
+TEST_P(BusyLoopOnRendererMainTest,
+       ForegroundRendererBusyLoopingScalesBasedOnUseCase) {
+  SetRendererBackgrounded(false);
+  if (!IsFeatureEnabled() || !Is120HzDisplay()) {
+    CheckScaleFactorIsAlwaysZero();
+  } else {
+    CheckScaleFactor([](UseCase use_case, float scale_factor) {
+      const float expected_scale_factor =
+          (use_case == UseCase::kNone ? .5f : 1.f);
+      if (scale_factor == expected_scale_factor) {
+        return ::testing::AssertionSuccess();
+      }
+      return ::testing::AssertionFailure()
+             << "scale factor is " << scale_factor << ", "
+             << "expected " << expected_scale_factor << " "
+             << "for use case " << UseCaseToString(use_case).value;
+    });
+  }
+}
+
+TEST_P(BusyLoopOnRendererMainTest, BusyLoopLessWhenCompositorGesture) {
+  if (!IsFeatureEnabled() || !Is120HzDisplay()) {
+    GTEST_SKIP() << "The BusyLoopLessWhenCompositorGesture feature only impacts"
+                 << "clients that busy loop.";
+  }
+
+  feature_list_.Reset();
+  feature_list_.InitWithFeatures(
+      {kBusyLoopOnRendererMain, kBusyLoopLessWhenCompositorGesture}, {});
+
+  CheckScaleFactor([](UseCase use_case, float scale_factor) {
+    const float expected_scale_factor =
+        (use_case == UseCase::kNone || use_case == UseCase::kCompositorGesture)
+            ? .5f
+            : 1.f;
+    if (scale_factor == expected_scale_factor) {
+      return ::testing::AssertionSuccess();
+    }
+    return ::testing::AssertionFailure()
+           << "scale factor is " << scale_factor << ", "
+           << "expected " << expected_scale_factor << " "
+           << "for use case " << UseCaseToString(use_case).value;
+  });
+}
+
+namespace {
+
+::testing::AssertionResult Report(UseCase use_case,
+                                  float expected_scale_factor,
+                                  float scale_factor) {
+  if (scale_factor == expected_scale_factor) {
+    return ::testing::AssertionSuccess();
+  }
+  return ::testing::AssertionFailure()
+         << "scale factor is " << scale_factor << ", "
+         << "expected " << expected_scale_factor << " "
+         << "for use case " << UseCaseToString(use_case).value;
+}
+
+}  // namespace
+
+TEST_P(BusyLoopOnRendererMainTest, BusyLoopAggressiveAfterCommittedLoad) {
+  if (!IsFeatureEnabled() || !Is120HzDisplay()) {
+    GTEST_SKIP() << "The BusyLoopLessWhenCompositorGesture feature only impacts"
+                 << "clients that busy loop.";
+  }
+
+  auto expect_regular_factor = [](UseCase use_case, float scale_factor) {
+    const float expected_scale_factor = use_case == UseCase::kNone ? .5f : 1.f;
+    return Report(use_case, scale_factor, expected_scale_factor);
+  };
+
+  auto expect_boosted_factor = [](UseCase use_case, float scale_factor) {
+    return Report(use_case, scale_factor, 1.5f);
+  };
+
+  feature_list_.Reset();
+  feature_list_.InitWithFeatures(
+      {kBusyLoopOnRendererMain, kBusyLoopAggressiveAfterCommittedLoad}, {});
+
+  CheckScaleFactor(expect_regular_factor);
+
+  // Close to a provisional load, factor is increased.
+  scheduler_->DidCommitProvisionalLoad(false, false, true);
+  CheckScaleFactor(expect_boosted_factor);
+
+  // It persists for some time.
+  scheduler_->DidCommitProvisionalLoad(false, false, true);
+  test_task_runner_->FastForwardBy(base::Milliseconds(100));
+  CheckScaleFactor(expect_boosted_factor);
+
+  // Back to the normal factor since it's been too long.
+  test_task_runner_->FastForwardBy(base::Seconds(1));
+  CheckScaleFactor(expect_regular_factor);
+}
 
 }  // namespace main_thread_scheduler_impl_unittest
 }  // namespace scheduler

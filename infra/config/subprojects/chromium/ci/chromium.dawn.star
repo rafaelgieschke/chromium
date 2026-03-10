@@ -112,10 +112,7 @@ gpu.ci.linux_builder(
             "gpu_dawn_common_isolated_scripts",
         ],
         mixins = [
-            "gpu-swarming-pool",
-            "linux-jammy",
-            "no_gpu",
-            "x86-64",
+            "gpu_linux_gce_stable",
         ],
     ),
     targets_settings = targets.settings(
@@ -199,7 +196,11 @@ gpu.ci.linux_builder(
             "x64",
         ],
     ),
-    targets = targets.bundle(),
+    targets = targets.bundle(
+        targets = [
+            "dawn_standalone_tests_compile_only",
+        ],
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "DEPS|Linux|Builder",
         short_name = "x64",
@@ -476,9 +477,9 @@ ci.thin_tester(
     ),
     targets = targets.bundle(
         targets = [
+            "dawn_chromium_isolated_scripts",
+            "gpu_common_gtests_passthrough",
             "gpu_dawn_compat_telemetry_tests",
-            "gpu_dawn_integration_gtests_passthrough",
-            "gpu_dawn_isolated_scripts",
         ],
         mixins = [
             "linux_intel_uhd_630_stable",
@@ -546,9 +547,9 @@ ci.thin_tester(
     ),
     targets = targets.bundle(
         targets = [
+            "dawn_chromium_isolated_scripts",
+            "gpu_common_gtests_passthrough",
             "gpu_dawn_compat_telemetry_tests",
-            "gpu_dawn_integration_gtests_passthrough",
-            "gpu_dawn_isolated_scripts",
         ],
         mixins = [
             "linux_nvidia_gtx_1660_stable",
@@ -935,12 +936,54 @@ ci.thin_tester(
     ),
     targets = targets.bundle(
         targets = [
-            "gpu_noop_sleep_telemetry_test",
+            "gpu_dawn_android_compat_telemetry_tests",
+            "gpu_dawn_integration_gtests_passthrough",
+            "gpu_dawn_android_isolated_scripts",
         ],
         mixins = [
-            "has_native_resultdb_integration",
             "gpu_pixel_10_stable",
+            "has_native_resultdb_integration",
+            # TODO(crbug.com/443001330): Remove the limited_capacity_bot mixin
+            # once additional devices are deployed. 49 devices is likely not enough
+            # to run both standard GPU and WebGPU tests on CI + have enough
+            # capacity for trybots without this.
+            "limited_capacity_bot",
         ],
+        per_test_modifications = {
+            "dawn_end2end_skip_validation_tests": targets.remove(
+                reason = "TODO(crbug.com/40238674): Enable once it's shown to work on Android.",
+            ),
+            "dawn_end2end_validation_layers_tests": targets.remove(
+                reason = "TODO(crbug.com/40238674): Enable once it's shown to work on Android.",
+            ),
+            "dawn_end2end_wire_tests": targets.remove(
+                reason = "TODO(crbug.com/40238674): Enable once it's shown to work on Android.",
+            ),
+            "dawn_perf_tests": targets.remove(
+                reason = "TODO(crbug.com/40238674): Enable once it's shown to work on Android.",
+            ),
+            "gl_tests_passthrough": targets.remove(
+                reason = "TODO(crbug.com/40238674): Enable once it's shown to work on Android.",
+            ),
+            "gl_unittests": targets.remove(
+                reason = "TODO(crbug.com/40238674): Enable once it's shown to work on Android.",
+            ),
+            "webgpu_blink_web_tests": targets.remove(
+                reason = "TODO(crbug.com/40238674): Enable once it's shown to work on Android.",
+            ),
+            "webgpu_blink_web_tests_with_backend_validation": targets.remove(
+                reason = "TODO(crbug.com/40238674): Enable once it's shown to work on Android.",
+            ),
+            "webgpu_cts_compat_min_es31_tests": targets.remove(
+                reason = "Too many failures.",
+            ),
+            "webgpu_cts_shared_worker_tests": targets.remove(
+                reason = [
+                    "We only need coverage on one GPU per OS, so remove from lower capacity",
+                    "configs. Additionally, shared workers are not supported on Android.",
+                ],
+            ),
+        },
     ),
     targets_settings = targets.settings(
         browser_config = targets.browser_config.ANDROID_CHROMIUM,
@@ -1320,6 +1363,7 @@ gpu.ci.mac_builder(
             "mac",
         ],
     ),
+    targets = targets.bundle(),
     console_view_entry = consoles.console_view_entry(
         category = "ToT|Mac|Builder",
         short_name = "arm64",
@@ -1356,6 +1400,11 @@ gpu.ci.mac_builder(
             "mac",
         ],
     ),
+    targets = targets.bundle(
+        targets = [
+            "dawn_standalone_tests_compile_only",
+        ],
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "DEPS|Mac|Builder",
         short_name = "arm64",
@@ -1386,9 +1435,9 @@ ci.thin_tester(
     ),
     targets = targets.bundle(
         targets = [
+            "dawn_chromium_isolated_scripts",
+            "gpu_common_gtests_passthrough",
             "gpu_dawn_telemetry_tests",
-            "gpu_dawn_integration_gtests_passthrough",
-            "gpu_dawn_isolated_scripts",
         ],
         mixins = [
             "mac_arm64_apple_m2_retina_gpu_stable",
@@ -1567,7 +1616,11 @@ gpu.ci.mac_builder(
             "mac",
         ],
     ),
-    targets = targets.bundle(),
+    targets = targets.bundle(
+        targets = [
+            "dawn_standalone_tests_compile_only",
+        ],
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "DEPS|Mac|Builder",
         short_name = "x64",
@@ -1601,9 +1654,9 @@ ci.thin_tester(
     ),
     targets = targets.bundle(
         targets = [
+            "dawn_chromium_isolated_scripts",
+            "gpu_common_gtests_passthrough",
             "gpu_dawn_telemetry_tests",
-            "gpu_dawn_integration_gtests_passthrough",
-            "gpu_dawn_isolated_scripts",
         ],
         mixins = [
             "mac_retina_amd_gpu_stable",
@@ -1655,9 +1708,9 @@ ci.thin_tester(
     ),
     targets = targets.bundle(
         targets = [
+            "dawn_chromium_isolated_scripts",
+            "gpu_common_gtests_passthrough",
             "gpu_dawn_telemetry_tests",
-            "gpu_dawn_integration_gtests_passthrough",
-            "gpu_dawn_isolated_scripts",
         ],
         mixins = [
             "mac_mini_intel_gpu_stable",
@@ -2194,7 +2247,11 @@ gpu.ci.windows_builder(
             "x64",
         ],
     ),
-    targets = targets.bundle(),
+    targets = targets.bundle(
+        targets = [
+            "dawn_standalone_tests_compile_only",
+        ],
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "DEPS|Windows|Builder",
         short_name = "x64",
@@ -2237,6 +2294,9 @@ gpu.ci.windows_builder(
         ],
     ),
     targets = targets.bundle(
+        # TODO(crbug.com/452840618): Change this to just dawn_standalone_tests_compile_only
+        # once tests are enabled on Snapdragon X Elite devices in both Dawn and
+        # Chromium.
         additional_compile_targets = [
             "dawn_end2end_tests",
             "dawn_perf_tests",
@@ -2285,6 +2345,9 @@ gpu.ci.windows_builder(
         ],
     ),
     targets = targets.bundle(
+        # TODO(crbug.com/452840618): Change this to just dawn_standalone_tests_compile_only
+        # once tests are enabled on Snapdragon X Elite devices in both Dawn and
+        # Chromium.
         additional_compile_targets = [
             "dawn_end2end_tests",
             "dawn_perf_tests",
@@ -2323,11 +2386,31 @@ ci.thin_tester(
     ),
     targets = targets.bundle(
         targets = [
-            "gpu_noop_sleep_telemetry_test",
+            "dawn_chromium_isolated_scripts",
+            "gpu_common_gtests_passthrough",
+            "gpu_dawn_telemetry_win_x64_tests",
         ],
         mixins = [
             "win11_qualcomm_snapdragon_x_elite_stable",
         ],
+        per_test_modifications = {
+            "gl_tests_passthrough": targets.mixin(
+                args = [
+                    "--test-launcher-filter-file=../../testing/buildbot/filters/win.qualcomm.snapdragon_x_elite.gl_tests_passthrough.filter",
+                ],
+            ),
+            "gl_unittests": targets.mixin(
+                args = [
+                    "--test-launcher-filter-file=../../testing/buildbot/filters/win.qualcomm.snapdragon_x_elite.gl_unittests.filter",
+                ],
+            ),
+            "webgpu_cts_fxc_tests": targets.remove(
+                reason = "WebGPU is only enabled on Qualcomm Windows devices where DXC is available. See crbug.com/475891205",
+            ),
+            "webgpu_cts_fxc_with_validation_tests": targets.remove(
+                reason = "WebGPU is only enabled on Qualcomm Windows devices where DXC is available. See crbug.com/475891205",
+            ),
+        },
     ),
     targets_settings = targets.settings(
         browser_config = targets.browser_config.RELEASE,
@@ -2335,6 +2418,64 @@ ci.thin_tester(
     ),
     console_view_entry = consoles.console_view_entry(
         category = "DEPS|Windows|arm64|Qualcomm",
+        short_name = "sdx",
+    ),
+)
+
+ci.thin_tester(
+    name = "Dawn Win11 arm64 Release (Qualcomm Snapdragon X Elite)",
+    description_html = "Runs ToT Dawn tests on stable Windows 11/Qualcomm Snapdragon X Elite configs (Dell Latitude 7455)",
+    parent = "ci/Dawn Win11 arm64 Builder",
+    builder_spec = builder_config.builder_spec(
+        execution_mode = builder_config.execution_mode.TEST,
+        gclient_config = builder_config.gclient_config(
+            config = "chromium",
+        ),
+        chromium_config = builder_config.chromium_config(
+            config = "chromium",
+            apply_configs = [
+                "mb",
+            ],
+            build_config = builder_config.build_config.RELEASE,
+            target_bits = 64,
+            target_platform = builder_config.target_platform.WIN,
+        ),
+        run_tests_serially = True,
+    ),
+    targets = targets.bundle(
+        targets = [
+            "dawn_chromium_isolated_scripts",
+            "gpu_common_gtests_passthrough",
+            "gpu_dawn_telemetry_win_x64_tests",
+        ],
+        mixins = [
+            "win11_qualcomm_snapdragon_x_elite_stable",
+        ],
+        per_test_modifications = {
+            "gl_tests_passthrough": targets.mixin(
+                args = [
+                    "--test-launcher-filter-file=../../testing/buildbot/filters/win.qualcomm.snapdragon_x_elite.gl_tests_passthrough.filter",
+                ],
+            ),
+            "gl_unittests": targets.mixin(
+                args = [
+                    "--test-launcher-filter-file=../../testing/buildbot/filters/win.qualcomm.snapdragon_x_elite.gl_unittests.filter",
+                ],
+            ),
+            "webgpu_cts_fxc_tests": targets.remove(
+                reason = "WebGPU is only enabled on Qualcomm Windows devices where DXC is available. See crbug.com/475891205",
+            ),
+            "webgpu_cts_fxc_with_validation_tests": targets.remove(
+                reason = "WebGPU is only enabled on Qualcomm Windows devices where DXC is available. See crbug.com/475891205",
+            ),
+        },
+    ),
+    targets_settings = targets.settings(
+        browser_config = targets.browser_config.RELEASE,
+        os_type = targets.os_type.WINDOWS,
+    ),
+    console_view_entry = consoles.console_view_entry(
+        category = "ToT|Windows|arm64|Qualcomm",
         short_name = "sdx",
     ),
 )
@@ -2364,9 +2505,9 @@ ci.thin_tester(
     ),
     targets = targets.bundle(
         targets = [
+            "dawn_chromium_isolated_scripts",
+            "gpu_common_gtests_passthrough",
             "gpu_dawn_telemetry_win_x64_tests",
-            "gpu_dawn_integration_gtests_passthrough_win_x64",
-            "gpu_dawn_isolated_scripts",
         ],
         mixins = [
             "win10_intel_uhd_630_stable",
@@ -2426,9 +2567,9 @@ ci.thin_tester(
     ),
     targets = targets.bundle(
         targets = [
+            "dawn_chromium_isolated_scripts",
+            "gpu_common_gtests_passthrough",
             "gpu_dawn_telemetry_win_x64_tests",
-            "gpu_dawn_integration_gtests_passthrough_win_x64",
-            "gpu_dawn_isolated_scripts",
         ],
         mixins = [
             "win10_nvidia_gtx_1660_stable",
@@ -2803,7 +2944,11 @@ gpu.ci.windows_builder(
             "win",
         ],
     ),
-    targets = targets.bundle(),
+    targets = targets.bundle(
+        targets = [
+            "dawn_standalone_tests_compile_only",
+        ],
+    ),
     console_view_entry = consoles.console_view_entry(
         category = "DEPS|Windows|Builder",
         short_name = "x86",
@@ -2837,9 +2982,9 @@ ci.thin_tester(
     ),
     targets = targets.bundle(
         targets = [
+            "dawn_chromium_isolated_scripts",
+            "gpu_common_gtests_passthrough",
             "gpu_dawn_telemetry_tests_fxc",
-            "gpu_dawn_integration_gtests_passthrough",
-            "gpu_dawn_isolated_scripts",
         ],
         mixins = [
             "win10_intel_uhd_630_stable",
@@ -2890,9 +3035,9 @@ ci.thin_tester(
     ),
     targets = targets.bundle(
         targets = [
+            "dawn_chromium_isolated_scripts",
+            "gpu_common_gtests_passthrough",
             "gpu_dawn_telemetry_tests_fxc",
-            "gpu_dawn_integration_gtests_passthrough",
-            "gpu_dawn_isolated_scripts",
         ],
         mixins = [
             "win10_nvidia_gtx_1660_stable",

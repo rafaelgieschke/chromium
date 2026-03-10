@@ -23,13 +23,13 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
-import org.chromium.base.ContextUtils;
-import org.chromium.base.Log;
 import org.chromium.base.test.ActivityFinisher;
 import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.DisableIf;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.RequiresRestart;
@@ -41,7 +41,6 @@ import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.history.BrowsingHistoryBridge;
 import org.chromium.chrome.browser.history.HistoryItem;
 import org.chromium.chrome.browser.history.HistoryProvider.BrowsingHistoryObserver;
-import org.chromium.chrome.browser.incognito.IncognitoUtils;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.R;
@@ -142,6 +141,7 @@ public class TabSwitcherSearchTest {
 
     @Test
     @MediumTest
+    @DisabledTest(message = "crbug.com/399128533")
     public void testZeroPrefixSuggestions_OpenSuggestion() {
         List<String> urlsToOpen =
                 List.of(
@@ -165,6 +165,7 @@ public class TabSwitcherSearchTest {
 
     @Test
     @MediumTest
+    @DisabledTest(message = "crbug.com/399128533")
     public void testZeroPrefixSuggestions_OpenSameTab() {
         List<String> urlsToOpen = List.of("/chrome/test/data/android/navigate/one.html");
         mPage = Journeys.prepareRegularTabsWithWebPages(mPage, mTestServer.getURLs(urlsToOpen));
@@ -217,18 +218,6 @@ public class TabSwitcherSearchTest {
     @MediumTest
     public void testZeroPrefixSuggestions_Incognito() {
         List<String> urlsToOpen = List.of("/chrome/test/data/android/navigate/one.html");
-        Log.i(
-                "Debug crbug.com/470234934:",
-                " shouldOpenIncognitoAsWindow=" + IncognitoUtils.shouldOpenIncognitoAsWindow());
-        Log.i(
-                "Debug crbug.com/470234934:",
-                " sAndroidOpenIncognitoAsWindow="
-                        + ChromeFeatureList.sAndroidOpenIncognitoAsWindow.isEnabled());
-        Log.i(
-                "Debug crbug.com/470234934:",
-                " isNonMultiDisplayContextOnTablet="
-                        + DeviceFormFactor.isNonMultiDisplayContextOnTablet(
-                                ContextUtils.getApplicationContext()));
         mPage = Journeys.createIncognitoTabsWithWebPages(mPage, mTestServer.getURLs(urlsToOpen));
         TabSwitcherSearchStation tabSwitcherSearchStation =
                 mPage.openIncognitoTabSwitcher().openTabSwitcherSearch();
@@ -265,6 +254,7 @@ public class TabSwitcherSearchTest {
 
     @Test
     @MediumTest
+    @DisabledTest(message = "crbug.com/399128533")
     public void testTypedSuggestions_OpenSuggestion() {
         List<String> urlsToOpen =
                 List.of(
@@ -284,6 +274,7 @@ public class TabSwitcherSearchTest {
 
     @Test
     @MediumTest
+    @DisabledTest(message = "crbug.com/399128533")
     public void testTypedSuggestions_OpenSameTab() {
         List<String> urlsToOpen = List.of("/chrome/test/data/android/navigate/one.html");
         mPage = Journeys.prepareRegularTabsWithWebPages(mPage, mTestServer.getURLs(urlsToOpen));
@@ -340,6 +331,8 @@ public class TabSwitcherSearchTest {
 
     @Test
     @MediumTest
+    @DisableIf.Device(
+            DeviceFormFactor.DESKTOP) // TODO(crbug.com/479863847): Test failing on Desktop bot
     public void testSearchActivityBackButton_Incognito() {
         ChromeTabbedActivity cta = mCtaTestRule.getActivity();
         mPage.openNewIncognitoTabOrWindowFast()

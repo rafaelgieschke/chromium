@@ -15,6 +15,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
+#include "base/test/gtest_util.h"
 #include "base/test/mock_log.h"
 #include "base/test/scoped_command_line.h"
 #include "base/test/scoped_feature_list.h"
@@ -772,7 +773,7 @@ TEST_F(SiteInstanceTest, GetSiteForURL) {
   TestBrowserContext context;
 
   bool origin_keyed_processes_by_default =
-      SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault();
+      SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault(&context);
 
   // Pages are irrelevant.
   GURL test_url = GURL("http://www.google.com/index.html");
@@ -945,7 +946,8 @@ TEST_F(SiteInstanceTest, ProcessLockDoesNotUseEffectiveURL) {
   // (foo.com).
   {
     bool origin_keyed_processes_by_default =
-        SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault();
+        SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault(
+            browser_context.get());
 
     auto site_info = SiteInfo::CreateForTesting(isolation_context, test_url);
     if (origin_keyed_processes_by_default) {
@@ -958,7 +960,8 @@ TEST_F(SiteInstanceTest, ProcessLockDoesNotUseEffectiveURL) {
   }
 
   bool is_origin_keyed_processes_by_default =
-      SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault();
+      SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault(
+          browser_context.get());
   GURL expected_process_lock_url =
       is_origin_keyed_processes_by_default ? test_url : nonapp_site_url;
   AgentClusterKey agent_cluster_key =
@@ -1764,7 +1767,8 @@ TEST_F(SiteInstanceTest, OriginalURL) {
   std::unique_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
 
   bool is_origin_keyed_processes_by_default =
-      SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault();
+      SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault(
+          browser_context.get());
   AgentClusterKey agent_cluster_key =
       is_origin_keyed_processes_by_default
           ? AgentClusterKey::CreateOriginKeyed(
@@ -2082,8 +2086,9 @@ TEST_F(SiteInstanceTest, CreateForGuest) {
   const StoragePartitionConfig kGuestConfig = StoragePartitionConfig::Create(
       context(), "appid", "partition_name", /*in_memory=*/false);
   auto instance2 = SiteInstanceImpl::CreateForGuest(context(), kGuestConfig);
-  EXPECT_TRUE(instance2->IsGuest());
-  EXPECT_EQ(instance2->GetStoragePartitionConfig(), kGuestConfig);
+  EXPECT_TRUE(instance2->GetSecurityPrincipal().IsGuest());
+  EXPECT_EQ(instance2->GetSecurityPrincipal().GetStoragePartitionConfig(),
+            kGuestConfig);
 }
 
 TEST_F(SiteInstanceTest, DoesSiteRequireDedicatedProcess) {
@@ -2219,7 +2224,7 @@ TEST_F(SiteInstanceTest, ErrorPage) {
       /*cross_origin_isolation_key=*/std::nullopt, context()->UniqueId());
   EXPECT_TRUE(error_site_info.is_error_page());
   EXPECT_FALSE(error_site_info.web_exposed_isolation_info().is_isolated());
-  EXPECT_FALSE(error_site_info.is_guest());
+  EXPECT_FALSE(error_site_info.IsGuest());
 
   // Verify that non-error URLs don't generate error page SiteInfos.
   const auto instance =
@@ -2246,6 +2251,30 @@ TEST_F(SiteInstanceTest, ErrorPage) {
       static_cast<SiteInstanceImpl*>(related_instance.get())->GetSiteInfo());
 }
 
+TEST_F(SiteInstanceTest, SiteInstanceNewStoragePartitionConfig) {
+  const GURL test_url("https://example.com");
+  const auto site_instance = SiteInstanceImpl::Create(context());
+  const auto default_partition_config =
+      CreateStoragePartitionConfigForTesting();
+
+  EXPECT_FALSE(site_instance->HasSite());
+  EXPECT_EQ(default_partition_config,
+            site_instance->GetSecurityPrincipal().GetStoragePartitionConfig());
+
+  const auto non_default_partition_config =
+      CreateStoragePartitionConfigForTesting(
+          /*in_memory=*/false, /*partition_domain=*/"test_partition");
+  EXPECT_NE(default_partition_config, non_default_partition_config);
+
+  const UrlInfo partitioned_url_info(
+      UrlInfoInit(test_url).WithStoragePartitionConfig(
+          non_default_partition_config));
+
+  // Can not change storage partition config after it was accessed before. See
+  // checks in SiteInstanceImpl::SetSiteInfoInternal() for more information.
+  EXPECT_CHECK_DEATH(site_instance->SetSite(partitioned_url_info));
+}
+
 TEST_F(SiteInstanceTest, RelatedSitesInheritStoragePartitionConfig) {
   const GURL test_url("https://example.com");
 
@@ -2265,8 +2294,8 @@ TEST_F(SiteInstanceTest, RelatedSitesInheritStoragePartitionConfig) {
       /*is_fixed_storage_partition=*/false);
   EXPECT_EQ(non_default_partition_config,
             static_cast<SiteInstanceImpl*>(partitioned_instance.get())
-                ->GetSiteInfo()
-                .storage_partition_config());
+                ->GetSecurityPrincipal()
+                .GetStoragePartitionConfig());
 
   // Create a related SiteInstance that doesn't specify a
   // StoragePartitionConfig and make sure the StoragePartition gets propagated.
@@ -2274,8 +2303,8 @@ TEST_F(SiteInstanceTest, RelatedSitesInheritStoragePartitionConfig) {
       partitioned_instance->GetRelatedSiteInstance(test_url);
   EXPECT_EQ(non_default_partition_config,
             static_cast<SiteInstanceImpl*>(related_instance.get())
-                ->GetSiteInfo()
-                .storage_partition_config());
+                ->GetSecurityPrincipal()
+                .GetStoragePartitionConfig());
 }
 
 TEST_F(SiteInstanceTest, GetNonOriginKeyedEquivalentPreservesIsPdf) {

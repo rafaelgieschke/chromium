@@ -75,7 +75,7 @@ class EmbeddedPermissionPromptInteractiveTest
     https_server_ = std::make_unique<net::EmbeddedTestServer>(
         net::EmbeddedTestServer::TYPE_HTTPS);
     feature_list_.InitWithFeatures(
-        {blink::features::kPermissionElement,
+        {blink::features::kGeolocationElement,
          blink::features::kUserMediaElement,
          blink::features::kBypassPepcSecurityForTesting},
         {});
@@ -411,7 +411,7 @@ class EmbeddedPermissionPromptInteractiveTest
                   auto* manager =
                       permissions::PermissionRequestManager::FromWebContents(
                           browser()->tab_strip_model()->GetActiveWebContents());
-                  manager->Dismiss();
+                  manager->Dismiss(/*prompt_options=*/std::monostate());
                   manager->FinalizeCurrentRequests();
                 })));
 
@@ -551,17 +551,6 @@ IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptInteractiveTest,
 }
 
 IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptInteractiveTest,
-                       BasicFlowGeolocation) {
-  TestAskBlockAllowFlow(
-      "geolocation", {permissions::PermissionUtil::GetGeolocationType()},
-      std::vector<std::u16string>(
-          {u"a.test:" + base::UTF8ToUTF16(GetOrigin().GetPort()) + u" wants to",
-           u"You have allowed location for this site",
-           u"You previously didn't allow location for this site"}),
-      std::vector<std::u16string>({u"Know your location"}));
-}
-
-IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptInteractiveTest,
                        BasicFlowCameraMicrophone) {
   TestAskBlockAllowFlow(
       "camera-microphone",
@@ -583,12 +572,6 @@ IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptInteractiveTest,
 IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptInteractiveTest,
                        TestAllowThisTimeFlowCamera) {
   TestAllowThisTimeFlow("camera", {ContentSettingsType::MEDIASTREAM_CAMERA});
-}
-
-IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptInteractiveTest,
-                       TestAllowThisTimeFlowGeolocation) {
-  TestAllowThisTimeFlow("geolocation",
-                        {permissions::PermissionUtil::GetGeolocationType()});
 }
 
 IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptInteractiveTest,
@@ -1054,7 +1037,7 @@ IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptInteractiveTest,
 }
 
 // Linux wayland does not support window activation.
-#if (BUILDFLAG(IS_LINUX) && BUILDFLAG(IS_OZONE_WAYLAND))
+#if (BUILDFLAG(IS_LINUX) && BUILDFLAG(SUPPORTS_OZONE_WAYLAND))
 #define MAYBE_TestOsSystemAutoResolves DISABLED_TestOsSystemAutoResolves
 #else
 #define MAYBE_TestOsSystemAutoResolves TestOsSystemAutoResolves
@@ -1177,7 +1160,7 @@ IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptInteractiveTest,
         // is too large.
         WaitForMatchingNotification(
             "Audits.issueAdded",
-            base::BindRepeating([](const base::Value::Dict& params) {
+            base::BindRepeating([](const base::DictValue& params) {
               const std::string* code =
                   params.FindStringByDottedPath("issue.code");
               if (!code) {
@@ -1227,7 +1210,7 @@ IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptInteractiveTest,
         ASSERT_FALSE(manager->has_pending_requests());
 
         // Need to close the permission prompt before the test shuts down.
-        manager->Dismiss();
+        manager->Dismiss(/*prompt_options=*/std::monostate());
         manager->FinalizeCurrentRequests();
       }));
 }
@@ -1249,7 +1232,7 @@ IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptInteractiveTest,
         ASSERT_FALSE(manager->has_pending_requests());
 
         // Need to close the permission prompt before the test shuts down.
-        manager->Dismiss();
+        manager->Dismiss(/*prompt_options=*/std::monostate());
         manager->FinalizeCurrentRequests();
       }));
 }
@@ -1261,7 +1244,7 @@ class EmbeddedPermissionPromptPositioningInteractiveTest
     feature_list_.Reset();
     feature_list_.InitWithFeaturesAndParameters(
         {
-            {blink::features::kPermissionElement, {}},
+            {blink::features::kGeolocationElement, {}},
             {blink::features::kUserMediaElement, {}},
             {permissions::features::kPermissionElementPromptPositioning,
              {{"PermissionElementPromptPositioningParam", "near_element"}}},
@@ -1346,7 +1329,7 @@ IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptPositioningInteractiveTest,
           auto* manager =
               permissions::PermissionRequestManager::FromWebContents(
                   browser()->tab_strip_model()->GetActiveWebContents());
-          manager->Dismiss();
+          manager->Dismiss(/*prompt_options=*/std::monostate());
           manager->FinalizeCurrentRequests();
 
           zoom::ZoomController* zoom_controller =
@@ -1407,7 +1390,7 @@ IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptPositioningInteractiveTest,
           auto* manager =
               permissions::PermissionRequestManager::FromWebContents(
                   browser()->tab_strip_model()->GetActiveWebContents());
-          manager->Dismiss();
+          manager->Dismiss(/*prompt_options=*/std::monostate());
           manager->FinalizeCurrentRequests();
         }));
   }
@@ -1510,7 +1493,7 @@ IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptPolicyInteractiveTest,
   policies.Set(policy::key::kVideoCaptureAllowed,
                policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
                policy::POLICY_SOURCE_CLOUD, base::Value(true), nullptr);
-  base::Value::List urls;
+  base::ListValue urls;
   urls.Append(GetURL().spec());
   policies.Set(policy::key::kVideoCaptureAllowedUrls,
                policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
@@ -1527,7 +1510,7 @@ IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptPolicyInteractiveTest,
   policies.Set(policy::key::kAudioCaptureAllowed,
                policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
                policy::POLICY_SOURCE_CLOUD, base::Value(true), nullptr);
-  base::Value::List urls;
+  base::ListValue urls;
   urls.Append(GetURL().spec());
   policies.Set(policy::key::kAudioCaptureAllowedUrls,
                policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
@@ -1547,7 +1530,7 @@ IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptPolicyInteractiveTest,
   policies.Set(policy::key::kAudioCaptureAllowed,
                policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
                policy::POLICY_SOURCE_CLOUD, base::Value(true), nullptr);
-  base::Value::List urls;
+  base::ListValue urls;
   urls.Append(GetURL().spec());
   policies.Set(policy::key::kAudioCaptureAllowedUrls,
                policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
@@ -1559,18 +1542,6 @@ IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptPolicyInteractiveTest,
   TestPolicy(policies, "camera-microphone",
              EmbeddedPermissionPromptPolicyView::kMainViewId,
              u"Your administrator allows camera and microphone for this site");
-}
-
-IN_PROC_BROWSER_TEST_P(EmbeddedPermissionPromptPolicyInteractiveTest,
-                       GeolocationPolicyAllow) {
-  policy::PolicyMap policies;
-  policies.Set(policy::key::kDefaultGeolocationSetting,
-               policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
-               policy::POLICY_SOURCE_CLOUD, base::Value(CONTENT_SETTING_ALLOW),
-               nullptr);
-  TestPolicy(policies, "geolocation",
-             EmbeddedPermissionPromptPolicyView::kMainViewId,
-             u"Your administrator allows location for this site");
 }
 
 // Setting up to run all tests with two screen scale factors.

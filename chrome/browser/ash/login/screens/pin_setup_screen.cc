@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 
+#include "ash/constants/ash_features.h"
 #include "ash/constants/ash_switches.h"
 #include "base/check.h"
 #include "base/debug/dump_without_crashing.h"
@@ -21,7 +22,6 @@
 #include "chrome/browser/ash/login/quick_unlock/quick_unlock_utils.h"
 #include "chrome/browser/ash/login/users/chrome_user_manager_util.h"
 #include "chrome/browser/ash/login/wizard_context.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/ash/login/pin_setup_screen_handler.h"
@@ -29,7 +29,9 @@
 #include "chromeos/ash/components/login/auth/auth_performer.h"
 #include "chromeos/ash/components/login/auth/public/cryptohome_key_constants.h"
 #include "chromeos/ash/components/login/auth/public/user_context.h"
+#include "chromeos/ash/components/osauth/public/auth_policy_connector.h"
 #include "chromeos/ash/components/osauth/public/auth_session_storage.h"
+#include "chromeos/ash/components/osauth/public/common_types.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/user_manager.h"
 #include "ui/display/screen.h"
@@ -87,6 +89,13 @@ bool IsUserEnterpriseManaged() {
          !profile->IsChild();
 }
 
+bool IsPinProhibitedAsMainFactorByPolicy(AccountId account) {
+  auto allowed_auth_factors =
+      AuthPolicyConnector::Get()->AllowedLocalAuthFactors(account);
+  return allowed_auth_factors.has_value() &&
+         !allowed_auth_factors->Has(ash::AshAuthFactor::kCryptohomePin);
+}
+
 }  // namespace
 
 // static
@@ -113,15 +122,15 @@ std::string PinSetupScreen::GetResultString(Result result) {
   // LINT.ThenChange(//tools/metrics/histograms/metadata/oobe/histograms.xml)
 }
 
-PinSetupScreen::PinSetupScreen(base::WeakPtr<PinSetupScreenView> view,
+PinSetupScreen::PinSetupScreen(PrefService* local_state,
+                               base::WeakPtr<PinSetupScreenView> view,
                                const ScreenExitCallback& exit_callback)
     : BaseScreen(PinSetupScreenView::kScreenId, OobeScreenPriority::DEFAULT),
       view_(std::move(view)),
       exit_callback_(exit_callback),
       auth_performer_(UserDataAuthClient::Get()),
-      // TODO(crbug.com/404133029): Remove g_browser_process usage.
-      cryptohome_pin_engine_(g_browser_process->local_state(),
-                             &auth_performer_) {
+      cryptohome_pin_engine_(local_state, &auth_performer_) {
+  CHECK(local_state);
   DCHECK(view_);
 
   quick_unlock::PinBackend::GetInstance()->HasLoginSupport(base::BindOnce(
@@ -154,8 +163,31 @@ std::optional<PinSetupScreen::SkipReason> PinSetupScreen::GetSkipReason(
   AccountId account_id = ash::AuthSessionStorage::Get()
                              ->Peek(context.extra_factors_token.value())
                              ->GetAccountId();
-  if (cryptohome_pin_engine_.ShouldSkipSetupBecauseOfPolicy(account_id)) {
-    return SkipReason::kNotAllowedByPolicy;
+  bool should_skip_setup_because_of_quick_unlock_policy =
+      cryptohome_pin_engine_.ShouldSkipSetupBecauseOfPolicy(account_id);
+
+  if (features::IsManagedLocalPinAndPasswordEnabled()) {
+    const bool is_secondary_setup_mode =
+        IsInSetupMode(PinSetupMode::kSetupAsSecondaryFactor, context);
+    const bool is_primary_or_recovery_setup_mode =
+        IsInSetupMode(PinSetupMode::kRecovery, context) ||
+        IsInSetupMode(PinSetupMode::kSetupAsPrimaryFactor, context);
+
+    // Only skip due to quick unlock policy in secondary setup mode.
+    if (should_skip_setup_because_of_quick_unlock_policy &&
+        is_secondary_setup_mode) {
+      return SkipReason::kNotAllowedByPolicy;
+    }
+    // In case of recovery or primary mode, always use the
+    // AllowedLocalAuthFactors policy value.
+    if (is_primary_or_recovery_setup_mode &&
+        IsPinProhibitedAsMainFactorByPolicy(account_id)) {
+      return SkipReason::kNotAllowedByPolicyAsPrimaryFactor;
+    }
+  } else {
+    if (should_skip_setup_because_of_quick_unlock_policy) {
+      return SkipReason::kNotAllowedByPolicy;
+    }
   }
 
   // Hardware capability check. In order for the screen to be shown, the device
@@ -175,7 +207,8 @@ std::optional<PinSetupScreen::SkipReason> PinSetupScreen::GetSkipReason(
       return SkipReason::kNotSupportedAsPrimaryFactor;
     }
 
-    if (IsUserEnterpriseManaged()) {
+    if (IsUserEnterpriseManaged() &&
+        !features::IsManagedLocalPinAndPasswordEnabled()) {
       return SkipReason::kNotSupportedAsPrimaryFactorForManagedUsers;
     }
   }
@@ -256,7 +289,7 @@ void PinSetupScreen::HideImpl() {
   session_refresher_.reset();
 }
 
-void PinSetupScreen::OnUserAction(const base::Value::List& args) {
+void PinSetupScreen::OnUserAction(const base::ListValue& args) {
   const std::string& action_id = args[0].GetString();
   if (action_id == kUserActionDoneButtonClicked) {
     RecordUserAction(action_id);

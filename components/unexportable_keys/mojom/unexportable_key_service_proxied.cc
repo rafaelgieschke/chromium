@@ -13,6 +13,7 @@
 #include "base/functional/bind.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/types/expected.h"
+#include "base/types/expected_macros.h"
 #include "base/types/optional_util.h"
 #include "base/unguessable_token.h"
 #include "components/unexportable_keys/background_task_priority.h"
@@ -20,19 +21,12 @@
 #include "components/unexportable_keys/service_error.h"
 #include "components/unexportable_keys/unexportable_key_id.h"
 #include "crypto/signature_verifier.h"
+#include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "mojo/public/cpp/bindings/enum_traits.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 
 namespace unexportable_keys {
 namespace {
-ServiceErrorOr<void> AdaptErrorOrVoid(
-    const std::optional<ServiceError> result) {
-  if (result.has_value()) {
-    return base::unexpected(*result);
-  } else {
-    return base::ok();
-  }
-}
 
 ServiceErrorOr<size_t> AdaptSizeType(ServiceErrorOr<uint64_t> result) {
   return result.transform(
@@ -82,8 +76,10 @@ void UnexportableKeyServiceProxied::GenerateSigningKeySlowlyAsync(
       // remote_ will not call any pending callbacks after it is destroyed.
       // Since we own remote_, it is guaranteed that this will be alive when a
       // callback is called.
-      base::BindOnce(&UnexportableKeyServiceProxied::OnKeyGenerated,
-                     base::Unretained(this), std::move(callback)));
+      mojo::WrapCallbackWithDefaultInvokeIfNotRun(
+          base::BindOnce(&UnexportableKeyServiceProxied::OnKeyGenerated,
+                         base::Unretained(this), std::move(callback)),
+          base::unexpected(ServiceError::kOperationCancelled)));
 }
 
 void UnexportableKeyServiceProxied::OnKeyGenerated(
@@ -116,8 +112,10 @@ void UnexportableKeyServiceProxied::FromWrappedSigningKeySlowlyAsync(
       // remote_ will not call any pending callbacks after it is destroyed.
       // Since we own remote_, it is guaranteed that this will be alive when a
       // callback is called.
-      base::BindOnce(&UnexportableKeyServiceProxied::OnKeyLoaded,
-                     base::Unretained(this), std::move(callback)));
+      mojo::WrapCallbackWithDefaultInvokeIfNotRun(
+          base::BindOnce(&UnexportableKeyServiceProxied::OnKeyLoaded,
+                         base::Unretained(this), std::move(callback)),
+          base::unexpected(ServiceError::kOperationCancelled)));
 }
 
 void UnexportableKeyServiceProxied::OnKeyLoaded(
@@ -136,28 +134,15 @@ void UnexportableKeyServiceProxied::OnKeyLoaded(
   std::move(original_callback).Run(key_id);
 }
 
-void UnexportableKeyServiceProxied::CopyKeyFromOtherService(
-    const UnexportableKeyService& other_service,
-    UnexportableKeyId key_id_from_other_service,
-    BackgroundTaskPriority priority,
-    base::OnceCallback<void(ServiceErrorOr<UnexportableKeyId>)> callback) {
-  ServiceErrorOr<std::vector<uint8_t>> wrapped_key =
-      other_service.GetWrappedKey(key_id_from_other_service);
-  if (!wrapped_key.has_value()) {
-    std::move(callback).Run(base::unexpected(wrapped_key.error()));
-    return;
-  }
-
-  // TODO(crbug.com/455538141): - Implement key copy in the task manager.
-  FromWrappedSigningKeySlowlyAsync(*wrapped_key, priority, std::move(callback));
-}
-
 void UnexportableKeyServiceProxied::SignSlowlyAsync(
     const UnexportableKeyId key_id,
     base::span<const uint8_t> data,
     BackgroundTaskPriority priority,
     base::OnceCallback<void(ServiceErrorOr<std::vector<uint8_t>>)> callback) {
-  remote_->Sign(key_id, base::ToVector(data), priority, std::move(callback));
+  remote_->Sign(key_id, base::ToVector(data), priority,
+                mojo::WrapCallbackWithDefaultInvokeIfNotRun(
+                    std::move(callback),
+                    base::unexpected(ServiceError::kOperationCancelled)));
 }
 
 ServiceErrorOr<std::vector<uint8_t>>
@@ -206,28 +191,34 @@ ServiceErrorOr<base::Time> UnexportableKeyServiceProxied::GetCreationTime(
   return it->second.creation_time;
 }
 
-void UnexportableKeyServiceProxied::DeleteKeySlowlyAsync(
-    UnexportableKeyId key_id,
+void UnexportableKeyServiceProxied::DeleteKeysSlowlyAsync(
+    base::span<const UnexportableKeyId> key_ids,
     BackgroundTaskPriority priority,
-    base::OnceCallback<void(ServiceErrorOr<void>)> callback) {
-  if (!key_cache_.contains(key_id)) {
+    base::OnceCallback<void(ServiceErrorOr<size_t>)> callback) {
+  auto to_delete = base::ToVector(key_ids);
+  std::erase_if(to_delete, [&](UnexportableKeyId key_id) {
+    return key_cache_.erase(key_id) == 0;
+  });
+
+  if (to_delete.empty()) {
     std::move(callback).Run(base::unexpected(ServiceError::kKeyNotFound));
     return;
   }
-  key_cache_.erase(key_id);
 
-  remote_->DeleteKey(
-      key_id, priority,
-      base::BindOnce(&AdaptErrorOrVoid).Then(std::move(callback)));
+  remote_->DeleteKeys(
+      to_delete, priority,
+      mojo::WrapCallbackWithDefaultInvokeIfNotRun(
+          base::BindOnce(&AdaptSizeType).Then(std::move(callback)),
+          base::unexpected(ServiceError::kOperationCancelled)));
 }
 
 void UnexportableKeyServiceProxied::DeleteAllKeysSlowlyAsync(
-    BackgroundTaskPriority priority,
     base::OnceCallback<void(ServiceErrorOr<size_t>)> callback) {
   key_cache_.clear();
 
-  remote_->DeleteAllKeys(
-      priority, base::BindOnce(&AdaptSizeType).Then(std::move(callback)));
+  remote_->DeleteAllKeys(mojo::WrapCallbackWithDefaultInvokeIfNotRun(
+      base::BindOnce(&AdaptSizeType).Then(std::move(callback)),
+      base::unexpected(ServiceError::kOperationCancelled)));
 }
 
 void UnexportableKeyServiceProxied::
@@ -238,7 +229,32 @@ void UnexportableKeyServiceProxied::
   // remote_ will not call any pending callbacks after it is destroyed.
   // Since we own remote_, it is guaranteed that this will be alive when a
   // callback is called.
-  remote_->GetAllSigningKeysForGarbageCollection(priority, std::move(callback));
+  remote_->GetAllSigningKeysForGarbageCollection(
+      priority, mojo::WrapCallbackWithDefaultInvokeIfNotRun(
+                    base::BindOnce(&UnexportableKeyServiceProxied::
+                                       OnGetAllSigningKeysForGarbageCollection,
+                                   base::Unretained(this), std::move(callback)),
+                    base::unexpected(ServiceError::kOperationCancelled)));
+}
+
+void UnexportableKeyServiceProxied::OnGetAllSigningKeysForGarbageCollection(
+    base::OnceCallback<void(ServiceErrorOr<std::vector<UnexportableKeyId>>)>
+        original_callback,
+    ServiceErrorOr<std::vector<mojom::NewKeyDataPtr>> result) {
+  ASSIGN_OR_RETURN(std::vector<mojom::NewKeyDataPtr> key_data,
+                   std::move(result), [&](ServiceError error) {
+                     std::move(original_callback).Run(base::unexpected(error));
+                   });
+
+  std::vector<UnexportableKeyId> key_ids;
+  key_ids.reserve(key_data.size());
+  for (mojom::NewKeyDataPtr& new_key_data : key_data) {
+    UnexportableKeyId key_id = new_key_data->key_id;
+    key_cache_.try_emplace(key_id, std::move(new_key_data));
+    key_ids.push_back(key_id);
+  }
+
+  std::move(original_callback).Run(std::move(key_ids));
 }
 
 }  // namespace unexportable_keys

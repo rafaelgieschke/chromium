@@ -226,7 +226,6 @@ MouseEventManager::DispatchMouseEvent(
         mouse_event_type == event_type_names::kAuxclick) {
       click_count = click_count_;
     }
-    std::optional<EventTiming> event_timing;
     bool should_dispatch =
         !check_for_listener || target->HasEventListeners(mouse_event_type);
     if (mouse_event_type == event_type_names::kContextmenu ||
@@ -263,10 +262,7 @@ MouseEventManager::DispatchMouseEvent(
         HTMLDialogElement::HandleDialogLightDismissForClick(
             *pointer_down_target, *pointer_up_target);
       }
-      if (frame_ && frame_->DomWindow()) {
-        event_timing =
-            EventTiming::TryCreate(frame_->DomWindow(), *event, target);
-      }
+      UIEventTiming event_timing(frame_, *event, target);
       if (should_dispatch) {
         input_event_result = event_handling_util::ToWebInputEventResult(
             target->DispatchEvent(*event));
@@ -282,10 +278,7 @@ MouseEventManager::DispatchMouseEvent(
           mouse_event.FromTouch() ? MouseEvent::kFromTouch
                                   : MouseEvent::kRealOrIndistinguishable,
           mouse_event.menu_source_type);
-      if (frame_ && frame_->DomWindow()) {
-        event_timing =
-            EventTiming::TryCreate(frame_->DomWindow(), *event, target);
-      }
+      UIEventTiming event_timing(frame_, *event, target);
       if (should_dispatch) {
         input_event_result = event_handling_util::ToWebInputEventResult(
             target->DispatchEvent(*event));
@@ -392,8 +385,13 @@ void MouseEventManager::RecomputeMouseHoverState() {
   if (!view)
     return;
 
-  if (!frame_->GetPage() || !frame_->GetPage()->GetFocusController().IsActive())
+  const bool should_page_receive_mouse_hover =
+      frame_->GetPage() &&
+      (RuntimeEnabledFeatures::SyntheticMouseHoverOverInactivePageEnabled() ||
+       frame_->GetPage()->GetFocusController().IsActive());
+  if (!should_page_receive_mouse_hover) {
     return;
+  }
 
   // Don't dispatch a synthetic mouse move event if the mouse cursor is not
   // visible to the user.
@@ -944,14 +942,30 @@ DragHandlingResult MouseEventManager::HandleDrag(
     // as a click.
     InvalidateClick();
 
-    // Since drag operation started we need to send a pointercancel for the
-    // corresponding pointer.
-    if (initiated_by_button_press) {
+    if (RuntimeEnabledFeatures::SuppressPointerStreamAfterDragEnabled()) {
+      const auto pointerType = initiator == DragAndDropToolType::kMouse
+                                   ? WebPointerProperties::PointerType::kMouse
+                               : initiator == DragAndDropToolType::kFinger
+                                   ? WebPointerProperties::PointerType::kTouch
+                                   : WebPointerProperties::PointerType::kPen;
+      // When a drag starts we need to suppress the pointer event stream for the
+      // corresponding pointer.
       frame_->GetEventHandler().HandlePointerEvent(
           WebPointerEvent::CreatePointerCausesUaActionEvent(
-              WebPointerProperties::PointerType::kMouse,
-              event.Event().TimeStamp()),
+              pointerType, event.Event().TimeStamp()),
           Vector<WebPointerEvent>(), Vector<WebPointerEvent>());
+    } else {
+      // TODO(crbug.com/452372355): Remove this branch of the `if` once the
+      // suppression feature flag is enabled by default.
+      // Since drag operation started we need to send a pointercancel for the
+      // corresponding pointer.
+      if (initiated_by_button_press) {
+        frame_->GetEventHandler().HandlePointerEvent(
+            WebPointerEvent::CreatePointerCausesUaActionEvent(
+                WebPointerProperties::PointerType::kMouse,
+                event.Event().TimeStamp()),
+            Vector<WebPointerEvent>(), Vector<WebPointerEvent>());
+      }
     }
     drag_initiator_ = initiator;
   }
@@ -1075,7 +1089,8 @@ WebInputEventResult MouseEventManager::DispatchDragEvent(
   initializer->setRelatedTarget(related_target);
   initializer->setView(frame_->GetDocument()->domWindow());
   initializer->setComposed(true);
-  if (RuntimeEnabledFeatures::PreserveDropEffectEnabled()) {
+  // Per the DnD spec, these events have a default `dropEffect`.
+  if (RuntimeEnabledFeatures::SetDefaultDropEffectEnabled()) {
     if (event_type == event_type_names::kDragenter ||
         event_type == event_type_names::kDragover) {
       data_transfer->SetDestinationOperationFromEffectAllowed();
@@ -1084,7 +1099,7 @@ WebInputEventResult MouseEventManager::DispatchDragEvent(
           ui::mojom::blink::DragOperation::kNone);
     }
   }
-  initializer->setGetDataTransfer(data_transfer);
+  initializer->setDataTransfer(data_transfer);
   initializer->setSourceCapabilities(
       frame_->GetDocument()->domWindow()
           ? frame_->GetDocument()
@@ -1100,8 +1115,17 @@ WebInputEventResult MouseEventManager::DispatchDragEvent(
                                         ? MouseEvent::kFromTouch
                                         : MouseEvent::kRealOrIndistinguishable);
 
-  return event_handling_util::ToWebInputEventResult(
+  const auto event_result = event_handling_util::ToWebInputEventResult(
       drag_target->DispatchEvent(*me));
+  // If the drop effect was overridden to none for a dragLeave, reset it to
+  // an uninitialized state. In cases where a drag leaves a target, having
+  // dropEffect explicitly set to none would be incorrect and may
+  // cause unintended behavior when the dataTransfer object is reused.
+  if (RuntimeEnabledFeatures::SetDefaultDropEffectEnabled() &&
+      event_type == event_type_names::kDragleave) {
+    data_transfer->resetDropEffect();
+  }
+  return event_result;
 }
 
 void MouseEventManager::ClearDragDataTransfer() {

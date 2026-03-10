@@ -8,7 +8,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
@@ -48,6 +47,7 @@
 #include "extensions/browser/process_manager_observer.h"
 #include "extensions/browser/renderer_startup_helper.h"
 #include "extensions/browser/service_worker/service_worker_task_queue.h"
+#include "extensions/browser/service_worker/worker_id.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
@@ -282,7 +282,7 @@ ProcessManager::FrameSet ProcessManager::GetRenderFrameHostsForExtension(
 
 bool ProcessManager::IsRenderFrameHostRegistered(
     content::RenderFrameHost* render_frame_host) {
-  return base::Contains(all_extension_frames_, render_frame_host);
+  return all_extension_frames_.contains(render_frame_host);
 }
 
 void ProcessManager::AddObserver(ProcessManagerObserver* observer) {
@@ -566,7 +566,7 @@ void ProcessManager::NetworkRequestDone(
   ExtensionHost* host = result->second;
   pending_network_requests_.erase(result);
 
-  if (!base::Contains(background_hosts_, host)) {
+  if (!background_hosts_.contains(host)) {
     return;
   }
 
@@ -673,7 +673,7 @@ void ProcessManager::CloseBackgroundHost(ExtensionHost* host) {
         mojom::ViewType::kExtensionBackgroundPage);
   delete host;
   // |host| should deregister itself from our structures.
-  CHECK(!base::Contains(background_hosts_, host));
+  CHECK(!background_hosts_.contains(host));
 
   for (auto& observer : observer_list_)
     observer.OnBackgroundHostClose(extension_id);
@@ -737,12 +737,11 @@ base::Uuid ProcessManager::IncrementServiceWorkerKeepaliveCount(
       util::GetServiceWorkerContextForExtensionId(extension->id(),
                                                   browser_context_);
 
-  content::ServiceWorkerExternalRequestResult start_result =
-      service_worker_context->StartingExternalRequest(
-          service_worker_version_id, timeout_type, request_uuid);
+  service_worker_context->StartingExternalRequest(service_worker_version_id,
+                                                  timeout_type, request_uuid);
 
   service_worker_keepalives_[request_uuid] = ServiceWorkerKeepaliveData{
-      worker_id, activity_type, extra_data, timeout_type, start_result};
+      worker_id, activity_type, extra_data, timeout_type};
 
   return request_uuid;
 }
@@ -801,8 +800,6 @@ void ProcessManager::DecrementServiceWorkerKeepaliveCount(
   CHECK_EQ(iter->second.worker_id, worker_id);
   CHECK_EQ(iter->second.activity_type, activity_type);
   CHECK_EQ(iter->second.extra_data, extra_data);
-  content::ServiceWorkerExternalRequestResult start_result =
-      iter->second.start_result;
   service_worker_keepalives_.erase(iter);
 
   int64_t service_worker_version_id = worker_id.version_id;
@@ -813,18 +810,6 @@ void ProcessManager::DecrementServiceWorkerKeepaliveCount(
   content::ServiceWorkerExternalRequestResult finish_result =
       service_worker_context->FinishedExternalRequest(service_worker_version_id,
                                                       request_uuid);
-
-  if (start_result == content::ServiceWorkerExternalRequestResult::kOk) {
-    base::UmaHistogramEnumeration(
-        "Extensions.ServiceWorkerBackground."
-        "ProcessManagerFinishedExternalRequestResultWithSuccessfulStart",
-        finish_result);
-  } else {
-    base::UmaHistogramEnumeration(
-        "Extensions.ServiceWorkerBackground."
-        "ProcessManagerFinishedExternalRequestResultWithUnsuccessfulStart",
-        finish_result);
-  }
 
   // Example of when kWorkerNotRunning can happen is when the renderer process
   // is killed while handling a service worker request (e.g. because of a bad
@@ -975,13 +960,12 @@ void ProcessManager::StartTrackingServiceWorkerRunningInstance(
   worker_context_ids_[worker_id] = base::Uuid::GenerateRandomV4();
 
   // Observe the RenderProcessHost for cleaning up on process shutdown.
-  int render_process_id = worker_id.render_process_id;
-  bool inserted = worker_process_to_extension_ids_[render_process_id]
+  bool inserted = worker_process_to_extension_ids_[worker_id.render_process_id]
                       .insert(worker_id.extension_id)
                       .second;
   if (inserted) {
     content::RenderProcessHost* render_process_host =
-        content::RenderProcessHost::FromID(render_process_id);
+        content::RenderProcessHost::FromID(worker_id.render_process_id);
     DCHECK(render_process_host);
     if (!process_observations_.IsObservingSource(render_process_host)) {
       // These will be cleaned up in RenderProcessExited().
@@ -997,7 +981,7 @@ void ProcessManager::RenderProcessExited(
     const content::ChildProcessTerminationInfo& info) {
   DCHECK(process_observations_.IsObservingSource(host));
   process_observations_.RemoveObservation(host);
-  const int render_process_id = host->GetDeprecatedID();
+  const content::ChildProcessId render_process_id = host->GetID();
   // Look up and then clean up the entries that are affected by
   // |render_process_id| destruction.
   //
@@ -1036,7 +1020,7 @@ void ProcessManager::OnExtensionHostDestroyed(ExtensionHost* host) {
   TRACE_EVENT0("browser,startup", "ProcessManager::OnExtensionHostDestroyed");
   host->RemoveObserver(this);
 
-  DCHECK(base::Contains(background_hosts_, host));
+  DCHECK(background_hosts_.contains(host));
   background_hosts_.erase(host);
   // Note: |host->extension()| may be null at this point.
   ClearBackgroundPageData(host->extension_id());
@@ -1073,6 +1057,10 @@ void ProcessManager::StopTrackingServiceWorkerRunningInstance(
 void ProcessManager::StopTrackingServiceWorkerRunningInstance(
     const ExtensionId& extension_id,
     int64_t worker_version_id) {
+  // NOTE: Multiple notifications can try to remove a worker when the worker
+  // stops (DidStopServiceWorkerContext(), ProcessManager::RenderProcessExit(),
+  // or extension uninstall/disable).
+
   // We need the specific version because an extension could be
   // re-activated before StopTrackingServiceWorkerRunningInstance() is called.
   // In that case we might try to stop tracking the new version instance of the
@@ -1081,23 +1069,11 @@ void ProcessManager::StopTrackingServiceWorkerRunningInstance(
       all_running_extension_workers_.GetAllForExtension(extension_id,
                                                         worker_version_id);
 
-  if (worker_ids_for_extension.empty()) {
-    // Multiple notifications can try to remove a worker when the worker
-    // stops (DidStopServiceWorkerContext(),
-    // ProcessManager::RenderProcessExit(), or extension uninstall/disable).
-    return;
-  }
-
   // TODO(crbug.com/40936639): After the fix releases there should only be one
-  // worker instance tracked for each extension at any time. If there is still
-  // more than one then do not delete it so we will count it and know about it.
-  // Confirm more thoroughly with DUMP_WILL_BE_CHECK() if metrics look
-  // promising.
-  if (worker_ids_for_extension.size() > 1u) {
-    return;
+  // worker instance tracked for each extension at any time.
+  for (const WorkerId& worker_id : worker_ids_for_extension) {
+    StopTrackingServiceWorkerRunningInstance(worker_id);
   }
-
-  StopTrackingServiceWorkerRunningInstance(worker_ids_for_extension[0]);
 }
 
 bool ProcessManager::HasServiceWorker(const WorkerId& worker_id) const {

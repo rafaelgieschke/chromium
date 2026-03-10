@@ -14,13 +14,13 @@
 
 #include "base/check.h"
 #include "base/check_op.h"
-#include "base/containers/contains.h"
 #include "base/containers/stack.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/not_fatal_until.h"
 #include "base/numerics/safe_conversions.h"
 #include "components/autofill/core/browser/foundations/form_forest_util_inl.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
 
 namespace autofill::internal {
 
@@ -194,8 +194,8 @@ void FormForest::UpdateTreeOfRendererForm(FormData* form,
     *old_form = std::move(*form);
     form = old_form;
   } else {
-    DCHECK(!base::Contains(frame->child_forms, form->renderer_id(),
-                           &FormData::renderer_id));
+    DCHECK(!std::ranges::contains(frame->child_forms, form->renderer_id(),
+                                  &FormData::renderer_id));
     form->set_fields({});
     child_frames_changed = false;
     frame->child_forms.push_back(std::move(*form));
@@ -507,7 +507,7 @@ const FormData& FormForest::GetBrowserForm(FormGlobalId renderer_form) const {
 FormForest::SecurityOptions::SecurityOptions(
     const url::Origin* main_origin,
     const url::Origin* triggered_origin,
-    const base::flat_map<FieldGlobalId, FieldType>* field_type_map)
+    const absl::flat_hash_map<FieldGlobalId, FieldType>* field_type_map)
     : main_origin_(main_origin),
       triggered_origin_(triggered_origin),
       field_type_map_(field_type_map) {

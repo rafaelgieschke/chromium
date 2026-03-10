@@ -49,11 +49,15 @@ class TabInterfaceAndroid : public tabs::TabInterface {
       PinnedStateChangedCallback callback) override;
   base::CallbackListSubscription RegisterGroupChanged(
       GroupChangedCallback callback) override;
+  base::CallbackListSubscription RegisterBlockedStateChanged(
+      BlockedStateChangedCallback callback) override;
   bool CanShowModalUI() const override;
   std::unique_ptr<tabs::ScopedTabModalUI> ShowModalUI() override;
   base::CallbackListSubscription RegisterModalUIChanged(
       TabInterfaceCallback callback) override;
   bool IsInNormalWindow() const override;
+  BrowserWindowInterface* GetBrowserWindowInterface() override;
+  const BrowserWindowInterface* GetBrowserWindowInterface() const override;
   tabs::TabFeatures* GetTabFeatures() override;
   const tabs::TabFeatures* GetTabFeatures() const override;
   bool IsPinned() const override;

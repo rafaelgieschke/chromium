@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "base/containers/contains.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/state_transitions.h"
@@ -275,7 +274,7 @@ void DocumentSpeculationRules::AddRuleSet(SpeculationRuleSet* rule_set) {
 
   CountSpeculationRulesLoadOutcome(outcome);
 
-  DCHECK(!base::Contains(rule_sets_, rule_set));
+  DCHECK(!std::ranges::contains(rule_sets_, rule_set));
   rule_sets_.push_back(rule_set);
   if (rule_set->has_document_rule()) {
     UseCounter::Count(GetSupplementable(),
@@ -817,7 +816,7 @@ void DocumentSpeculationRules::AddLinkBasedSpeculationCandidates(
             mojom::blink::SpeculationAction action,
             SpeculationRuleSet* rule_set,
             const HeapVector<Member<SpeculationRule>>& speculation_rules) {
-          if (!link->HrefURL().ProtocolIsInHTTPFamily()) {
+          if (!link->HrefURL().ProtocolIsInHttpFamily()) {
             return;
           }
 
@@ -918,7 +917,7 @@ void DocumentSpeculationRules::AddLinkBasedSpeculationCandidates(
   }
 
   for (auto& it : matched_links_) {
-    candidates.AppendVector(*(it.value));
+    candidates.append_range(*(it.value));
   }
 }
 
@@ -957,10 +956,10 @@ void DocumentSpeculationRules::DocumentPropertyChanged() {
 void DocumentSpeculationRules::AddLink(HTMLAnchorElementBase* link) {
   DCHECK(initialized_);
   DCHECK(link->IsLink());
-  DCHECK(!base::Contains(unmatched_links_, link));
-  DCHECK(!base::Contains(matched_links_, link));
-  DCHECK(!base::Contains(pending_links_, link));
-  DCHECK(!base::Contains(stale_links_, link));
+  DCHECK(!unmatched_links_.Contains(link));
+  DCHECK(!matched_links_.Contains(link));
+  DCHECK(!pending_links_.Contains(link));
+  DCHECK(!stale_links_.Contains(link));
 
   pending_links_.insert(link);
   // We don't check LockedAncestorPreventingStyle here because this
@@ -976,8 +975,8 @@ void DocumentSpeculationRules::RemoveLink(HTMLAnchorElementBase* link) {
 
   if (auto it = matched_links_.find(link); it != matched_links_.end()) {
     matched_links_.erase(it);
-    DCHECK(!base::Contains(unmatched_links_, link));
-    DCHECK(!base::Contains(pending_links_, link));
+    DCHECK(!unmatched_links_.Contains(link));
+    DCHECK(!pending_links_.Contains(link));
     return;
   }
   // TODO(crbug.com/1371522): Removing a link that doesn't match anything isn't
@@ -985,7 +984,7 @@ void DocumentSpeculationRules::RemoveLink(HTMLAnchorElementBase* link) {
   // QueueUpdateSpeculationCandidates in this scenario.
   if (auto it = unmatched_links_.find(link); it != unmatched_links_.end()) {
     unmatched_links_.erase(it);
-    DCHECK(!base::Contains(pending_links_, link));
+    DCHECK(!pending_links_.Contains(link));
     return;
   }
   auto it = pending_links_.find(link);
@@ -999,7 +998,7 @@ void DocumentSpeculationRules::InvalidateLink(HTMLAnchorElementBase* link) {
   pending_links_.insert(link);
   if (auto it = matched_links_.find(link); it != matched_links_.end()) {
     matched_links_.erase(it);
-    DCHECK(!base::Contains(unmatched_links_, link));
+    DCHECK(!unmatched_links_.Contains(link));
     return;
   }
   if (auto it = unmatched_links_.find(link); it != unmatched_links_.end())
@@ -1022,7 +1021,7 @@ void DocumentSpeculationRules::InvalidateAllLinks() {
 void DocumentSpeculationRules::UpdateSelectors() {
   HeapVector<Member<StyleRule>> selectors;
   for (SpeculationRuleSet* rule_set : rule_sets_) {
-    selectors.AppendVector(rule_set->selectors());
+    selectors.append_range(rule_set->selectors());
   }
 
   selectors_ = std::move(selectors);

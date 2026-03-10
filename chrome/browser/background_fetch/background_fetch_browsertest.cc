@@ -119,15 +119,14 @@ class WaitableDownloadLoggerObserver : public download::Logger::Observer {
   }
 
   // download::Logger::Observer implementation:
-  void OnServiceStatusChanged(
-      const base::Value::Dict& service_status) override {}
+  void OnServiceStatusChanged(const base::DictValue& service_status) override {}
   void OnServiceDownloadsAvailable(
-      const base::Value::List& service_downloads) override {}
+      const base::ListValue& service_downloads) override {}
   void OnServiceDownloadChanged(
-      const base::Value::Dict& service_download) override {}
+      const base::DictValue& service_download) override {}
   void OnServiceDownloadFailed(
-      const base::Value::Dict& service_download) override {}
-  void OnServiceRequestMade(const base::Value::Dict& service_request) override {
+      const base::DictValue& service_download) override {}
+  void OnServiceRequestMade(const base::DictValue& service_request) override {
     const std::string* client = service_request.FindString("client");
     const std::string* guid = service_request.FindString("guid");
     const std::string* result = service_request.FindString("result");
@@ -232,7 +231,7 @@ class OfflineContentProviderObserver final
 
   ItemsAddedCallback items_added_callback_;
   FinishedProcessingItemCallback finished_processing_item_callback_;
-  raw_ptr<BackgroundFetchDelegateImpl, AcrossTasksDanglingUntriaged> delegate_ =
+  raw_ptr<BackgroundFetchDelegateImpl> delegate_ =
       nullptr;
   bool pause_ = false;
   bool resume_ = false;
@@ -305,6 +304,9 @@ class BackgroundFetchBrowserTest : public InProcessBrowserTest {
 
     download_service_->GetLogger()->RemoveObserver(download_observer_.get());
     download_service_ = nullptr;
+    delegate_ = nullptr;
+    active_browser_ = nullptr;
+    offline_content_provider_observer_->set_delegate(nullptr);
   }
 
   // ---------------------------------------------------------------------------
@@ -427,8 +429,8 @@ class BackgroundFetchBrowserTest : public InProcessBrowserTest {
     content::WebContents* web_contents =
         browser()->tab_strip_model()->GetActiveWebContents();
     DownloadRequestLimiter::TabDownloadState* tab_download_state =
-        g_browser_process->download_request_limiter()->GetDownloadState(
-            web_contents, true /* create */);
+        g_browser_process->download_request_limiter()->GetOrCreateDownloadState(
+            web_contents);
     tab_download_state->set_download_seen();
     tab_download_state->SetDownloadStatusAndNotify(
         url::Origin::Create(web_contents->GetVisibleURL()),
@@ -460,9 +462,9 @@ class BackgroundFetchBrowserTest : public InProcessBrowserTest {
   net::EmbeddedTestServer* https_server() { return https_server_.get(); }
 
  protected:
-  raw_ptr<BackgroundFetchDelegateImpl, AcrossTasksDanglingUntriaged> delegate_ =
+  raw_ptr<BackgroundFetchDelegateImpl> delegate_ =
       nullptr;
-  raw_ptr<download::BackgroundDownloadService, AcrossTasksDanglingUntriaged>
+  raw_ptr<download::BackgroundDownloadService>
       download_service_ = nullptr;
   base::OnceClosure click_event_closure_;
 
@@ -492,7 +494,7 @@ class BackgroundFetchBrowserTest : public InProcessBrowserTest {
 
   std::unique_ptr<net::EmbeddedTestServer> https_server_;
 
-  raw_ptr<Browser, AcrossTasksDanglingUntriaged> active_browser_ = nullptr;
+  raw_ptr<Browser> active_browser_ = nullptr;
 };
 
 IN_PROC_BROWSER_TEST_F(BackgroundFetchBrowserTest, DownloadService_Acceptance) {
@@ -528,7 +530,7 @@ IN_PROC_BROWSER_TEST_F(BackgroundFetchBrowserTest,
   ASSERT_NO_FATAL_FAILURE(
       RunScriptFunction("StartSingleFileDownloadWithCorrectDownloadTotal()"));
 
-  std::vector<raw_ptr<const ukm::mojom::UkmEntry, VectorExperimental>> entries =
+  auto entries =
       test_ukm_recorder_->GetEntriesByName(
           ukm::builders::BackgroundFetch::kEntryName);
   ASSERT_EQ(1u, entries.size());
@@ -982,7 +984,7 @@ IN_PROC_BROWSER_TEST_F(BackgroundFetchFencedFrameBrowserTest,
       "frames.";
   StartSingleFileDownload(fenced_frame, kExpectedError);
 
-  std::vector<raw_ptr<const ukm::mojom::UkmEntry, VectorExperimental>> entries =
+  auto entries =
       test_ukm_recorder_->GetEntriesByName(
           ukm::builders::BackgroundFetch::kEntryName);
   ASSERT_EQ(0u, entries.size());
@@ -1025,7 +1027,7 @@ IN_PROC_BROWSER_TEST_F(BackgroundFetchFencedFrameBrowserTest,
       "frames.";
   StartSingleFileDownload(fenced_frame, kExpectedError);
 
-  std::vector<raw_ptr<const ukm::mojom::UkmEntry, VectorExperimental>> entries =
+  auto entries =
       test_ukm_recorder_->GetEntriesByName(
           ukm::builders::BackgroundFetch::kEntryName);
   ASSERT_EQ(0u, entries.size());

@@ -9,7 +9,6 @@
 <translation id="101823271612280837">Mae'r recordio wedi'i stopio Methu â defnyddio dangosfwrdd Gêm yn y modd llechen.</translation>
 <translation id="1024364763893396229">Cadw eich <ph name="NAME" /></translation>
 <translation id="1032891413405719768">Mae batri'r pwyntil yn isel</translation>
-<translation id="1036073649888683237">I reoli hysbysiadau, ewch i'r Gosodiadau</translation>
 <translation id="1036348656032585052">Diffodd</translation>
 <translation id="1037492556044956303">Ychwanegwyd <ph name="DEVICE_NAME" /></translation>
 <translation id="1038106730571050514">Dangos awgrymiadau</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">Llun diweddar <ph name="INDEX" /> o <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Crebachu Google Tasks</translation>
 <translation id="2208323208084708176">Modd bwrdd gwaith unedig</translation>
-<translation id="2210311543574621570">Byddwch yn gweld y clipfwrdd pan fyddwch yn pwyso a dal Ctrl + V. Gallwch ddiffodd y llwybr byr hwn trwy analluogi'r faner #clipboard-history-longpress yn chrome://flags.</translation>
 <translation id="2215920961700443347">Dim rhyngrwyd. Cysylltwch â'r rhyngrwyd a rhowch gynnig arall arni.</translation>
 <translation id="2222841058024245321">Desg 7</translation>
 <translation id="2223384056430485343">Mewn sgrîn hollt</translation>
@@ -428,6 +426,7 @@ Mae <ph name="DEVICECOUNT" /> o ddyfeisiau yn gysylltiedig.</translation>
 <translation id="2478076885740497414">Gosod yr ap</translation>
 <translation id="2482878487686419369">Hysbysiadau</translation>
 <translation id="2484513351006226581">Pwyswch <ph name="KEYBOARD_SHORTCUT" /> i newid cynllun y bysellfwrdd.</translation>
+<translation id="2485422356828889247">Dadosod</translation>
 <translation id="2486214324139475545">Rhagolwg <ph name="DESK_NAME" />. Desg weithredol.</translation>
 <translation id="2486405091093637109">Cafodd '<ph name="DISPLAY_NAME" />' ei newid i eglurdeb <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz). Heb gadarnhau, bydd y gosodiadau blaenorol yn cael eu hadfer mewn <ph name="TIMEOUT_SECONDS" />.</translation>
 <translation id="2487915095798731898">Ymuno</translation>
@@ -2195,7 +2194,6 @@ I ddiffodd y ddyfais, pwyswch a daliwch y botwm pŵer ar y ddyfais eto.</transla
 <translation id="8241650983304689286">Ychwanegu tab at wedd hollt newydd</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, Cryfder y Signal <ph name="SIGNAL_STRENGTH" />, Batri'r Ffôn <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Dangos holl gynnwys Google Drive</translation>
-<translation id="8257510091797044096">Gosod eich dyfais</translation>
 <translation id="8261506727792406068">Dileu</translation>
 <translation id="8262312463845990408">Toglo chwarae yn ôl</translation>
 <translation id="8268302343625273732">Gweld pob aseiniad yn Google Classroom</translation>

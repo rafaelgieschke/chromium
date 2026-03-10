@@ -30,13 +30,13 @@ std::optional<SkImageInfo> MakeSkImageInfo(
   }
   sk_sp<SkColorSpace> color_space;
   if (!color_transfer_function.is_null() && !color_to_xyz_matrix.is_null()) {
+    // Both these fields are declared as fixed-size arrays, and the array sizes
+    // are validated before any user-defined deserialization traits are invoked.
+    CHECK_EQ(color_transfer_function.size(), 7u);
+    CHECK_EQ(color_to_xyz_matrix.size(), 9u);
+
     const float* data = color_transfer_function.data();
     skcms_TransferFunction transfer_function;
-    // TODO(crbug.com/40061960): Mojo should validate this array size. We can
-    // CHECK it instead when it does.
-    if (color_transfer_function.size() != 7u) {
-      return std::nullopt;
-    }
     transfer_function.g = data[0];
     transfer_function.a = UNSAFE_TODO(data[1]);
     transfer_function.b = UNSAFE_TODO(data[2]);
@@ -46,11 +46,6 @@ std::optional<SkImageInfo> MakeSkImageInfo(
     transfer_function.f = UNSAFE_TODO(data[6]);
 
     skcms_Matrix3x3 to_xyz_matrix;
-    // TODO(crbug.com/40061960): Mojo should validate this array size. We can
-    // CHECK it instead when it does.
-    if (color_to_xyz_matrix.size() != 9u) {
-      return std::nullopt;
-    }
     UNSAFE_TODO(memcpy(to_xyz_matrix.vals, color_to_xyz_matrix.data(),
                        9 * sizeof(float)));
     color_space = SkColorSpace::MakeRGB(transfer_function, to_xyz_matrix);
@@ -219,8 +214,8 @@ bool StructTraits<skia::mojom::ImageInfoDataView, SkImageInfo>::Read(
 
   // The ImageInfo wire types are uint32_t, but the Skia type uses int, and the
   // values can't be negative.
-  auto width = base::MakeCheckedNum(data.width()).Cast<int>();
-  auto height = base::MakeCheckedNum(data.height()).Cast<int>();
+  auto width = base::CheckedNumeric(data.width()).Cast<int>();
+  auto height = base::CheckedNumeric(data.height()).Cast<int>();
   if (!width.IsValid() || !height.IsValid()) {
     return false;
   }
@@ -251,8 +246,8 @@ bool StructTraits<skia::mojom::BitmapN32ImageInfoDataView, SkImageInfo>::Read(
 
   // The ImageInfo wire types are uint32_t, but the Skia type uses int, and the
   // values can't be negative.
-  auto width = base::MakeCheckedNum(data.width()).Cast<int>();
-  auto height = base::MakeCheckedNum(data.height()).Cast<int>();
+  auto width = base::CheckedNumeric(data.width()).Cast<int>();
+  auto height = base::CheckedNumeric(data.height()).Cast<int>();
   if (!width.IsValid() || !height.IsValid()) {
     return false;
   }

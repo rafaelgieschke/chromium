@@ -1,5 +1,5 @@
 <!DOCTYPE HTML>
-<html>
+<html dir="$i18n{textdirection}" lang="$i18n{language}">
   <head>
     <meta charset="utf-8">
     <title>$i18n{title}</title>
@@ -9,9 +9,17 @@
       html, body {
         height: 100%;
         margin: 0;
+        overflow: hidden;
         overscroll-behavior-x: contain;
         padding: 0;
         width: 100%;
+      }
+
+      /* This is only used for first load. */
+      @media (prefers-color-scheme: dark) {
+        body {
+          background-color: rgba(16, 18, 23, 1);
+        }
       }
 
       body {

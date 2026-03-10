@@ -12,11 +12,13 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
+#include "extensions/common/api/messaging/message.h"
 #include "extensions/common/api/messaging/port_id.h"
 #include "extensions/common/mojom/message_port.mojom.h"
 #include "extensions/renderer/bindings/api_binding_util.h"
 #include "gin/public/wrappable_pointer_tags.h"
 #include "gin/wrappable.h"
+#include "v8/include/cppgc/prefinalizer.h"
 #include "v8/include/v8-forward.h"
 
 namespace gin {
@@ -25,7 +27,6 @@ class Arguments;
 
 namespace extensions {
 class APIEventHandler;
-class Message;
 
 // A gin::Wrappable implementation of `runtime.Port` exposed to extensions. This
 // provides a means for extensions to communicate with themselves and each
@@ -33,6 +34,8 @@ class Message;
 // out this responsibility. This class only handles the JS interface (both calls
 // from JS and forward events to JS).
 class GinPort final : public gin::Wrappable<GinPort> {
+  CPPGC_USING_PRE_FINALIZER(GinPort, Dispose);
+
  public:
   class Delegate {
    public:
@@ -41,7 +44,7 @@ class GinPort final : public gin::Wrappable<GinPort> {
     // Posts a message to the port.
     virtual void PostMessageToPort(v8::Local<v8::Context> context,
                                    const PortId& port_id,
-                                   std::unique_ptr<Message> message) = 0;
+                                   Message message) = 0;
 
     // Closes the port.
     virtual void ClosePort(v8::Local<v8::Context> context,
@@ -69,8 +72,7 @@ class GinPort final : public gin::Wrappable<GinPort> {
   const char* GetHumanReadableName() const override;
 
   // Dispatches an event to any listeners of the onMessage event.
-  void DispatchOnMessage(v8::Local<v8::Context> context,
-                         const Message& message);
+  void DispatchOnMessage(v8::Local<v8::Context> context, Message message);
 
   // Dispatches an event to any listeners of the onDisconnect event and closes
   // the port.
@@ -91,6 +93,8 @@ class GinPort final : public gin::Wrappable<GinPort> {
   bool is_closed_for_testing() const { return state_ == State::kDisconnected; }
 
  private:
+  void Dispose() { context_invalidation_listener_.Dispose(); }
+
   const gin::WrapperInfo* wrapper_info() const override;
 
   enum class State {
@@ -132,6 +136,9 @@ class GinPort final : public gin::Wrappable<GinPort> {
   // Invalidates the port's events after the port has been disconnected.
   void InvalidateEvents(v8::Local<v8::Context> context);
 
+  // Clears the delegate and event handler pointers.
+  void ClearContextPointers();
+
   // Throws the given `error`.
   void ThrowError(v8::Isolate* isolate, std::string_view error);
 
@@ -159,13 +166,7 @@ class GinPort final : public gin::Wrappable<GinPort> {
   // port JS object.
   bool accessed_sender_;
 
-  // A listener for context invalidation. Note: this isn't actually optional;
-  // it just needs to be created after `weak_factory_`, which needs to be the
-  // final member.
-  std::optional<binding::ContextInvalidationListener>
-      context_invalidation_listener_;
-
-  base::WeakPtrFactory<GinPort> weak_factory_{this};
+  binding::ContextInvalidationListener context_invalidation_listener_;
 };
 
 }  // namespace extensions

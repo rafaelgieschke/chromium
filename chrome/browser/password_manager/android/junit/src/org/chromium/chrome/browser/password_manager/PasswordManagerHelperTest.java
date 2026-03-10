@@ -39,14 +39,13 @@ import org.mockito.junit.MockitoRule;
 import org.robolectric.Robolectric;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowLooper;
 import org.robolectric.shadows.ShadowPackageManager;
 import org.robolectric.shadows.ShadowSystemClock;
 
 import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
-import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.chrome.browser.loading_modal.LoadingModalDialogCoordinator;
@@ -75,7 +74,7 @@ import java.util.Set;
 /**
  * Tests for password manager helper methods.
  *
- * <p>Tests related to password checkup can be found in {@link PasswordManagerCheckupHelperTest}
+ * <p>Tests related to password checkup can be found in {@link PasswordManagerHelper}
  */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(
@@ -101,8 +100,6 @@ public class PasswordManagerHelperTest {
     @Mock private SettingsNavigation mSettingsNavigationMock;
 
     @Mock private PendingIntent mPendingIntentMock;
-
-    @Mock private ObservableSupplier<ModalDialogManager> mModalDialogManagerSupplier;
 
     // TODO(crbug.com/40854050): Use fake instead of mock
     @Mock private PasswordManagerBackendSupportHelper mBackendSupportHelperMock;
@@ -133,7 +130,6 @@ public class PasswordManagerHelperTest {
                 new ModalDialogManager(
                         mock(ModalDialogManager.Presenter.class),
                         ModalDialogManager.ModalDialogType.APP);
-        when(mModalDialogManagerSupplier.get()).thenReturn(mModalDialogManager);
         doAnswer(
                         invocation -> {
                             mLoadingDialogCoordinatorObserver = invocation.getArgument(0);
@@ -161,7 +157,7 @@ public class PasswordManagerHelperTest {
         mPasswordManagerHelper.showPasswordSettings(
                 ContextUtils.getApplicationContext(),
                 ManagePasswordsReferrer.CHROME_SETTINGS,
-                mModalDialogManagerSupplier,
+                mModalDialogManager,
                 /* managePasskeys= */ false,
                 TEST_EMAIL_ADDRESS,
                 mSettingsCustomTabLauncher);
@@ -195,7 +191,7 @@ public class PasswordManagerHelperTest {
         mPasswordManagerHelper.showPasswordSettings(
                 ContextUtils.getApplicationContext(),
                 ManagePasswordsReferrer.CHROME_SETTINGS,
-                mModalDialogManagerSupplier,
+                mModalDialogManager,
                 /* managePasskeys= */ false,
                 TEST_EMAIL_ADDRESS,
                 mSettingsCustomTabLauncher);
@@ -224,7 +220,7 @@ public class PasswordManagerHelperTest {
         mPasswordManagerHelper.showPasswordSettings(
                 ContextUtils.getApplicationContext(),
                 ManagePasswordsReferrer.CHROME_SETTINGS,
-                mModalDialogManagerSupplier,
+                mModalDialogManager,
                 /* managePasskeys= */ false,
                 TEST_EMAIL_ADDRESS,
                 mSettingsCustomTabLauncher);
@@ -254,7 +250,7 @@ public class PasswordManagerHelperTest {
         mPasswordManagerHelper.showPasswordSettings(
                 ContextUtils.getApplicationContext(),
                 ManagePasswordsReferrer.CHROME_SETTINGS,
-                mModalDialogManagerSupplier,
+                mModalDialogManager,
                 /* managePasskeys= */ false,
                 TEST_EMAIL_ADDRESS,
                 mSettingsCustomTabLauncher);
@@ -405,7 +401,7 @@ public class PasswordManagerHelperTest {
                 mLoadingModalDialogCoordinator,
                 TEST_EMAIL_ADDRESS);
 
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
         verify(mLoadingModalDialogCoordinator).dismiss();
     }
 
@@ -426,7 +422,7 @@ public class PasswordManagerHelperTest {
 
         mLoadingDialogCoordinatorObserver.onDismissable();
 
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
         verify(mLoadingModalDialogCoordinator).dismiss();
     }
 
@@ -563,7 +559,7 @@ public class PasswordManagerHelperTest {
         mPasswordManagerHelper.showPasswordSettings(
                 ContextUtils.getApplicationContext(),
                 ManagePasswordsReferrer.CHROME_SETTINGS,
-                mModalDialogManagerSupplier,
+                mModalDialogManager,
                 /* managePasskeys= */ false,
                 TEST_EMAIL_ADDRESS,
                 mSettingsCustomTabLauncher);
@@ -596,7 +592,7 @@ public class PasswordManagerHelperTest {
         mPasswordManagerHelper.showPasswordSettings(
                 ContextUtils.getApplicationContext(),
                 ManagePasswordsReferrer.CHROME_SETTINGS,
-                mModalDialogManagerSupplier,
+                mModalDialogManager,
                 /* managePasskeys= */ false,
                 TEST_EMAIL_ADDRESS,
                 mSettingsCustomTabLauncher);
@@ -617,7 +613,6 @@ public class PasswordManagerHelperTest {
                                 PasswordMetricsUtil
                                         .LOCAL_LAUNCH_CREDENTIAL_MANAGER_SUCCESS_HISTOGRAM)
                         .build();
-        when(mSyncServiceMock.isSyncFeatureEnabled()).thenReturn(false);
 
         ApiException returnedException =
                 new ApiException(
@@ -627,7 +622,7 @@ public class PasswordManagerHelperTest {
         mPasswordManagerHelper.showPasswordSettings(
                 ContextUtils.getApplicationContext(),
                 ManagePasswordsReferrer.CHROME_SETTINGS,
-                mModalDialogManagerSupplier,
+                mModalDialogManager,
                 /* managePasskeys= */ false,
                 TEST_NO_EMAIL_ADDRESS,
                 mSettingsCustomTabLauncher);
@@ -651,7 +646,7 @@ public class PasswordManagerHelperTest {
         mPasswordManagerHelper.showPasswordSettings(
                 testActivity,
                 ManagePasswordsReferrer.CHROME_SETTINGS,
-                mModalDialogManagerSupplier,
+                mModalDialogManager,
                 /* managePasskeys= */ false,
                 TEST_NO_EMAIL_ADDRESS,
                 mSettingsCustomTabLauncher);
@@ -681,7 +676,7 @@ public class PasswordManagerHelperTest {
         mPasswordManagerHelper.showPasswordSettings(
                 testActivity,
                 ManagePasswordsReferrer.CHROME_SETTINGS,
-                mModalDialogManagerSupplier,
+                mModalDialogManager,
                 /* managePasskeys= */ false,
                 TEST_NO_EMAIL_ADDRESS,
                 mSettingsCustomTabLauncher);
@@ -710,7 +705,7 @@ public class PasswordManagerHelperTest {
         mPasswordManagerHelper.showPasswordSettings(
                 testActivity,
                 ManagePasswordsReferrer.CHROME_SETTINGS,
-                mModalDialogManagerSupplier,
+                mModalDialogManager,
                 /* managePasskeys= */ false,
                 TEST_NO_EMAIL_ADDRESS,
                 mSettingsCustomTabLauncher);
@@ -736,7 +731,7 @@ public class PasswordManagerHelperTest {
         mPasswordManagerHelper.showPasswordSettings(
                 testActivity,
                 ManagePasswordsReferrer.CHROME_SETTINGS,
-                mModalDialogManagerSupplier,
+                mModalDialogManager,
                 /* managePasskeys= */ false,
                 TEST_NO_EMAIL_ADDRESS,
                 mSettingsCustomTabLauncher);
@@ -759,7 +754,7 @@ public class PasswordManagerHelperTest {
         mPasswordManagerHelper.showPasswordSettings(
                 testActivity,
                 ManagePasswordsReferrer.CHROME_SETTINGS,
-                mModalDialogManagerSupplier,
+                mModalDialogManager,
                 /* managePasskeys= */ false,
                 TEST_NO_EMAIL_ADDRESS,
                 mSettingsCustomTabLauncher);
@@ -788,7 +783,6 @@ public class PasswordManagerHelperTest {
     }
 
     private void chooseToSyncPasswords() {
-        when(mSyncServiceMock.isSyncFeatureEnabled()).thenReturn(true);
         when(mSyncServiceMock.getSelectedTypes()).thenReturn(Set.of(UserSelectableType.PASSWORDS));
         when(mSyncServiceMock.getAccountInfo())
                 .thenReturn(

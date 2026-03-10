@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.omnibox;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -27,10 +28,18 @@ import org.mockito.junit.MockitoRule;
 import org.robolectric.annotation.Config;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.util.Features.DisableFeatures;
+import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.ControlsPosition;
+import org.chromium.chrome.browser.layouts.LayoutType;
+import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator.FuseboxState;
 import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
 import org.chromium.chrome.browser.omnibox.suggestions.OmniboxSuggestionsDropdownEmbedder.OmniboxAlignment;
+import org.chromium.chrome.browser.ui.edge_to_edge.TopInsetProvider;
+import org.chromium.components.omnibox.OmniboxFeatureList;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.display.DisplayAndroid;
@@ -53,6 +62,7 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
     // probably because you used position[1] instead of position[0].
     private static final int ALIGNMENT_TOP = 43;
     private static final int ALIGNMENT_LEFT = 40;
+    private static final int ALIGNMENT_HEIGHT = 45;
 
     // Sentinel value for mistaken use of pixels. OmniboxSuggestionsDropdownEmbedderImpl should
     // operate solely in terms of dp so values that are 10x their correct size are probably
@@ -70,11 +80,14 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
     private @Mock DisplayAndroid mDisplay;
     private @Mock InsetObserver mInsetObserver;
     private @Mock LocationBarDataProvider mLocationBarDataProvider;
+    private @Mock TopInsetProvider mTopInsetProvider;
 
     private OmniboxSuggestionsDropdownEmbedderImpl mImpl;
     private WeakReference<Context> mContextWeakRef;
     private int mBottomWindowPadding;
     private @ControlsPosition int mControlsPosition = ControlsPosition.TOP;
+    private final SettableNonNullObservableSupplier<Integer> mFuseboxStateSupplier =
+            ObservableSuppliers.createNonNull(FuseboxState.DISABLED);
 
     @Before
     public void setUp() {
@@ -93,6 +106,7 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
         doReturn(ANCHOR_TOP).when(mAnchorView).getTop();
         doReturn(ALIGNMENT_TOP).when(mHorizontalAlignmentView).getTop();
         doReturn(ALIGNMENT_LEFT).when(mHorizontalAlignmentView).getLeft();
+        doReturn(ALIGNMENT_HEIGHT).when(mHorizontalAlignmentView).getMeasuredHeight();
         doReturn(mDisplay).when(mWindowAndroid).getDisplay();
         doReturn(DIP_SCALE).when(mDisplay).getDipScale();
         doReturn((int) (getConfiguration().screenHeightDp * DIP_SCALE))
@@ -108,11 +122,16 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         () -> mControlsPosition,
                         () -> 0,
                         () -> mBottomWindowPadding,
-                        mLocationBarDataProvider);
+                        mFuseboxStateSupplier,
+                        mLocationBarDataProvider,
+                        mTopInsetProvider);
     }
 
     @Test
     public void testWindowAttachment() {
+        // TopInsetProvider observer should be added during construction.
+        verify(mTopInsetProvider).addObserver(any(TopInsetProvider.Observer.class));
+
         verify(mAnchorView, never()).addOnLayoutChangeListener(mImpl);
         verify(mHorizontalAlignmentView, never()).addOnLayoutChangeListener(mImpl);
         verify(mAnchorView, never()).getViewTreeObserver();
@@ -143,6 +162,7 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         getExpectedHeight(ANCHOR_HEIGHT + ANCHOR_TOP),
                         0,
                         0,
+                        0,
                         0),
                 alignment);
     }
@@ -162,6 +182,7 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         getExpectedHeight(ANCHOR_HEIGHT + ANCHOR_TOP) + 40,
                         0,
                         0,
+                        0,
                         40),
                 alignment);
 
@@ -174,6 +195,7 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         ANCHOR_HEIGHT + ANCHOR_TOP,
                         ANCHOR_WIDTH,
                         getExpectedHeight(ANCHOR_HEIGHT + ANCHOR_TOP),
+                        0,
                         0,
                         0,
                         0),
@@ -201,7 +223,9 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         () -> mControlsPosition,
                         () -> 0,
                         () -> 0,
-                        mLocationBarDataProvider);
+                        mFuseboxStateSupplier,
+                        mLocationBarDataProvider,
+                        mTopInsetProvider);
         impl.recalculateOmniboxAlignment();
         OmniboxAlignment alignment = impl.getCurrentAlignment();
         assertEquals(
@@ -210,6 +234,7 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         ANCHOR_HEIGHT + ANCHOR_TOP,
                         ANCHOR_WIDTH,
                         getExpectedHeight(ANCHOR_HEIGHT + ANCHOR_TOP),
+                        0,
                         0,
                         0,
                         0),
@@ -231,6 +256,7 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         getExpectedHeight(ANCHOR_HEIGHT + ANCHOR_TOP - 13),
                         0,
                         0,
+                        0,
                         0),
                 alignment);
     }
@@ -249,6 +275,7 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         getExpectedHeight(ANCHOR_HEIGHT + ANCHOR_TOP),
                         0,
                         0,
+                        0,
                         0),
                 alignment);
     }
@@ -262,12 +289,13 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
         OmniboxAlignment alignment = mImpl.getCurrentAlignment();
         assertEquals(
                 new OmniboxAlignment(
-                        0, 0, ANCHOR_WIDTH, getExpectedHeight(0) - ANCHOR_HEIGHT, 0, 0, 0),
+                        0, 0, ANCHOR_WIDTH, getExpectedHeight(0) - ANCHOR_HEIGHT, 0, 0, 0, 0),
                 alignment);
     }
 
     @Test
     @Config(qualifiers = "ldltr-sw600dp")
+    @DisableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
     public void testRecalculateOmniboxAlignment_tabletToPhoneSwitch() {
         int sideSpacing = OmniboxResourceProvider.getDropdownSideSpacing(mContextWeakRef.get());
         doReturn(mAnchorView).when(mHorizontalAlignmentView).getParent();
@@ -281,6 +309,7 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         expectedTop,
                         ALIGNMENT_WIDTH + 2 * sideSpacing,
                         getExpectedHeight(expectedTop),
+                        0,
                         0,
                         0,
                         0),
@@ -299,12 +328,14 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         getExpectedHeight(ANCHOR_HEIGHT + ANCHOR_TOP),
                         0,
                         0,
+                        0,
                         0),
                 newAlignment);
     }
 
     @Test
     @Config(qualifiers = "ldltr-sw600dp")
+    @DisableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
     public void testRecalculateOmniboxAlignment_phoneToTabletSwitch() {
         Configuration newConfig = getConfiguration();
         newConfig.screenWidthDp = DeviceFormFactor.MINIMUM_TABLET_WIDTH_DP - 1;
@@ -319,6 +350,7 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         ANCHOR_HEIGHT + ANCHOR_TOP,
                         ANCHOR_WIDTH,
                         getExpectedHeight(ANCHOR_HEIGHT + ANCHOR_TOP),
+                        0,
                         0,
                         0,
                         0),
@@ -336,6 +368,7 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         expectedTop,
                         ALIGNMENT_WIDTH + 2 * sideSpacing,
                         getExpectedHeight(expectedTop),
+                        0,
                         0,
                         0,
                         0),
@@ -356,7 +389,8 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
 
     @Test
     @Config(qualifiers = "ldltr-sw600dp")
-    public void testRecalculateOmniboxAlignment_tabletRevampEnabled_ltr() {
+    @DisableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
+    public void testRecalculateOmniboxAlignment_tablet_ltr() {
         int sideSpacing = OmniboxResourceProvider.getDropdownSideSpacing(mContextWeakRef.get());
         doReturn(mAnchorView).when(mHorizontalAlignmentView).getParent();
         doReturn(60).when(mHorizontalAlignmentView).getTop();
@@ -371,13 +405,37 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         getExpectedHeight(expectedTop),
                         0,
                         0,
+                        0,
+                        0),
+                alignment);
+    }
+
+    @Test
+    @Config(qualifiers = "ldltr-sw600dp")
+    @EnableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
+    public void testRecalculateOmniboxAlignment_tablet_fusebox() {
+        mFuseboxStateSupplier.set(FuseboxState.EXPANDED);
+        doReturn(mAnchorView).when(mHorizontalAlignmentView).getParent();
+        mImpl.recalculateOmniboxAlignment();
+        OmniboxAlignment alignment = mImpl.getCurrentAlignment();
+        int expectedTop = ALIGNMENT_HEIGHT + ANCHOR_TOP + ALIGNMENT_TOP;
+        assertEquals(
+                new OmniboxAlignment(
+                        ALIGNMENT_LEFT,
+                        expectedTop,
+                        ALIGNMENT_WIDTH,
+                        getExpectedHeight(expectedTop),
+                        0,
+                        0,
+                        0,
                         0),
                 alignment);
     }
 
     @Test
     @Config(qualifiers = "ldrtl-sw600dp-h100dp")
-    public void testRecalculateOmniboxAlignment_tabletRevampEnabled_rtl() {
+    @DisableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
+    public void testRecalculateOmniboxAlignment_tablet_rtl() {
         int sideSpacing = OmniboxResourceProvider.getDropdownSideSpacing(mContextWeakRef.get());
         doReturn(View.LAYOUT_DIRECTION_RTL).when(mAnchorView).getLayoutDirection();
         doReturn(mAnchorView).when(mHorizontalAlignmentView).getParent();
@@ -394,13 +452,15 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         getExpectedHeight(expectedTop),
                         0,
                         0,
+                        0,
                         0),
                 alignment);
     }
 
     @Test
     @Config(qualifiers = "ldltr-sw600dp")
-    public void testRecalculateOmniboxAlignment_tabletRevampEnabled_mainSpaceAboveWindowBottom() {
+    @DisableFeatures(OmniboxFeatureList.OMNIBOX_MULTIMODAL_INPUT)
+    public void testRecalculateOmniboxAlignment_tablet_mainSpaceAboveWindowBottom() {
         doReturn(mAnchorView).when(mHorizontalAlignmentView).getParent();
         doReturn(60).when(mHorizontalAlignmentView).getTop();
         doReturn((int) (DeviceFormFactor.MINIMUM_TABLET_WIDTH_DP * DIP_SCALE))
@@ -424,6 +484,7 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
                         getExpectedHeight(top),
                         0,
                         0,
+                        0,
                         0),
                 alignment);
     }
@@ -440,5 +501,42 @@ public class OmniboxSuggestionsDropdownEmbedderImplTest {
 
     private Configuration getConfiguration() {
         return mContextWeakRef.get().getResources().getConfiguration();
+    }
+
+    @Test
+    public void testOnToEdgeChange() {
+        doReturn(mAnchorView).when(mHorizontalAlignmentView).getParent();
+
+        // With controls at top, paddingTop should remain 0.
+        mControlsPosition = ControlsPosition.TOP;
+        mImpl.onToEdgeChange(
+                /* systemTopInset= */ 100, /* consumeTopInset= */ true, LayoutType.BROWSING);
+        assertEquals(0, mImpl.getCurrentAlignment().paddingTop);
+
+        // With controls at bottom and consumeTopInset=true, paddingTop should match systemTopInset.
+        mControlsPosition = ControlsPosition.BOTTOM;
+        mImpl.onToEdgeChange(
+                /* systemTopInset= */ 100, /* consumeTopInset= */ true, LayoutType.BROWSING);
+        assertEquals(100, mImpl.getCurrentAlignment().paddingTop);
+
+        // With consumeTopInset=false, paddingTop should reset to 0.
+        mImpl.onToEdgeChange(
+                /* systemTopInset= */ 100, /* consumeTopInset= */ false, LayoutType.BROWSING);
+        assertEquals(0, mImpl.getCurrentAlignment().paddingTop);
+
+        // paddingTop should update from non-zero to zero when systemTopInset changes.
+        mImpl.onToEdgeChange(
+                /* systemTopInset= */ 50, /* consumeTopInset= */ true, LayoutType.BROWSING);
+        assertEquals(50, mImpl.getCurrentAlignment().paddingTop);
+
+        mImpl.onToEdgeChange(
+                /* systemTopInset= */ 0, /* consumeTopInset= */ true, LayoutType.BROWSING);
+        assertEquals(0, mImpl.getCurrentAlignment().paddingTop);
+    }
+
+    @Test
+    public void testDestroy_removesTopInsetObserver() {
+        mImpl.destroy();
+        verify(mTopInsetProvider).removeObserver(any(TopInsetProvider.Observer.class));
     }
 }

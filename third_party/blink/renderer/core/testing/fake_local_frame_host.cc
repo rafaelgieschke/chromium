@@ -108,9 +108,7 @@ void FakeLocalFrameHost::GoToEntryAtOffset(
     base::TimeTicks actual_navigation_start,
     std::optional<blink::scheduler::TaskAttributionId>) {}
 
-void FakeLocalFrameHost::UpdateTitle(
-    const String& title,
-    base::i18n::TextDirection title_direction) {}
+void FakeLocalFrameHost::UpdateTitle(const String& title) {}
 
 void FakeLocalFrameHost::UpdateApplicationTitle(
     const String& application_title) {}
@@ -323,18 +321,9 @@ void FakeLocalFrameHost::RecordWindowProxyUsageMetrics(
     const blink::FrameToken& target_frame_token,
     blink::mojom::WindowProxyAccessType access_type) {}
 
-void FakeLocalFrameHost::InitializeCrashReportStorage(
+void FakeLocalFrameHost::InitializeCrashReportContext(
     uint64_t length,
-    InitializeCrashReportStorageCallback callback) {}
-
-void FakeLocalFrameHost::SetCrashReportStorageKey(
-    const String& key,
-    const String& value,
-    SetCrashReportStorageKeyCallback callback) {}
-
-void FakeLocalFrameHost::RemoveCrashReportStorageKey(
-    const String& key,
-    RemoveCrashReportStorageKeyCallback callback) {}
+    InitializeCrashReportContextCallback callback) {}
 
 void FakeLocalFrameHost::NotifyDocumentInteractive() {}
 

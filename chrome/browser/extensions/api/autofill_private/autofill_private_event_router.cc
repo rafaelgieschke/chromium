@@ -25,14 +25,16 @@
 #include "chrome/common/extensions/api/autofill_private.h"
 #include "components/autofill/core/browser/data_manager/personal_data_manager.h"
 #include "components/autofill/core/browser/data_model/autofill_ai/entity_instance.h"
+#include "components/autofill/core/common/autofill_prefs.h"
+#include "components/prefs/pref_filter.h"
 #include "components/sync/service/sync_service.h"
 #include "content/public/browser/browser_context.h"
 
 namespace extensions {
 namespace {
 template <class T>
-base::Value::List ToValueList(const std::vector<T>& values) {
-  base::Value::List list;
+base::ListValue ToValueList(const std::vector<T>& values) {
+  base::ListValue list;
   list.reserve(values.size());
   for (const auto& value : values) {
     list.Append(value.ToValue());
@@ -49,8 +51,9 @@ AutofillPrivateEventRouter::AutofillPrivateEventRouter(
   // some unit tests try to create all context services, but don't initialize
   // the event router first.
   event_router_ = EventRouter::Get(context_);
-  if (!event_router_)
+  if (!event_router_) {
     return;
+  }
 
   personal_data_ =
       autofill::PersonalDataManagerFactory::GetForBrowserContext(context_);
@@ -98,11 +101,17 @@ void AutofillPrivateEventRouter::OnPersonalDataChanged() {
 }
 
 void AutofillPrivateEventRouter::OnEntityInstancesChanged() {
-  base::Value::List args;
+  PrefService* pref_service = Profile::FromBrowserContext(context_)->GetPrefs();
+  const bool obfuscate_sensitive_types =
+      pref_service &&
+      autofill::prefs::IsAutofillAiReauthBeforeFillingEnabled(pref_service);
+
+  base::ListValue args;
   args.Append(ToValueList(
       extensions::autofill_ai_util::
           EntityInstancesToPrivateApiEntityInstancesWithLabels(
               entity_data_manager_observer_.GetSource()->GetEntityInstances(),
+              obfuscate_sensitive_types,
               g_browser_process->GetApplicationLocale())));
 
   std::unique_ptr<Event> extension_event = std::make_unique<Event>(
@@ -124,8 +133,9 @@ void AutofillPrivateEventRouter::OnSyncShutdown(syncer::SyncService*) {
 
 void AutofillPrivateEventRouter::BroadcastCurrentData() {
   // Ignore any updates before data is loaded. This can happen in tests.
-  if (!(personal_data_ && personal_data_->IsDataLoaded()))
+  if (!(personal_data_ && personal_data_->IsDataLoaded())) {
     return;
+  }
 
   autofill_util::AddressEntryList address_list =
       extensions::autofill_util::GenerateAddressList(
@@ -147,7 +157,7 @@ void AutofillPrivateEventRouter::BroadcastCurrentData() {
       extensions::autofill_util::GetAccountInfo(
           personal_data_->address_data_manager());
 
-  base::Value::List args;
+  base::ListValue args;
   args.Append(ToValueList(address_list));
   args.Append(ToValueList(credit_card_list));
   args.Append(ToValueList(iban_list));

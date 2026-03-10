@@ -18,7 +18,6 @@
 #include "chrome/browser/hid/hid_connection_tracker.h"
 #include "chrome/browser/hid/hid_connection_tracker_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
@@ -232,13 +231,13 @@ class ChromeHidTestHelper {
   scoped_refptr<const extensions::Extension> CreateExtensionWithId(
       std::string_view extension_id) {
     auto manifest =
-        base::Value::Dict()
+        base::DictValue()
             .Set("name", "Fake extension")
             .Set("description", "For testing.")
             .Set("version", "0.1")
             .Set("manifest_version", 2)
             .Set("web_accessible_resources",
-                 base::Value::List().Append(kExtensionDocumentFileName));
+                 base::ListValue().Append(kExtensionDocumentFileName));
     scoped_refptr<const extensions::Extension> extension =
         extensions::ExtensionBuilder()
             .SetManifest(std::move(manifest))

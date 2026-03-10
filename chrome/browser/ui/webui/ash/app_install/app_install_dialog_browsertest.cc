@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/ash/app_install/app_install_dialog.h"
 
+#include "ash/constants/webui_url_constants.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/test/bind.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/web_applications/web_app_command_scheduler.h"
 #include "chrome/browser/web_applications/web_app_helpers.h"
 #include "chrome/browser/web_applications/web_app_install_params.h"
-#include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/chrome_test_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -84,7 +84,7 @@ IN_PROC_BROWSER_TEST_F(AppInstallDialogBrowserTest, InstallApp) {
       ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
 
   content::TestNavigationObserver navigation_observer_dialog(
-      (GURL(chrome::kChromeUIAppInstallDialogURL)));
+      (GURL(ash::kChromeUIAppInstallDialogURL)));
   navigation_observer_dialog.StartWatchingNewWebContents();
 
   base::WeakPtr<AppInstallDialog> dialog_handle =
@@ -139,7 +139,8 @@ IN_PROC_BROWSER_TEST_F(AppInstallDialogBrowserTest, InstallApp) {
   watcher.Wait();
 
   // Expect the app is opened.
-  webapps::AppId app_id = web_app::GenerateAppIdFromManifestId(app_url);
+  webapps::AppId app_id =
+      web_app::GenerateAppIdFromManifestId(webapps::ManifestId(app_url));
   BrowserWindowInterface* const app_browser =
       GetLastActiveBrowserWindowInterfaceWithAnyProfile();
   EXPECT_TRUE(web_app::AppBrowserController::IsForWebApp(app_browser, app_id));
@@ -152,7 +153,8 @@ IN_PROC_BROWSER_TEST_F(AppInstallDialogBrowserTest, InstallApp) {
 
 IN_PROC_BROWSER_TEST_F(AppInstallDialogBrowserTest, AlreadyInstalled) {
   constexpr char kAppUrl[] = "https://example.org/";
-  webapps::AppId app_id = web_app::GenerateAppIdFromManifestId(GURL(kAppUrl));
+  webapps::AppId app_id =
+      web_app::GenerateAppIdFromManifestId(webapps::ManifestId(GURL(kAppUrl)));
 
   SetUpAlmanacPayload(kAppUrl);
 
@@ -161,7 +163,7 @@ IN_PROC_BROWSER_TEST_F(AppInstallDialogBrowserTest, AlreadyInstalled) {
   apps::AppReadinessWaiter(browser()->profile(), app_id).Await();
 
   content::TestNavigationObserver navigation_observer_dialog(
-      (GURL(chrome::kChromeUIAppInstallDialogURL)));
+      (GURL(ash::kChromeUIAppInstallDialogURL)));
   navigation_observer_dialog.StartWatchingNewWebContents();
 
   auto* proxy =
@@ -193,7 +195,7 @@ IN_PROC_BROWSER_TEST_F(AppInstallDialogBrowserTest, AlreadyInstalled) {
 
 IN_PROC_BROWSER_TEST_F(AppInstallDialogBrowserTest, FailedInstall) {
   content::TestNavigationObserver navigation_observer_dialog(
-      (GURL(chrome::kChromeUIAppInstallDialogURL)));
+      (GURL(ash::kChromeUIAppInstallDialogURL)));
   navigation_observer_dialog.StartWatchingNewWebContents();
 
   base::WeakPtr<AppInstallDialog> dialog_handle =
@@ -241,7 +243,7 @@ IN_PROC_BROWSER_TEST_F(AppInstallDialogBrowserTest, FailedInstall) {
 
 IN_PROC_BROWSER_TEST_F(AppInstallDialogBrowserTest, NoAppError) {
   content::TestNavigationObserver navigation_observer_dialog(
-      (GURL(chrome::kChromeUIAppInstallDialogURL)));
+      (GURL(ash::kChromeUIAppInstallDialogURL)));
   navigation_observer_dialog.StartWatchingNewWebContents();
 
   apps::PackageId package_id(apps::PackageType::kWeb, "invalid");
@@ -265,7 +267,7 @@ IN_PROC_BROWSER_TEST_F(AppInstallDialogBrowserTest, NoAppError) {
 
 IN_PROC_BROWSER_TEST_F(AppInstallDialogBrowserTest, ConnectionError) {
   content::TestNavigationObserver navigation_observer_dialog(
-      (GURL(chrome::kChromeUIAppInstallDialogURL)));
+      (GURL(ash::kChromeUIAppInstallDialogURL)));
   navigation_observer_dialog.StartWatchingNewWebContents();
 
   apps::PackageId package_id(apps::PackageType::kWeb, "invalid");

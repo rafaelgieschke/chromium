@@ -11,7 +11,6 @@
 #include "base/atomicops.h"
 #include "base/bits.h"
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/containers/span.h"
 #include "base/debug/crash_logging.h"
 #include "base/memory/singleton.h"
@@ -458,9 +457,8 @@ void PersistentSystemProfile::MergeUpdateRecords(
           }
         }
 
-        base::Pickle pickler =
-            base::Pickle::WithUnownedBuffer(base::as_byte_span(record));
-        base::PickleIterator iter(pickler);
+        base::PickleIterator iter =
+            base::PickleIterator::WithData(base::as_byte_span(record));
         std::string_view trial;
         std::string_view group;
         if (iter.ReadStringPiece(&trial) && iter.ReadStringPiece(&group)) {

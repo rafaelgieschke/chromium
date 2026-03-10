@@ -86,6 +86,7 @@
 #include "third_party/blink/public/platform/web_content_settings_client.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url_request.h"
+#include "third_party/blink/public/web/web_autofill_client.h"
 #include "third_party/blink/public/web/web_content_capture_client.h"
 #include "third_party/blink/public/web/web_frame.h"
 #include "third_party/blink/public/web/web_link_preview_triggerer.h"
@@ -94,6 +95,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_local_compile_hints_producer.h"
 #include "third_party/blink/renderer/bindings/core/v8/window_proxy_manager.h"
+#include "third_party/blink/renderer/core/ad_tracker/ad_tracker.h"
 #include "third_party/blink/renderer/core/clipboard/system_clipboard.h"
 #include "third_party/blink/renderer/core/content_capture/content_capture_manager.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -120,6 +122,8 @@
 #include "third_party/blink/renderer/core/editing/ime/input_method_controller.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
+#include "third_party/blink/renderer/core/editing/markers/grammar_marker.h"
+#include "third_party/blink/renderer/core/editing/markers/spelling_marker.h"
 #include "third_party/blink/renderer/core/editing/serializers/create_markup_options.h"
 #include "third_party/blink/renderer/core/editing/serializers/serialization.h"
 #include "third_party/blink/renderer/core/editing/spellcheck/spell_check_requester.h"
@@ -136,7 +140,6 @@
 #include "third_party/blink/renderer/core/exported/web_plugin_container_impl.h"
 #include "third_party/blink/renderer/core/fileapi/public_url_manager.h"
 #include "third_party/blink/renderer/core/fragment_directive/text_fragment_handler.h"
-#include "third_party/blink/renderer/core/frame/ad_tracker.h"
 #include "third_party/blink/renderer/core/frame/attribution_src_loader.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/event_handler_registry.h"
@@ -265,15 +268,24 @@ namespace blink {
 namespace {
 
 #if BUILDFLAG(IS_ANDROID)
-std::vector<gfx::Range> ExtractMisspellingRangesFromDocumentMarkerVector(
-    const DocumentMarkerVector& markers) {
-  std::vector<gfx::Range> ranges;
+blink::DocumentMarkerVector ExtractSpellingMarkersFromDocumentMarkerVector(
+    const blink::DocumentMarkerVector& markers) {
+  blink::DocumentMarkerVector spelling_markers;
   for (auto& marker : markers) {
-    if (marker->GetType() == DocumentMarker::MarkerType::kSpelling) {
-      ranges.emplace_back(marker->StartOffset(), marker->EndOffset());
+    if (marker->GetType() == DocumentMarker::MarkerType::kSpelling ||
+        marker->GetType() == DocumentMarker::MarkerType::kGrammar) {
+      spelling_markers.push_back(marker);
+    }
+
+    if (const auto* suggestion_marker =
+            DynamicTo<SuggestionMarker>(marker.Get())) {
+      if (suggestion_marker->IsMisspelling() ||
+          suggestion_marker->IsGrammarError()) {
+        spelling_markers.push_back(marker);
+      }
     }
   }
-  return ranges;
+  return spelling_markers;
 }
 #endif  // BUILDFLAG(IS_ANDROID)
 
@@ -367,7 +379,7 @@ mojom::blink::BlockingDetailsPtr CreateBlockingDetailsMojom(
       blocking_details.ColumnNumber() > 0) {
     // `Url()` and `Function()` may return nullptr.
     auto source_location = mojom::blink::ScriptSourceLocation::New(
-        blocking_details.Url() ? KURL(blocking_details.Url()) : KURL(),
+        blocking_details.Url() ? KURL(blocking_details.Url()) : NullUrl(),
         blocking_details.Function() ? blocking_details.Function() : "",
         blocking_details.LineNumber(), blocking_details.ColumnNumber());
     feature_location_to_report->source = std::move(source_location);
@@ -396,9 +408,7 @@ mojom::blink::StorageTypeAccessed ToMojoStorageType(
 
 HeapVector<Member<PostLayoutSnapshotClient>> CopyClients(
     const HeapHashSet<WeakMember<PostLayoutSnapshotClient>>& clients) {
-  HeapVector<Member<PostLayoutSnapshotClient>> copy;
-  copy.ReserveInitialCapacity(clients.size());
-  copy.AppendRange(clients.begin(), clients.end());
+  HeapVector<Member<PostLayoutSnapshotClient>> copy(clients);
   return copy;
 }
 
@@ -426,12 +436,14 @@ LocalFrame* LocalFrame::FromFrameToken(const LocalFrameToken& frame_token) {
   return it == local_frames_map.end() ? nullptr : it->value.Get();
 }
 
-void LocalFrame::Init(Frame* opener,
-                      const DocumentToken& document_token,
-                      std::unique_ptr<PolicyContainer> policy_container,
-                      const StorageKey& storage_key,
-                      ukm::SourceId document_ukm_source_id,
-                      const KURL& creator_base_url) {
+void LocalFrame::Init(
+    Frame* opener,
+    const DocumentToken& document_token,
+    std::unique_ptr<PolicyContainer> policy_container,
+    const StorageKey& storage_key,
+    ukm::SourceId document_ukm_source_id,
+    const KURL& creator_base_url,
+    std::unique_ptr<base::UnguessableToken> sandbox_origin_token) {
   if (!policy_container)
     policy_container = PolicyContainer::CreateEmpty();
 
@@ -444,7 +456,8 @@ void LocalFrame::Init(Frame* opener,
 
   SetOpenerDoNotNotify(opener);
   loader_.Init(document_token, std::move(policy_container), storage_key,
-               document_ukm_source_id, creator_base_url);
+               document_ukm_source_id, creator_base_url,
+               std::move(sandbox_origin_token));
 }
 
 void LocalFrame::SetView(LocalFrameView* view) {
@@ -819,6 +832,9 @@ bool LocalFrame::DetachImpl(FrameDetachType type) {
   frame_visibility_observers_.clear();
 
   not_restored_reasons_.reset();
+  microtasks_pauser_.reset();
+  prescient_networking_.reset();
+  link_preview_triggerer_.reset();
 
   DCHECK(!view_->IsAttached());
   Client()->WillBeDetached();
@@ -965,7 +981,11 @@ void LocalFrame::PrintNavigationWarning(const String& message) {
 bool LocalFrame::ShouldClose() {
   // TODO(crbug.com/1407078): This should be fixed to dispatch beforeunload
   // events to both local and remote frames.
-  return loader_.ShouldClose();
+  base::TimeTicks before_unload_dialog_opened_time;
+  base::TimeTicks before_unload_dialog_closed_time;
+  return loader_.ShouldClose(/*is_reload=*/false,
+                             before_unload_dialog_opened_time,
+                             before_unload_dialog_closed_time);
 }
 
 bool LocalFrame::DetachChildren() {
@@ -1514,28 +1534,6 @@ void LocalFrame::StartPrinting(const WebPrintParams& print_params,
     }
   }
 
-  if (IsMainFrame() && RuntimeEnabledFeatures::CSSSafePrintableInsetEnabled()) {
-    float inset = 0;
-    // If there's more than one page per sheet, the unprintable area will be
-    // accounted for by the printing code, so that the collection of pages will
-    // be inset appropriately.
-    if (print_params.pages_per_sheet == 1) {
-      inset = print_params_.printable_area_in_css_pixels.x();
-      inset = std::max(inset, print_params_.printable_area_in_css_pixels.y());
-      inset = std::max(inset,
-                       print_params_.default_page_description.size.width() -
-                           print_params_.printable_area_in_css_pixels.right());
-      inset = std::max(inset,
-                       print_params_.default_page_description.size.height() -
-                           print_params_.printable_area_in_css_pixels.bottom());
-    }
-
-    DocumentStyleEnvironmentVariables& vars =
-        GetDocument()->GetStyleEngine().EnsureEnvironmentVariables();
-    vars.SetVariable(UADefinedVariable::kSafePrintableInset,
-                     StyleEnvironmentVariables::FormatFloatPx(inset));
-  }
-
   SetPrinting(true, maximum_shrink_ratio);
 }
 
@@ -1557,12 +1555,6 @@ void LocalFrame::StartPrintingSubLocalFrame() {
 void LocalFrame::EndPrinting() {
   RestoreScrollOffsets();
   SetPrinting(false, 0);
-
-  if (IsMainFrame()) {
-    DocumentStyleEnvironmentVariables& vars =
-        GetDocument()->GetStyleEngine().EnsureEnvironmentVariables();
-    vars.RemoveVariable(UADefinedVariable::kSafePrintableInset);
-  }
 }
 
 void LocalFrame::SetPrinting(bool printing, float maximum_shrink_ratio) {
@@ -1704,6 +1696,9 @@ void LocalFrame::SetLayoutZoomFactor(float factor) {
 }
 
 void LocalFrame::SetTextZoomFactor(float factor) {
+  if (GetDocument() && GetDocument()->TextScaleMetaTagPresent()) {
+    factor = 1.0f;
+  }
   SetZoomFactors(layout_zoom_factor_, factor, css_zoom_factor_);
 }
 
@@ -2072,8 +2067,9 @@ LocalFrame::LocalFrame(
   is_frame_created_by_ad_script_ =
       !IsMainFrame() && ad_tracker_ &&
       ad_tracker_->IsAdScriptInStack(
-          AdTracker::StackType::kBottomAndTop,
-          /*ignore_monkey_patch=*/AdTracker::MonkeyPatchableApi::kNone,
+          AdTracker::StackType::kTopOnly,
+          /*ignore_monkey_patch=*/
+          AdTracker::MonkeyPatchableApi::kNodeAppendChild,
           &ad_script_ancestry_);
 
   Initialize();
@@ -2403,6 +2399,14 @@ const mojom::RendererContentSettingsPtr& LocalFrame::GetContentSettings()
   return Loader().GetDocumentLoader()->GetContentSettings();
 }
 
+WebAutofillClient* LocalFrame::GetAutofillClient() {
+  WebLocalFrameImpl* web_frame = WebLocalFrameImpl::FromFrame(this);
+  if (!web_frame) {
+    return nullptr;
+  }
+  return web_frame->AutofillClient();
+}
+
 PluginData* LocalFrame::GetPluginData() const {
   if (!Loader().AllowPlugins())
     return nullptr;
@@ -2682,7 +2686,7 @@ void LocalFrame::ForceSynchronousDocumentInstall(const AtomicString& mime_type,
   // around this problem.
   Vector<char> current_chunk;
   for (const auto& segment : data) {
-    current_chunk.AppendSpan(base::span(segment));
+    current_chunk.append_range(segment);
     if (current_chunk.size() > kMaxDocumentChunkSize) {
       parser->AppendBytes(base::as_byte_span(current_chunk));
       current_chunk.clear();
@@ -2781,7 +2785,7 @@ void LocalFrame::SetAdEvidence(const FrameAdEvidence& ad_evidence) {
 
 bool LocalFrame::IsAdScriptInStack() const {
   return ad_tracker_ &&
-         ad_tracker_->IsAdScriptInStack(AdTracker::StackType::kBottomAndTop);
+         ad_tracker_->IsAdScriptInStack(AdTracker::StackType::kTopOnly);
 }
 
 std::optional<AdScriptIdentifier> LocalFrame::CreationAdScript() const {
@@ -3242,7 +3246,7 @@ void LocalFrame::RequestExecuteScript(
   }
 
   Vector<WebScriptSource> script_sources;
-  script_sources.AppendSpan(sources);
+  script_sources.append_range(sources);
 
   ScriptState* script_state = ToScriptState(this, *world);
   // TODO(https://crbug.com/435149285): Remove this block and revert back to
@@ -3459,7 +3463,7 @@ void LocalFrame::EvictFromBackForwardCache(
   mojom::blink::ScriptSourceLocationPtr source = nullptr;
   if (source_location) {
     source = mojom::blink::ScriptSourceLocation::New(
-        source_location->Url() ? KURL(source_location->Url()) : KURL(),
+        source_location->Url() ? KURL(source_location->Url()) : NullUrl(),
         source_location->Function() ? source_location->Function() : "",
         source_location->LineNumber(), source_location->ColumnNumber());
   }
@@ -3670,8 +3674,9 @@ void LocalFrame::SaveImageAt(const gfx::Point& window_point) {
     return;
 
   String url = To<Element>(*node).ImageSourceURL();
-  if (!KURL(NullURL(), url).ProtocolIsData())
+  if (!ProtocolIs(url, "data")) {
     return;
+  }
 
   auto params = mojom::blink::DownloadURLParams::New();
   params->is_context_menu_save = true;
@@ -3774,8 +3779,7 @@ void LocalFrame::RequestVideoFrameAtWithBoundsHint(
     size = gfx::Size(width, height);
   }
 
-  auto image =
-      video->CreateStaticBitmapImage(/*allow_accelerated_images=*/true, size);
+  auto image = video->CreateStaticBitmapImage(size);
   if (!image) {
     std::move(callback).Run(SkBitmap(), gfx::Rect());
     return;
@@ -4133,8 +4137,8 @@ void LocalFrame::ScheduleNextServiceForPostLayoutSnapshotClients() {
 
 void LocalFrame::CheckPositionAnchorsForCssVisibilityChanges() {
   for (auto& client : post_layout_snapshot_clients_) {
-    if (AnchorPositionScrollData* scroll_data =
-            DynamicTo<AnchorPositionScrollData>(client.Get())) {
+    auto* scroll_data = DynamicTo<AnchorPositionScrollData>(client.Get());
+    if (scroll_data && scroll_data->IsActive()) {
       if (auto* observer = scroll_data->GetAnchorPositionVisibilityObserver()) {
         observer->UpdateForCssAnchorVisibility();
       }
@@ -4277,7 +4281,7 @@ void LocalFrame::NotifyFrameVisibilityChanged(
 
 // TODO(crbug.com/447973489) - Add test coverage for this method
 #if BUILDFLAG(IS_ANDROID)
-void LocalFrame::PerformSpellCheck() {
+void LocalFrame::PerformFullContentSpellCheck() {
   if (!base::FeatureList::IsEnabled(
           blink::features::kAndroidSpellcheckFullApiBlink)) {
     return;
@@ -4291,9 +4295,10 @@ void LocalFrame::PerformSpellCheck() {
 
   const EphemeralRange range(Position(container_node, 0),
                              Position::LastPositionInNode(*container_node));
+
   GetSpellChecker().GetSpellCheckRequester().RequestCheckingFor(
       range,
-      ExtractMisspellingRangesFromDocumentMarkerVector(
+      ExtractSpellingMarkersFromDocumentMarkerVector(
           GetDocument()->Markers().Markers()),
       /*request_num=*/0, /*should_force_refresh=*/false);
 }

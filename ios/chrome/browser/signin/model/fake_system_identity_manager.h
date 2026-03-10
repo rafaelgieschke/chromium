@@ -63,6 +63,16 @@ class FakeSystemIdentityManager final : public SystemIdentityManager {
   // Simulates `identity` removed from another application.
   void ForgetIdentityFromOtherApplication(id<SystemIdentity> identity);
 
+  // Updates the avatar for an identity.
+  // If `avatar` is nil, the avatar is reset. GetCachedAvatarForIdentity() will
+  // return nil, and a fetch is needed to have the final avatar.
+  // If `send_notification` is true, a notification is sent to notify that the
+  // identity was updated. Otherwise, no notification is sent and the new avatar
+  // is returned for any new avatar query.
+  void UpdateSystemIdentityAvatar(const GaiaId& gaia_id,
+                                  UIImage* avatar,
+                                  bool send_notification = true);
+
   // Returns a test object that enables changes to capability state.
   AccountCapabilitiesTestMutator* GetPendingCapabilitiesMutator(
       id<SystemIdentity> identity);
@@ -165,6 +175,10 @@ class FakeSystemIdentityManager final : public SystemIdentityManager {
   void FetchCapabilities(id<SystemIdentity> identity,
                          const std::vector<std::string>& names,
                          FetchCapabilitiesCallback callback) final;
+  void BuildExternalPrivacyContext(
+      id<SystemIdentity> identity,
+      UIViewController* view_controller,
+      BuildExternalPrivacyContextCallback callback) final;
   bool HandleMDMNotification(id<SystemIdentity> identity,
                              NSArray<id<SystemIdentity>>* active_identities,
                              id<RefreshAccessTokenError> error,

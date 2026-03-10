@@ -23,12 +23,12 @@
 #import "ios/chrome/browser/shared/model/profile/test/test_profile_ios.h"
 #import "ios/chrome/browser/shared/model/profile/test/test_profile_manager_ios.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
 #import "ios/chrome/browser/shared/public/commands/browser_coordinator_commands.h"
+#import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/lens_commands.h"
 #import "ios/chrome/browser/shared/public/commands/lens_overlay_commands.h"
-#import "ios/chrome/browser/shared/public/commands/load_query_commands.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/toolbar_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/signin/model/authentication_service.h"
@@ -41,6 +41,7 @@
 #import "ios/chrome/browser/snapshots/model/snapshot_tab_helper.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/fullscreen/toolbars_size_browser_agent.h"
 #import "ios/chrome/browser/web/model/web_view_proxy/web_view_proxy_tab_helper.h"
+#import "ios/chrome/test/app/uikit_test_util.h"
 #import "ios/chrome/test/ios_chrome_scoped_testing_local_state.h"
 #import "ios/chrome/test/scoped_key_window.h"
 #import "ios/web/public/test/fakes/fake_web_state.h"
@@ -50,6 +51,7 @@
 #import "testing/platform_test.h"
 #import "third_party/ocmock/OCMock/OCMock.h"
 #import "ui/base/device_form_factor.h"
+#import "ui/base/test/ios/ui_image_test_utils.h"
 
 using base::test::ios::kWaitForUIElementTimeout;
 using base::test::ios::WaitUntilConditionOrTimeout;
@@ -61,6 +63,17 @@ using base::test::ios::WaitUntilConditionOrTimeout;
 
 namespace {
 
+// A fake WebState that overrides `TakeSnapshot` to instantly return a solid
+// blue UIImage.
+class LensOverlayFakeWebState : public web::FakeWebState {
+ public:
+  void TakeSnapshot(const CGRect rect, SnapshotCallback callback) override {
+    std::move(callback).Run(
+        ui::test::uiimage_utils::UIImageWithSizeAndSolidColor(
+            CGSizeMake(1, 1), [UIColor whiteColor]));
+  }
+};
+
 class LensOverlayCoordinatorTest : public PlatformTest {
  public:
   void SetUp() override {
@@ -69,8 +82,6 @@ class LensOverlayCoordinatorTest : public PlatformTest {
     if (ui::GetDeviceFormFactor() != ui::DEVICE_FORM_FACTOR_PHONE) {
       GTEST_SKIP() << "Feature unsupported on iPad";
     }
-
-    feature_list_.InitAndEnableFeature(kEnableLensOverlay);
 
     root_view_controller_ = [[UIViewController alloc] init];
     root_view_controller_.definesPresentationContext = YES;
@@ -88,8 +99,9 @@ class LensOverlayCoordinatorTest : public PlatformTest {
         AuthenticationServiceFactory::GetForProfile(profile_);
 
     SceneState* mock_scene_state = OCMClassMock([SceneState class]);
-    UIWindow* window =
-        [[UIWindow alloc] initWithFrame:CGRectMake(0, 0, 320, 520)];
+    UIWindow* window = [[UIWindow alloc]
+        initWithWindowScene:chrome_test_util::GetAnyWindowScene()];
+    window.frame = CGRectMake(0, 0, 320, 520);
     OCMStub([mock_scene_state window]).andReturn(window);
     profile_state_ = [[ProfileState alloc] initWithAppState:nil];
     profile_state_.profile = profile_.get();
@@ -123,15 +135,10 @@ class LensOverlayCoordinatorTest : public PlatformTest {
         startDispatchingToTarget:lens_commands_handler_
                      forProtocol:@protocol(LensCommands)];
 
-    application_handler_ = OCMProtocolMock(@protocol(ApplicationCommands));
+    application_handler_ = OCMProtocolMock(@protocol(SceneCommands));
     [browser_->GetCommandDispatcher()
         startDispatchingToTarget:application_handler_
-                     forProtocol:@protocol(ApplicationCommands)];
-
-    load_query_handler_ = OCMProtocolMock(@protocol(LoadQueryCommands));
-    [browser_->GetCommandDispatcher()
-        startDispatchingToTarget:load_query_handler_
-                     forProtocol:@protocol(LoadQueryCommands)];
+                     forProtocol:@protocol(SceneCommands)];
 
     browser_coordinator_commands_handler_ =
         OCMProtocolMock(@protocol(BrowserCoordinatorCommands));
@@ -146,10 +153,17 @@ class LensOverlayCoordinatorTest : public PlatformTest {
         startDispatchingToTarget:toolbar_commands_handler_
                      forProtocol:@protocol(ToolbarCommands)];
 
+    gemini_commands_handler_ = OCMProtocolMock(@protocol(BWGCommands));
+
+    [browser_->GetCommandDispatcher()
+        startDispatchingToTarget:gemini_commands_handler_
+                     forProtocol:@protocol(BWGCommands)];
+
     // Tab helper
-    std::unique_ptr<web::FakeWebState> web_state =
-        std::make_unique<web::FakeWebState>();
+    std::unique_ptr<LensOverlayFakeWebState> web_state =
+        std::make_unique<LensOverlayFakeWebState>();
     web_state->SetBrowserState(profile_.get());
+    web_state->SetCanTakeSnapshot(true);
     LensOverlayTabHelper::CreateForWebState(web_state.get());
     SnapshotTabHelper::CreateForWebState(web_state.get());
     SnapshotSourceTabHelper::CreateForWebState(web_state.get());
@@ -165,11 +179,6 @@ class LensOverlayCoordinatorTest : public PlatformTest {
     delegate_.view = [[UIView alloc] initWithFrame:frame];
     delegate_.view.backgroundColor = [UIColor blueColor];
     [scoped_window_.Get() addSubview:delegate_.view];
-
-    // Hack to forcefully render the view to successfully capture snapshots.
-    [NSRunLoop.currentRunLoop
-        runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
-    [scoped_window_.Get() layoutIfNeeded];
 
     // Mark the only web state as active.
     browser_.get()->GetWebStateList()->InsertWebState(std::move(web_state));
@@ -187,7 +196,7 @@ class LensOverlayCoordinatorTest : public PlatformTest {
             GetApplicationContext()->GetSystemIdentityManager());
     fake_system_identity_manager->AddIdentity(identity);
     authentication_service->SignIn(identity,
-                                   signin_metrics::AccessPoint::kUnknown);
+                                   signin_metrics::AccessPoint::kStartPage);
 
     // Wait for the base view controller to be presented.
     base_view_controller_.modalPresentationStyle =
@@ -245,11 +254,11 @@ class LensOverlayCoordinatorTest : public PlatformTest {
   UIViewController* root_view_controller_ = nil;
   id dispatcher_;
   raw_ptr<LensOverlayTabHelper> tab_helper_;
-  id<ApplicationCommands> application_handler_;
-  id<LoadQueryCommands> load_query_handler_;
+  id<SceneCommands> application_handler_;
   id<LensCommands> lens_commands_handler_;
   id<BrowserCoordinatorCommands> browser_coordinator_commands_handler_;
   id<ToolbarCommands> toolbar_commands_handler_;
+  id<BWGCommands> gemini_commands_handler_;
 
   void DeliverMemoryWarningNotification() {
     [[NSNotificationCenter defaultCenter]
@@ -378,13 +387,16 @@ TEST_F(LensOverlayCoordinatorTest,
   [coordinator_ start];
 
   // When the coordinator is asked to create and show the UI.
+  __block BOOL presentation_success = NO;
   [HandlerForProtocol(dispatcher_, LensOverlayCommands)
       createAndShowLensUI:NO
                entrypoint:LensOverlayEntrypoint::kOverflowMenu
                completion:^(BOOL success) {
+                 presentation_success = success;
                  run_loop_.Quit();
                }];
   run_loop_.Run();
+  EXPECT_TRUE(presentation_success);
 
   EXPECT_TRUE(
       WaitUntilConditionOrTimeout(kWaitForUIElementTimeout, true, ^bool {
@@ -425,14 +437,16 @@ TEST_F(LensOverlayCoordinatorTest,
   [coordinator_ start];
 
   // When the coordinator is asked to create and show the UI.
+  __block BOOL presentation_success = NO;
   [HandlerForProtocol(dispatcher_, LensOverlayCommands)
       createAndShowLensUI:NO
                entrypoint:LensOverlayEntrypoint::kOverflowMenu
                completion:^(BOOL success) {
+                 presentation_success = success;
                  run_loop_.Quit();
                }];
-
   run_loop_.Run();
+  EXPECT_TRUE(presentation_success);
   EXPECT_TRUE(
       WaitUntilConditionOrTimeout(kWaitForUIElementTimeout, true, ^bool {
         return coordinator_.isLensOverlayVisible;
@@ -459,14 +473,16 @@ TEST_F(LensOverlayCoordinatorTest, ShouldPresentConsentDialog) {
   [coordinator_ start];
 
   // When the coordinator is asked to create and show the UI.
+  __block BOOL presentation_success = NO;
   [HandlerForProtocol(dispatcher_, LensOverlayCommands)
       createAndShowLensUI:NO
                entrypoint:LensOverlayEntrypoint::kOverflowMenu
                completion:^(BOOL success) {
+                 presentation_success = success;
                  run_loop_.Quit();
                }];
-
   run_loop_.Run();
+  EXPECT_TRUE(presentation_success);
 
   EXPECT_TRUE(
       WaitUntilConditionOrTimeout(kWaitForUIElementTimeout, true, ^bool {
@@ -492,14 +508,16 @@ TEST_F(LensOverlayCoordinatorTest, DoesntPromptForConsentWhenAlreadyReceived) {
   [coordinator_ start];
 
   // When the coordinator is asked to create and show the UI.
+  __block BOOL presentation_success = NO;
   [HandlerForProtocol(dispatcher_, LensOverlayCommands)
       createAndShowLensUI:NO
                entrypoint:LensOverlayEntrypoint::kOverflowMenu
                completion:^(BOOL success) {
+                 presentation_success = success;
                  run_loop_.Quit();
                }];
-
   run_loop_.Run();
+  EXPECT_TRUE(presentation_success);
 
   EXPECT_TRUE(
       WaitUntilConditionOrTimeout(kWaitForUIElementTimeout, true, ^bool {
@@ -530,13 +548,15 @@ TEST_F(LensOverlayCoordinatorTest, TimingMetricsRecorded) {
       HandlerForProtocol(dispatcher_, LensOverlayCommands);
 
   // Create and show lens UI.
+  __block BOOL presentation_success = NO;
   [lens_overlay_handler createAndShowLensUI:NO
                                  entrypoint:LensOverlayEntrypoint::kOverflowMenu
                                  completion:^(BOOL success) {
+                                   presentation_success = success;
                                    run_loop_.Quit();
                                  }];
-
   run_loop_.Run();
+  EXPECT_TRUE(presentation_success);
 
   // Destroy Lens UI.
   [lens_overlay_handler

@@ -4,6 +4,8 @@
 
 #include "net/socket/socket_pool_additional_capacity.h"
 
+#include <limits>
+
 #include "base/notimplemented.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
@@ -59,6 +61,12 @@ TEST(SocketPoolAdditionalCapacityTest, CreateForTest) {
             "3.000000e-01,noise:4.000000e-01)");
 }
 
+TEST(SocketPoolAdditionalCapacityTest, CreateDefault) {
+  EXPECT_EQ(std::string(SocketPoolAdditionalCapacity::Create()),
+            "SocketPoolAdditionalCapacity(base:1.000000e-06,capacity:256,"
+            "minimum:1.000000e-02,noise:2.000000e-01)");
+}
+
 TEST(SocketPoolAdditionalCapacityTest, InvalidCreation) {
   const SocketPoolAdditionalCapacity empty_pool =
       SocketPoolAdditionalCapacity::CreateEmpty();
@@ -68,9 +76,9 @@ TEST(SocketPoolAdditionalCapacityTest, InvalidCreation) {
             empty_pool);
   EXPECT_EQ(SocketPoolAdditionalCapacity::CreateForTest(1.1, 2, 0.3, 0.4),
             empty_pool);
-  EXPECT_EQ(
-      SocketPoolAdditionalCapacity::CreateForTest(std::nan(""), 2, 0.3, 0.4),
-      empty_pool);
+  EXPECT_EQ(SocketPoolAdditionalCapacity::CreateForTest(
+                std::numeric_limits<double>::quiet_NaN(), 2, 0.3, 0.4),
+            empty_pool);
 
   // capacity range
   EXPECT_EQ(SocketPoolAdditionalCapacity::CreateForTest(0.1, 2000, 0.3, 0.4),
@@ -81,18 +89,18 @@ TEST(SocketPoolAdditionalCapacityTest, InvalidCreation) {
             empty_pool);
   EXPECT_EQ(SocketPoolAdditionalCapacity::CreateForTest(0.1, 2, 1.3, 0.4),
             empty_pool);
-  EXPECT_EQ(
-      SocketPoolAdditionalCapacity::CreateForTest(0.1, 2, std::nan(""), 0.4),
-      empty_pool);
+  EXPECT_EQ(SocketPoolAdditionalCapacity::CreateForTest(
+                0.1, 2, std::numeric_limits<double>::quiet_NaN(), 0.4),
+            empty_pool);
 
   // noise range
   EXPECT_EQ(SocketPoolAdditionalCapacity::CreateForTest(0.1, 2, 0.3, -0.4),
             empty_pool);
   EXPECT_EQ(SocketPoolAdditionalCapacity::CreateForTest(0.1, 2, 0.3, 1.4),
             empty_pool);
-  EXPECT_EQ(
-      SocketPoolAdditionalCapacity::CreateForTest(0.1, 2, 0.3, std::nan("")),
-      empty_pool);
+  EXPECT_EQ(SocketPoolAdditionalCapacity::CreateForTest(
+                0.1, 2, 0.3, std::numeric_limits<double>::quiet_NaN()),
+            empty_pool);
 }
 
 TEST(SocketPoolAdditionalCapacityTest, NextStateBeforeAllocation) {
@@ -244,6 +252,7 @@ TEST(SocketPoolAdditionalCapacityTest, EmptyPool) {
 
 TEST(SocketPoolAdditionalCapacityTest,
      TestDefaultDistributionForFieldTrialConfig) {
+  SocketPoolAdditionalCapacity pool = SocketPoolAdditionalCapacity::Create();
 
   // In order to do that we need an easy way to measure distributions.
   // Since we are applying noise, we run a ten thousand variants.
@@ -253,13 +262,13 @@ TEST(SocketPoolAdditionalCapacityTest,
     size_t transition_release_count = 0;
     for (size_t i = 0; i < 10000; ++i) {
       if (SocketPoolState::kCapped ==
-          kFieldTrialPool.NextStateBeforeAllocation(SocketPoolState::kUncapped,
-                                                    sockets_in_use, 256)) {
+          pool.NextStateBeforeAllocation(SocketPoolState::kUncapped,
+                                         sockets_in_use, 256)) {
         ++transition_allocation_count;
       }
       if (SocketPoolState::kUncapped ==
-          kFieldTrialPool.NextStateAfterRelease(SocketPoolState::kCapped,
-                                                sockets_in_use, 256)) {
+          pool.NextStateAfterRelease(SocketPoolState::kCapped, sockets_in_use,
+                                     256)) {
         ++transition_release_count;
       }
     }
@@ -326,7 +335,9 @@ FUZZ_TEST(SocketPoolAdditionalCapacityTest, ValidateRandomizedInputs)
                  fuzztest::Arbitrary<size_t>(),
                  fuzztest::Arbitrary<size_t>())
     .WithSeeds({
-        {std::nan(""), 0, std::nan(""), std::nan(""), false, 0, 0},
+        {std::numeric_limits<double>::quiet_NaN(), 0,
+         std::numeric_limits<double>::quiet_NaN(),
+         std::numeric_limits<double>::quiet_NaN(), false, 0, 0},
         {0.0, 0, 0.0, 0.0, false, 0, 0},
         {0.3, 64, 0.1, 0.1, false, 96, 64},
         {0.6, 128, 0.2, 0.2, true, 192, 128},
@@ -342,7 +353,7 @@ class MockClientSocketPool : public ClientSocketPool {
  public:
   MockClientSocketPool()
       : ClientSocketPool(/*socket_soft_cap=*/256,
-                         kFieldTrialPool,
+                         SocketPoolAdditionalCapacity::Create(),
                          ProxyChain::Direct(),
                          /*is_for_websockets=*/false,
                          /*common_connect_job_params*/ nullptr,
@@ -377,7 +388,6 @@ class MockClientSocketPool : public ClientSocketPool {
       ClientSocketHandle* handle,
       CompletionOnceCallback callback,
       const ProxyAuthCallback& proxy_auth_callback,
-      bool fail_if_alias_requires_proxy_override,
       const NetLogWithSource& net_log) override {
     NOTIMPLEMENTED();
     return ERR_IO_PENDING;
@@ -387,7 +397,6 @@ class MockClientSocketPool : public ClientSocketPool {
       scoped_refptr<SocketParams> params,
       const std::optional<NetworkTrafficAnnotationTag>& proxy_annotation_tag,
       size_t num_sockets,
-      bool fail_if_alias_requires_proxy_override,
       CompletionOnceCallback callback,
       const NetLogWithSource& net_log) override {
     NOTIMPLEMENTED();

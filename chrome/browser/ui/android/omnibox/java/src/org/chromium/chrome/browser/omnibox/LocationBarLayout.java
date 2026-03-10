@@ -20,11 +20,13 @@ import androidx.annotation.VisibleForTesting;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.core.widget.ImageViewCompat;
 
+import org.chromium.base.CallbackUtils;
 import org.chromium.base.MathUtils;
 import org.chromium.build.annotations.Initializer;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.lens.LensEntryPoint;
+import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator.FuseboxState;
 import org.chromium.chrome.browser.omnibox.status.StatusCoordinator;
 import org.chromium.chrome.browser.omnibox.status.StatusView;
 import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
@@ -33,6 +35,7 @@ import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionHandler;
 import org.chromium.components.browser_ui.widget.CompositeTouchDelegate;
 import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.ui.base.DeviceFormFactor;
+import org.chromium.ui.base.WindowAndroid;
 
 /** This class represents the location bar where the user types in URLs and search terms. */
 @NullMarked
@@ -43,7 +46,7 @@ public class LocationBarLayout extends ConstraintLayout {
     protected ImageButton mZoomButton;
     protected ImageButton mInstallButton;
     protected ImageButton mComposeplateButton;
-    private final @Nullable View mNavigateButton;
+    protected final @Nullable View mNavigateButton;
     protected UrlBar mUrlBar;
 
     protected UrlBarCoordinator mUrlCoordinator;
@@ -71,6 +74,8 @@ public class LocationBarLayout extends ConstraintLayout {
     private boolean mShowLensButton;
     private boolean mShowDeleteButton;
     private boolean mShowNavigateButton;
+
+    private Runnable mOnSizeChangedRunnable = CallbackUtils.emptyRunnable();
 
     public LocationBarLayout(Context context, AttributeSet attrs) {
         this(context, attrs, R.layout.location_bar);
@@ -127,6 +132,16 @@ public class LocationBarLayout extends ConstraintLayout {
         checkUrlContainerWidth();
     }
 
+    @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        mOnSizeChangedRunnable.run();
+    }
+
+    protected void setOnSizeChangedRunnable(Runnable onSizeChangedRunnable) {
+        mOnSizeChangedRunnable = onSizeChangedRunnable;
+    }
+
     /**
      * Initializes LocationBarLayout with dependencies that aren't immediately available at
      * construction time.
@@ -136,6 +151,8 @@ public class LocationBarLayout extends ConstraintLayout {
      * @param urlCoordinator The coordinator for interacting with the url bar.
      * @param statusCoordinator The coordinator for interacting with the status icon.
      * @param locationBarDataProvider Provider of LocationBar data, e.g. url and title.
+     * @param windowAndroid WindowAndroid object for the window in which the LocationBarLayout is
+     *     rendered.
      */
     @Initializer
     @CallSuper
@@ -143,7 +160,8 @@ public class LocationBarLayout extends ConstraintLayout {
             AutocompleteCoordinator autocompleteCoordinator,
             UrlBarCoordinator urlCoordinator,
             StatusCoordinator statusCoordinator,
-            LocationBarDataProvider locationBarDataProvider) {
+            LocationBarDataProvider locationBarDataProvider,
+            WindowAndroid windowAndroid) {
         mAutocompleteCoordinator = autocompleteCoordinator;
         mUrlCoordinator = urlCoordinator;
         mStatusCoordinator = statusCoordinator;
@@ -535,4 +553,25 @@ public class LocationBarLayout extends ConstraintLayout {
     int getUrlActionContainerEndMarginForTesting() {
         return mUrlActionContainerEndMargin;
     }
+
+    /**
+     * This should be called when the state of the fusebox shown in the LocationBar changes; it is
+     * assumed to start in the DISABLED state.
+     */
+    /* package */ void onFuseboxStateChanged(@FuseboxState int state) {}
+
+    /**
+     * This should be called when the autocomplete request type for the active omnibox session
+     * changes to/from specialized (e.g. aim)/conventional (e.g. plain old search). It is not
+     * assumed that this will be called when the session ends.
+     */
+    public void onSpecializedFuseboxModeActivated(boolean isSpecializedRequestType) {}
+
+    /**
+     * Signal that the list of suggestions shown in the associated omnibox suggestions list has
+     * changed
+     *
+     * @param hasSuggestions Number of suggestions being presented
+     */
+    void onSuggestionsChanged(boolean hasSuggestions) {}
 }

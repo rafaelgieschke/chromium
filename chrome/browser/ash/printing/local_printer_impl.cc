@@ -21,8 +21,6 @@ namespace ash {
 
 namespace {
 
-LocalPrinter* g_instance = nullptr;
-
 std::vector<chromeos::Printer> GetLocalPrinters(const AccountId& accountId) {
   static constexpr chromeos::PrinterClass printer_classes_to_fetch[] = {
       chromeos::PrinterClass::kSaved, chromeos::PrinterClass::kEnterprise,
@@ -43,6 +41,14 @@ std::vector<chromeos::Printer> GetLocalPrinters(const AccountId& accountId) {
   return printers;
 }
 
+void OnSetUpPrinter(
+    LocalPrinter::GetCapabilityCallback callback,
+    const chromeos::Printer& printer,
+    const std::optional<::printing::PrinterSemanticCapsAndDefaults>& caps) {
+  std::move(callback).Run(base::optional_ref<const chromeos::Printer>(printer),
+                          caps);
+}
+
 // Mark if a not yet installed printer is autoconf then continue with setup.
 void OnPrinterQueriedForAutoConf(ash::CupsPrintersManager* printers_manager,
                                  LocalPrinter::GetCapabilityCallback callback,
@@ -50,13 +56,15 @@ void OnPrinterQueriedForAutoConf(ash::CupsPrintersManager* printers_manager,
                                  bool is_printer_autoconf,
                                  const chromeos::IppPrinterInfo& info) {
   if (!is_printer_autoconf) {
-    std::move(callback).Run(std::nullopt);
+    std::move(callback).Run(std::nullopt, std::nullopt);
     return;
   }
 
   printer.mutable_ppd_reference()->autoconf = true;
   printer.set_ipp_printer_info(info);
-  printing::SetUpPrinter(printers_manager, printer, std::move(callback));
+  printing::SetUpPrinter(
+      printers_manager, printer,
+      base::BindOnce(OnSetUpPrinter, std::move(callback), printer));
 }
 
 // Query the printer for setup metrics then continue with setup.
@@ -67,7 +75,9 @@ void OnPrinterQueriedForAutoConfMetricsOnly(
     bool is_printer_autoconf,
     const chromeos::IppPrinterInfo& info) {
   printer.set_ipp_printer_info(info);
-  printing::SetUpPrinter(printers_manager, printer, std::move(callback));
+  printing::SetUpPrinter(
+      printers_manager, printer,
+      base::BindOnce(OnSetUpPrinter, std::move(callback), printer));
 }
 
 // This function is called when user's rights to access the printer were
@@ -85,7 +95,7 @@ void OnPrinterAuthenticated(
     std::string /* access_token */) {
   if (status != ash::printing::oauth2::StatusCode::kOK) {
     // An error occurred.
-    std::move(callback).Run(std::nullopt);
+    std::move(callback).Run(std::nullopt, std::nullopt);
     return;
   }
 
@@ -95,7 +105,7 @@ void OnPrinterAuthenticated(
   // compatibility.
   if (!printers_manager->IsPrinterInstalled(printer)) {
     if (!printer.HasUri()) {
-      std::move(callback).Run(std::nullopt);
+      std::move(callback).Run(std::nullopt, std::nullopt);
       return;
     }
 
@@ -112,7 +122,7 @@ void OnPrinterAuthenticated(
     // CupsPrintersManager should have marked compatible USB printers as having
     // a valid PPD reference or autoconf, so this USB printer is incompatible.
     if (printer.IsUsbProtocol()) {
-      std::move(callback).Run(std::nullopt);
+      std::move(callback).Run(std::nullopt, std::nullopt);
       return;
     }
 
@@ -129,19 +139,9 @@ void OnPrinterAuthenticated(
 
 }  // namespace
 
-LocalPrinter* LocalPrinterImpl::Get() {
-  CHECK(g_instance);
-  return g_instance;
-}
+LocalPrinterImpl::LocalPrinterImpl() = default;
 
-LocalPrinterImpl::LocalPrinterImpl() {
-  CHECK(!g_instance);
-  g_instance = this;
-}
-
-LocalPrinterImpl::~LocalPrinterImpl() {
-  g_instance = nullptr;
-}
+LocalPrinterImpl::~LocalPrinterImpl() = default;
 
 void LocalPrinterImpl::GetPrinters(const AccountId& accountId,
                                    LocalPrinter::GetPrintersCallback callback) {
@@ -161,7 +161,7 @@ void LocalPrinterImpl::GetCapability(
       printers_manager->GetPrinter(printer_id);
   if (!printer) {
     // If the printer was removed, the lookup will fail.
-    std::move(callback).Run(std::nullopt);
+    std::move(callback).Run(std::nullopt, std::nullopt);
     return;
   }
 
@@ -182,6 +182,16 @@ void LocalPrinterImpl::GetCapability(
                            std::move(callback),
                            ash::printing::oauth2::StatusCode::kOK, "");
   }
+}
+
+void LocalPrinterImpl::GetStatus(const AccountId& accountId,
+                                 const std::string& printer_id,
+                                 LocalPrinter::GetStatusCallback callback) {
+  ash::CupsPrintersManager* printers_manager =
+      ash::CupsPrintersManagerFactory::GetForBrowserContext(
+          ash::BrowserContextHelper::Get()->GetBrowserContextByAccountId(
+              accountId));
+  printers_manager->FetchPrinterStatus(printer_id, std::move(callback));
 }
 
 }  // namespace ash

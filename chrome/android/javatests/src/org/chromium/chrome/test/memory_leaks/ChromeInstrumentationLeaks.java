@@ -25,18 +25,23 @@ public class ChromeInstrumentationLeaks implements LeakCanaryConfigProvider {
     @IdentifierNameString
     private static String sField462704925 = "org.chromium.ui.KeyboardVisibilityDelegate#sInstance";
 
-    // crbug.com/462709210
+    // In the rare case that the cleanup task hasn't finished yet, ignore the "leak" - it gets
+    // cleaned up once the cleanup task happens.
     @IdentifierNameString
-    private static String sClass462709210 =
-            "org.chromium.chrome.browser.magic_stack.HomeModulesConfigManager$LazyHolder";
+    private static String sClassPersistencePolicyCleanup =
+            "org.chromium.chrome.browser.tabmodel.TabbedModeTabPersistencePolicy";
 
     @IdentifierNameString
-    private static String sField462709210 =
-            "org.chromium.chrome.browser.magic_stack.HomeModulesConfigManager$LazyHolder#sInstance";
+    private static String sFieldPersistencePolicyCleanup =
+            "org.chromium.chrome.browser.tabmodel.TabbedModeTabPersistencePolicy#sCleanupTask";
 
     @Override
     public Map<String, String> getStaticFieldLeaks() {
-        return Map.of(sClass462709210, sField462709210, sClass462704925, sField462704925);
+        return Map.of(
+                sClass462704925,
+                sField462704925,
+                sClassPersistencePolicyCleanup,
+                sFieldPersistencePolicyCleanup);
     }
 
     @Override

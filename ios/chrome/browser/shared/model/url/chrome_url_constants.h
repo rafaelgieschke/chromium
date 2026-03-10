@@ -48,6 +48,8 @@ inline constexpr char kChromeUICrashHost[] = "crash";
 inline constexpr char kChromeUIChromeURLsHost[] = "chrome-urls";
 inline constexpr char kChromeUICrashesHost[] = "crashes";
 inline constexpr char kChromeUICreditsHost[] = "credits";
+inline constexpr char kChromeUIConnectorsInternalsHost[] =
+    "connectors-internals";
 inline constexpr char kChromeUIDataSharingInternalsHost[] =
     "data-sharing-internals";
 inline constexpr char kChromeUIDinoHost[] = "dino";
@@ -193,6 +195,10 @@ inline constexpr char kEnhancedSafeBrowsingLearnMoreURL[] =
 inline constexpr char kMyActivityURL[] =
     "https://myactivity.google.com/myactivity";
 
+// Help center URL for the Bookmarks limit exceeded error.
+inline constexpr char kBookmarksLimitExceededHelpCenter[] =
+    "https://support.google.com/chrome?p=manage_bookmarks_ios";
+
 // "Learn more" URL for the Lens Overlay.
 inline constexpr char kLearnMoreLensURL[] =
     "https://support.google.com/chrome/?p=google_lens_ios";
@@ -213,7 +219,7 @@ inline constexpr char kBWGPageContentSharingURL[] =
 inline constexpr char kBWGExtensionsURL[] = "https://gemini.google.com/apps";
 
 // Gets the hosts/domains that are shown in chrome://chrome-urls.
-inline constexpr std::array<std::string_view, 21> kChromeHostURLs = {
+inline constexpr std::array<std::string_view, 22> kChromeHostURLs = {
     commerce::kChromeUICommerceInternalsHost,
     kChromeUIChromeURLsHost,
     kChromeUICreditsHost,
@@ -228,6 +234,7 @@ inline constexpr std::array<std::string_view, 21> kChromeHostURLs = {
     kChromeUINewTabHost,
     kChromeUINTPTilesInternalsHost,
     kChromeUIPasswordManagerInternalsHost,
+    kChromeUIPrefsInternalsHost,
     kChromeUISignInInternalsHost,
     kChromeUISyncInternalsHost,
     kChromeUITermsHost,

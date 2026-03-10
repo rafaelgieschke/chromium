@@ -9,6 +9,7 @@
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
+#include "components/os_crypt/async/common/encryptor.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/saved_tab_groups/public/pref_names.h"
@@ -23,6 +24,7 @@
 #include "components/sync/service/glue/sync_transport_data_prefs.h"
 #include "components/sync/service/sync_prefs.h"
 #include "components/sync/service/sync_service_crypto.h"
+#include "components/sync/test/sync_service_crypto_test_utils.h"
 #include "components/trusted_vault/test/fake_trusted_vault_client.h"
 #include "google_apis/gaia/gaia_id.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -106,12 +108,13 @@ class SyncUserSettingsImplTest : public testing::Test {
     // TODO(crbug.com/368409110): Necessary for a workaround in
     // SyncPrefs::KeepAccountSettingsPrefsOnlyForUsers(); see TODO there.
     pref_service_.registry()->RegisterDictionaryPref(
-        tab_groups::prefs::kLocallyClosedRemoteTabGroupIds,
-        base::Value::Dict());
+        tab_groups::prefs::kLocallyClosedRemoteTabGroupIds, base::DictValue());
     sync_prefs_ = std::make_unique<SyncPrefs>(&pref_service_);
 
     sync_service_crypto_ = std::make_unique<SyncServiceCrypto>(
         &sync_service_crypto_delegate_, &trusted_vault_client_);
+    sync_service_crypto_->SetEncryptor(
+        std::make_unique<os_crypt_async::Encryptor>(GetEncryptorForTest()));
 
     ON_CALL(delegate_, IsCustomPassphraseAllowed).WillByDefault(Return(true));
     ON_CALL(delegate_, GetSyncAccountStateForPrefs)
@@ -128,12 +131,6 @@ class SyncUserSettingsImplTest : public testing::Test {
   void SetSyncAccountState(SyncPrefs::SyncAccountState sync_account_state) {
     ON_CALL(delegate_, GetSyncAccountStateForPrefs)
         .WillByDefault(Return(sync_account_state));
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-    if (sync_account_state ==
-        SyncPrefs::SyncAccountState::kSignedInWithoutSyncConsent) {
-      pref_service_.SetBoolean(prefs::kExplicitBrowserSignin, true);
-    }
-#endif
   }
 
   std::unique_ptr<SyncUserSettingsImpl> MakeSyncUserSettings(
@@ -169,6 +166,14 @@ TEST_F(SyncUserSettingsImplTest, PreferredTypesSyncEverything) {
   // TODO(crbug.com/445840788): In CL #3, delete (CONTEXTUAL_TASK is now mapped
   // to a selectable type.
   expected_types.Remove(CONTEXTUAL_TASK);
+
+  // TODO(crbug.com/476335087): In CL #3, delete (GEMINI_THREAD is now mapped to
+  // a selectable type.
+  expected_types.Remove(GEMINI_THREAD);
+
+  // TODO(crbug.com/486879778): In CL #3, delete (ACCESSIBILITY_ANNOTATION is
+  // now mapped to a selectable type.
+  expected_types.Remove(ACCESSIBILITY_ANNOTATION);
 
 #if BUILDFLAG(IS_CHROMEOS)
   expected_types.RemoveAll({WEB_APKS});
@@ -348,6 +353,14 @@ TEST_F(SyncUserSettingsImplTest, PreferredTypesSyncAllOsTypes) {
   // TODO(crbug.com/397767033): In CL #3, delete (CONTEXTUAL_TASK is now mapped
   // to a selectable type.
   expected_types.Remove(CONTEXTUAL_TASK);
+  // TODO(crbug.com/476335087): In CL #3, delete (GEMINI_THREAD is now mapped to
+  // a selectable type.
+  expected_types.Remove(GEMINI_THREAD);
+
+  // TODO(crbug.com/486879778): In CL #3, delete (ACCESSIBILITY_ANNOTATION is
+  // now mapped to a selectable type.
+  expected_types.Remove(ACCESSIBILITY_ANNOTATION);
+
   EXPECT_TRUE(sync_user_settings->IsSyncAllOsTypesEnabled());
   EXPECT_THAT(GetPreferredUserTypes(*sync_user_settings),
               ContainerEq(expected_types));

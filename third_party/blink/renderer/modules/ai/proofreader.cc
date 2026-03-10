@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/modules/ai/ai_interface_proxy.h"
 #include "third_party/blink/renderer/modules/ai/ai_metrics.h"
 #include "third_party/blink/renderer/modules/ai/ai_writing_assistance_create_client.h"
+#include "third_party/blink/renderer/modules/ai/feedback_helpers.h"
 #include "third_party/blink/renderer/modules/ai/model_execution_responder.h"
 #include "third_party/blink/renderer/platform/text/text_break_iterator.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
@@ -371,6 +372,7 @@ ScriptPromise<Proofreader> Proofreader::create(
     ScriptState* script_state,
     ProofreaderCreateOptions* options,
     ExceptionState& exception_state) {
+  MaybeRequestFeedback(script_state, AIMetrics::AISessionType::kProofreader);
   if (!script_state->ContextIsValid()) {
     ThrowInvalidContextException(exception_state);
     return ScriptPromise<Proofreader>();
@@ -450,10 +452,10 @@ ScriptPromise<ProofreadResult> Proofreader::proofread(
   auto pending_remote = CreateModelExecutionResponder(
       script_state, composite_signal, task_runner_,
       AIMetrics::AISessionType::kProofreader,
-
       BindOnce(&Proofreader::OnProofreadComplete, WrapPersistent(this),
                WrapPersistent(resolver), WrapPersistent(script_state),
                WrapPersistent(composite_signal), input),
+      /*tool_call_callback=*/base::NullCallback(),
       /*overflow_callback=*/base::DoNothingWithBoundArgs(WrapPersistent(this)),
       BindOnce(&Proofreader::OnProofreadError, WrapPersistent(this),
                WrapPersistent(resolver)),
@@ -606,6 +608,7 @@ void Proofreader::GetCorrectionTypes(
                WrapPersistent(resolver), WrapPersistent(script_state),
                WrapPersistent(signal), WrapPersistent(result), raw_corrections,
                input, correction_index),
+      /*tool_call_callback=*/base::NullCallback(),
       /*overflow_callback=*/
       base::DoNothingWithBoundArgs(WrapPersistent(this)),
       /*error_callback=*/
@@ -629,14 +632,14 @@ void Proofreader::GetCorrectionTypes(
 
   // Annotate the current error in the original input.
   String input_with_error =
-      StrCat({input.Substring(0, correction.error_start), "`", from, "`",
+      StrCat({input.subview(0, correction.error_start), "`", from, "`",
               input.Substring(correction.error_end)});
 
   // Annotate the current correction in the corrected input.
   String corrected_input = result->correctedInput();
   String corrected_input_with_correction =
-      StrCat({corrected_input.Substring(0, correction.correction_start), "`",
-              to, "`", corrected_input.Substring(correction.correction_end)});
+      StrCat({corrected_input.subview(0, correction.correction_start), "`", to,
+              "`", corrected_input.Substring(correction.correction_end)});
 
   remote_->GetCorrectionType(input_with_error, corrected_input_with_correction,
                              correction_instruction, std::move(pending_remote));

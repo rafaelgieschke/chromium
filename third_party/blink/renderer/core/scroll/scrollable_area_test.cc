@@ -7,19 +7,25 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/html/html_body_element.h"
+#include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/scroll/scroll_animator_base.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_test_suite.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme_overlay_mock.h"
+#include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 #include "third_party/blink/renderer/core/testing/scoped_mock_overlay_scrollbars.h"
 #include "third_party/blink/renderer/platform/geometry/length_functions.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/testing/paint_test_configurations.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support_with_mock_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
@@ -249,20 +255,12 @@ TEST_P(ScrollableAreaTest, ScrollAnimatorCallbackFiresOnAnimationCancel) {
       MockScrollableArea::Create(ScrollOffset(0, 100));
   EXPECT_CALL(*scrollable_area, ScheduleAnimation())
       .WillRepeatedly(Return(true));
-  bool finished = false;
   scrollable_area->SetScrollOffset(
       ScrollOffset(0, 10000), mojom::blink::ScrollType::kProgrammatic,
-      cc::ScrollSourceType::kNone, mojom::blink::ScrollBehavior::kSmooth,
-      ScrollableArea::ScrollCallback(BindOnce(
-          [](bool* finished, ScrollableArea::ScrollCompletionMode) {
-            *finished = true;
-          },
-          Unretained(&finished))));
+      cc::ScrollSourceType::kNone, mojom::blink::ScrollBehavior::kSmooth);
   EXPECT_EQ(0.0, scrollable_area->GetScrollAnimator().CurrentOffset().y());
-  EXPECT_FALSE(finished);
   scrollable_area->CancelProgrammaticScrollAnimation();
   EXPECT_EQ(0.0, scrollable_area->GetScrollAnimator().CurrentOffset().y());
-  EXPECT_TRUE(finished);
 }
 
 TEST_P(ScrollableAreaTest, ScrollAnimatorCallbackFiresOnInstantScroll) {
@@ -273,17 +271,10 @@ TEST_P(ScrollableAreaTest, ScrollAnimatorCallbackFiresOnInstantScroll) {
       MockScrollableArea::Create(ScrollOffset(0, 100));
   EXPECT_CALL(*scrollable_area, ScheduleAnimation())
       .WillRepeatedly(Return(true));
-  bool finished = false;
   scrollable_area->SetScrollOffset(
       ScrollOffset(0, 10000), mojom::blink::ScrollType::kProgrammatic,
-      cc::ScrollSourceType::kNone, mojom::blink::ScrollBehavior::kInstant,
-      ScrollableArea::ScrollCallback(BindOnce(
-          [](bool* finished, ScrollableArea::ScrollCompletionMode) {
-            *finished = true;
-          },
-          Unretained(&finished))));
+      cc::ScrollSourceType::kNone, mojom::blink::ScrollBehavior::kInstant);
   EXPECT_EQ(100, scrollable_area->GetScrollAnimator().CurrentOffset().y());
-  EXPECT_TRUE(finished);
 }
 
 TEST_P(ScrollableAreaTest, ScrollAnimatorCallbackFiresOnAnimationFinish) {
@@ -294,24 +285,15 @@ TEST_P(ScrollableAreaTest, ScrollAnimatorCallbackFiresOnAnimationFinish) {
       MockScrollableArea::Create(ScrollOffset(0, 100));
   EXPECT_CALL(*scrollable_area, ScheduleAnimation())
       .WillRepeatedly(Return(true));
-  bool finished = false;
   scrollable_area->SetScrollOffset(
       ScrollOffset(0, 9), mojom::blink::ScrollType::kProgrammatic,
-      cc::ScrollSourceType::kNone, mojom::blink::ScrollBehavior::kSmooth,
-      ScrollableArea::ScrollCallback(BindOnce(
-          [](bool* finished, ScrollableArea::ScrollCompletionMode) {
-            *finished = true;
-          },
-          Unretained(&finished))));
+      cc::ScrollSourceType::kNone, mojom::blink::ScrollBehavior::kSmooth);
   EXPECT_EQ(0.0, scrollable_area->GetScrollAnimator().CurrentOffset().y());
-  EXPECT_FALSE(finished);
   scrollable_area->UpdateCompositorScrollAnimations();
   scrollable_area->ServiceScrollAnimations(1);
   EXPECT_EQ(0.0, scrollable_area->GetScrollAnimator().CurrentOffset().y());
-  EXPECT_FALSE(finished);
   scrollable_area->ServiceScrollAnimations(1000000);
   EXPECT_EQ(9.0, scrollable_area->GetScrollAnimator().CurrentOffset().y());
-  EXPECT_TRUE(finished);
 }
 
 TEST_P(ScrollableAreaTest, ScrollBackToInitialPosition) {
@@ -322,15 +304,9 @@ TEST_P(ScrollableAreaTest, ScrollBackToInitialPosition) {
       MockScrollableArea::Create(ScrollOffset(0, 100));
   EXPECT_CALL(*scrollable_area, ScheduleAnimation())
       .WillRepeatedly(Return(true));
-  bool finished = false;
   scrollable_area->SetScrollOffset(
       ScrollOffset(0, 50), mojom::blink::ScrollType::kProgrammatic,
-      cc::ScrollSourceType::kNone, mojom::blink::ScrollBehavior::kSmooth,
-      ScrollableArea::ScrollCallback(BindOnce(
-          [](bool* finished, ScrollableArea::ScrollCompletionMode) {
-            *finished = true;
-          },
-          Unretained(&finished))));
+      cc::ScrollSourceType::kNone, mojom::blink::ScrollBehavior::kSmooth);
   scrollable_area->SetScrollOffset(
       ScrollOffset(0, 0), mojom::blink::ScrollType::kProgrammatic,
       cc::ScrollSourceType::kNone, mojom::blink::ScrollBehavior::kSmooth);
@@ -338,7 +314,6 @@ TEST_P(ScrollableAreaTest, ScrollBackToInitialPosition) {
   scrollable_area->ServiceScrollAnimations(1);
   scrollable_area->ServiceScrollAnimations(1000000);
   EXPECT_EQ(0, scrollable_area->GetScrollOffset().y());
-  EXPECT_TRUE(finished);
 }
 
 TEST_P(ScrollableAreaTest, FilterIncomingScrollDuringSmoothUserScroll) {
@@ -364,6 +339,61 @@ TEST_P(ScrollableAreaTest, FilterIncomingScrollDuringSmoothUserScroll) {
     const bool should_filter = !exempted_types.contains(incoming_type);
     EXPECT_EQ(area->ShouldFilterIncomingScroll(incoming_type), should_filter);
   }
+}
+
+class ScrollableAreaOverscrollTest : public testing::Test,
+                                     ScopedOverscrollGesturesForTest {
+ public:
+  ScrollableAreaOverscrollTest() : ScopedOverscrollGesturesForTest(true) {}
+
+  void SetUp() override {
+    dummy_page_holder_ =
+        std::make_unique<DummyPageHolder>(gfx::Size(0, 0), nullptr);
+  }
+
+  Document& GetDocument() { return dummy_page_holder_->GetDocument(); }
+
+  void SetInnerHTML(const char* html) {
+    GetDocument().body()->SetInnerHTMLWithoutTrustedTypes(html);
+  }
+
+  void UpdateAllLifecyclePhasesForTest() {
+    GetDocument().View()->UpdateAllLifecyclePhasesForTest();
+  }
+
+ private:
+  test::TaskEnvironment task_environment_;
+  std::unique_ptr<DummyPageHolder> dummy_page_holder_;
+};
+
+TEST_F(ScrollableAreaOverscrollTest, ScrollableAreaTraversalVisitsContainer) {
+  SetInnerHTML(R"HTML(
+    <div id="container" overscrollcontainer style="height: 100px; width: 100px;">
+      <div id="menu"></div>
+      <div id="content"></div>
+    </div>
+    <button command="toggle-overscroll" commandfor="menu">
+  )HTML");
+  UpdateAllLifecyclePhasesForTest();
+
+  auto* content = GetDocument().getElementById(AtomicString("content"));
+  auto* menu = GetDocument().getElementById(AtomicString("menu"));
+  auto* container = GetDocument().getElementById(AtomicString("container"));
+  auto* overscroll_area_parent =
+      menu->GetPseudoElement(kPseudoIdOverscrollAreaParent);
+
+  ASSERT_TRUE(content);
+  ASSERT_TRUE(menu);
+  ASSERT_TRUE(container);
+
+  // TODO(crbug.com/485240464): Ensure all of the scrollable areas are iterated
+  // correctly.
+  EXPECT_EQ(&*ScrollableAreaTraversal(content).begin(),
+            container->GetLayoutBox()->GetScrollableArea());
+  EXPECT_EQ(&*ScrollableAreaTraversal(container).begin(),
+            container->GetLayoutBox()->GetScrollableArea());
+  EXPECT_EQ(&*ScrollableAreaTraversal(menu).begin(),
+            overscroll_area_parent->GetLayoutBox()->GetScrollableArea());
 }
 
 }  // namespace blink

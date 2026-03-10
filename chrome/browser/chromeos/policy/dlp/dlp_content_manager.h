@@ -14,7 +14,9 @@
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "base/scoped_observation.h"
 #include "base/time/time.h"
+#include "chrome/browser/ash/browser_delegate/browser_controller.h"
 #include "chrome/browser/chromeos/policy/dlp/dialogs/dlp_warn_dialog.h"
 #include "chrome/browser/chromeos/policy/dlp/dlp_confidential_contents.h"
 #include "chrome/browser/chromeos/policy/dlp/dlp_content_manager_observer.h"
@@ -22,7 +24,6 @@
 #include "chrome/browser/chromeos/policy/dlp/dlp_content_restriction_set.h"
 #include "chrome/browser/chromeos/policy/dlp/dlp_content_tab_helper.h"
 #include "chrome/browser/chromeos/policy/dlp/dlp_rules_manager.h"
-#include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "content/public/browser/desktop_media_id.h"
 #include "content/public/browser/global_routing_id.h"
@@ -48,7 +49,7 @@ class DlpWarnNotifier;
 // If any confidential WebContents is visible, the corresponding restrictions
 // will be enforced according to the current enterprise policy.
 class DlpContentManager : public DlpContentObserver,
-                          public BrowserListObserver,
+                          public ash::BrowserController::Observer,
                           public TabStripModelObserver {
  public:
   // Holds DLP restrictions information for `web_contents` object.
@@ -327,9 +328,8 @@ class DlpContentManager : public DlpContentObserver,
       const DlpContentRestrictionSet& restriction_set) override;
   void OnWebContentsDestroyed(content::WebContents* web_contents) override;
 
-  // BrowserListObserver overrides:
-  void OnBrowserAdded(Browser* browser) override;
-  void OnBrowserRemoved(Browser* browser) override;
+  // ash::BrowserController::Observer overrides:
+  void OnBrowserCreated(ash::BrowserDelegate* browser) override;
 
   // TabStripModelObserver overrides:
   void OnTabStripModelChanged(
@@ -456,6 +456,10 @@ class DlpContentManager : public DlpContentObserver,
   std::array<base::ObserverList<DlpContentManagerObserver>,
              static_cast<int>(DlpContentRestriction::kMaxValue) + 1>
       observer_lists_;
+
+  base::ScopedObservation<ash::BrowserController,
+                          ash::BrowserController::Observer>
+      browser_controller_observation_{this};
 
   // A helper structure that contains web contents which were reported during
   // the current screen share.

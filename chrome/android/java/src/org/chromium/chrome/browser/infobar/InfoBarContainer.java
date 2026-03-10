@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.infobar;
 
+import static org.chromium.build.NullUtil.assertNonNull;
 import static org.chromium.build.NullUtil.assumeNonNull;
 
 import android.app.Activity;
@@ -13,11 +14,12 @@ import android.view.ViewGroup;
 import androidx.annotation.VisibleForTesting;
 
 import org.jni_zero.CalledByNative;
+import org.jni_zero.JniType;
 import org.jni_zero.NativeMethods;
 
 import org.chromium.base.ObserverList;
 import org.chromium.base.UserData;
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
@@ -267,7 +269,7 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener, I
 
         // Chromium's InfoBarContainer may add an InfoBar immediately during this initialization
         // call, so make sure everything in the InfoBarContainer is completely ready beforehand.
-        mNativeInfoBarContainer = InfoBarContainerJni.get().init(this);
+        mNativeInfoBarContainer = InfoBarContainerJni.get().init(tab);
     }
 
     private static @Nullable Activity getActivity(Tab tab) {
@@ -489,7 +491,7 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener, I
         // Note: Doing a cast and pulling off dependencies from ChromeActivity is generally a
         // pattern we try to avoid. However, InfoBar is slated for deprecation soon, so a better
         // dependency management approach won't be used.
-        ObservableSupplier<EdgeToEdgeController> edgeToEdgeSupplier = null;
+        MonotonicObservableSupplier<EdgeToEdgeController> edgeToEdgeSupplier = null;
         if (activity instanceof ChromeActivity) {
             edgeToEdgeSupplier = ((ChromeActivity) activity).getEdgeToEdgeSupplier();
         }
@@ -598,11 +600,18 @@ public class InfoBarContainer implements UserData, KeyboardVisibilityListener, I
         return mInfoBarContainerView;
     }
 
+    @CalledByNative
+    private static InfoBarContainer getFromTab(@JniType("TabAndroid*") Tab tab) {
+        return assertNonNull(get(tab));
+    }
+
     @NativeMethods
     interface Natives {
-        long init(InfoBarContainer self);
+        long init(@JniType("TabAndroid*") Tab tab);
 
-        void setWebContents(long nativeInfoBarContainerAndroid, @Nullable WebContents webContents);
+        void setWebContents(
+                long nativeInfoBarContainerAndroid,
+                @Nullable @JniType("content::WebContents*") WebContents webContents);
 
         void destroy(long nativeInfoBarContainerAndroid);
     }

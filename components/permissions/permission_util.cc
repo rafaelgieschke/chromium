@@ -4,10 +4,10 @@
 
 #include "components/permissions/permission_util.h"
 
+#include <algorithm>
 #include <memory>
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -16,6 +16,7 @@
 #include "build/build_config.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/content_settings/core/common/content_settings_utils.h"
 #include "components/content_settings/core/common/features.h"
 #include "components/permissions/features.h"
 #include "components/permissions/permission_request.h"
@@ -180,6 +181,8 @@ RequestTypeForUma PermissionUtil::GetUmaValueForRequestType(
 #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
     case RequestType::kNotifications:
       return RequestTypeForUma::PERMISSION_NOTIFICATIONS;
+    case RequestType::kSensors:
+      return RequestTypeForUma::PERMISSION_SENSORS;
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN)
     case RequestType::kProtectedMediaIdentifier:
       return RequestTypeForUma::PERMISSION_PROTECTED_MEDIA_IDENTIFIER;
@@ -261,8 +264,8 @@ bool PermissionUtil::GetPermissionType(ContentSettingsType type,
     case ContentSettingsType::MIDI_SYSEX:
       *out = PermissionType::MIDI_SYSEX;
       break;
-    case ContentSettingsType::DURABLE_STORAGE:
-      *out = PermissionType::DURABLE_STORAGE;
+    case ContentSettingsType::PERSISTENT_STORAGE:
+      *out = PermissionType::PERSISTENT_STORAGE;
       break;
     case ContentSettingsType::MEDIASTREAM_CAMERA:
       *out = PermissionType::VIDEO_CAPTURE;
@@ -388,9 +391,9 @@ bool PermissionUtil::IsLowPriorityPermissionRequest(
 
 bool PermissionUtil::ShouldCurrentRequestUsePermissionElementSecondaryUI(
     PermissionPrompt::Delegate* delegate) {
-  if (!base::FeatureList::IsEnabled(blink::features::kPermissionElement) &&
-      !base::FeatureList::IsEnabled(blink::features::kGeolocationElement) &&
-      !base::FeatureList::IsEnabled(blink::features::kUserMediaElement)) {
+  if (!base::FeatureList::IsEnabled(blink::features::kGeolocationElement) &&
+      !base::FeatureList::IsEnabled(blink::features::kUserMediaElement) &&
+      !base::FeatureList::IsEnabled(blink::features::kWebAppInstallation)) {
     return false;
   }
 
@@ -424,12 +427,13 @@ bool PermissionUtil::IsGuardContentSetting(ContentSettingsType type) {
 }
 
 bool PermissionUtil::DoesSupportTemporaryGrants(ContentSettingsType type) {
-  return base::Contains(content_settings::GetTypesWithTemporaryGrants(), type);
+  return std::ranges::contains(content_settings::GetTypesWithTemporaryGrants(),
+                               type);
 }
 
 bool PermissionUtil::DoesStoreTemporaryGrantsInHcsm(ContentSettingsType type) {
-  return base::Contains(content_settings::GetTypesWithTemporaryGrantsInHcsm(),
-                        type);
+  return std::ranges::contains(
+      content_settings::GetTypesWithTemporaryGrantsInHcsm(), type);
 }
 
 // Due to dependency issues, this method is duplicated in
@@ -474,10 +478,7 @@ ContentSettingsType PermissionUtil::PermissionTypeToContentSettingsTypeSafe(
       return ContentSettingsType::NOTIFICATIONS;
     case PermissionType::GEOLOCATION:
     case PermissionType::GEOLOCATION_APPROXIMATE:
-      return base::FeatureList::IsEnabled(
-                 content_settings::features::kApproximateGeolocationPermission)
-                 ? ContentSettingsType::GEOLOCATION_WITH_OPTIONS
-                 : ContentSettingsType::GEOLOCATION;
+      return content_settings::GeolocationContentSettingsType();
     case PermissionType::PROTECTED_MEDIA_IDENTIFIER:
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN) || \
     BUILDFLAG(IS_FUCHSIA)
@@ -485,8 +486,8 @@ ContentSettingsType PermissionUtil::PermissionTypeToContentSettingsTypeSafe(
 #else
       break;
 #endif
-    case PermissionType::DURABLE_STORAGE:
-      return ContentSettingsType::DURABLE_STORAGE;
+    case PermissionType::PERSISTENT_STORAGE:
+      return ContentSettingsType::PERSISTENT_STORAGE;
     case PermissionType::AUDIO_CAPTURE:
       return ContentSettingsType::MEDIASTREAM_MIC;
     case PermissionType::VIDEO_CAPTURE:
@@ -666,8 +667,8 @@ GURL PermissionUtil::GetCanonicalOrigin(ContentSettingsType permission,
                                         const GURL& requesting_origin,
                                         const GURL& embedding_origin) {
   std::optional<GURL> override_origin =
-      PermissionsClient::Get()->OverrideCanonicalOrigin(requesting_origin,
-                                                        embedding_origin);
+      PermissionsClient::Get()->GetCanonicalOriginOverride(requesting_origin,
+                                                           embedding_origin);
   if (override_origin) {
     return override_origin.value();
   }
@@ -728,12 +729,7 @@ bool PermissionUtil::DoesPlatformSupportChip() {
 
 // static
 ContentSettingsType PermissionUtil::GetGeolocationType() {
-  if (base::FeatureList::IsEnabled(
-          content_settings::features::kApproximateGeolocationPermission)) {
-    return ContentSettingsType::GEOLOCATION_WITH_OPTIONS;
-  } else {
-    return ContentSettingsType::GEOLOCATION;
-  }
+  return content_settings::GeolocationContentSettingsType();
 }
 
 }  // namespace permissions

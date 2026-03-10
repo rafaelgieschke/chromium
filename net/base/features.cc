@@ -14,6 +14,10 @@
 #include "net/net_buildflags.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_constants.h"
 
+#if BUILDFLAG(IS_APPLE)
+#include "net/base/network_change_notifier_apple_buildflags.h"
+#endif  // BUILDFLAG(IS_APPLE)
+
 #if BUILDFLAG(IS_WIN)
 #include "base/win/windows_version.h"
 #endif
@@ -76,6 +80,8 @@ BASE_FEATURE(kUseStructuredDnsErrors, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kUseHostResolverCache, base::FEATURE_DISABLED_BY_DEFAULT);
 
+BASE_FEATURE(kHappyEyeballsV2, base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kHappyEyeballsV3, base::FEATURE_DISABLED_BY_DEFAULT);
 
 const base::FeatureParam<int> kAlternativePortForGloballyReachableCheck{
@@ -121,10 +127,6 @@ BASE_FEATURE(kSplitCodeCacheByNetworkIsolationKey,
 
 BASE_FEATURE(kPartitionConnectionsByNetworkIsolationKey,
              base::FEATURE_DISABLED_BY_DEFAULT);
-
-BASE_FEATURE(kPrefixCookieHttp, base::FEATURE_ENABLED_BY_DEFAULT);
-
-BASE_FEATURE(kPrefixCookieHostHttp, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kSearchEnginePreconnectInterval,
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -248,17 +250,16 @@ BASE_FEATURE(kTcpPortReuseMetricsWin, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kTcpSocketIoCompletionPortWin, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
+#if BUILDFLAG(IS_MAC)
+BASE_FEATURE(kTcpPortRandomizationMac, base::FEATURE_DISABLED_BY_DEFAULT);
+const base::FeatureParam<int> kTcpPortRandomizationReuseDelaySec{
+    &kTcpPortRandomizationMac, "reuse_delay_sec", 120};
+#endif
+
 BASE_FEATURE(kAvoidEntryCreationForNoStore, base::FEATURE_DISABLED_BY_DEFAULT);
 const base::FeatureParam<int> kAvoidEntryCreationForNoStoreCacheSize{
     &kAvoidEntryCreationForNoStore, "AvoidEntryCreationForNoStoreCacheSize",
     1000};
-
-// A flag for new Kerberos feature, that suggests new UI
-// when Kerberos authentication in browser fails on ChromeOS.
-// b/260522530
-#if BUILDFLAG(IS_CHROMEOS)
-BASE_FEATURE(kKerberosInBrowserRedirect, base::FEATURE_ENABLED_BY_DEFAULT);
-#endif
 
 // A flag to use asynchronous session creation for new QUIC sessions.
 BASE_FEATURE(kAsyncQuicSession,
@@ -345,20 +346,27 @@ BASE_FEATURE(kUseNewAlpsCodepointQUIC, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kTruncateBodyToContentLength, base::FEATURE_ENABLED_BY_DEFAULT);
 
-#if BUILDFLAG(IS_MAC)
-BASE_FEATURE(kReduceIPAddressChangeNotification,
-             base::FEATURE_ENABLED_BY_DEFAULT);
+#if BUILDFLAG(IS_APPLE)
 BASE_FEATURE(kUseNetworkPathMonitorForNetworkChangeNotifier,
-             base::FEATURE_DISABLED_BY_DEFAULT);
-#endif  // BUILDFLAG(IS_MAC)
+#ifdef COMPILE_OLD_NOTIFIER_IMPL
+             base::FEATURE_DISABLED_BY_DEFAULT
+#else
+             base::FEATURE_ENABLED_BY_DEFAULT
+#endif  // COMPILE_OLD_NOTIFIER_IMPL
+);
+#endif  // BUILDFLAG(IS_APPLE)
 
+#if BUILDFLAG(IS_WIN)
+BASE_FEATURE(kDeviceBoundSessions, base::FEATURE_ENABLED_BY_DEFAULT);
+#else
 BASE_FEATURE(kDeviceBoundSessions, base::FEATURE_DISABLED_BY_DEFAULT);
-BASE_FEATURE(kPersistDeviceBoundSessions, base::FEATURE_DISABLED_BY_DEFAULT);
+#endif
+BASE_FEATURE(kPersistDeviceBoundSessions, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE_PARAM(bool,
                    kDeviceBoundSessionsRequireOriginTrialTokens,
                    &kDeviceBoundSessions,
                    "RequireOriginTrialTokens",
-                   true);
+                   false);
 BASE_FEATURE_PARAM(bool,
                    kDeviceBoundSessionsRefreshQuota,
                    &kDeviceBoundSessions,
@@ -373,10 +381,10 @@ BASE_FEATURE_PARAM(int,
                    kDeviceBoundSessionsSchemaVersion,
                    &kDeviceBoundSessions,
                    "SchemaVersion",
-                   2);
+                   3);
 
 BASE_FEATURE(kDeviceBoundSessionsFederatedRegistration,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE_PARAM(bool,
                    kDeviceBoundSessionsFederatedRegistrationCheckWellKnown,
                    &kDeviceBoundSessionsFederatedRegistration,
@@ -393,6 +401,17 @@ BASE_FEATURE_PARAM(base::TimeDelta,
 
 BASE_FEATURE(kDeviceBoundSessionSigningQuotaAndCaching,
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kDeviceBoundSessionsForRestrictedSites,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kDeviceBoundSessionsForRestrictedSitesExperimentId,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE_PARAM(std::string,
+                   kDeviceBoundSessionsForRestrictedSitesExperimentIdParam,
+                   &kDeviceBoundSessionsForRestrictedSitesExperimentId,
+                   "Value",
+                   "");
 
 BASE_FEATURE(kSpdySessionForProxyAdditionalChecks,
              base::FEATURE_ENABLED_BY_DEFAULT);
@@ -412,6 +431,9 @@ BASE_FEATURE(kSimdutfBase64Support,
 );
 
 BASE_FEATURE(kFurtherOptimizeParsingDataUrls, base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kDataUrlMimeTypeParameterPreservation,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kNoVarySearchIgnoreUnrecognizedKeys,
              base::FEATURE_ENABLED_BY_DEFAULT);
@@ -442,7 +464,7 @@ BASE_FEATURE_PARAM(int,
                    kSqlDiskCacheForceCheckpointThreshold,
                    &kDiskCacheBackendExperiment,
                    "SqlDiskCacheForceCheckpointThreshold",
-                   20000);
+                   2000);
 BASE_FEATURE_PARAM(int,
                    kSqlDiskCacheIdleCheckpointThreshold,
                    &kDiskCacheBackendExperiment,
@@ -453,6 +475,11 @@ BASE_FEATURE_PARAM(int,
                    &kDiskCacheBackendExperiment,
                    "SqlDiskCacheOptimisticWriteBufferSize",
                    32 * 1024 * 1024);
+BASE_FEATURE_PARAM(bool,
+                   kSqlDiskCachePreloadDatabase,
+                   &kDiskCacheBackendExperiment,
+                   "SqlDiskCachePreloadDatabase",
+                   false);
 BASE_FEATURE_PARAM(bool,
                    kSqlDiskCacheSynchronousOff,
                    &kDiskCacheBackendExperiment,
@@ -468,6 +495,41 @@ BASE_FEATURE_PARAM(bool,
                    &kDiskCacheBackendExperiment,
                    "SqlDiskCacheLoadIndexOnInit",
                    false);
+BASE_FEATURE_PARAM(int,
+                   kSqlDiskCacheMaxWriteBufferTotalSize,
+                   &kDiskCacheBackendExperiment,
+                   "SqlDiskCacheMaxWriteBufferTotalSize",
+                   32 * 1024 * 1024);
+BASE_FEATURE_PARAM(int,
+                   kSqlDiskCacheMaxWriteBufferSizePerEntry,
+                   &kDiskCacheBackendExperiment,
+                   "SqlDiskCacheMaxWriteBufferSizePerEntry",
+                   512 * 1024);
+BASE_FEATURE_PARAM(int,
+                   kSqlDiskCacheMaxReadBufferTotalSize,
+                   &kDiskCacheBackendExperiment,
+                   "SqlDiskCacheMaxReadBufferTotalSize",
+                   32 * 1024 * 1024);
+BASE_FEATURE_PARAM(bool,
+                   kSqlDiskCacheSerialCheckpoint,
+                   &kDiskCacheBackendExperiment,
+                   "SqlDiskCacheSerialCheckpoint",
+                   true);
+BASE_FEATURE_PARAM(bool,
+                   kSqlDiskCacheSizeAndPriorityAwareEviction,
+                   &kDiskCacheBackendExperiment,
+                   "SqlDiskCacheSizeAndPriorityAwareEviction",
+                   true);
+BASE_FEATURE_PARAM(bool,
+                   kSqlDiskCacheReleaseMemoryAfterWrites,
+                   &kDiskCacheBackendExperiment,
+                   "SqlDiskCacheReleaseMemoryAfterWrites",
+                   true);
+BASE_FEATURE_PARAM(int,
+                   kSqlDiskCacheCacheSize,
+                   &kDiskCacheBackendExperiment,
+                   "SqlDiskCacheCacheSize",
+                   0);
 #endif  // ENABLE_DISK_CACHE_SQL_BACKEND
 
 BASE_FEATURE(kIgnoreHSTSForLocalhost, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -492,14 +554,9 @@ BASE_FEATURE(kHstsTopLevelNavigationsOnly, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kHttpCacheMappedFileFlushWin, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
-BASE_FEATURE(kHttpCacheNoVarySearch,
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
-    BUILDFLAG(IS_CHROMEOS)
-             base::FEATURE_ENABLED_BY_DEFAULT
-#else
-             base::FEATURE_DISABLED_BY_DEFAULT
-#endif
-);
+// This feature flag is overridden by WebView. This cannot be removed until the
+// feature is launched on WebView (https://crbug.com/382394774).
+BASE_FEATURE(kHttpCacheNoVarySearch, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE_PARAM(size_t,
                    kHttpCacheNoVarySearchCacheMaxEntries,
@@ -549,31 +606,31 @@ BASE_FEATURE(kVerifyMTCs, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
 BASE_FEATURE(kTcpSocketPoolLimitRandomization,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE_PARAM(double,
                    kTcpSocketPoolLimitRandomizationBase,
                    &kTcpSocketPoolLimitRandomization,
                    "TcpSocketPoolLimitRandomizationBase",
-                   0.0);
+                   0.000001);
 
 BASE_FEATURE_PARAM(int,
                    kTcpSocketPoolLimitRandomizationCapacity,
                    &kTcpSocketPoolLimitRandomization,
                    "TcpSocketPoolLimitRandomizationCapacity",
-                   0);
+                   256);
 
 BASE_FEATURE_PARAM(double,
                    kTcpSocketPoolLimitRandomizationMinimum,
                    &kTcpSocketPoolLimitRandomization,
                    "TcpSocketPoolLimitRandomizationMinimum",
-                   0.0);
+                   0.01);
 
 BASE_FEATURE_PARAM(double,
                    kTcpSocketPoolLimitRandomizationNoise,
                    &kTcpSocketPoolLimitRandomization,
                    "TcpSocketPoolLimitRandomizationNoise",
-                   0.0);
+                   0.2);
 
 BASE_FEATURE(kNetTaskScheduler, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE_PARAM(bool,
@@ -690,6 +747,9 @@ BASE_FEATURE_PARAM(std::string,
 BASE_FEATURE(kDnsResponseDiscardPartialQuestions,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
+BASE_FEATURE(kDohFallbackAllowedWithLocalNameservers,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kAddAutomaticWithDohFallbackMode,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -698,5 +758,30 @@ BASE_FEATURE(kUseQuicProxiesWithoutWaitingForConnectResponse,
 
 BASE_FEATURE(kEnableBootstrapIPRandomizationForDoh,
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kUseLockFreeX509Verification, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kProbeSecureDnsCanaryDomain, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE_PARAM(std::string,
+                   kSecureDnsCanaryDomainHost,
+                   &kProbeSecureDnsCanaryDomain,
+                   /*name=*/"canary_domain_host",
+                   /*default_value=*/"");
+
+#if BUILDFLAG(IS_APPLE)
+BASE_FEATURE(kUseNSURLDataForGURLConversion, base::FEATURE_ENABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_APPLE)
+
+BASE_FEATURE(kDrainSpdySessionSynchronouslyOnRemoteEndpointDisconnect,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kLogicalClearHttpCache, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kSQLitePersistentCookieStoreEarlyInit,
+             "SQLitePersistentCookieStoreEarlyInit",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+const base::FeatureParam<bool> kSQLitePersistentCookieStoreEarlyInitCheckDisk{
+    &kSQLitePersistentCookieStoreEarlyInit, "check_disk", true};
 
 }  // namespace net::features

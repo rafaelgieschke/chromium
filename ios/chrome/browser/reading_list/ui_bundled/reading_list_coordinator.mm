@@ -52,14 +52,15 @@
 #import "ios/chrome/browser/reading_list/ui_bundled/reading_list_table_view_controller.h"
 #import "ios/chrome/browser/reminder_notifications/coordinator/reminder_notifications_coordinator.h"
 #import "ios/chrome/browser/shared/coordinator/scene/scene_state.h"
+#import "ios/chrome/browser/shared/coordinator/scene/state/incognito_state.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
 #import "ios/chrome/browser/shared/model/browser/browser_provider.h"
 #import "ios/chrome/browser/shared/model/browser/browser_provider_interface.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/shared/model/url/chrome_url_constants.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/settings_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/table_view/table_view_navigation_controller.h"
@@ -121,7 +122,7 @@
   // The mediator that updates the sign-in promo view.
   SigninPromoViewMediator* _signinPromoViewMediator;
   // Handler for sign-in commands.
-  id<ApplicationCommands> _applicationCommandsHandler;
+  id<SceneCommands> _sceneHandler;
   // Authentication Service to retrieve the user's signed-in state.
   raw_ptr<AuthenticationService> _authService;
   // Observer for auth service status changes.
@@ -162,8 +163,8 @@
                                                faviconLoader:faviconLoader
                                              listItemFactory:itemFactory];
   // Initialize services.
-  _applicationCommandsHandler = HandlerForProtocol(
-      self.browser->GetCommandDispatcher(), ApplicationCommands);
+  _sceneHandler =
+      HandlerForProtocol(self.browser->GetCommandDispatcher(), SceneCommands);
   _authService = AuthenticationServiceFactory::GetForProfile(profile);
   _authServiceObserverBridge =
       std::make_unique<AuthenticationServiceObserverBridge>(_authService, self);
@@ -336,8 +337,7 @@
 
 - (void)readingListListViewController:(UIViewController*)viewController
           showSetTabReminderUIForItem:(id<ReadingListListItem>)item {
-  CHECK(
-      send_tab_to_self::IsSendTabIOSPushNotificationsEnabledWithTabReminders());
+  CHECK(send_tab_to_self::AreIOSTabRemindersEnabled());
   CHECK_EQ(self.tableViewController, viewController);
 
   scoped_refptr<const ReadingListEntry> entry =
@@ -392,10 +392,11 @@
   // Only open a new incognito tab when incognito is authenticated. Prompt for
   // auth otherwise.
   if (incognito) {
-    IncognitoReauthSceneAgent* reauthAgent = [IncognitoReauthSceneAgent
-        agentFromScene:self.browser->GetSceneState()];
-    __weak ReadingListCoordinator* weakSelf = self;
-    if (reauthAgent.authenticationRequired) {
+    SceneState* scene = self.browser->GetSceneState();
+    if (scene.incognitoState.authenticationRequired) {
+      IncognitoReauthSceneAgent* reauthAgent =
+          [IncognitoReauthSceneAgent agentFromScene:scene];
+      __weak ReadingListCoordinator* weakSelf = self;
       // Copy C++ args to call later from the block.
       GURL copyEntryURL = GURL(entryURL);
       [reauthAgent
@@ -761,7 +762,7 @@
       initWithBaseViewController:self.tableViewController
                          browser:self.browser
                           params:params
-                      originView:view];
+                      sourceItem:view];
   [self.sharingCoordinator start];
 }
 

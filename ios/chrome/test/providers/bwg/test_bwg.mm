@@ -6,6 +6,9 @@
 
 namespace ios::provider {
 
+void ConfigureWithStartupConfiguration(
+    GeminiStartupConfiguration* gemini_startup_configuration) {}
+
 void StartBwgOverlay(GeminiConfiguration* gemini_configuration) {}
 
 const std::u16string GetPageContextShouldDetachScript() {
@@ -32,7 +35,7 @@ void CheckGeminiEligibility(AuthenticationService* auth_service,
 void ResetGemini() {}
 
 void UpdatePageAttachmentState(
-    BWGPageContextAttachmentState bwg_attachment_state) {}
+    GeminiPageContextAttachmentState gemini_attachment_state) {}
 
 bool IsProtectedUrl(std::string url) {
   return false;
@@ -52,5 +55,23 @@ GeminiSettingsAction* ActionForSettingsContext(GeminiSettingsContext context) {
 void UpdateOverlayOffsetWithOpacity(CGFloat offset, CGFloat opacity) {}
 
 void UpdateGeminiViewState(GeminiViewState view_state) {}
+
+void UpdateGeminiViewState(GeminiViewState view_state, bool animated) {}
+
+GeminiViewState GetCurrentGeminiViewState() {
+  return GeminiViewState::kUnknown;
+}
+
+void RequestUIChange(GeminiUIElementType ui_element_type) {}
+
+void AttachImage(UIImage* image) {}
+
+GeminiClientMode GetCurrentClientMode() {
+  return GeminiClientMode::kUnknown;
+}
+
+GeminiPageContextAttachmentState GetCurrentPageContextAttachmentState() {
+  return GeminiPageContextAttachmentState::kUnknown;
+}
 
 }  // namespace ios::provider

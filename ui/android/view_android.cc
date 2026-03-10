@@ -11,7 +11,6 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/containers/adapters.h"
-#include "base/containers/contains.h"
 #include "base/memory/raw_ptr.h"
 #include "cc/slim/layer.h"
 #include "components/viz/common/frame_sinks/copy_output_request.h"
@@ -126,12 +125,13 @@ ScopedJavaLocalRef<jobject> ViewAndroid::GetEventForwarder() {
         << "The view tree path already has an event forwarder.";
     event_forwarder_.reset(new EventForwarder(this));
   }
-  return event_forwarder_->GetJavaObject();
+  return event_forwarder_->GetOrCreateJavaObject(
+      base::android::AttachCurrentThread());
 }
 
 void ViewAndroid::AddChild(ViewAndroid* child) {
   DCHECK(child);
-  DCHECK(!base::Contains(children_, child));
+  DCHECK(!std::ranges::contains(children_, child));
   DCHECK(!RootPathHasEventForwarder(this) || !SubtreeHasEventForwarder(child))
       << "Some view tree path will have more than one event forwarder "
          "if the child is added.";
@@ -403,10 +403,10 @@ void ViewAndroid::RequestFocus() {
 
 bool ViewAndroid::StartDragAndDrop(const JavaRef<jobject>& jshadow_image,
                                    const JavaRef<jobject>& jdrop_data,
-                                   jint cursor_offset_x,
-                                   jint cursor_offset_y,
-                                   jint drag_obj_rect_width,
-                                   jint drag_obj_rect_height) {
+                                   int32_t cursor_offset_x,
+                                   int32_t cursor_offset_y,
+                                   int32_t drag_obj_rect_width,
+                                   int32_t drag_obj_rect_height) {
   ScopedJavaLocalRef<jobject> delegate(GetViewAndroidDelegate());
   if (delegate.is_null())
     return false;

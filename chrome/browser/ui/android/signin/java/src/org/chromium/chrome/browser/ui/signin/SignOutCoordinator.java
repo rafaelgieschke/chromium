@@ -13,6 +13,7 @@ import androidx.annotation.MainThread;
 import androidx.fragment.app.FragmentManager;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
 import org.chromium.build.annotations.NullMarked;
@@ -22,10 +23,13 @@ import org.chromium.chrome.browser.signin.services.SigninManager;
 import org.chromium.chrome.browser.sync.SyncServiceFactory;
 import org.chromium.chrome.browser.ui.messages.snackbar.Snackbar;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
+import org.chromium.components.signin.SigninFeatureMap;
+import org.chromium.components.signin.SigninFeatures;
 import org.chromium.components.signin.identitymanager.ConsentLevel;
 import org.chromium.components.signin.identitymanager.IdentityManager;
 import org.chromium.components.signin.metrics.SignoutReason;
 import org.chromium.components.sync.SyncService;
+import org.chromium.components.sync.UserActionableError;
 import org.chromium.components.sync.UserSelectableType;
 import org.chromium.ui.modaldialog.DialogDismissalCause;
 import org.chromium.ui.modaldialog.ModalDialogManager;
@@ -34,6 +38,7 @@ import org.chromium.ui.modelutil.PropertyModel;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.text.NumberFormat;
 import java.util.stream.IntStream;
 
 /** A coordinator to handle sign-out. */
@@ -53,6 +58,9 @@ public class SignOutCoordinator {
      * @param profile The Profile to sign out of.
      * @param fragmentManager FragmentManager used by {@link SignOutDialogCoordinator}.
      * @param dialogManager A ModalDialogManager that manages the dialog.
+     * @param snackbarManager The manager for displaying snackbars at the bottom of the activity.
+     * @param signinAndHistorySyncActivityLauncher launcher used to launch the {@link
+     *     SigninAndHistorySyncActivity}.
      * @param signOutReason The access point to sign out from.
      * @param showConfirmDialog Whether a confirm dialog should be shown before sign-out.
      * @param onSignOut A {@link Runnable} to run when the user presses the confirm button. Will be
@@ -66,6 +74,7 @@ public class SignOutCoordinator {
             FragmentManager fragmentManager,
             ModalDialogManager dialogManager,
             SnackbarManager snackbarManager,
+            SigninAndHistorySyncActivityLauncher signinAndHistorySyncActivityLauncher,
             @SignoutReason int signOutReason,
             boolean showConfirmDialog,
             Runnable onSignOut) {
@@ -75,6 +84,7 @@ public class SignOutCoordinator {
                 fragmentManager,
                 dialogManager,
                 snackbarManager,
+                signinAndHistorySyncActivityLauncher,
                 signOutReason,
                 showConfirmDialog,
                 onSignOut,
@@ -98,6 +108,10 @@ public class SignOutCoordinator {
      * @param profile The Profile to sign out of.
      * @param fragmentManager FragmentManager used by {@link SignOutDialogCoordinator}.
      * @param dialogManager A ModalDialogManager that manages the dialog.
+     * @param snackbarManager SnackbarManager for displaying snackbars at the bottom of the
+     *     activity.
+     * @param signinAndHistorySyncActivityLauncher launcher used to launch the {@link
+     *     SigninAndHistorySyncActivity}.
      * @param signOutReason The access point to sign out from.
      * @param showConfirmDialog Whether a confirm dialog should be shown before sign-out.
      * @param onSignOut A {@link Runnable} to run when the user presses the confirm button. Will be
@@ -112,6 +126,7 @@ public class SignOutCoordinator {
             FragmentManager fragmentManager,
             ModalDialogManager dialogManager,
             SnackbarManager snackbarManager,
+            SigninAndHistorySyncActivityLauncher signinAndHistorySyncActivityLauncher,
             @SignoutReason int signOutReason,
             boolean showConfirmDialog,
             Runnable onSignOut,
@@ -126,35 +141,66 @@ public class SignOutCoordinator {
         assumeNonNull(signinManager);
         SyncService syncService = SyncServiceFactory.getForProfile(profile);
         assumeNonNull(syncService);
+        @UserActionableError int userActionableError = syncService.getUserActionableError();
         syncService.getTypesWithUnsyncedData(
                 unsyncedTypes -> {
-                    switch (getUiState(
-                            identityManager, !unsyncedTypes.isEmpty(), showConfirmDialog)) {
-                        case UiState.SNACK_BAR -> signOutAndShowSnackbar(
-                                context,
-                                snackbarManager,
-                                signinManager,
-                                syncService,
-                                signOutReason,
-                                onSignOut,
-                                suppressSnackbar);
-                        case UiState.UNSAVED_DATA -> showUnsavedDataDialog(
-                                context, dialogManager, signinManager, signOutReason, onSignOut);
-                        case UiState.SHOW_CONFIRM_DIALOG -> showConfirmDialog(
-                                context,
-                                dialogManager,
-                                snackbarManager,
-                                signinManager,
-                                syncService,
-                                signOutReason,
-                                onSignOut);
-                        case UiState.LEGACY_DIALOG -> SignOutDialogCoordinator.show(
-                                context,
-                                profile,
-                                fragmentManager,
-                                dialogManager,
-                                signOutReason,
-                                onSignOut);
+                    @UiState
+                    int uiState =
+                            getUiState(
+                                    identityManager,
+                                    signinManager,
+                                    !unsyncedTypes.isEmpty(),
+                                    showConfirmDialog,
+                                    userActionableError);
+                    switch (uiState) {
+                        case UiState.SNACK_BAR ->
+                                signOutAndShowSnackbar(
+                                        context,
+                                        snackbarManager,
+                                        signinManager,
+                                        syncService,
+                                        signOutReason,
+                                        onSignOut,
+                                        suppressSnackbar);
+                        case UiState.UNSAVED_DATA ->
+                                showUnsavedDataDialog(
+                                        context,
+                                        dialogManager,
+                                        signinManager,
+                                        userActionableError,
+                                        signOutReason,
+                                        onSignOut);
+                        case UiState.SHOW_CONFIRM_DIALOG ->
+                                showConfirmDialog(
+                                        context,
+                                        dialogManager,
+                                        snackbarManager,
+                                        signinManager,
+                                        syncService,
+                                        signOutReason,
+                                        onSignOut);
+                        case UiState.LEGACY_DIALOG ->
+                                SignOutDialogCoordinator.show(
+                                        context,
+                                        profile,
+                                        fragmentManager,
+                                        dialogManager,
+                                        signOutReason,
+                                        onSignOut);
+                        case UiState.FULLSCREEN_DIALOG ->
+                                signOutAndShowFullscreenDialog(
+                                        context,
+                                        profile,
+                                        signinAndHistorySyncActivityLauncher,
+                                        signinManager,
+                                        signOutReason,
+                                        onSignOut);
+                    }
+                    if (uiState != UiState.SNACK_BAR) {
+                        RecordHistogram.recordBooleanHistogram(
+                                "Sync.BookmarksLimitExceededOnSignoutPrompt",
+                                userActionableError
+                                        == UserActionableError.BOOKMARKS_LIMIT_EXCEEDED);
                     }
                 });
     }
@@ -219,7 +265,7 @@ public class SignOutCoordinator {
 
     // TODO: b/325654229 - This method should be private. It's temporarily made public as a work
     // around for b/343933167.
-    /** Shows the sanckbar which is shown upon signing out. */
+    /** Shows the snackbar which is shown upon signing out. */
     public static void showSnackbar(
             Context context, SnackbarManager snackbarManager, SyncService syncService) {
         boolean anyTypeIsManagedByPolicy =
@@ -252,7 +298,8 @@ public class SignOutCoordinator {
         UiState.SNACK_BAR,
         UiState.UNSAVED_DATA,
         UiState.SHOW_CONFIRM_DIALOG,
-        UiState.LEGACY_DIALOG
+        UiState.LEGACY_DIALOG,
+        UiState.FULLSCREEN_DIALOG,
     })
     @Retention(RetentionPolicy.SOURCE)
     private @interface UiState {
@@ -260,6 +307,7 @@ public class SignOutCoordinator {
         int UNSAVED_DATA = 1;
         int SHOW_CONFIRM_DIALOG = 2;
         int LEGACY_DIALOG = 3;
+        int FULLSCREEN_DIALOG = 4;
     }
 
     private static void validateSignOutReason(Profile profile, @SignoutReason int signOutReason) {
@@ -287,7 +335,18 @@ public class SignOutCoordinator {
     }
 
     private static @UiState int getUiState(
-            IdentityManager identityManager, boolean hasUnsavedData, boolean showConfirmDialog) {
+            IdentityManager identityManager,
+            SigninManager signinManager,
+            boolean hasUnsavedData,
+            boolean showConfirmDialog,
+            @UserActionableError int userActionableError) {
+        if (SigninFeatureMap.isEnabled(SigninFeatures.SUPPORT_FORCED_SIGNIN_POLICY)
+                && signinManager.isForceSigninEnabled()) {
+            return UiState.FULLSCREEN_DIALOG;
+        }
+        if (userActionableError == UserActionableError.BOOKMARKS_LIMIT_EXCEEDED) {
+            return UiState.UNSAVED_DATA;
+        }
         if (identityManager.hasPrimaryAccount(ConsentLevel.SYNC)) {
             return UiState.LEGACY_DIALOG;
         }
@@ -304,16 +363,23 @@ public class SignOutCoordinator {
             Context context,
             ModalDialogManager dialogManager,
             SigninManager signinManager,
+            @UserActionableError int userActionableError,
             @SignoutReason int signOutReason,
             Runnable onSignOut) {
+        String message = context.getString(R.string.sign_out_unsaved_data_message);
+        if (userActionableError == UserActionableError.BOOKMARKS_LIMIT_EXCEEDED) {
+            message =
+                    context.getString(
+                            R.string.chrome_signout_confirmation_prompt_too_many_bookmarks_body,
+                            NumberFormat.getIntegerInstance()
+                                    .format(SyncService.SYNC_BOOKMARKS_LIMIT));
+        }
         final PropertyModel model =
                 new PropertyModel.Builder(ModalDialogProperties.ALL_KEYS)
                         .with(
                                 ModalDialogProperties.TITLE,
                                 context.getString(R.string.sign_out_unsaved_data_title))
-                        .with(
-                                ModalDialogProperties.MESSAGE_PARAGRAPH_1,
-                                context.getString(R.string.sign_out_unsaved_data_message))
+                        .with(ModalDialogProperties.MESSAGE_PARAGRAPH_1, message)
                         .with(
                                 ModalDialogProperties.POSITIVE_BUTTON_TEXT,
                                 context.getString(R.string.sign_out_unsaved_data_primary_button))
@@ -414,6 +480,27 @@ public class SignOutCoordinator {
                                     showSnackbar(context, snackbarManager, syncService);
                                 }
                                 onSignOut.run();
+                            });
+                });
+    }
+
+    private static void signOutAndShowFullscreenDialog(
+            Context context,
+            Profile profile,
+            SigninAndHistorySyncActivityLauncher signinAndHistorySyncActivityLauncher,
+            SigninManager signinManager,
+            @SignoutReason int signOutReason,
+            Runnable onSignOut) {
+        signOut(
+                signinManager,
+                signOutReason,
+                () -> {
+                    PostTask.runOrPostTask(
+                            TaskTraits.UI_DEFAULT,
+                            () -> {
+                                onSignOut.run();
+                                FullscreenSigninPromoLauncher.launchPromoIfForced(
+                                        context, profile, signinAndHistorySyncActivityLauncher);
                             });
                 });
     }

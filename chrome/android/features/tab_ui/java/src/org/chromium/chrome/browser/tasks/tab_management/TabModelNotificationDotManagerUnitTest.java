@@ -11,8 +11,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import static org.chromium.chrome.browser.tabmodel.TabGroupTitleUtils.UNSET_TAB_GROUP_TITLE;
+
 import android.content.Context;
-import android.text.TextUtils;
 
 import androidx.test.core.app.ApplicationProvider;
 
@@ -59,7 +60,6 @@ import java.util.List;
 @RunWith(BaseRobolectricTestRunner.class)
 public class TabModelNotificationDotManagerUnitTest {
     private static final int EXISTING_TAB_ID = 5;
-    private static final int ROOT_ID = 6;
     private static final int NON_EXISTANT_TAB_ID = 7;
     private static final Token TAB_GROUP_ID = new Token(378L, 4378L);
     private static final String TITLE = "Vacation";
@@ -103,7 +103,6 @@ public class TabModelNotificationDotManagerUnitTest {
         when(mTabGroupModelFilter.tabGroupExists(TAB_GROUP_ID)).thenReturn(true);
         when(mTabModel.getProfile()).thenReturn(mProfile);
         when(mTabModel.getTabById(EXISTING_TAB_ID)).thenReturn(mTab);
-        when(mTab.getRootId()).thenReturn(ROOT_ID);
         when(mTab.getTabGroupId()).thenReturn(TAB_GROUP_ID);
 
         Context context = ApplicationProvider.getApplicationContext();
@@ -278,7 +277,7 @@ public class TabModelNotificationDotManagerUnitTest {
 
     @Test
     public void testFallbackTitle() {
-        when(mTabGroupModelFilter.getTabGroupTitle(TAB_GROUP_ID)).thenReturn(null);
+        when(mTabGroupModelFilter.getTabGroupTitle(TAB_GROUP_ID)).thenReturn(UNSET_TAB_GROUP_TITLE);
         initializeBothBackends();
         createDirtyTabMessageForIds(List.of(EXISTING_TAB_ID));
 
@@ -319,7 +318,7 @@ public class TabModelNotificationDotManagerUnitTest {
         TabModelDotInfo tabModelDotInfo =
                 mTabModelNotificationDotManager.getNotificationDotObservableSupplier().get();
         assertFalse(tabModelDotInfo.showDot);
-        assertTrue(TextUtils.isEmpty(tabModelDotInfo.tabGroupTitle));
+        assertEquals(UNSET_TAB_GROUP_TITLE, tabModelDotInfo.tabGroupTitle);
     }
 
     private void verifyShown() {

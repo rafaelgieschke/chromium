@@ -10,7 +10,6 @@
 #include <string_view>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/i18n/char_iterator.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_split.h"
@@ -308,7 +307,7 @@ bool IsSupportedFormType(uint32_t groups) {
              2;
 }
 
-std::string GetSuffixForProfileFormType(uint32_t bitmask) {
+std::string_view GetSuffixForProfileFormType(uint32_t bitmask) {
   switch (bitmask) {
     case kAddress | kEmail | kPhone:
     case kName | kAddress | kEmail | kPhone:
@@ -492,6 +491,15 @@ std::u16string JoinNameParts(std::u16string_view given,
 
 const PaymentRequestData& GetPaymentRequestData(
     std::string_view issuer_network) {
+  if (issuer_network == autofill::kAmericanExpressCard &&
+      base::FeatureList::IsEnabled(
+          features::kAutofillEnableNewAmexNetworkArt)) {
+    static const PaymentRequestData& payments_request_data = {
+        autofill::kAmericanExpressCard, "amex",
+        IDR_AUTOFILL_METADATA_CC_AMEX_NEW, IDS_AUTOFILL_CC_AMEX};
+    return payments_request_data;
+  }
+
   for (const PaymentRequestData& data : kPaymentRequestData) {
     if (issuer_network == data.issuer_network) {
       return data;
@@ -511,8 +519,8 @@ const char* GetIssuerNetworkForBasicCardIssuerNetwork(
 }
 
 bool IsValidBasicCardIssuerNetwork(std::string_view basic_card_issuer_network) {
-  return base::Contains(kPaymentRequestData, basic_card_issuer_network,
-                        &PaymentRequestData::basic_card_issuer_network);
+  return std::ranges::contains(kPaymentRequestData, basic_card_issuer_network,
+                               &PaymentRequestData::basic_card_issuer_network);
 }
 
 bool IsValidCountryCode(std::string_view country_code) {

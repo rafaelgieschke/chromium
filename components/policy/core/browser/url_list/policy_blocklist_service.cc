@@ -7,14 +7,15 @@
 #include <utility>
 
 #include "components/policy/core/common/policy_pref_names.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_service.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
 constexpr char kAllTrafficWildcard[] = "*";
 
 // Returns a URL filter that covers all URL navigations.
-base::Value::List GetAllTrafficFilter() {
-  base::Value::List all_traffic;
+base::ListValue GetAllTrafficFilter() {
+  base::ListValue all_traffic;
   all_traffic.Append(kAllTrafficWildcard);
   return all_traffic;
 }
@@ -36,11 +37,11 @@ class AlwaysOnVpnPreConnectBlocklistSource : public policy::BlocklistSource {
       const AlwaysOnVpnPreConnectBlocklistSource&) = delete;
   ~AlwaysOnVpnPreConnectBlocklistSource() override = default;
 
-  const base::Value::List* GetBlocklistSpec() const override {
+  const base::ListValue* GetBlocklistSpec() const override {
     return &blocklist_;
   }
 
-  const base::Value::List* GetAllowlistSpec() const override {
+  const base::ListValue* GetAllowlistSpec() const override {
     return &pref_change_registrar_.prefs()->GetList(
         policy::policy_prefs::kAlwaysOnVpnPreConnectUrlAllowlist);
   }
@@ -56,7 +57,7 @@ class AlwaysOnVpnPreConnectBlocklistSource : public policy::BlocklistSource {
   }
 
  private:
-  const base::Value::List blocklist_;
+  const base::ListValue blocklist_;
   PrefChangeRegistrar pref_change_registrar_;
 };
 

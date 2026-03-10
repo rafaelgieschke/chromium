@@ -93,8 +93,8 @@ class TestStoragePartition : public StoragePartition {
       const url::Origin& top_frame_origin) override;
 
   mojo::PendingRemote<network::mojom::URLLoaderNetworkServiceObserver>
-  CreateURLLoaderNetworkObserverForFrame(int process_id,
-                                         int routing_id) override;
+  CreateURLLoaderNetworkObserverForFrame(
+      const content::GlobalRenderFrameHostId& frame_id) override;
 
   mojo::PendingRemote<network::mojom::URLLoaderNetworkServiceObserver>
   CreateURLLoaderNetworkObserverForNavigationRequest(
@@ -208,21 +208,18 @@ class TestStoragePartition : public StoragePartition {
   ZoomLevelDelegate* GetZoomLevelDelegate() override;
 
   void ClearDataForOrigin(uint32_t remove_mask,
-                          uint32_t quota_storage_remove_mask,
                           const GURL& storage_origin,
                           base::OnceClosure callback) override;
   void ClearDataForBuckets(const blink::StorageKey& storage_key,
                            const std::set<std::string>& buckets,
                            base::OnceClosure callback) override;
   void ClearData(uint32_t remove_mask,
-                 uint32_t quota_storage_remove_mask,
                  const blink::StorageKey& storage_key,
                  const base::Time begin,
                  const base::Time end,
                  base::OnceClosure callback) override;
 
   void ClearData(uint32_t remove_mask,
-                 uint32_t quota_storage_remove_mask,
                  BrowsingDataFilterBuilder* filter_builder,
                  StorageKeyPolicyMatcherFunction storage_key_policy_matcher,
                  network::mojom::CookieDeletionFilterPtr cookie_deletion_filter,

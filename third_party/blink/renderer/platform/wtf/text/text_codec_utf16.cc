@@ -27,6 +27,7 @@
 
 #include <unicode/utf16.h>
 
+#include <bit>
 #include <memory>
 
 #include "base/numerics/byte_conversions.h"
@@ -39,8 +40,8 @@
 namespace blink {
 
 bool TextCodecUtf16::IsSupported(StringView canonical_name) {
-  return EqualIgnoringASCIICase(canonical_name, "UTF-16LE") ||
-         EqualIgnoringASCIICase(canonical_name, "UTF-16BE");
+  return EqualIgnoringAsciiCase(canonical_name, "UTF-16LE") ||
+         EqualIgnoringAsciiCase(canonical_name, "UTF-16BE");
 }
 
 void TextCodecUtf16::RegisterEncodingNames(EncodingNameRegistrar registrar) {
@@ -132,7 +133,7 @@ String TextCodecUtf16::Decode(base::span<const uint8_t> bytes,
     UChar c = lead_byte_ | (in_span.take_first_elem() << 8);
 
     if (!little_endian_) {
-      c = base::ByteSwap(c);
+      c = std::byteswap(c);
     }
 
     have_lead_byte_ = false;
@@ -143,7 +144,7 @@ String TextCodecUtf16::Decode(base::span<const uint8_t> bytes,
   for (wtf_size_t i = 0; i < num_chars_in; ++i) {
     UChar c = base::U16FromLittleEndian(in_span.take_first<2ul>());
     if (!little_endian_) {
-      c = base::ByteSwap(c);
+      c = std::byteswap(c);
     }
     decode(c);
   }

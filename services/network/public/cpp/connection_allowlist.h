@@ -12,6 +12,8 @@
 #include "base/component_export.h"
 #include "services/network/public/mojom/connection_allowlist.mojom-shared.h"
 
+class GURL;
+
 namespace network {
 
 // This implements a data structure holding information from a parsed
@@ -21,6 +23,16 @@ namespace network {
 // from the blink public API, given that we cannot include .mojo.h there due to
 // DEPS rules.
 struct COMPONENT_EXPORT(NETWORK_CPP_CONNECTION_ALLOWLIST) ConnectionAllowlist {
+  enum class RedirectBehavior {
+    kAllow,
+    kBlock,
+  };
+
+  enum class WebRtcBehavior {
+    kAllow,
+    kBlock,
+  };
+
   ConnectionAllowlist();
   ~ConnectionAllowlist();
 
@@ -35,7 +47,14 @@ struct COMPONENT_EXPORT(NETWORK_CPP_CONNECTION_ALLOWLIST) ConnectionAllowlist {
   std::vector<std::string> allowlist;
   std::optional<std::string> reporting_endpoint;
   std::vector<mojom::ConnectionAllowlistIssue> issues;
+  RedirectBehavior redirect_behavior = RedirectBehavior::kBlock;
+  WebRtcBehavior webrtc_behavior = WebRtcBehavior::kBlock;
 };
+
+COMPONENT_EXPORT(NETWORK_CPP_CONNECTION_ALLOWLIST)
+bool ConnectionAllowlistMatchesUrl(
+    const ConnectionAllowlist& connection_allowlist,
+    const GURL& url);
 
 // The set of allowlists associated with a given response, typemapped for the
 // same reason.

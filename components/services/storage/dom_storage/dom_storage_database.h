@@ -22,7 +22,7 @@
 #include "base/threading/sequence_bound.h"
 #include "base/time/time.h"
 #include "base/types/pass_key.h"
-#include "storage/common/database/db_status.h"
+#include "components/services/storage/dom_storage/db_status.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 
 namespace base {
@@ -33,7 +33,7 @@ class MemoryAllocatorDumpGuid;
 }  // namespace base
 
 namespace storage {
-class DomStorageDatabaseLevelDB;
+enum class StorageType;
 
 // Abstract interface for DOM storage database implementations. Provides
 // key-value storage operations for DOMStorage StorageAreas.
@@ -73,8 +73,13 @@ class DomStorageDatabase {
   // `map_id`. Some maps are loaded on demand where `map_id` remains unknown
   // until the first read or write.
   //
-  // The number of sessions consuming a map can increase or decrease. A session
-  // can clone a map, which then shares the same map across multiple sessions.
+  // Local storage does not use `session_id`.  Instead, local storage contains a
+  // single global session where each `storage_key` owns one map of key value
+  // pairs.
+  //
+  // In session storage, each map must have at least one `session_id`. The
+  // number of sessions consuming a map can increase or decrease. A session can
+  // clone a map, which then shares the same map across multiple sessions.
   // Cloned maps have at least 2 IDs in `session_ids_`. A session may also stop
   // using a map by deleting it or forking it, which then removes an ID from
   // `session_ids_`. `session_ids_` is empty for an unused map.
@@ -86,11 +91,16 @@ class DomStorageDatabase {
   // Maps without sessions are not in use. They can be deleted.
   class MapLocator {
    public:
-    MapLocator(std::string source_session_id,
-               blink::StorageKey source_storage_key);
-    MapLocator(std::string source_session_id,
-               blink::StorageKey source_storage_key,
-               int64_t source_map_id);
+    // Construct a map locator for the global session in local storage.
+    explicit MapLocator(blink::StorageKey storage_key);
+    MapLocator(blink::StorageKey storage_key, int64_t map_id);
+
+    // Construct a map locator for a specific `session_id` in session storage.
+    MapLocator(std::string session_id, blink::StorageKey storage_key);
+    MapLocator(std::string session_id,
+               blink::StorageKey storage_key,
+               int64_t map_id);
+
     ~MapLocator();
 
     MapLocator(MapLocator&&);
@@ -245,11 +255,19 @@ class DomStorageDatabase {
     std::optional<Usage> map_usage;
   };
 
+  // Constructs an absolute path to the `storage_type` database under
+  // `storage_partition_dir`.
+  static base::FilePath GetPath(StorageType storage_type,
+                                const base::FilePath& storage_partition_dir);
+
   virtual ~DomStorageDatabase() = default;
 
-  // TODO(crbug.com/377242771): Remove LevelDB accessor after fully migrating to
-  // this interface.
-  virtual DomStorageDatabaseLevelDB& GetLevelDB() = 0;
+  // Opens an on-disk or in-memory database and returns the result. To create an
+  // in-memory database, provide an empty `database_path`.
+  virtual DbStatus Open(
+      const base::FilePath& database_path,
+      const std::optional<base::trace_event::MemoryAllocatorDumpGuid>&
+          memory_dump_id) = 0;
 
   // Gets an entire map's key/value pairs.
   virtual StatusOr<std::map<Key, Value>> ReadMapKeyValues(
@@ -292,15 +310,16 @@ class DomStorageDatabase {
   // the top-level site is same-site with one of those origins.
   virtual DbStatus PurgeOrigins(std::set<url::Origin> origins) = 0;
 
-  // For LevelDB only. Rewrites the database on disk to
-  // clean up traces of deleted entries.
+  // Removes all traces of deleted data from the backing storage.  For example,
+  // removes all traces of an origin URL that might exist in the deleted data.
   //
-  // NOTE: If `RewriteDB()` fails, this DomStorageDatabase may no longer
-  // be usable; in such cases, all future operations will return an IOError
-  // status.
-  virtual DbStatus RewriteDB() = 0;
+  // This can be expensive. For SQLite, it runs a checkpoint that transfers
+  // content from the WAL file to the database file.  For LevelDB, it creates a
+  // new copy of the database that replaces the old copy.
+  virtual DbStatus CleanUpStaleData() = 0;
 
   // Test-only functions.
+  virtual DbStatus PutVersionForTesting(int64_t version) = 0;
   virtual void MakeAllCommitsFailForTesting() = 0;
   virtual void SetDestructionCallbackForTesting(base::OnceClosure callback) = 0;
 };
@@ -316,56 +335,50 @@ class DomStorageDatabaseFactory {
  public:
   using PassKey = base::PassKey<DomStorageDatabaseFactory>;
 
-  using OpenCallback = base::OnceCallback<void(
-      StatusOr<base::SequenceBound<DomStorageDatabase>> database)>;
-
-  // Creates and opens a `SequenceBound<DomStorageDatabase>` using
-  // `blocking_task_runner`. Runs `callback` with result after opening the
-  // database.
+  // Creates and opens a `SequenceBound<DomStorageDatabase>`.
   //
-  // To create an in-memory database, provide an empty `directory`.
-  static void Open(
+  // To create an in-memory database, provide an empty `database_path`.
+  static base::SequenceBound<DomStorageDatabase> Create(
       StorageType storage_type,
-      const base::FilePath& directory,
-      const std::string& name,
-      const std::optional<base::trace_event::MemoryAllocatorDumpGuid>&
-          memory_dump_id,
-      scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,
-      OpenCallback callback);
+      bool is_in_memory,
+      scoped_refptr<base::SequencedTaskRunner> blocking_task_runner);
 
-  // Destroys the persistent database named `name` within the filesystem
-  // directory identified by the absolute path in `directory`.
+  using StatusCallback = base::OnceCallback<void(DbStatus)>;
+
+  // Destroys the persistent database on the filesystem identified by the
+  // absolute path in `database_path`.
   //
   // All work is done on `task_runner`, which must support blocking operations,
   // and upon completion `callback` is called on the calling sequence.
-  static void Destroy(
-      const base::FilePath& directory,
-      const std::string& name,
-      scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,
-      base::OnceCallback<void(DbStatus)> callback);
+  static void Destroy(const base::FilePath& database_path,
+                      StatusCallback callback);
 
  private:
   friend class LocalStorageLevelDBTest;
+  friend class LocalStorageSqliteTest;
+  friend class DomStorageDatabaseTest;
   friend class SessionStorageLevelDBTest;
-
-  // `Open()` uses this function to asynchronously create a
-  // `base::SequenceBound<DomStorageDatabase>`. The `TDatabase` template
-  // specifies the derived type to construct like `LocalStorageLevelDB`. The
-  // derived type must inherit the `DomStorageDatabase` interface. After
-  // failure, `callback` runs with an error `status`.
-  template <typename TDatabase>
-  static void CreateSequenceBoundDomStorageDatabase(
-      scoped_refptr<base::SequencedTaskRunner> blocking_task_runner,
-      const base::FilePath& directory,
-      const std::string& name,
-      const std::optional<base::trace_event::MemoryAllocatorDumpGuid>&
-          memory_dump_id,
-      base::OnceCallback<
-          void(StatusOr<base::SequenceBound<TDatabase>> database)> callback);
+  friend class SessionStorageSqliteTest;
 
   // Allow unit tests to create a database instance without `SequenceBound`.
   static PassKey CreatePassKeyForTesting();
 };
+
+// Creates a blocking task runner to use for `database_path`.  `database_path`
+// will be empty for in memory databases.
+scoped_refptr<base::SequencedTaskRunner> GetTaskRunnerForDb(
+    const base::FilePath& database_path);
+
+// A shared implementation of `DomStorageDatabase::PurgeOrigins()` from above.
+// Both LevelDB and SQLite implementations use this helper function.
+DbStatus PurgeOrigins(DomStorageDatabase& database,
+                      std::set<url::Origin> origins);
+
+// Migrates all metadata and map entries from `source` to `destination`.
+// Intended for migrating from LevelDB to SQLite. The `destination` must be
+// empty.
+DbStatus MigrateDatabase(DomStorageDatabase& source,
+                         DomStorageDatabase& destination);
 
 }  // namespace storage
 

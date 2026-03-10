@@ -22,13 +22,13 @@ namespace blink {
 CSSTokenizer::CSSTokenizer(StringView string, wtf_size_t offset)
     : input_(string) {
   // According to the spec, we should perform preprocessing here.
-  // See: https://drafts.csswg.org/css-syntax/#input-preprocessing
+  // See: https://www.w3.org/TR/css-syntax-3/#input-preprocessing
   //
   // However, we can skip this step since:
   // * We're using HTML spaces (which accept \r and \f as a valid white space)
   // * Do not count white spaces
-  // * CSSTokenizerInputStream::NextInputChar() replaces NULLs for replacement
-  //   characters
+  // * CSSTokenizerInputStream::NextInputChar() replaces NULLs and lone
+  //   surrogates with replacement characters
   input_.Advance(offset);
 }
 
@@ -374,7 +374,7 @@ CSSParserToken CSSTokenizer::ConsumeNumericToken() {
 CSSParserToken CSSTokenizer::ConsumeIdentLikeToken() {
   StringView name = ConsumeName();
   if (ConsumeIfNext('(')) {
-    if (EqualIgnoringASCIICase(name, "url")) {
+    if (EqualIgnoringAsciiCase(name, "url")) {
       // The spec is slightly different so as to avoid dropping whitespace
       // tokens, but they wouldn't be used and this is easier.
       input_.AdvanceUntilNonWhitespace();
@@ -600,7 +600,7 @@ StringView CSSTokenizer::ConsumeName() {
     const LChar* ptr = buffer.Span8().data();
     while (size + 16 <= buffer.length()) {
       int8_t b __attribute__((vector_size(16)));
-      UNSAFE_TODO(memcpy(&b, ptr + size, sizeof(b)));
+      UNSAFE_BUFFERS(memcpy(&b, ptr + size, sizeof(b)));
 
       // Exactly the same as IsNameCodePoint(), except the IsASCII() part,
       // which we deal with below. Note that we compute the inverted condition,
@@ -639,7 +639,8 @@ StringView CSSTokenizer::ConsumeName() {
       // We found either the end, or a sign that we need escape-aware parsing.
       size += __builtin_ctzll(bits) >> 2;
 #endif
-      if (UNSAFE_TODO(ptr[size]) == '\0' || UNSAFE_TODO(ptr[size]) == '\\') {
+      if (UNSAFE_BUFFERS(ptr[size]) == '\0' ||
+          UNSAFE_BUFFERS(ptr[size]) == '\\') {
         // We need escape-aware parsing.
         return RegisterString(blink::ConsumeName(input_));
       } else {
@@ -654,6 +655,16 @@ StringView CSSTokenizer::ConsumeName() {
   // Slow path for non-UTF-8 and tokens near the end of the string.
   for (; size < buffer.length(); ++size) {
     UChar cc = buffer[size];
+    if (IsSurrogate(cc)) {
+      // Valid surrogate pairs can stay on the fast path.
+      if (IsLeadingSurrogate(cc) && ((size + 1) < buffer.length()) &&
+          IsTrailingSurrogate(buffer[size + 1])) {
+        ++size;
+        continue;
+      }
+      // Lone surrogate needs replacement via the slow path.
+      return RegisterString(blink::ConsumeName(input_));
+    }
     if (!IsNameCodePoint(cc)) {
       // End of this token, but not end of the string.
       if (cc == '\0' || cc == '\\') {

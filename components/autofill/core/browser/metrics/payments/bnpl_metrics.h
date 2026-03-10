@@ -47,7 +47,8 @@ enum class BnplSuggestionUnavailableReason {
 enum class BnplTosDialogResult {
   kCancelButtonClicked = 0,
   kAcceptButtonClicked = 1,
-  kMaxValue = kAcceptButtonClicked,
+  kTabOrBrowserClosed = 2,
+  kMaxValue = kTabOrBrowserClosed,
 };
 // LINT.ThenChange(/tools/metrics/histograms/metadata/autofill/enums.xml:BnplTosDialogResult)
 
@@ -60,16 +61,17 @@ enum class BnplTosDialogResult {
 enum class SelectBnplIssuerDialogResult {
   kCancelButtonClicked = 0,
   kIssuerSelected = 1,
-  kMaxValue = kIssuerSelected,
+  kTabOrBrowserClosed = 2,
+  kMaxValue = kTabOrBrowserClosed,
 };
 // LINT.ThenChange(/tools/metrics/histograms/metadata/autofill/enums.xml:SelectBnplIssuerDialogResult)
 
 // Returns the histogram suffix corresponding to the given issuer_id.
-std::string GetHistogramSuffixFromIssuerId(
+std::string_view GetHistogramSuffixFromIssuerId(
     autofill::BnplIssuer::IssuerId issuer_id);
 
 // Converts a BnplFlowResult enum to its string representation.
-std::string ConvertBnplFlowResultToString(BnplFlowResult result);
+std::string_view ConvertBnplFlowResultToString(BnplFlowResult result);
 
 // LINT.IfChange(BnplFormEvent)
 
@@ -78,8 +80,9 @@ std::string ConvertBnplFlowResultToString(BnplFlowResult result);
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
 enum class BnplFormEvent {
-  // Payments autofill suggestions were shown on a BNPL-eligible merchant.
-  kSuggestionsShown = 0,
+  // Payments autofill suggestions were shown on a BNPL-eligible page,
+  // regardless of whether a BNPL suggestion was shown.
+  kSuggestionsShownOnBnplEligiblePage = 0,
 
   // The BNPL suggestion was added to the payments autofill dropdown and shown
   // to the user.

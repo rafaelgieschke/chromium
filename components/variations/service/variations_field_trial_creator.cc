@@ -5,13 +5,9 @@
 #include "components/variations/service/variations_field_trial_creator.h"
 
 #include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include <cstdint>
 #include <memory>
-#include <set>
 #include <utility>
 
 #include "base/base64.h"
@@ -21,10 +17,8 @@
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/json/json_file_value_serializer.h"
-#include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/process/process.h"
-#include "base/rand_util.h"
 #include "base/sequence_checker.h"
 #include "base/strings/pattern.h"
 #include "base/strings/strcat.h"
@@ -57,9 +51,7 @@
 #include "components/variations/variations_seed_processor.h"
 #include "components/variations/variations_switches.h"
 #include "components/version_info/version_info.h"
-#include "ui/base/device_form_factor.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 
 namespace variations {
 namespace {
@@ -143,8 +135,7 @@ Study::CpuArchitecture GetCurrentCpuArchitecture() {
 bool ShouldUseFieldTrialTestingConfig(const base::CommandLine* command_line) {
   bool is_enable_switch_set =
       command_line->HasSwitch(switches::kEnableFieldTrialTestingConfig) ||
-      command_line->GetSwitchValueASCII(
-          variations::switches::kEnableBenchmarking) ==
+      command_line->GetSwitchValueASCII(::switches::kEnableBenchmarking) ==
           switches::kEnableFieldTrialTestingConfig;
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   return is_enable_switch_set;
@@ -195,38 +186,8 @@ Study::Channel ConvertProductChannelToStudyChannel(
   NOTREACHED();
 }
 
-void MaybeActivateMetricsNoopTrial() {
-  if (base::FieldTrial* trial =
-          base::FieldTrialList::Find("MetricsNoopRegressionAutoAdvance")) {
-    // The original plan was to randomly activate the field trial half the time,
-    // but the rand() function was not seeded resulting in none of the Enabled
-    // group was activated. Nevertheles, this is an interesting edge case for
-    // us to test so keep this around for now. The replacement is
-    // MetricsNoopRegressionAutoAdvance2 below.
-    if (trial->GetGroupNameWithoutActivation() == "Enabled") {
-      if (rand() % 2 == 0) {
-        trial->Activate();
-      }
-    } else {
-      trial->Activate();
-    }
-  }
-}
-
-void MaybeActivateMetricsNoopTrial2() {
-  if (base::FieldTrial* trial =
-          base::FieldTrialList::Find("MetricsNoopRegressionAutoAdvance2")) {
-    // If the user is in the Enabled group, we want to randomly activate the
-    // field trial half the time.
-    if (trial->GetGroupNameWithoutActivation() == "Enabled") {
-      if (base::RandBool()) {
-        trial->Activate();
-      }
-    } else {
-      trial->Activate();
-    }
-  }
-}
+// No-op feature used to test sticky activation functionality.
+BASE_FEATURE(kVariationsStickyNoopTest, base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace
 
@@ -242,13 +203,11 @@ bool CreateTrialsResult::AppliedSeedHasActiveLimitedLayer() const {
 
 VariationsFieldTrialCreator::VariationsFieldTrialCreator(
     VariationsServiceClient* client,
-    std::unique_ptr<VariationsSeedStore> seed_store,
-    const UIStringOverrider& ui_string_overrider)
+    std::unique_ptr<VariationsSeedStore> seed_store)
     : client_(client),
       seed_store_(std::move(seed_store)),
       application_locale_(
           language::GetApplicationLocale(seed_store_->local_state())),
-      ui_string_overrider_(ui_string_overrider),
       sticky_activation_manager_(seed_store_->local_state()) {}
 
 VariationsFieldTrialCreator::~VariationsFieldTrialCreator() = default;
@@ -389,9 +348,8 @@ bool VariationsFieldTrialCreator::SetUpFieldTrials(
     base::Process::TerminateCurrentProcessImmediately(0x7E57C0D3);
   }
 
-  // TODO(crbug.com/458408055): Remove these once the experiments are over.
-  MaybeActivateMetricsNoopTrial();
-  MaybeActivateMetricsNoopTrial2();
+  // TODO(crbug.com/467929965): Remove this once the experiment is over.
+  base::FeatureList::IsEnabled(kVariationsStickyNoopTest);
 
   // This must be called after |local_state_| is initialized.
   platform_field_trials->OnVariationsSetupComplete();
@@ -581,42 +539,6 @@ base::Time VariationsFieldTrialCreator::GetLatestSeedFetchTime() {
   return GetSeedStore()->GetLatestSeedFetchTime();
 }
 
-void VariationsFieldTrialCreator::OverrideCachedUIStrings() {
-  DCHECK(ui::ResourceBundle::HasSharedInstance());
-
-  ui::ResourceBundle* bundle = &ui::ResourceBundle::GetSharedInstance();
-  bundle->CheckCanOverrideStringResources();
-
-  for (auto const& it : overridden_strings_map_) {
-    bundle->OverrideLocaleStringResource(it.first, it.second);
-  }
-
-  overridden_strings_map_.clear();
-}
-
-bool VariationsFieldTrialCreator::IsOverrideResourceMapEmpty() {
-  return overridden_strings_map_.empty();
-}
-
-void VariationsFieldTrialCreator::OverrideUIString(
-    uint32_t resource_hash,
-    const std::u16string& str) {
-  int resource_id = ui_string_overrider_.GetResourceIndex(resource_hash);
-  if (resource_id == -1) {
-    return;
-  }
-
-  // This function may be called before the resource bundle is initialized. So
-  // we cache the UI strings and override them after the full browser starts.
-  if (!ui::ResourceBundle::HasSharedInstance()) {
-    overridden_strings_map_[resource_id] = str;
-    return;
-  }
-
-  ui::ResourceBundle::GetSharedInstance().OverrideLocaleStringResource(
-      resource_id, str);
-}
-
 Study::Platform VariationsFieldTrialCreator::GetPlatform() {
   if (platform_override_.has_value()) {
     return platform_override_.value();
@@ -632,11 +554,7 @@ Study::FormFactor VariationsFieldTrialCreator::GetCurrentFormFactor() {
 void VariationsFieldTrialCreator::ApplyFieldTrialTestingConfig(
     base::FeatureList* feature_list) {
   VLOG(1) << "Applying FieldTrialTestingConfig";
-  // Note that passing base::Unretained(this) below is safe because the callback
-  // is executed synchronously.
   AssociateDefaultFieldTrialConfig(
-      base::BindRepeating(&VariationsFieldTrialCreator::OverrideUIString,
-                          base::Unretained(this)),
       GetPlatform(), GetCurrentFormFactor(), feature_list);
 }
 #endif  // BUILDFLAG(FIELDTRIAL_TESTING_ENABLED)
@@ -697,10 +615,10 @@ VariationsFieldTrialCreator::GetGoogleGroupsFromPrefs() {
 
   base::flat_set<uint64_t> groups = base::flat_set<uint64_t>();
 
-  const base::Value::Dict& profiles_dict =
+  const base::DictValue& profiles_dict =
       local_state()->GetDict(prefs::kVariationsGoogleGroups);
   for (const auto profile : profiles_dict) {
-    const base::Value::List& profile_groups = profile.second.GetList();
+    const base::ListValue& profile_groups = profile.second.GetList();
     for (const auto& group_value : profile_groups) {
       const std::string* group = group_value.GetIfString();
       if (!group || group->empty()) {
@@ -776,6 +694,11 @@ CreateTrialsResult VariationsFieldTrialCreator::CreateTrialsFromSeed(
 
   VariationsLayers layers(seed, entropy_providers);
 
+  // Use the VariationsIdsProvider's clock to get the current time. This is
+  // the timestamp used for entropy evaluation.
+  base::Time current_time =
+      VariationsIdsProvider::GetInstance()->GetCurrentTime();
+
   // The server is not expected to send a seed with misconfigured entropy. Just
   // in case there is an unexpected server-side bug and the entropy is
   // misconfigured, return early to skip assigning any trials from the seed.
@@ -788,7 +711,9 @@ CreateTrialsResult VariationsFieldTrialCreator::CreateTrialsFromSeed(
   // support limited entropy randomization. For such clients,
   // `SeedHasMisconfiguredEntropy()`is always false.
   const MisconfiguredEntropyResult result =
-      SeedHasMisconfiguredEntropy(*client_state, seed);
+      SeedHasMisconfiguredEntropy(*client_state, seed,
+                                  GetGoogleWebEntropyLimitInBits(),
+                                  current_time);
   if (result.is_misconfigured) {
     RecordVariationsSeedUsage(
         run_in_safe_mode ? SeedUsage::kMisconfiguredSafeSeedNotUsed
@@ -799,17 +724,9 @@ CreateTrialsResult VariationsFieldTrialCreator::CreateTrialsFromSeed(
   RecordVariationsSeedUsage(run_in_safe_mode ? SeedUsage::kSafeSeedUsed
                                              : SeedUsage::kRegularSeedUsed);
 
-  // Note that passing base::Unretained(this) below is safe because the callback
-  // is executed synchronously. It is not possible to pass UIStringOverrider
-  // directly to VariationsSeedProcessor (which is in components/variations and
-  // not components/variations/service) as the variations component should not
-  // depend on //ui/base.
   VariationsSeedProcessor(sticky_activation_manager_)
-      .CreateTrialsFromSeed(
-          seed, *client_state,
-          base::BindRepeating(&VariationsFieldTrialCreator::OverrideUIString,
-                              base::Unretained(this)),
-          entropy_providers, layers, feature_list);
+      .CreateTrialsFromSeed(seed, *client_state, entropy_providers, layers,
+                            feature_list);
   sticky_activation_manager_.StartMonitoring();
 
   VLOG(1) << "CreateTrialsFromSeed complete with "

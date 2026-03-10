@@ -52,10 +52,10 @@
 #include "third_party/blink/renderer/core/dom/xml_document.h"
 #include "third_party/blink/renderer/core/execution_context/agent.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/html/custom/ce_reactions_scope.h"
+#include "third_party/blink/renderer/core/html/custom/custom_element_registry.h"
 #include "third_party/blink/renderer/core/html/html_html_element.h"
 #include "third_party/blink/renderer/core/html/html_template_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_construction_site.h"
@@ -613,9 +613,10 @@ static bool IsLibxmlDefaultCatalogFile(const String& url_string) {
 
   // On Windows, libxml with catalogs enabled computes a URL relative
   // to where its DLL resides.
-  if (url_string.StartsWithIgnoringASCIICase("file:///") &&
-      url_string.EndsWithIgnoringASCIICase("/etc/catalog"))
+  if (url_string.StartsWithIgnoringAsciiCase("file:///") &&
+      url_string.EndsWithIgnoringAsciiCase("/etc/catalog")) {
     return true;
+  }
   return false;
 }
 
@@ -628,12 +629,15 @@ static bool ShouldAllowExternalLoad(const KURL& url) {
 
   // The most common DTD. There isn't much point in hammering www.w3c.org by
   // requesting this URL for every XHTML document.
-  if (url_string.StartsWithIgnoringASCIICase("http://www.w3.org/TR/xhtml"))
+  if (url_string.StartsWithIgnoringAsciiCase("http://www.w3.org/TR/xhtml")) {
     return false;
+  }
 
   // Similarly, there isn't much point in requesting the SVG DTD.
-  if (url_string.StartsWithIgnoringASCIICase("http://www.w3.org/Graphics/SVG"))
+  if (url_string.StartsWithIgnoringAsciiCase(
+          "http://www.w3.org/Graphics/SVG")) {
     return false;
+  }
 
   // The libxml doesn't give us a lot of context for deciding whether to allow
   // this request. In the worst case, this load could be for an external
@@ -666,7 +670,7 @@ static void* OpenFunc(const char* uri) {
   DCHECK(document);
   CHECK(IsMainThread());
 
-  KURL url(NullURL(), uri);
+  KURL url(NullUrl(), uri);
 
   // If the document has no ExecutionContext, it's detached. Detached documents
   // aren't allowed to fetch.
@@ -1098,10 +1102,13 @@ void XMLDocumentParser::StartElementNs(
   }
 
   AtomicString is;
+  bool has_customelementregistry_attr = false;
   for (const auto& attr : prefixed_attributes) {
     if (attr.GetName() == html_names::kIsAttr) {
       is = attr.Value();
-      break;
+    } else if (RuntimeEnabledFeatures::ScopedCustomElementRegistryEnabled() &&
+               attr.GetName() == html_names::kCustomelementregistryAttr) {
+      has_customelementregistry_attr = true;
     }
   }
 
@@ -1110,6 +1117,19 @@ void XMLDocumentParser::StartElementNs(
     q_name = QualifiedName(g_null_atom,
                            AtomicString(StrCat({prefix, ":", local_name})),
                            g_null_atom);
+  }
+
+  CustomElementRegistry* registry = nullptr;
+  if (RuntimeEnabledFeatures::ScopedCustomElementRegistryEnabled() &&
+      !has_customelementregistry_attr) {
+    // If the element doesn't have the customelementregistry attribute, then
+    // it should inherit its registry from its parent.
+    if (auto* parent_element = DynamicTo<Element>(current_node_.Get())) {
+      registry = parent_element->customElementRegistry();
+    } else {
+      registry =
+          CustomElementRegistry::DefaultRegistry(current_node_->GetDocument());
+    }
   }
 
   // If we are constructing a custom element, then we must run extra steps as
@@ -1121,8 +1141,8 @@ void XMLDocumentParser::StartElementNs(
   std::optional<ThrowOnDynamicMarkupInsertionCountIncrementer>
       throw_on_dynamic_markup_insertions;
   if (!parsing_fragment_) {
-    if (HTMLConstructionSite::LookUpCustomElementDefinition(
-            *document_, q_name, is, document_->customElementRegistry())) {
+    if (HTMLConstructionSite::LookUpCustomElementDefinition(*document_, q_name,
+                                                            is, registry)) {
       throw_on_dynamic_markup_insertions.emplace(document_);
       document_->GetAgent().event_loop()->PerformMicrotaskCheckpoint();
       reactions.emplace(isolate);
@@ -1133,7 +1153,7 @@ void XMLDocumentParser::StartElementNs(
       q_name,
       parsing_fragment_ ? CreateElementFlags::ByFragmentParser(document_)
                         : CreateElementFlags::ByParser(document_),
-      is, /*registry*/ nullptr);
+      is, registry);
   // Check IsStopped() because custom element constructors may synchronously
   // trigger removal of the document and cancellation of this parser.
   if (IsStopped()) {
@@ -1266,7 +1286,7 @@ void XMLDocumentParser::Characters(base::span<const xmlChar> chars) {
   }
 
   CreateLeafTextNodeIfNeeded();
-  buffered_text_.AppendSpan(chars);
+  buffered_text_.append_range(chars);
 }
 
 void XMLDocumentParser::GetError(XMLErrors::ErrorType type,
@@ -1320,7 +1340,7 @@ void XMLDocumentParser::GetProcessingInstruction(const String& target,
   CheckIfBlockingStyleSheetAdded();
 
   saw_xsl_transform_ = !saw_first_element_ && pi->IsXSL();
-  CHECK(!saw_xsl_transform_ || XSLTProcessor::XSLTEnabled());
+  CHECK(!saw_xsl_transform_ || RuntimeEnabledFeatures::XSLTEnabled());
   if (saw_xsl_transform_ &&
       !DocumentXSLT::HasTransformSourceDocument(*GetDocument())) {
     // This behavior is very tricky. We call stopParsing() here because we
@@ -1490,7 +1510,8 @@ PRINTF_FORMAT(2, 3)
 static void WarningHandler(void* closure, const char* message, ...) {
   va_list args;
   va_start(args, message);
-  GetParser(closure)->GetError(XMLErrors::kErrorTypeWarning, message, args);
+  UNSAFE_TODO(GetParser(closure))
+      ->GetError(XMLErrors::kErrorTypeWarning, message, args);
   va_end(args);
 }
 
@@ -1498,7 +1519,8 @@ PRINTF_FORMAT(2, 3)
 static void NormalErrorHandler(void* closure, const char* message, ...) {
   va_list args;
   va_start(args, message);
-  GetParser(closure)->GetError(XMLErrors::kErrorTypeNonFatal, message, args);
+  UNSAFE_TODO(GetParser(closure))
+      ->GetError(XMLErrors::kErrorTypeNonFatal, message, args);
   va_end(args);
 }
 
@@ -1592,11 +1614,6 @@ static xmlEntityPtr GetEntityHandler(void* closure, const xmlChar* name) {
   }
 
   ent = xmlGetDocEntity(ctxt->myDoc, name);
-
-  if (ent && ent->etype == XML_EXTERNAL_GENERAL_PARSED_ENTITY) {
-    GetParser(closure)->DidSeeExternalEntity();
-  }
-
   if (!ent && GetParser(closure)->IsXHTMLDocument()) {
     ent = GetXHTMLEntity(name);
     if (ent) {
@@ -1705,25 +1722,6 @@ void XMLDocumentParser::DoEnd() {
 
       context_ = nullptr;
     }
-  }
-
-  auto* window = GetDocument()->domWindow();
-
-  // Don't issue the warning when we have moved from deprecation to removal.
-  if (!RuntimeEnabledFeatures::XMLNoExternalEntitiesEnabled() && !saw_error_ &&
-      !saw_xsl_transform_ && saw_external_entity_ && window) {
-    GetDocument()->CountDeprecation(WebFeature::kXMLExternalResourceLoadEntitiesOnly);
-
-    // The previous line counts this as a deprecation, but add an
-    // explicit message here, due to crbug.com/40069336.
-    window->AddConsoleMessage(
-        MakeGarbageCollected<ConsoleMessage>(
-            ConsoleMessage::Source::kDeprecation,
-            ConsoleMessage::Level::kWarning,
-            "Externally loaded entities in XML parsing have been deprecated "
-            "and will be removed from this browser soon. See "
-            "https://chromestatus.com/feature/6734457763659776."),
-        /*discard_duplicates=*/true);
   }
 
   bool xml_viewer_mode = !saw_error_ && !saw_css_ && !saw_xsl_transform_ &&

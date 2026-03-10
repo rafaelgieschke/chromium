@@ -28,8 +28,9 @@ namespace persistent_cache {
 PersistentCacheCollection::PersistentCacheCollection(
     base::FilePath top_directory,
     int64_t target_footprint,
+    Client client,
     size_t lru_capacity)
-    : backend_storage_(BackendType::kSqlite, std::move(top_directory)),
+    : backend_storage_(client, BackendType::kSqlite, std::move(top_directory)),
       target_footprint_(target_footprint),
       lru_capacity_(lru_capacity),
       persistent_caches_(PersistentCacheLRUMap::NO_AUTO_EVICT) {
@@ -40,8 +41,11 @@ PersistentCacheCollection::PersistentCacheCollection(
     base::FilePath top_directory,
     int64_t target_footprint,
     std::unique_ptr<BackendStorage::Delegate> storage_delegate,
+    Client client,
     size_t lru_capacity)
-    : backend_storage_(std::move(storage_delegate), std::move(top_directory)),
+    : backend_storage_(client,
+                       std::move(storage_delegate),
+                       std::move(top_directory)),
       target_footprint_(target_footprint),
       lru_capacity_(lru_capacity),
       persistent_caches_(PersistentCacheLRUMap::NO_AUTO_EVICT) {
@@ -52,7 +56,7 @@ PersistentCacheCollection::~PersistentCacheCollection() = default;
 
 base::expected<std::optional<EntryMetadata>, TransactionError>
 PersistentCacheCollection::Find(const std::string& cache_id,
-                                std::string_view key,
+                                base::span<const uint8_t> key,
                                 BufferProvider buffer_provider) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
@@ -70,7 +74,7 @@ PersistentCacheCollection::Find(const std::string& cache_id,
 
 base::expected<void, TransactionError> PersistentCacheCollection::Insert(
     const std::string& cache_id,
-    std::string_view key,
+    base::span<const uint8_t> key,
     base::span<const uint8_t> content,
     EntryMetadata metadata) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -236,7 +240,8 @@ PersistentCache* PersistentCacheCollection::GetOrCreateCache(
 
   // Create the cache
   auto inserted_it = persistent_caches_.Put(
-      cache_id, std::make_unique<PersistentCache>(std::move(backend)));
+      cache_id, std::make_unique<PersistentCache>(backend_storage_.client(),
+                                                  std::move(backend)));
   return inserted_it->second.get();
 }
 

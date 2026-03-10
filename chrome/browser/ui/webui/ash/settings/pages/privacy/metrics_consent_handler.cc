@@ -6,7 +6,6 @@
 
 #include "base/check.h"
 #include "chrome/browser/ash/settings/stats_reporting_controller.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/profile_pref_names.h"
 #include "chromeos/ash/components/settings/cros_settings_names.h"
 #include "components/metrics/metrics_service.h"
@@ -50,13 +49,13 @@ void MetricsConsentHandler::OnJavascriptAllowed() {}
 void MetricsConsentHandler::OnJavascriptDisallowed() {}
 
 void MetricsConsentHandler::HandleGetMetricsConsentState(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   AllowJavascript();
   CHECK_EQ(1U, args.size());
 
   const base::Value& callback_id = args[0];
 
-  base::Value::Dict response;
+  base::DictValue response;
 
   base::Value consent_pref =
       ShouldUseUserConsent()
@@ -70,7 +69,7 @@ void MetricsConsentHandler::HandleGetMetricsConsentState(
 }
 
 void MetricsConsentHandler::HandleUpdateMetricsConsent(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   AllowJavascript();
   CHECK_EQ(2U, args.size());
   CHECK_EQ(args[1].type(), base::Value::Type::DICT);

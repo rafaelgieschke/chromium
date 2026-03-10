@@ -67,11 +67,12 @@
 #include "third_party/search_engines_data/resources/definitions/prepopulated_engines.h"
 #include "ui/base/window_open_disposition.h"
 
-using testing::_;
-using testing::TestParamInfo;
-using testing::ValuesIn;
-using testing::WithParamInterface;
-using EntryPoint = SearchEngineChoiceDialogService::EntryPoint;
+using ::testing::_;
+using ::testing::TestParamInfo;
+using ::testing::ValuesIn;
+using ::testing::WithParamInterface;
+using EntryPoint = ::SearchEngineChoiceDialogService::EntryPoint;
+using ::regional_capabilities::SearchEngineChoiceScreenConditions;
 
 namespace {
 
@@ -109,7 +110,7 @@ class MockSearchEngineChoiceDialogService
 
     if (SearchEngineChoiceDialogServiceFactory::
             ComputeProfileEligibilityForTesting(CHECK_DEREF(profile)) !=
-        search_engines::SearchEngineChoiceScreenConditions::kEligible) {
+        SearchEngineChoiceScreenConditions::kEligible) {
       return nullptr;
     }
 
@@ -252,7 +253,7 @@ class SearchEngineChoiceDialogBrowserTest : public InProcessBrowserTest {
   // navigations could happen multiple times in a browser and might record the
   // histogram more than the number specified in `count`.
   void CheckNavigationConditionRecorded(
-      search_engines::SearchEngineChoiceScreenConditions condition,
+      regional_capabilities::SearchEngineChoiceScreenConditions condition,
       int count) {
     EXPECT_GE(histogram_tester_.GetBucketCount(
                   search_engines::
@@ -262,7 +263,7 @@ class SearchEngineChoiceDialogBrowserTest : public InProcessBrowserTest {
   }
 
   void CheckProfileInitConditionRecorded(
-      search_engines::SearchEngineChoiceScreenConditions condition,
+      regional_capabilities::SearchEngineChoiceScreenConditions condition,
       int count) {
     histogram_tester_.ExpectBucketCount(
         search_engines::kSearchEngineChoiceScreenProfileInitConditionsHistogram,
@@ -473,11 +474,10 @@ IN_PROC_BROWSER_TEST_F(SearchEngineChoiceDialogBrowserTest,
 
   // So far, no dialog check should have been failed based on a profile having
   // claimed the dialog.
-  EXPECT_EQ(1,
-            histogram_tester().GetBucketCount(
-                search_engines::
-                    kSearchEngineChoiceScreenNavigationConditionsHistogram,
-                search_engines::SearchEngineChoiceScreenConditions::kEligible));
+  EXPECT_EQ(1, histogram_tester().GetBucketCount(
+                   search_engines::
+                       kSearchEngineChoiceScreenNavigationConditionsHistogram,
+                   SearchEngineChoiceScreenConditions::kEligible));
 
   // Open a browser with the second profile, it should open a dialog too.
   Browser* browser_with_second_profile = CreateBrowser(second_profile);
@@ -491,11 +491,10 @@ IN_PROC_BROWSER_TEST_F(SearchEngineChoiceDialogBrowserTest,
       2);
 
   // Still expect no profile-based rejection.
-  EXPECT_EQ(2,
-            histogram_tester().GetBucketCount(
-                search_engines::
-                    kSearchEngineChoiceScreenNavigationConditionsHistogram,
-                search_engines::SearchEngineChoiceScreenConditions::kEligible));
+  EXPECT_EQ(2, histogram_tester().GetBucketCount(
+                   search_engines::
+                       kSearchEngineChoiceScreenNavigationConditionsHistogram,
+                   SearchEngineChoiceScreenConditions::kEligible));
 }
 #endif
 
@@ -513,7 +512,7 @@ IN_PROC_BROWSER_TEST_F(SearchEngineChoiceDialogBrowserTest,
 
   EXPECT_TRUE(service->IsShowingDialog(*browser()));
   CheckNavigationConditionRecorded(
-      search_engines::SearchEngineChoiceScreenConditions::kEligible, 1);
+      SearchEngineChoiceScreenConditions::kEligible, 1);
 
   // Choose the first search engine to close the dialog.
   TemplateURL* first_search_engine = service->GetSearchEngines().at(0);
@@ -555,9 +554,7 @@ IN_PROC_BROWSER_TEST_F(SearchEngineChoiceDialogBrowserTest,
   EXPECT_FALSE(service->IsShowingDialog(*browser()));
 
   CheckNavigationConditionRecorded(
-      search_engines::SearchEngineChoiceScreenConditions::
-          kSuppressedByOtherDialog,
-      1);
+      SearchEngineChoiceScreenConditions::kSuppressedByOtherDialog, 1);
 }
 #endif
 
@@ -610,17 +607,14 @@ IN_PROC_BROWSER_TEST_F(
     scoped_histogram_tester.ExpectUniqueSample(
         search_engines::kSearchEngineChoiceScreenNavigationConditionsHistogram,
         // Indicating that default search is disabled.
-        search_engines::SearchEngineChoiceScreenConditions::kControlledByPolicy,
-        1);
+        SearchEngineChoiceScreenConditions::kControlledByPolicy, 1);
   } else {
     EXPECT_EQ(template_url_service->GetDefaultSearchProvider()->keyword(),
               u"extension");
 
     scoped_histogram_tester.ExpectUniqueSample(
         search_engines::kSearchEngineChoiceScreenNavigationConditionsHistogram,
-        search_engines::SearchEngineChoiceScreenConditions::
-            kExtensionControlled,
-        1);
+        SearchEngineChoiceScreenConditions::kExtensionControlled, 1);
   }
 }
 
@@ -687,9 +681,7 @@ IN_PROC_BROWSER_TEST_F(SearchEngineChoiceDialogBrowserTest,
       search_engine_choice_dialog_service->IsShowingDialog(*app_browser));
 
   CheckNavigationConditionRecorded(
-      search_engines::SearchEngineChoiceScreenConditions::
-          kUnsupportedBrowserType,
-      2);
+      SearchEngineChoiceScreenConditions::kUnsupportedBrowserType, 2);
 }
 
 IN_PROC_BROWSER_TEST_F(SearchEngineChoiceDialogBrowserTest,
@@ -760,9 +752,7 @@ IN_PROC_BROWSER_TEST_F(SearchEngineChoiceDialogBrowserTest,
   EXPECT_FALSE(second_service->IsShowingDialog(*second_guest_session));
 
   CheckNavigationConditionRecorded(
-      search_engines::SearchEngineChoiceScreenConditions::
-          kUsingPersistedGuestSessionChoice,
-      0);
+      SearchEngineChoiceScreenConditions::kUsingPersistedGuestSessionChoice, 0);
 }
 
 IN_PROC_BROWSER_TEST_F(SearchEngineChoiceDialogBrowserTest,
@@ -810,9 +800,7 @@ IN_PROC_BROWSER_TEST_F(SearchEngineChoiceDialogBrowserTest,
       TemplateURLPrepopulateData::bing.id);
 
   CheckNavigationConditionRecorded(
-      search_engines::SearchEngineChoiceScreenConditions::
-          kUsingPersistedGuestSessionChoice,
-      1);
+      SearchEngineChoiceScreenConditions::kUsingPersistedGuestSessionChoice, 1);
 }
 
 IN_PROC_BROWSER_TEST_F(SearchEngineChoiceDialogBrowserTest,
@@ -925,11 +913,39 @@ IN_PROC_BROWSER_TEST_F(SearchEngineChoiceDialogBrowserTest,
                 .prepopulate_id,
             TemplateURLPrepopulateData::bing.id);
   CheckNavigationConditionRecorded(
-      search_engines::SearchEngineChoiceScreenConditions::
-          kUsingPersistedGuestSessionChoice,
-      1);
+      SearchEngineChoiceScreenConditions::kUsingPersistedGuestSessionChoice, 1);
 }
 #endif
+
+IN_PROC_BROWSER_TEST_F(SearchEngineChoiceDialogBrowserTest,
+                       DialogNotShownIfPolicyIsSet) {
+  Profile* profile = browser()->profile();
+  TemplateURLService* template_url_service =
+      TemplateURLServiceFactory::GetForProfile(profile);
+
+  // Set the default search provider via policy.
+  TemplateURLData data;
+  data.SetShortName(u"Policy Engine");
+  data.SetKeyword(u"policy");
+  data.SetURL("https://policy.com/url?bar={searchTerms}");
+  data.policy_origin = TemplateURLData::PolicyOrigin::kDefaultSearchProvider;
+
+  TemplateURL* template_url =
+      template_url_service->Add(std::make_unique<TemplateURL>(data));
+  template_url_service->SetUserSelectedDefaultSearchProvider(template_url);
+
+  // Navigate to an eligible URL.
+  ASSERT_TRUE(ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL(chrome::kChromeUINewTabPageURL),
+      WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP));
+
+  auto* service = static_cast<MockSearchEngineChoiceDialogService*>(
+      SearchEngineChoiceDialogServiceFactory::GetForProfile(profile));
+  EXPECT_FALSE(service->IsShowingDialog(*browser()));
+  CheckNavigationConditionRecorded(
+      SearchEngineChoiceScreenConditions::kControlledByPolicy, 1);
+}
 
 IN_PROC_BROWSER_TEST_F(SearchEngineChoiceDialogBrowserTest,
                        DialogNotShownForSmallHeightBrowserWindows) {
@@ -945,9 +961,7 @@ IN_PROC_BROWSER_TEST_F(SearchEngineChoiceDialogBrowserTest,
       SearchEngineChoiceDialogServiceFactory::GetForProfile(profile));
   EXPECT_FALSE(service->IsShowingDialog(*browser()));
   CheckNavigationConditionRecorded(
-      search_engines::SearchEngineChoiceScreenConditions::
-          kBrowserWindowTooSmall,
-      1);
+      SearchEngineChoiceScreenConditions::kBrowserWindowTooSmall, 1);
 }
 
 struct RepromptTestParam {
@@ -1003,7 +1017,7 @@ IN_PROC_BROWSER_TEST_P(SearchEngineRepromptBrowserTest, PRE_Reprompt) {
       SearchEngineChoiceDialogServiceFactory::GetForProfile(profile);
   ASSERT_TRUE(service);
   EXPECT_EQ(service->ComputeDialogConditions(*browser()),
-            search_engines::SearchEngineChoiceScreenConditions::kEligible);
+            SearchEngineChoiceScreenConditions::kEligible);
 
   // Navigate to a URL. The first load happened while the dialog was
   // force-disabled for testing.

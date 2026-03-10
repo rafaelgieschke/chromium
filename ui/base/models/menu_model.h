@@ -27,6 +27,13 @@ class Accelerator;
 class ButtonMenuItemModel;
 class ImageModel;
 
+// The new badge type that can be displayed next to a menu item to promote a
+// feature.
+enum class NewBadgeType {
+  kNew,
+  kPreview,
+};
+
 // An interface implemented by an object that provides the content of a menu.
 class COMPONENT_EXPORT(UI_BASE) MenuModel {
  public:
@@ -78,6 +85,10 @@ class COMPONENT_EXPORT(UI_BASE) MenuModel {
   // Returns the minor text of the item at the specified index. The minor text
   // is rendered to the right of the label and using the font GetLabelFontAt().
   virtual std::u16string GetMinorTextAt(size_t index) const;
+
+  // Returns true if the minor text at the specified index should be treated as
+  // a URL when rendering the menu item.
+  virtual bool GetMinorTextIsUrlAt(size_t index) const;
 
   // Returns the minor icon of the item at the specified index. The minor icon
   // is rendered to the left of the minor text.
@@ -137,6 +148,11 @@ class COMPONENT_EXPORT(UI_BASE) MenuModel {
   // to show off to users (items marked as new will receive a "New" badge when
   // the appropriate flag is enabled).
   virtual bool IsNewFeatureAt(size_t index) const;
+
+  // Returns the badge type the menu item at `index` should should show when the
+  // appropriate flag is enabled. Returns std::nullopt if the menu item
+  // shouldn't show a badge.
+  virtual std::optional<NewBadgeType> GetNewBadgeTypeAt(size_t index) const;
 
   // Returns an application-window-unique identifier that can be used to track
   // the menu item irrespective of menu-specific command IDs.

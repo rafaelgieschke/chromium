@@ -167,7 +167,7 @@ class WebStateImpl final : public WebState {
   // a message is received from the web ui JavaScript via `chrome.send` API.
   void HandleWebUIMessage(const GURL& source_url,
                           std::string_view message,
-                          const base::Value::List& args);
+                          const base::ListValue& args);
 
   // Explicitly sets the MIME type, overwriting any MIME type that was set by
   // headers. Note that this should be called after OnNavigationCommitted, as
@@ -257,11 +257,16 @@ class WebStateImpl final : public WebState {
                               const GURL& opener_url,
                               bool initiated_by_user);
 
-  // Notifies the delegate that request receives an authentication challenge
+  // Notifies the delegate that request receives a HTTP authentication challenge
   // and is unable to respond using cached credentials.
   void OnAuthRequired(NSURLProtectionSpace* protection_space,
                       NSURLCredential* proposed_credential,
-                      WebStateDelegate::AuthCallback callback);
+                      WebStateDelegate::HTTPAuthCallback callback);
+
+  // Notifies the delegate that request receives a client certificate
+  // authentication challenge and is unable to respond using cached credentials.
+  void OnAuthRequired(NSURLProtectionSpace* protection_space,
+                      WebStateDelegate::ClientCertAuthCallback callback);
 
   // Cancels all dialogs associated with this web_state.
   void CancelDialogs();

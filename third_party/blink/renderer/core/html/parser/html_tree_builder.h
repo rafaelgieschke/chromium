@@ -43,6 +43,7 @@ class ContainerNode;
 class Element;
 class HTMLDocument;
 class HTMLDocumentParser;
+class StreamingSanitizer;
 
 class HTMLTreeBuilder final : public GarbageCollected<HTMLTreeBuilder> {
  public:
@@ -62,7 +63,8 @@ class HTMLTreeBuilder final : public GarbageCollected<HTMLTreeBuilder> {
                   ParserContentPolicy,
                   const HTMLParserOptions&,
                   bool include_shadow_roots,
-                  CustomElementRegistry* registry);
+                  CustomElementRegistry* registry,
+                  StreamingSanitizer*);
 
  private:
   HTMLTreeBuilder(HTMLDocumentParser*,
@@ -72,7 +74,8 @@ class HTMLTreeBuilder final : public GarbageCollected<HTMLTreeBuilder> {
                   bool include_shadow_roots,
                   ContainerNode* fragment_target,
                   Element* fragment_context_element,
-                  CustomElementRegistry* registry);
+                  CustomElementRegistry* registry,
+                  StreamingSanitizer* sanitizer);
 
  public:
   HTMLTreeBuilder(const HTMLTreeBuilder&) = delete;
@@ -90,11 +93,6 @@ class HTMLTreeBuilder final : public GarbageCollected<HTMLTreeBuilder> {
   }
   bool IsParsingFragmentOrTemplateContents() const {
     return IsParsingFragment() || IsParsingTemplateContents();
-  }
-
-  void SetDOMPartsAllowedState(DOMPartsAllowed state) {
-    DCHECK(RuntimeEnabledFeatures::DOMPartsAPIEnabled());
-    tree_.SetDOMPartsAllowedState(state);
   }
 
   void Detach();
@@ -158,7 +156,7 @@ class HTMLTreeBuilder final : public GarbageCollected<HTMLTreeBuilder> {
   void ProcessComment(AtomicHTMLToken*);
   void ProcessCharacter(AtomicHTMLToken*);
   void ProcessEndOfFile(AtomicHTMLToken*);
-  void ProcessDOMPart(AtomicHTMLToken*);
+  void ProcessProcessingInstruction(AtomicHTMLToken*);
 
   bool ProcessStartTagForInHead(AtomicHTMLToken*);
   void ProcessStartTagForInBody(AtomicHTMLToken*);

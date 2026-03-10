@@ -340,13 +340,15 @@ scoped_refptr<Image> Image::ImageForDefaultFrame() {
   return image;
 }
 
-PaintImageBuilder Image::CreatePaintImageBuilder() {
+PaintImageBuilder Image::CreatePaintImageBuilder(
+    std::optional<PaintImage::Id> paint_id) {
   auto animation_type = MaybeAnimated() ? PaintImage::AnimationType::kAnimated
                                         : PaintImage::AnimationType::kStatic;
-  return PaintImageBuilder::WithDefault()
-      .set_id(stable_image_id_)
-      .set_animation_type(animation_type)
-      .set_is_multipart(is_multipart_);
+  auto builder = PaintImageBuilder::WithDefault();
+  builder.set_id(paint_id.value_or(stable_image_id_));
+  builder.set_animation_type(animation_type).set_is_multipart(is_multipart_);
+
+  return builder;
 }
 
 bool Image::ApplyShader(cc::PaintFlags& flags,

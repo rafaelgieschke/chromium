@@ -7,6 +7,7 @@
 
 #include "base/functional/callback_forward.h"
 #include "base/memory/weak_ptr.h"
+#include "base/types/strong_alias.h"
 #include "components/affiliations/core/browser/affiliation_utils.h"
 #include "components/password_manager/core/browser/passkey_credential.h"
 #include "components/password_manager/core/browser/ui/affiliated_group.h"
@@ -99,8 +100,7 @@ class PasswordsGrouper {
 
   void InitializePSLExtensionList(std::vector<std::string> psl_extension_list);
 
-  raw_ptr<affiliations::AffiliationService, DanglingUntriaged>
-      affiliation_service_;
+  base::WeakPtr<affiliations::AffiliationService> affiliation_service_;
 
   // Structure used to keep track of the mapping between the credential's
   // sign-on realm and the group id.

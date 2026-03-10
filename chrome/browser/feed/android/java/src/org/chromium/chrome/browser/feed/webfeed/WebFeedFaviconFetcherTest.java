@@ -20,11 +20,9 @@ import org.junit.runner.RunWith;
 import org.mockito.Mockito;
 import org.robolectric.Robolectric;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowLog;
 
 import org.chromium.base.Callback;
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.components.embedder_support.util.ShadowUrlUtilities;
 import org.chromium.components.favicon.IconType;
 import org.chromium.components.favicon.LargeIconBridge;
 import org.chromium.components.image_fetcher.ImageDataFetchResult;
@@ -39,9 +37,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** Tests {@link WebFeedFaviconFetcher}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@Config(
-        manifest = Config.NONE,
-        shadows = {ShadowUrlUtilities.class})
+@Config(manifest = Config.NONE)
 @SmallTest
 public class WebFeedFaviconFetcherTest {
     private static final GURL TEST_URL = JUnitTestGURLs.EXAMPLE_URL;
@@ -58,7 +54,6 @@ public class WebFeedFaviconFetcherTest {
     @Before
     public void setUp() {
         // Print logs to stdout.
-        ShadowLog.stream = System.out;
 
         mActivity = Robolectric.setupActivity(Activity.class);
         mBitmapFromImageFetcher =

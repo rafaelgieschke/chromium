@@ -12,7 +12,6 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/location.h"
@@ -104,7 +103,7 @@ void FakeUdpSocket::ReceivePacket(const webrtc::SocketAddress& from,
                                   const scoped_refptr<net::IOBuffer>& data,
                                   int data_size) {
   NotifyPacketReceived(webrtc::ReceivedIpPacket(
-      webrtc::MakeArrayView(data->bytes(), data_size), from,
+      data->span().first(static_cast<size_t>(data_size)), from,
       webrtc::Timestamp::Micros(webrtc::TimeMicros())));
 }
 
@@ -129,9 +128,8 @@ int FakeUdpSocket::SendTo(const void* data,
   auto buffer = base::MakeRefCounted<net::IOBufferWithSize>(data_size);
   UNSAFE_TODO(memcpy(buffer->data(), data, data_size));
   base::TimeTicks now = base::TimeTicks::Now();
-  webrtc::ApplyPacketOptions(
-      webrtc::ArrayView<uint8_t>(buffer->bytes(), data_size),
-      options.packet_time_params, (now - base::TimeTicks()).InMicroseconds());
+  webrtc::ApplyPacketOptions(buffer->span(), options.packet_time_params,
+                             (now - base::TimeTicks()).InMicroseconds());
   NotifySentPacket(
       this, webrtc::SentPacketInfo(options.packet_id, webrtc::TimeMillis()));
   dispatcher_->DeliverPacket(local_address_, address, buffer, data_size);
@@ -228,7 +226,7 @@ FakePacketSocketFactory::CreateUdpSocket(
   int port = -1;
   if (min_port > 0 && max_port > 0) {
     for (uint16_t i = min_port; i <= max_port; ++i) {
-      if (!base::Contains(udp_sockets_, i)) {
+      if (!udp_sockets_.contains(i)) {
         port = i;
         break;
       }
@@ -241,7 +239,7 @@ FakePacketSocketFactory::CreateUdpSocket(
       port = next_port_;
       next_port_ =
           (next_port_ >= kPortRangeEnd) ? kPortRangeStart : (next_port_ + 1);
-    } while (base::Contains(udp_sockets_, port));
+    } while (udp_sockets_.contains(port));
   }
 
   CHECK(local_address.ipaddr() == address_);

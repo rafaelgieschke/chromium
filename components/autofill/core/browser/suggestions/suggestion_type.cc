@@ -5,6 +5,7 @@
 #include "components/autofill/core/browser/suggestions/suggestion_type.h"
 
 #include "base/notreached.h"
+#include "suggestion_type.h"
 
 namespace autofill {
 
@@ -22,6 +23,10 @@ std::string_view SuggestionTypeToStringView(SuggestionType type) {
       return "kManageAddress";
     case SuggestionType::kManageAutofillAi:
       return "kManageAutofillAi";
+    case SuggestionType::kManageAutofillAiIdentityDocs:
+      return "kManageAutofillAiIdentityDocs";
+    case SuggestionType::kManageAutofillAiTravel:
+      return "kManageAutofillAiTravel";
     case SuggestionType::kManageCreditCard:
       return "kManageCreditCard";
     case SuggestionType::kManageIban:
@@ -108,12 +113,18 @@ std::string_view SuggestionTypeToStringView(SuggestionType type) {
       return "kFillAutofillAi";
     case SuggestionType::kPendingStateSignin:
       return "kPendingStateSignin";
+    case SuggestionType::kAtMemorySearchResult:
+      return "kAtMemorySearchResult";
     case SuggestionType::kLoyaltyCardEntry:
       return "kLoyaltyCardEntry";
     case SuggestionType::kAllLoyaltyCardsEntry:
       return "kAllLoyaltyCardsEntry";
     case SuggestionType::kOneTimePasswordEntry:
       return "OneTimePasswordEntry";
+    case SuggestionType::kLoadingThrobber:
+      return "kLoadingThrobber";
+    case SuggestionType::kBnplFootnote:
+      return "kBnplFootnote";
   }
   NOTREACHED();
 }

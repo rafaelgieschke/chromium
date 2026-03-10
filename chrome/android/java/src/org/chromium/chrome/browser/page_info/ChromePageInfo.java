@@ -31,11 +31,12 @@ import java.util.function.Supplier;
 /** Helper class showing page info dialog for Clank. */
 @NullMarked
 public class ChromePageInfo {
-    private final Supplier<ModalDialogManager> mModalDialogManagerSupplier;
+    private final Supplier<@Nullable ModalDialogManager> mModalDialogManagerSupplier;
     private final @Nullable String mPublisher;
     private final @OpenedFromSource int mSource;
     private final @Nullable Supplier<StoreInfoActionHandler> mStoreInfoActionHandlerSupplier;
-    private final @Nullable Supplier<EphemeralTabCoordinator> mEphemeralTabCoordinatorSupplier;
+    private final @Nullable Supplier<@Nullable EphemeralTabCoordinator>
+            mEphemeralTabCoordinatorSupplier;
     private final @Nullable TabCreator mTabCreator;
 
     /**
@@ -47,11 +48,11 @@ public class ChromePageInfo {
      * @param tabCreator {@link TabCreator} to handle a new tab creation.
      */
     public ChromePageInfo(
-            Supplier<ModalDialogManager> modalDialogManagerSupplier,
+            Supplier<@Nullable ModalDialogManager> modalDialogManagerSupplier,
             @Nullable String publisher,
             @OpenedFromSource int source,
             @Nullable Supplier<StoreInfoActionHandler> storeInfoActionHandlerSupplier,
-            @Nullable Supplier<EphemeralTabCoordinator> ephemeralTabCoordinatorSupplier,
+            @Nullable Supplier<@Nullable EphemeralTabCoordinator> ephemeralTabCoordinatorSupplier,
             @Nullable TabCreator tabCreator) {
         mModalDialogManagerSupplier = modalDialogManagerSupplier;
         mPublisher = publisher;

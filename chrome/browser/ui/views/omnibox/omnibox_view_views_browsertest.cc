@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 
+#include <algorithm>
+
 #include "base/compiler_specific.h"
 #include "base/feature_list.h"
 #include "base/memory/raw_ptr.h"
@@ -17,6 +19,7 @@
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
+#include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/interstitials/security_interstitial_page_test_utils.h"
 #include "chrome/browser/profiles/profile.h"
@@ -35,6 +38,7 @@
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/view_ids.h"
+#include "chrome/browser/ui/views/accessibility/dump_accessibility_events_views_browsertest_base.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_view_views.h"
@@ -413,7 +417,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, DISABLED_SelectionClipboard) {
 
 IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, SelectAllOnTap) {
 #if BUILDFLAG(IS_OZONE)
-  if (ui::OzonePlatform::GetPlatformNameForTest() == "wayland" &&
+  if (ui::OzonePlatform::RunningOnWaylandForTest() &&
       base::FeatureList::IsEnabled(features::kOzoneBubblesUsePlatformWidgets)) {
     GTEST_SKIP()
         << "This test expects the window to be focused on sending a tap "
@@ -689,7 +693,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, BackgroundIsOpaque) {
   // can't use subpixel rendering.
   OmniboxViewViews* view = BrowserView::GetBrowserViewForBrowser(browser())
                                ->toolbar()
-                               ->location_bar()
+                               ->location_bar_view()
                                ->omnibox_view();
   ASSERT_TRUE(view);
   EXPECT_FALSE(view->GetRenderText()->subpixel_rendering_suppressed());
@@ -1385,7 +1389,7 @@ IN_PROC_BROWSER_TEST_F(
   histograms.ExpectTotalCount(
       security_interstitials::omnibox_https_upgrades::kEventHistogram, 0);
   ui_test_utils::HistoryEnumerator enumerator(browser()->profile());
-  EXPECT_TRUE(base::Contains(enumerator.urls(), url));
+  EXPECT_TRUE(std::ranges::contains(enumerator.urls(), url));
 
   // Now click the omnibox. This should trigger a zero suggest request with the
   // text "site-with-good-https.com" despite the omnibox URL being
@@ -1469,7 +1473,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsOnFocusZpsTest, ShowHatsSurvey) {
 
   auto* location_bar = BrowserView::GetBrowserViewForBrowser(browser())
                            ->toolbar()
-                           ->location_bar();
+                           ->location_bar_view();
 
   // After 5 focuses of the omnibox, the HaTS survey should show if the omnibox
   // isn't still focused after the survey delay.
@@ -1488,7 +1492,7 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsOnFocusZpsTest,
 
   auto* location_bar = BrowserView::GetBrowserViewForBrowser(browser())
                            ->toolbar()
-                           ->location_bar();
+                           ->location_bar_view();
 
   for (int i = 0; i < 4; i++) {
     location_bar->omnibox_view()->RequestFocus();
@@ -1529,7 +1533,7 @@ class OmniboxViewViewsAIMBrowserTest : public OmniboxViewViewsTest {
                   TemplateURLServiceFactory::GetForProfile(profile),
                   /*url_loader_factory=*/nullptr,
                   /*identity_manager=*/nullptr,
-                  /*is_off_the_record=*/false);
+                  AimEligibilityService::Configuration{});
           ON_CALL(*mock_service, IsAimLocallyEligible())
               .WillByDefault(Return(is_locally_eligible));
           ON_CALL(*mock_service, IsServerEligibilityEnabled())
@@ -1732,8 +1736,9 @@ class OmniboxViewViewsAIMButtonPreferenceTest
  public:
   OmniboxViewViewsAIMButtonPreferenceTest() {
     scoped_feature_list_.InitWithFeaturesAndParameters(
-        {{omnibox::kAiModeOmniboxEntryPoint, {}}},
-        {lens::features::kLensOverlay, features::kPageActionsMigration});
+        {{omnibox::kAiModeOmniboxEntryPoint, {}},
+         {features::kPageActionsMigration, {}}},
+        {lens::features::kLensOverlay});
   }
 
  protected:
@@ -1774,8 +1779,10 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsAIMButtonPreferenceTest,
 class OmniboxViewViewsPlaceholderTest : public InProcessBrowserTest {
  public:
   OmniboxViewViewsPlaceholderTest() {
-    scoped_feature_list_.InitAndEnableFeature(
-        contextual_tasks::kContextualTasks);
+    scoped_feature_list_.InitWithFeatures(
+        {contextual_tasks::kContextualTasks,
+         contextual_tasks::kContextualTasksForceEntryPointEligibility},
+        {});
   }
 
  protected:
@@ -1919,3 +1926,81 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsPlaceholderTest,
   // Verify the display text remains empty.
   EXPECT_EQ(u"", omnibox_view()->GetText());
 }
+
+#if !BUILDFLAG(IS_CHROMEOS)
+// Tests for dump accessibility events related to the omnibox.
+class OmniboxViewViewsDumpAccessibilityEventsTest
+    : public views::DumpAccessibilityEventsViewsTestBase {
+ public:
+  OmniboxViewViewsDumpAccessibilityEventsTest() = default;
+  ~OmniboxViewViewsDumpAccessibilityEventsTest() override = default;
+
+ protected:
+  void SetUpTestViews() override {
+    // No custom widget needed - we use the browser window.
+  }
+
+  gfx::NativeWindow GetTargetNativeWindow() const override {
+    return browser()->window()->GetNativeWindow();
+  }
+
+  views::View* GetTargetRootView() const override {
+    return BrowserView::GetBrowserViewForBrowser(browser())
+        ->GetWidget()
+        ->GetRootView();
+  }
+
+  OmniboxViewViews* omnibox_view() {
+    return static_cast<OmniboxViewViews*>(
+        browser()->window()->GetLocationBar()->GetOmniboxView());
+  }
+
+  OmniboxController* omnibox_controller() {
+    return browser()->window()->GetLocationBar()->GetOmniboxController();
+  }
+
+  // Opens the popup by starting an autocomplete query.
+  void OpenPopup() {
+    omnibox_controller()->edit_model()->SetUserText(u"example");
+    AutocompleteInput input(
+        u"example", metrics::OmniboxEventProto::BLANK,
+        ChromeAutocompleteSchemeClassifier(browser()->profile()));
+    input.set_omit_asynchronous_matches(true);
+    omnibox_controller()->StartAutocomplete(input);
+  }
+
+  // Closes the popup by clearing the autocomplete results.
+  void ClosePopup() {
+    omnibox_controller()->StopAutocomplete(/*clear_result=*/true);
+  }
+};
+
+IN_PROC_BROWSER_TEST_P(OmniboxViewViewsDumpAccessibilityEventsTest,
+                       OmniboxPopupOpenClose) {
+  SetFilters(R"(
+    @UIA-WIN-DENY:*
+    @UIA-WIN-ALLOW:ControllerFor*
+  )");
+
+  ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(browser()));
+  chrome::FocusLocationBar(browser());
+
+  EXPECT_FALSE(omnibox_controller()->IsPopupOpen());
+
+  BEGIN_RECORDING_EVENTS_OR_SKIP("omnibox-popup-open-close");
+
+  OpenPopup();
+  EXPECT_TRUE(omnibox_controller()->IsPopupOpen());
+
+  ClosePopup();
+  EXPECT_FALSE(omnibox_controller()->IsPopupOpen());
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    OmniboxViewViewsDumpAccessibilityEventsTest,
+    ::testing::ValuesIn(
+        views::DumpAccessibilityEventsViewsTestBase::EventTestPasses()),
+    views::EventTestPassToString());
+
+#endif

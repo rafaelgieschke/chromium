@@ -34,7 +34,10 @@ const char kTestGlicFreURL[] = "about:blank?fre-page";
 
 class GlicNetLogBrowserTest : public InProcessBrowserTest {
  public:
-  GlicNetLogBrowserTest() = default;
+  GlicNetLogBrowserTest() {
+    feature_list_.InitWithFeatures(
+        {}, {features::kGlicTrustFirstOnboarding, features::kGlicWarming});
+  }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     // Load blank page in glic guest view
@@ -48,18 +51,22 @@ class GlicNetLogBrowserTest : public InProcessBrowserTest {
   GlicTestEnvironment glic_test_env_{
       {.fre_status = glic::prefs::FreStatus::kNotStarted}};
   net::RecordingNetLogObserver net_log_observer_;
+  base::test::ScopedFeatureList feature_list_;
 };
 
 // Tests that opening the UI logs a request to the Glic FRE.
-IN_PROC_BROWSER_TEST_F(GlicNetLogBrowserTest, LogGlicFreRequestOnOpenUI) {
+// TODO(b/489172662): This does not work with GlicMultiInstance.
+// chrome/browser/glic/fre/glic_fre_ui.cc is not used with unified FRE,
+// so we will end up getting the glic_web_ui annotation instead.
+IN_PROC_BROWSER_TEST_F(GlicNetLogBrowserTest,
+                       DISABLED_LogGlicFreRequestOnOpenUI) {
   Profile* profile = browser()->profile();
 
   ASSERT_TRUE(GlicEnabling::IsEnabledForProfile(profile));
 
   auto* glic_service =
       GlicKeyedServiceFactory::GetGlicKeyedService(browser()->profile());
-  glic_service->OpenFreDialogInNewTab(
-      browser(), mojom::InvocationSource::kTopChromeButton);
+  glic_service->ToggleUI(nullptr, false, mojom::InvocationSource::kOsHotkey);
 
   std::vector<net::NetLogEntry> entries = net_log_observer().GetEntries();
   auto it = std::ranges::find_if(entries, [&](const auto& entry) {

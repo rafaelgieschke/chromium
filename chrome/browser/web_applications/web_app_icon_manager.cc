@@ -45,6 +45,8 @@
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/web_applications/commands/apply_manifest_migration_command.h"
 #include "chrome/browser/web_applications/file_utils_wrapper.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/browser/web_applications/web_app_icon_generator.h"
@@ -412,6 +414,54 @@ TypedResult<bool> DeleteDirectoryAndGetResultBlocking(
     return {.error_log = {CreateError(
                 {"Failed to delete directory: ", file_path.AsUTF8Unsafe()})}};
   }
+  return {.value = true};
+}
+
+TypedResult<bool> CopyAppIconsFromOneAppToAnotherBlocking(
+    const base::FilePath& from_app_resources_directory,
+    const base::FilePath& to_app_resources_directory) {
+  base::File::Error file_error_to_app = base::File::FILE_OK;
+  const base::FilePath from_app_trusted_resources =
+      from_app_resources_directory.Append(kTrustedIconFolderName);
+  const base::FilePath to_app_trusted_resources =
+      to_app_resources_directory.Append(kTrustedIconFolderName);
+  if (!base::DirectoryExists(from_app_resources_directory)) {
+    return {.error_log = {CreateError(
+                {"Source app manifest resources directory does not exist: ",
+                 from_app_resources_directory.AsUTF8Unsafe()})}};
+  }
+
+  if (!base::CreateDirectoryAndGetError(to_app_resources_directory,
+                                        &file_error_to_app)) {
+    return {.error_log = {CreateError(
+                {"Destination app manifest resources directory could not be "
+                 "created: ",
+                 to_app_resources_directory.AsUTF8Unsafe(), " with error: ",
+                 base::File::ErrorToString(file_error_to_app)})}};
+  }
+
+  if (!base::CreateDirectoryAndGetError(to_app_trusted_resources,
+                                        &file_error_to_app)) {
+    return {
+        .error_log = {CreateError(
+            {"Destination app manifest trusted icons directory could not be "
+             "created: ",
+             to_app_trusted_resources.AsUTF8Unsafe(),
+             " with error: ", base::File::ErrorToString(file_error_to_app)})}};
+  }
+
+  TypedResult<bool> manifest_icons_copy = ReplacePurposedIcons(
+      from_app_resources_directory, to_app_resources_directory);
+  if (manifest_icons_copy.HasErrors()) {
+    return manifest_icons_copy;
+  }
+
+  TypedResult<bool> trusted_icons_copy = ReplacePurposedIcons(
+      from_app_trusted_resources, to_app_trusted_resources);
+  if (trusted_icons_copy.HasErrors()) {
+    return trusted_icons_copy;
+  }
+
   return {.value = true};
 }
 
@@ -1457,8 +1507,7 @@ WebAppIconManager::FindIconMatchBigger(
   if (!web_app)
     return std::nullopt;
 
-  if (base::FeatureList::IsEnabled(features::kWebAppUsePrimaryIcon) &&
-      !skip_trusted_icons_for_favicons) {
+  if (!skip_trusted_icons_for_favicons) {
     // Must iterate through purposes in order given.
     for (IconPurpose purpose : purposes) {
       if (purpose == IconPurpose::MONOCHROME) {
@@ -1509,14 +1558,8 @@ void WebAppIconManager::ReadTrustedIconsWithFallbackToManifestIcons(
     return;
   }
 
-  // If the trusted icon usage is not enabled in the web applications system,
-  // fallback to using the API to read manifest icons.
-  if (!base::FeatureList::IsEnabled(features::kWebAppUsePrimaryIcon)) {
-    ReadUntrustedIcons(app_id, purpose_for_fallback, icon_sizes,
-                       std::move(callback));
-    return;
-  }
-
+  // ReadTrustedIconsBlocking() already takes care of the fallback flow to
+  // reading manifest icon bitmaps.
   icon_task_runner_->PostTaskAndReplyWithResult(
       FROM_HERE,
       base::BindOnce(
@@ -1601,21 +1644,19 @@ void WebAppIconManager::ReadIconsLastUpdateTime(
   bool consider_trusted_icons = false;
   IconPurpose purpose = IconPurpose::ANY;
 
-  if (base::FeatureList::IsEnabled(features::kWebAppUsePrimaryIcon)) {
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS)
-    if (!web_app->stored_trusted_icon_sizes(IconPurpose::MASKABLE).empty()) {
-      sizes_px = web_app->stored_trusted_icon_sizes(IconPurpose::MASKABLE);
-      consider_trusted_icons = true;
-      purpose = IconPurpose::MASKABLE;
-    }
+  if (!web_app->stored_trusted_icon_sizes(IconPurpose::MASKABLE).empty()) {
+    sizes_px = web_app->stored_trusted_icon_sizes(IconPurpose::MASKABLE);
+    consider_trusted_icons = true;
+    purpose = IconPurpose::MASKABLE;
+  }
 #endif  //  BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS)
 
-    if (sizes_px.empty() &&
-        !web_app->stored_trusted_icon_sizes(IconPurpose::ANY).empty()) {
-      sizes_px = web_app->stored_trusted_icon_sizes(IconPurpose::ANY);
-      consider_trusted_icons = true;
-      purpose = IconPurpose::ANY;
-    }
+  if (sizes_px.empty() &&
+      !web_app->stored_trusted_icon_sizes(IconPurpose::ANY).empty()) {
+    sizes_px = web_app->stored_trusted_icon_sizes(IconPurpose::ANY);
+    consider_trusted_icons = true;
+    purpose = IconPurpose::ANY;
   }
 
   if (sizes_px.empty()) {
@@ -1658,22 +1699,20 @@ void WebAppIconManager::ReadAllIcons(const webapps::AppId& app_id,
         std::vector<SquareSizePx>(sizes_px.begin(), sizes_px.end());
   }
 
-  if (base::FeatureList::IsEnabled(features::kWebAppUsePrimaryIcon)) {
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS)
-    if (!web_app->stored_trusted_icon_sizes(IconPurpose::MASKABLE).empty()) {
-      const SortedSizesPx& sizes_px =
-          web_app->stored_trusted_icon_sizes(IconPurpose::MASKABLE);
-      trusted_icon_purposes_to_sizes[IconPurpose::MASKABLE] =
-          std::vector<SquareSizePx>(sizes_px.begin(), sizes_px.end());
-    }
+  if (!web_app->stored_trusted_icon_sizes(IconPurpose::MASKABLE).empty()) {
+    const SortedSizesPx& sizes_px =
+        web_app->stored_trusted_icon_sizes(IconPurpose::MASKABLE);
+    trusted_icon_purposes_to_sizes[IconPurpose::MASKABLE] =
+        std::vector<SquareSizePx>(sizes_px.begin(), sizes_px.end());
+  }
 #endif  //  BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS)
 
-    if (trusted_icon_purposes_to_sizes.empty()) {
-      const SortedSizesPx& sizes_px =
-          web_app->stored_trusted_icon_sizes(IconPurpose::ANY);
-      trusted_icon_purposes_to_sizes[IconPurpose::ANY] =
-          std::vector<SquareSizePx>(sizes_px.begin(), sizes_px.end());
-    }
+  if (trusted_icon_purposes_to_sizes.empty()) {
+    const SortedSizesPx& sizes_px =
+        web_app->stored_trusted_icon_sizes(IconPurpose::ANY);
+    trusted_icon_purposes_to_sizes[IconPurpose::ANY] =
+        std::vector<SquareSizePx>(sizes_px.begin(), sizes_px.end());
   }
 
   icon_task_runner_->PostTaskAndReplyWithResult(
@@ -1722,21 +1761,18 @@ void WebAppIconManager::GetIconsSizeForApp(
     }
   }
 
-  // Populate trusted icon sizes too if enabled.
-  if (base::FeatureList::IsEnabled(features::kWebAppUsePrimaryIcon)) {
-    for (IconPurpose purpose : kIconPurposes) {
-      if (purpose == IconPurpose::MONOCHROME) {
-        continue;
-      }
-      for (SquareSizePx size : provider_->registrar_unsafe()
-                                   .GetAppById(app_id)
-                                   ->stored_trusted_icon_sizes(purpose)) {
-        IconId icon_id(app_id, purpose, size);
-        base::FilePath icon_path = GetIconsFileNameForChildDirectory(
-            web_apps_directory_, base::FilePath(kTrustedIconFolderName),
-            icon_id);
-        icon_paths.push_back(icon_path);
-      }
+  // Populate trusted icon sizes too.
+  for (IconPurpose purpose : kIconPurposes) {
+    if (purpose == IconPurpose::MONOCHROME) {
+      continue;
+    }
+    for (SquareSizePx size : provider_->registrar_unsafe()
+                                 .GetAppById(app_id)
+                                 ->stored_trusted_icon_sizes(purpose)) {
+      IconId icon_id(app_id, purpose, size);
+      base::FilePath icon_path = GetIconsFileNameForChildDirectory(
+          web_apps_directory_, base::FilePath(kTrustedIconFolderName), icon_id);
+      icon_paths.push_back(icon_path);
     }
   }
 
@@ -1801,7 +1837,7 @@ void WebAppIconManager::OverwriteAppIconsFromPendingIcons(
     OverwriteAppIconsFromPendingIconsCallback callback) {
   TRACE_EVENT0("ui", "WebAppIconManager::OverwriteIconsFromPendingIcons");
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (!provider_->registrar_unsafe().IsInRegistrar(app_id)) {
+  if (!provider_->registrar_unsafe().GetInstallState(app_id)) {
     std::move(callback).Run(false);
     return;
   }
@@ -1829,7 +1865,7 @@ void WebAppIconManager::DeletePendingIconData(
     DeletePendingIconDataCallback callback) {
   TRACE_EVENT0("ui", "WebAppIconManager::DeletePendingIconData");
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (!provider_->registrar_unsafe().IsInRegistrar(app_id)) {
+  if (!provider_->registrar_unsafe().GetInstallState(app_id)) {
     std::move(callback).Run(false);
     return;
   }
@@ -1870,6 +1906,32 @@ void WebAppIconManager::DeletePendingIconData(
             })
                 .Then(base::BindOnce(&LogErrorsCallCallback<bool>, GetWeakPtr(),
                                      std::move(callback))));
+}
+
+void WebAppIconManager::CopyIconsFromOneAppToAnother(
+    const webapps::AppId& from_app_id,
+    const webapps::AppId& to_app_id,
+    base::PassKey<ApplyManifestMigrationCommand>,
+    AppIconsCopySuccessCallback callback) {
+  TRACE_EVENT0("ui", "WebAppIconManager::OverwriteIconsFromPendingIcons");
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  if (!provider_->registrar_unsafe().GetInstallState(from_app_id) ||
+      !provider_->registrar_unsafe().GetInstallState(to_app_id)) {
+    std::move(callback).Run(false);
+    return;
+  }
+
+  const base::FilePath from_app_resources_directory =
+      GetManifestResourcesDirectoryForApp(web_apps_directory_, from_app_id);
+  const base::FilePath to_app_resources_directory =
+      GetManifestResourcesDirectoryForApp(web_apps_directory_, to_app_id);
+
+  icon_task_runner_->PostTaskAndReplyWithResult(
+      FROM_HERE,
+      base::BindOnce(&CopyAppIconsFromOneAppToAnotherBlocking,
+                     from_app_resources_directory, to_app_resources_directory),
+      base::BindOnce(&LogErrorsCallCallback<bool>, GetWeakPtr(),
+                     std::move(callback)));
 }
 
 SkBitmap WebAppIconManager::GetFavicon(const webapps::AppId& app_id) const {
@@ -1998,8 +2060,7 @@ void WebAppIconManager::CheckForEmptyOrMissingIconFiles(
   for (const IconPurpose& purpose : kIconPurposes) {
     manifest_icon_purpose_to_sizes[purpose] =
         web_app->downloaded_icon_sizes(purpose);
-    if (base::FeatureList::IsEnabled(features::kWebAppUsePrimaryIcon) &&
-        purpose != IconPurpose::MONOCHROME) {
+    if (purpose != IconPurpose::MONOCHROME) {
       trusted_icon_purpose_to_sizes[purpose] =
           web_app->stored_trusted_icon_sizes(purpose);
     }
@@ -2100,8 +2161,7 @@ WebAppIconManager::FindIconMatchSmaller(
   if (!web_app)
     return std::nullopt;
 
-  if (base::FeatureList::IsEnabled(features::kWebAppUsePrimaryIcon) &&
-      !skip_trusted_icons_for_favicons) {
+  if (!skip_trusted_icons_for_favicons) {
     // Must iterate through purposes in order given.
     for (IconPurpose purpose : purposes) {
       if (purpose == IconPurpose::MONOCHROME) {

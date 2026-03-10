@@ -23,8 +23,9 @@ import org.chromium.base.Callback;
 import org.chromium.base.MemoryPressureListener;
 import org.chromium.base.ObserverList;
 import org.chromium.base.memory.MemoryPressureCallback;
-import org.chromium.base.supplier.ObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.NonNullObservableSupplier;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
@@ -49,19 +50,16 @@ import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.preferences.PrefServiceUtil;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.search_engines.TemplateUrlServiceFactory;
+import org.chromium.chrome.browser.setup_list.SetupListModuleUtils;
 import org.chromium.chrome.browser.signin.SigninAndHistorySyncActivityLauncherImpl;
 import org.chromium.chrome.browser.signin.services.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.services.SigninManager;
 import org.chromium.chrome.browser.ui.native_page.TouchEnabledDelegate;
-import org.chromium.chrome.browser.ui.signin.PersonalizedSigninPromoView;
-import org.chromium.chrome.browser.ui.signin.SyncPromoController;
-import org.chromium.chrome.browser.ui.signin.account_picker.AccountPickerBottomSheetStrings;
 import org.chromium.chrome.browser.ui.signin.signin_promo.NtpSigninPromoDelegate;
 import org.chromium.chrome.browser.ui.signin.signin_promo.SigninPromoCoordinator;
 import org.chromium.chrome.browser.xsurface.ListLayoutHelper;
 import org.chromium.chrome.browser.xsurface.feed.FeedUserInteractionReliabilityLogger.ClosedReason;
 import org.chromium.chrome.browser.xsurface.feed.StreamType;
-import org.chromium.components.browser_ui.widget.ListItemBuilder;
 import org.chromium.components.browser_ui.widget.displaystyle.DisplayStyleObserver;
 import org.chromium.components.browser_ui.widget.displaystyle.HorizontalDisplayStyle;
 import org.chromium.components.browser_ui.widget.displaystyle.UiConfig;
@@ -73,14 +71,11 @@ import org.chromium.components.signin.SigninFeatureMap;
 import org.chromium.components.signin.SigninFeatures;
 import org.chromium.components.signin.identitymanager.IdentityManager;
 import org.chromium.components.signin.identitymanager.PrimaryAccountChangeEvent;
-import org.chromium.components.signin.metrics.SigninAccessPoint;
 import org.chromium.components.user_prefs.UserPrefs;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.listmenu.ListMenu;
 import org.chromium.ui.listmenu.ListMenuItemProperties;
-import org.chromium.ui.modelutil.MVCListAdapter;
-import org.chromium.ui.modelutil.MVCListAdapter.ModelList;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyListModel;
 import org.chromium.ui.modelutil.PropertyModel;
@@ -149,53 +144,6 @@ public class FeedSurfaceMediator
     }
 
     /**
-     * The {@link SignInPromo} for the Feed. TODO(huayinz): Update content and visibility through a
-     * ModelChangeProcessor.
-     */
-    private class LegacyFeedSignInPromo extends SignInPromo {
-        LegacyFeedSignInPromo(
-                SigninManager signinManager, SyncPromoController syncPromoController) {
-            super(signinManager, syncPromoController);
-            maybeUpdateSignInPromo();
-        }
-
-        @Override
-        protected void setVisibilityInternal(boolean visible) {
-            if (isVisible() == visible) return;
-
-            super.setVisibilityInternal(visible);
-            mCoordinator.updateHeaderViews(visible ? mCoordinator.getSigninPromoView() : null);
-            maybeUpdateSignInPromo();
-        }
-
-        @Override
-        protected void notifyDataChanged() {
-            maybeUpdateSignInPromo();
-        }
-
-        /** Update the content displayed in {@link PersonalizedSigninPromoView}. */
-        private void maybeUpdateSignInPromo() {
-            // Only call #setupPromoViewFromCache() if SignInPromo is visible to avoid potentially
-            // blocking the UI thread for several seconds if the accounts cache is not populated
-            // yet.
-            if (isVisible()) {
-                mSyncPromoController.setUpSyncPromoView(
-                        mProfileDataCache,
-                        mCoordinator
-                                .getSigninPromoView()
-                                .findViewById(R.id.signin_promo_view_container),
-                        this::onDismissPromo);
-            }
-        }
-
-        @Override
-        public void onDismissPromo() {
-            super.onDismissPromo();
-            mCoordinator.updateHeaderViews(/* signinPromoView= */ null);
-        }
-    }
-
-    /**
      * Wrapper class on top of {@link SigninPromoCoordinator} to also account for suggestions
      * available signal. TODO(crbug.com/448227402): remove this class once Seamless Sign-in is
      * launched.
@@ -215,7 +163,8 @@ public class FeedSurfaceMediator
                                     mContext,
                                     mProfile,
                                     SigninAndHistorySyncActivityLauncherImpl.get(),
-                                    this::onPromoStateChange));
+                                    this::onPromoStateChange,
+                                    SetupListModuleUtils::isSetupListActive));
             mCanShowPersonalizedSuggestions = canShowPersonalizedSuggestions;
             mCanShowPromo =
                     mSigninPromoCoordinator.canShowPromo() && mCanShowPersonalizedSuggestions;
@@ -309,8 +258,8 @@ public class FeedSurfaceMediator
     // It is non-null for NTP on tablets.
     private @Nullable final UiConfig mUiConfig;
     private final DisplayStyleObserver mDisplayStyleObserver = this::onDisplayStyleChanged;
-    private final ObservableSupplierImpl<Integer> mGetRestoringStateSupplier =
-            new ObservableSupplierImpl<>(RestoringState.WAITING_TO_RESTORE);
+    private final SettableNonNullObservableSupplier<Integer> mGetRestoringStateSupplier =
+            ObservableSuppliers.createNonNull(RestoringState.WAITING_TO_RESTORE);
 
     private RecyclerView.@Nullable OnScrollListener mStreamScrollListener;
     private final ObserverList<ScrollListener> mScrollListeners = new ObserverList<>();
@@ -318,7 +267,6 @@ public class FeedSurfaceMediator
     private @Nullable ContentChangedListener mStreamContentChangedListener;
     private @Nullable MemoryPressureCallback mMemoryPressureCallback;
     private @Nullable FeedSigninPromo mSigninPromo;
-    private @Nullable SignInPromo mLegacySignInPromo;
     private final RecyclerViewAnimationFinishDetector mRecyclerViewAnimationFinishDetector =
             new RecyclerViewAnimationFinishDetector();
 
@@ -330,9 +278,6 @@ public class FeedSurfaceMediator
     private int mThumbnailScrollY;
     private int mRestoreTabId;
     private int mHeaderCount;
-
-    /** The model representing feed-related cog menu items. */
-    private @Nullable ModelList mFeedMenuModel;
 
     /** Whether the Feed content is loading. */
     private boolean mIsLoadingFeed;
@@ -351,7 +296,6 @@ public class FeedSurfaceMediator
     private final boolean mIsNewTabSearchEngineUrlAndroidEnabled;
     private boolean mIsPropertiesInitializedForStream;
     private @ClosedReason int mClosedReason = ClosedReason.SUSPEND_APP;
-    private final boolean mIsNewTabPageCustomizationEnabled;
 
     /**
      * @param coordinator The {@link FeedSurfaceCoordinator} that interacts with this class.
@@ -388,7 +332,6 @@ public class FeedSurfaceMediator
         mOptionsCoordinator.setOptionsListener(this);
         mIsNewTabSearchEngineUrlAndroidEnabled =
                 DseNewTabUrlManager.isNewTabSearchEngineUrlAndroidEnabled();
-        mIsNewTabPageCustomizationEnabled = ChromeFeatureList.sNewTabPageCustomization.isEnabled();
         mUiConfig = uiConfig;
 
         /*
@@ -641,15 +584,6 @@ public class FeedSurfaceMediator
                     SectionHeaderListProperties.ON_TAB_SELECTED_CALLBACK_KEY,
                     new FeedSurfaceHeaderSelectedCallback());
 
-            if (!mIsNewTabPageCustomizationEnabled) {
-                // Build menu after section enabled key is set.
-                mFeedMenuModel = buildMenuItems();
-
-                mSectionHeaderModel.set(
-                        SectionHeaderListProperties.MENU_MODEL_LIST_KEY, mFeedMenuModel);
-                mSectionHeaderModel.set(SectionHeaderListProperties.MENU_DELEGATE_KEY, this);
-            }
-
             setUpWebFeedTab();
 
             // Set the current tab index to what restoreSavedInstanceState had.
@@ -785,8 +719,9 @@ public class FeedSurfaceMediator
                     headerModel.set(SectionHeaderProperties.UNREAD_CONTENT_KEY, hasUnreadContent);
                     mHasContentListener.hasContentChanged(stream.getStreamKind(), hasUnreadContent);
                 };
-        Boolean hasUnreadContent = stream.hasUnreadContent().addObserver(callback);
-        callback.onResult(Boolean.TRUE.equals(hasUnreadContent));
+        Boolean hasUnreadContent =
+                stream.hasUnreadContent().addSyncObserverAndPostIfNonNull(callback);
+        callback.onResult(hasUnreadContent);
     }
 
     private int getTabIdForSection(@StreamKind int streamKind) {
@@ -977,8 +912,6 @@ public class FeedSurfaceMediator
         boolean signInPromoVisible = shouldShowSigninPromo();
         if (signInPromoVisible && mSigninPromo != null) {
             mCoordinator.updateHeaderViews(mSigninPromo.getPromoView());
-        } else if (signInPromoVisible && mLegacySignInPromo != null) {
-            mCoordinator.updateHeaderViews(mCoordinator.getSigninPromoView());
         } else {
             mCoordinator.updateHeaderViews(/* signinPromoView= */ null);
         }
@@ -996,35 +929,13 @@ public class FeedSurfaceMediator
         // TODO(crbug.com/352735671): Move SignInPromo.shouldCreatePromo inside FeedSigninPromo
         //  after phase 2 follow-up launch.§
         boolean shouldCreatePromo = SignInPromo.shouldCreatePromo();
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.UNO_PHASE_2_FOLLOW_UP)) {
-            if (!shouldCreatePromo) {
-                return false;
-            }
-            if (mSigninPromo == null) {
-                mSigninPromo = new FeedSigninPromo(isSuggestionsVisible());
-            }
-            return mSigninPromo.canShowPromo();
-        } else {
-            AccountPickerBottomSheetStrings bottomSheetStrings =
-                    new AccountPickerBottomSheetStrings.Builder(
-                                    mContext.getString(
-                                            R.string.signin_account_picker_bottom_sheet_title))
-                            .build();
-            SyncPromoController promoController =
-                    new SyncPromoController(
-                            mProfile,
-                            bottomSheetStrings,
-                            SigninAccessPoint.NTP_FEED_TOP_PROMO,
-                            SigninAndHistorySyncActivityLauncherImpl.get());
-            if (!shouldCreatePromo || !promoController.canShowSyncPromo()) {
-                return false;
-            }
-            if (mLegacySignInPromo == null) {
-                mLegacySignInPromo = new LegacyFeedSignInPromo(mSigninManager, promoController);
-                mLegacySignInPromo.setCanShowPersonalizedSuggestions(isSuggestionsVisible());
-            }
-            return mLegacySignInPromo.isVisible();
+        if (!shouldCreatePromo) {
+            return false;
         }
+        if (mSigninPromo == null) {
+            mSigninPromo = new FeedSigninPromo(isSuggestionsVisible());
+        }
+        return mSigninPromo.canShowPromo();
     }
 
     /** Clear any dependencies related to the {@link Stream}. */
@@ -1040,10 +951,6 @@ public class FeedSurfaceMediator
             mMemoryPressureCallback = null;
         }
 
-        if (mLegacySignInPromo != null) {
-            mLegacySignInPromo.destroy();
-            mLegacySignInPromo = null;
-        }
         if (mSigninPromo != null) {
             mSigninPromo.destroy();
             mSigninPromo = null;
@@ -1063,6 +970,7 @@ public class FeedSurfaceMediator
             if (mStreamHolder != null) {
                 assumeNonNull(mStreamContentChangedListener);
                 mStreamHolder.removeOnContentChangedListener(mStreamContentChangedListener);
+                mStreamHolder.destroy();
                 mStreamHolder = null;
             }
         }
@@ -1148,9 +1056,6 @@ public class FeedSurfaceMediator
 
         boolean suggestionsVisible = isSuggestionsVisible();
 
-        if (mLegacySignInPromo != null) {
-            mLegacySignInPromo.setCanShowPersonalizedSuggestions(suggestionsVisible);
-        }
         if (mSigninPromo != null) {
             mSigninPromo.setCanShowPersonalizedSuggestions(suggestionsVisible);
         }
@@ -1167,12 +1072,6 @@ public class FeedSurfaceMediator
                     .set(SectionHeaderProperties.HEADER_TEXT_KEY, headerText);
 
             setHeaderIndicatorState(suggestionsVisible);
-
-            if (!mIsNewTabPageCustomizationEnabled) {
-                // Update toggleswitch item, which is last item in list.
-                mSectionHeaderModel.set(
-                        SectionHeaderListProperties.MENU_MODEL_LIST_KEY, buildMenuItems());
-            }
 
             PropertyModel currentStreamHeaderModel =
                     mSectionHeaderModel
@@ -1219,10 +1118,6 @@ public class FeedSurfaceMediator
         // which is called by the prefService observer.
         getPrefService().setBoolean(Pref.ARTICLES_LIST_VISIBLE, isExpanded);
 
-        if (!mIsNewTabPageCustomizationEnabled) {
-            FeedUma.recordArticlesListVisible(isExpanded);
-        }
-
         int streamType =
                 assumeNonNull(
                                 mTabToStreamMap.get(
@@ -1260,62 +1155,6 @@ public class FeedSurfaceMediator
         return isExpanded
                 ? res.getString(R.string.ntp_discover_on_branded)
                 : res.getString(R.string.ntp_discover_off_branded);
-    }
-
-    private ModelList buildMenuItems() {
-        assert mSectionHeaderModel != null;
-
-        ModelList itemList = new ModelList();
-        int iconId = 0;
-
-        if (FeedServiceBridge.isSignedIn()) {
-            if (WebFeedBridge.isWebFeedEnabled()) {
-                itemList.add(
-                        new ListItemBuilder()
-                                .withTitleRes(R.string.ntp_manage_feed)
-                                .withMenuId(R.id.ntp_feed_header_menu_item_manage)
-                                .withStartIconRes(iconId)
-                                .build());
-            } else {
-                itemList.add(
-                        new ListItemBuilder()
-                                .withTitleRes(R.string.ntp_manage_my_activity)
-                                .withMenuId(R.id.ntp_feed_header_menu_item_activity)
-                                .withStartIconRes(iconId)
-                                .build());
-                itemList.add(
-                        new ListItemBuilder()
-                                .withTitleRes(R.string.ntp_manage_interests)
-                                .withMenuId(R.id.ntp_feed_header_menu_item_interest)
-                                .withStartIconRes(iconId)
-                                .build());
-            }
-        }
-        itemList.add(
-                new ListItemBuilder()
-                        .withTitleRes(R.string.learn_more)
-                        .withMenuId(R.id.ntp_feed_header_menu_item_learn)
-                        .withStartIconRes(iconId)
-                        .build());
-        itemList.add(
-                getMenuToggleSwitch(
-                        mSectionHeaderModel.get(SectionHeaderListProperties.IS_SECTION_ENABLED_KEY),
-                        iconId));
-        return itemList;
-    }
-
-    /**
-     * Returns the menu list item that represents turning the feed on/off.
-     *
-     * @param isEnabled Whether the feed section is currently enabled.
-     * @param iconId IconId for the list item if any.
-     */
-    private MVCListAdapter.ListItem getMenuToggleSwitch(boolean isEnabled, int iconId) {
-        return new ListItemBuilder()
-                .withTitleRes(isEnabled ? R.string.ntp_turn_off_feed : R.string.ntp_turn_on_feed)
-                .withMenuId(R.id.ntp_feed_header_menu_item_toggle_switch)
-                .withStartIconRes(iconId)
-                .build();
     }
 
     /** Whether a new thumbnail should be captured. */
@@ -1448,6 +1287,7 @@ public class FeedSurfaceMediator
         showOrHideFeed();
     }
 
+    // TODO(crbug.com/376238770): Remove the feed menu related code
     @Override
     public void onItemSelected(PropertyModel item, View view) {
         assert mSectionHeaderModel != null;
@@ -1507,12 +1347,8 @@ public class FeedSurfaceMediator
      *
      * @return The restoring state {@link RestoringState}.
      */
-    public ObservableSupplier<Integer> getRestoringStateSupplier() {
+    public NonNullObservableSupplier<Integer> getRestoringStateSupplier() {
         return mGetRestoringStateSupplier;
-    }
-
-    public @Nullable SignInPromo getSignInPromoForTesting() {
-        return mLegacySignInPromo;
     }
 
     void manualRefresh(Callback<Boolean> callback) {

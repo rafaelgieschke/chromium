@@ -86,12 +86,6 @@ BASE_DECLARE_FEATURE(kWebAuthnPublishPrelinkingInfo);
 COMPONENT_EXPORT(FIDO_PUBLIC)
 BASE_DECLARE_FEATURE(kWebAuthnHelloSignal);
 
-#if BUILDFLAG(IS_ANDROID)
-// Enables the WebAuthn Signal API for Chrome on Android.
-COMPONENT_EXPORT(FIDO_PUBLIC)
-BASE_DECLARE_FEATURE(kWebAuthnAndroidSignal);
-#endif  // BUILDFLAG(IS_ANDROID)
-
 // When enabled, skips configuring hybrid when Windows can do hybrid. Hybrid may
 // still be delegated to Windows regardless of this flag.
 COMPONENT_EXPORT(FIDO_PUBLIC)
@@ -102,18 +96,9 @@ BASE_DECLARE_FEATURE(kWebAuthnSkipHybridConfigIfSystemSupported);
 COMPONENT_EXPORT(FIDO_PUBLIC)
 BASE_DECLARE_FEATURE(kDigitalCredentialsHybridLinking);
 
-// Enable passkey upgrade requests in Google Password Manager.
-COMPONENT_EXPORT(FIDO_PUBLIC)
-BASE_DECLARE_FEATURE(kWebAuthnPasskeyUpgrade);
-
 // Checks attestation from the enclave service.
 COMPONENT_EXPORT(FIDO_PUBLIC)
 BASE_DECLARE_FEATURE(kWebAuthnEnclaveAttestation);
-
-// Enables using the Microsoft Software Key Storage Provider to store
-// unexportable keys when a TPM is not available.
-COMPONENT_EXPORT(FIDO_PUBLIC)
-BASE_DECLARE_FEATURE(kWebAuthnMicrosoftSoftwareUnexportableKeyProvider);
 
 // Enables hiding passkeys instead of hard deleting them when reported as
 // obsolete by the signal API.
@@ -164,14 +149,17 @@ BASE_DECLARE_FEATURE(kAuthenticatorPasswordsOnlyImmediateRequests);
 COMPONENT_EXPORT(FIDO_PUBLIC)
 BASE_DECLARE_FEATURE(kWebAuthnNewRefreshFlow);
 
-// When running an assertion operation, sends the enclave a hash of the client
-// data JSON instead of the full contents.
-COMPONENT_EXPORT(FIDO_PUBLIC)
-BASE_DECLARE_FEATURE(kWebAuthenticationHashClientDataJsonForEnclave);
-
 // Enables to save keys from out of context ("opportunistic") retrieval.
 COMPONENT_EXPORT(FIDO_PUBLIC)
 BASE_DECLARE_FEATURE(kWebAuthnOpportunisticRetrieval);
+
+// Parameter controlling the time window (in seconds) for keeping the cached
+// opportunistically retrieved key in case its Gaia Id doesn't match to primary
+// signed-in account.
+COMPONENT_EXPORT(FIDO_PUBLIC)
+BASE_DECLARE_FEATURE_PARAM(
+    int,
+    kWebAuthnOpportunisticRetrievalTimeToKeepCachedKeySeconds);
 
 // Enable support for WebAuthn hints through the Windows WebAuthn API.
 // https://w3c.github.io/webauthn/#enum-hints.
@@ -181,6 +169,25 @@ BASE_DECLARE_FEATURE(kWebAuthenticationWindowsHints);
 // Enables the logic of refreshing the state of GPM Enclave Controller.
 COMPONENT_EXPORT(FIDO_PUBLIC)
 BASE_DECLARE_FEATURE(kWebAuthnEnableRefreshingStateOfGpmEnclaveController);
+
+// Support CTAP2.2 hmac-secret-mc extension in make credential request.
+COMPONENT_EXPORT(FIDO_PUBLIC)
+BASE_DECLARE_FEATURE(kWebAuthnHmacSecretMcExtension);
+
+// Enables support for FedCM requests through the Authenticator interface.
+COMPONENT_EXPORT(FIDO_PUBLIC)
+BASE_DECLARE_FEATURE(kFedCmInAuthenticator);
+
+// Prompt the user to set a new PIN when user verification is required to
+// fulfill a GPM passkey operation but no system UV or GPM PIN is available.
+COMPONENT_EXPORT(FIDO_PUBLIC)
+BASE_DECLARE_FEATURE(kWebAuthnCreatePinWhenSystemUvDisabled);
+
+#if BUILDFLAG(IS_WIN)
+// Enables support for PRF on create on Windows.
+COMPONENT_EXPORT(FIDO_PUBLIC)
+BASE_DECLARE_FEATURE(kWebAuthnWinPrfOnCreate);
+#endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace device
 

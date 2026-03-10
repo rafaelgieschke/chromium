@@ -7,8 +7,6 @@ package org.chromium.chrome.browser;
 import static org.junit.Assert.assertNotNull;
 import static org.mockito.Mockito.when;
 
-import static org.chromium.chrome.browser.TabbedMismatchedIndicesHandler.HISTOGRAM_MISMATCHED_INDICES_ACTIVITY_CREATION_TIME_DELTA;
-
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build.VERSION_CODES;
@@ -54,9 +52,7 @@ import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.incognito.IncognitoWindowNightModeStateProvider;
-import org.chromium.chrome.browser.multiwindow.InstanceInfo;
 import org.chromium.chrome.browser.multiwindow.MultiInstanceManager;
-import org.chromium.chrome.browser.multiwindow.MultiInstanceManager.NewWindowAppSource;
 import org.chromium.chrome.browser.multiwindow.MultiInstanceManager.PersistedInstanceType;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.night_mode.NightModeStateProvider;
@@ -71,6 +67,7 @@ import org.chromium.chrome.browser.tabmodel.RedirectTabCreator;
 import org.chromium.chrome.browser.tabmodel.TabClosureParams;
 import org.chromium.chrome.browser.tabmodel.TabGroupMetadata;
 import org.chromium.chrome.browser.tabmodel.TabGroupModelFilter;
+import org.chromium.chrome.browser.tabmodel.TabList;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabstrip.StripVisibilityState;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -92,7 +89,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
 /** Instrumentation tests for ChromeTabbedActivity. */
 @RunWith(ChromeJUnit4ClassRunner.class)
@@ -341,11 +337,6 @@ public class ChromeTabbedActivityTest {
     @MediumTest
     @MinAndroidSdkLevel(VERSION_CODES.S)
     public void testHandleMismatchedIndices_ActivityFinishing() {
-        HistogramWatcher histogramWatcher =
-                HistogramWatcher.newBuilder()
-                        .expectAnyRecordTimes(
-                                HISTOGRAM_MISMATCHED_INDICES_ACTIVITY_CREATION_TIME_DELTA, 1)
-                        .build();
         // Create two new ChromeTabbedActivity's.
         ChromeTabbedActivity activity1 = createActivityForMismatchedIndicesTest();
         ChromeTabbedActivity activity2 = createActivityForMismatchedIndicesTest();
@@ -368,19 +359,12 @@ public class ChromeTabbedActivityTest {
                         .getTabModelOrchestratorSupplier()
                         .get()
                         .getTabPersistentStoreDestroyedEarlyForTesting());
-        histogramWatcher.assertExpected();
     }
 
     @Test
     @MediumTest
     @MinAndroidSdkLevel(VERSION_CODES.S)
     public void testHandleMismatchedIndices_ActivityInSameTask() {
-        HistogramWatcher histogramWatcher =
-                HistogramWatcher.newBuilder()
-                        .expectAnyRecordTimes(
-                                HISTOGRAM_MISMATCHED_INDICES_ACTIVITY_CREATION_TIME_DELTA, 1)
-                        .build();
-
         // Create two new ChromeTabbedActivity's.
         ChromeTabbedActivity activity1 = createActivityForMismatchedIndicesTest();
         ChromeTabbedActivity activity2 = createActivityForMismatchedIndicesTest();
@@ -403,20 +387,12 @@ public class ChromeTabbedActivityTest {
 
         // activity1 should be subsequently destroyed.
         ApplicationTestUtils.waitForActivityState(activity1, Stage.DESTROYED);
-
-        histogramWatcher.assertExpected();
     }
 
     @Test
     @MediumTest
     @MinAndroidSdkLevel(VERSION_CODES.S)
     public void testHandleMismatchedIndices_ActivityNotInAppTasks() {
-        HistogramWatcher histogramWatcher =
-                HistogramWatcher.newBuilder()
-                        .expectAnyRecordTimes(
-                                HISTOGRAM_MISMATCHED_INDICES_ACTIVITY_CREATION_TIME_DELTA, 1)
-                        .build();
-
         // Create two new ChromeTabbedActivity's.
         ChromeTabbedActivity activity1 = createActivityForMismatchedIndicesTest();
         ChromeTabbedActivity activity2 = createActivityForMismatchedIndicesTest();
@@ -439,8 +415,6 @@ public class ChromeTabbedActivityTest {
 
         // activity1 should be subsequently destroyed.
         ApplicationTestUtils.waitForActivityState(activity1, Stage.DESTROYED);
-
-        histogramWatcher.assertExpected();
     }
 
     private ChromeTabbedActivity createActivityForMismatchedIndicesTest() {
@@ -657,6 +631,38 @@ public class ChromeTabbedActivityTest {
                             return mActivity.backShouldCloseTab(tab);
                         });
         Assert.assertTrue(ret);
+    }
+
+    @Test
+    @MediumTest
+    public void testBackShouldCloseTab_FromChromeUIWithParent() {
+        mActivityTestRule.getTestServer();
+        Tab tabWithParent =
+                ThreadUtils.runOnUiThreadBlocking(
+                        () -> {
+                            ChromeTabCreator tabCreator = mActivity.getCurrentTabCreator();
+                            return tabCreator.createNewTab(
+                                    new LoadUrlParams("about:blank"),
+                                    TabLaunchType.FROM_CHROME_UI,
+                                    mActivity.getActivityTab());
+                        });
+        boolean retWithParent =
+                ThreadUtils.runOnUiThreadBlocking(
+                        () -> mActivity.backShouldCloseTab(tabWithParent));
+        Assert.assertTrue(retWithParent);
+
+        Tab tabNoParent =
+                ThreadUtils.runOnUiThreadBlocking(
+                        () -> {
+                            ChromeTabCreator tabCreator = mActivity.getCurrentTabCreator();
+                            return tabCreator.createNewTab(
+                                    new LoadUrlParams("about:blank"),
+                                    TabLaunchType.FROM_CHROME_UI,
+                                    null);
+                        });
+        boolean retNoParent =
+                ThreadUtils.runOnUiThreadBlocking(() -> mActivity.backShouldCloseTab(tabNoParent));
+        Assert.assertFalse(retNoParent);
     }
 
     @Test
@@ -1168,28 +1174,14 @@ public class ChromeTabbedActivityTest {
         // 3. Get MultiInstanceManager for activity1 and InstanceInfo for activity2.
         MultiInstanceManager mim1 = mActivity.getMultiInstanceMangerForTesting();
 
-        final AtomicReference<InstanceInfo> instanceInfo2Ref = new AtomicReference<>();
-        CriteriaHelper.pollUiThread(
-                () -> {
-                    List<InstanceInfo> instanceInfos =
-                            mim1.getInstanceInfo(PersistedInstanceType.ANY);
-                    for (InstanceInfo info : instanceInfos) {
-                        if (info.taskId == activity2.getTaskId()) {
-                            instanceInfo2Ref.set(info);
-                            return true;
-                        }
-                    }
-                    return false;
-                },
-                "Could not find InstanceInfo for activity2");
-        InstanceInfo instanceInfo2 = instanceInfo2Ref.get();
-
         // 4. Move tab1 to activity2.
         ThreadUtils.runOnUiThreadBlocking(
-                () -> {
-                    mim1.moveTabsToWindow(
-                            instanceInfo2, List.of(tab1), -1, NewWindowAppSource.OTHER);
-                });
+                () ->
+                        mim1.moveTabsToWindowByIdChecked(
+                                activity2.getWindowIdForTesting(),
+                                List.of(tab1),
+                                /* destTabIndex= */ TabList.INVALID_TAB_INDEX,
+                                /* destGroupTabId= */ TabList.INVALID_TAB_INDEX));
 
         // 5. Verify tab1 is in activity2.
         CriteriaHelper.pollUiThread(
@@ -1201,9 +1193,12 @@ public class ChromeTabbedActivityTest {
 
         // 6. Move tab2 to activity2 and merge with tab1.
         ThreadUtils.runOnUiThreadBlocking(
-                () -> {
-                    mim1.moveTabsToWindowAndMergeToDest(instanceInfo2, List.of(tab2), tab1.getId());
-                });
+                () ->
+                        mim1.moveTabsToWindowByIdChecked(
+                                activity2.getWindowIdForTesting(),
+                                List.of(tab2),
+                                /* destTabIndex= */ TabList.INVALID_TAB_INDEX,
+                                /* destGroupTabId= */ tab1.getId()));
 
         // 7. Verify tab2 is in activity2 and merged with tab1.
         CriteriaHelper.pollUiThread(

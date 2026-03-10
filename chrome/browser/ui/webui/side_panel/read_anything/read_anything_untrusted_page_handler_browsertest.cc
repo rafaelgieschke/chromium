@@ -10,22 +10,30 @@
 #include <string>
 #include <vector>
 
+#include "base/command_line.h"
+#include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/run_until.h"
-#include "base/test/scoped_mock_time_message_loop_task_runner.h"
 #include "base/test/values_test_util.h"
 #include "base/values.h"
+#include "chrome/browser/pdf/pdf_extension_test_util.h"
+#include "chrome/browser/pdf/pdf_viewer_stream_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
+#include "chrome/browser/ui/actions/chrome_action_id.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/read_anything/read_anything_immersive_web_view.h"
 #include "chrome/browser/ui/read_anything/read_anything_prefs.h"
 #include "chrome/browser/ui/read_anything/read_anything_side_panel_controller.h"
 #include "chrome/browser/ui/read_anything/read_anything_side_panel_controller_utils.h"
+#include "chrome/browser/ui/side_panel/side_panel_entry.h"
+#include "chrome/browser/ui/side_panel/side_panel_enums.h"
+#include "chrome/browser/ui/side_panel/side_panel_registry.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_entry.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_enums.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_registry.h"
+#include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/common/extensions/extension_constants.h"
+#include "chrome/common/read_anything/read_anything.mojom-shared.h"
 #include "chrome/common/read_anything/read_anything.mojom.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -33,9 +41,13 @@
 #include "components/prefs/pref_value_map.h"
 #include "components/tabs/public/tab_interface.h"
 #include "components/translate/core/browser/translate_manager.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
+#include "content/public/test/browser_test_utils.h"
+#include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_web_ui.h"
 #include "mojo/public/mojom/base/values.mojom.h"
+#include "pdf/pdf_features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/accessibility/accessibility_features.h"
@@ -94,10 +106,11 @@ class MockPage : public read_anything::mojom::UntrustedPage {
                bool images_enabled,
                read_anything::mojom::Colors color,
                double speech_rate,
-               base::Value::Dict voices,
-               base::Value::List languages_enabled_in_pref,
+               base::DictValue voices,
+               base::ListValue languages_enabled_in_pref,
                read_anything::mojom::HighlightGranularity granularity,
-               read_anything::mojom::LineFocus line_focus));
+               read_anything::mojom::LineFocus last_non_disabled_line_focus,
+               bool line_focus_enabled));
   MOCK_METHOD(void,
               OnImageDataDownloaded,
               (const ui::AXTreeID&, int, const SkBitmap&));
@@ -119,11 +132,20 @@ class MockPage : public read_anything::mojom::UntrustedPage {
       void,
       OnGetPresentationState,
       (read_anything::mojom::ReadAnythingPresentationState presentation_state));
+  MOCK_METHOD(void, OnPinStatusReceived, (bool pin_state), (override));
+
 #if BUILDFLAG(IS_CHROMEOS)
   MOCK_METHOD(void, OnDeviceLocked, ());
 #else
   MOCK_METHOD(void, OnTtsEngineInstalled, ());
 #endif
+  MOCK_METHOD(void,
+              UpdateContent,
+              (const std::string& title, const std::string& content));
+  MOCK_METHOD(void,
+              OnReadabilityDistillationStateChanged,
+              (read_anything::mojom::ReadAnythingDistillationState state),
+              (override));
 
   mojo::Receiver<read_anything::mojom::UntrustedPage> receiver_{this};
 };
@@ -238,7 +260,7 @@ class ReadAnythingUntrustedPageHandlerTest
  public:
   ReadAnythingUntrustedPageHandlerTest() {
     std::vector<base::test::FeatureRef> enabled_features = {
-        features::kReadAnythingReadAloud, features::kReadAnythingLineFocus};
+        features::kReadAnythingLineFocus};
     std::vector<base::test::FeatureRef> disabled_features;
     if (IsImmersiveEnabled()) {
       enabled_features.push_back(features::kImmersiveReadAnything);
@@ -342,6 +364,28 @@ class ReadAnythingUntrustedPageHandlerTest
           ->tab()
           ->GetContents();
     }
+  }
+
+  views::View* GetImmersiveOverlay(Browser* browser_ptr = nullptr) {
+    if (!browser_ptr) {
+      browser_ptr = browser();
+    }
+    BrowserView* browser_view =
+        BrowserView::GetBrowserViewForBrowser(browser_ptr);
+    return browser_view->GetWidget()->GetContentsView()->GetViewByID(
+        VIEW_ID_READ_ANYTHING_OVERLAY);
+  }
+
+  content::WebContents* GetImmersiveWebContents(
+      Browser* browser_ptr = nullptr) {
+    views::View* overlay_view = GetImmersiveOverlay(browser_ptr);
+    if (!overlay_view || !overlay_view->GetVisible() ||
+        overlay_view->children().empty()) {
+      return nullptr;
+    }
+    views::WebView* web_view =
+        static_cast<views::WebView*>(overlay_view->children()[0]);
+    return web_view->GetWebContents();
   }
 
   ChromeTranslateClient* GetChromeTranslateClient() {
@@ -498,6 +542,7 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
   read_anything::mojom::HighlightGranularity expected_highlight_granularity =
       read_anything::mojom::HighlightGranularity::kDefaultValue;
   auto expected_line_focus = read_anything::mojom::LineFocus::kDefaultValue;
+  bool expected_line_focus_enabled = false;
   PrefService* prefs = browser()->profile()->GetPrefs();
   prefs->SetInteger(prefs::kAccessibilityReadAnythingLineSpacing, 3);
   prefs->SetInteger(prefs::kAccessibilityReadAnythingLetterSpacing, 2);
@@ -511,13 +556,14 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
                     expected_images_enabled);
   prefs->SetInteger(prefs::kAccessibilityReadAnythingColorInfo, 4);
 
-  EXPECT_CALL(page_, OnSettingsRestoredFromPrefs(
-                         expected_line_spacing, expected_letter_spacing,
-                         expected_font_name, expected_font_scale,
-                         expected_links_enabled, expected_images_enabled,
-                         expected_color, expected_speech_rate,
-                         testing::IsEmpty(), testing::IsEmpty(),
-                         expected_highlight_granularity, expected_line_focus))
+  EXPECT_CALL(
+      page_,
+      OnSettingsRestoredFromPrefs(
+          expected_line_spacing, expected_letter_spacing, expected_font_name,
+          expected_font_scale, expected_links_enabled, expected_images_enabled,
+          expected_color, expected_speech_rate, testing::IsEmpty(),
+          testing::IsEmpty(), expected_highlight_granularity,
+          expected_line_focus, expected_line_focus_enabled))
       .Times(1);
 
   handler_ = CreateHandler();
@@ -527,7 +573,7 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
                        Destructor_LogsLineFocus) {
   base::HistogramTester histogram_tester;
   const read_anything::mojom::LineFocus kLineFocus =
-      read_anything::mojom::LineFocus::kWindow1;
+      read_anything::mojom::LineFocus::kSmallCursorWindow;
   handler_ = CreateHandler();
   handler_->OnLineFocusChanged(kLineFocus);
 
@@ -538,6 +584,57 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
 
   histogram_tester.ExpectUniqueSample("Accessibility.ReadAnything.LineFocus",
                                       kLineFocus, 1);
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
+                       NavigateToPdfAfterHandlerCreated_NotifiesOfPdfChange) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  handler_ = CreateHandler();
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  if (chrome_pdf::features::IsOopifPdfEnabled()) {
+    EXPECT_CALL(page_, OnActiveAXTreeIDChanged(_, _, /*is_pdf=*/false))
+        .Times(1);
+  } else {
+    EXPECT_CALL(page_, OnActiveAXTreeIDChanged(_, _, /*is_pdf=*/false))
+        .Times(2);
+  }
+  EXPECT_CALL(page_, OnActiveAXTreeIDChanged(_, _, /*is_pdf=*/true)).Times(1);
+
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/pdf/test.pdf")));
+  ASSERT_TRUE(pdf_extension_test_util::EnsurePDFHasLoaded(web_contents));
+  handler_->DidStopLoading();
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
+                       NavigateToPdfBeforeHandlerCreated_NotifiesOfPdfChange) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/pdf/test.pdf")));
+  ASSERT_TRUE(pdf_extension_test_util::EnsurePDFHasLoaded(web_contents));
+
+  EXPECT_CALL(page_, OnActiveAXTreeIDChanged(_, _, /*is_pdf=*/true)).Times(1);
+  handler_ = CreateHandler();
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
+                       OnActiveAXTreeIDChanged_NotifiesOfPdfChange) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/pdf/test.pdf")));
+  ASSERT_TRUE(pdf_extension_test_util::EnsurePDFHasLoaded(web_contents));
+
+  EXPECT_CALL(page_, OnActiveAXTreeIDChanged(_, _, /*is_pdf=*/true)).Times(2);
+
+  handler_ = CreateHandler();
+  handler_->OnActiveAXTreeIDChanged();
 }
 
 IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
@@ -618,7 +715,7 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
 IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
                        OnLineFocusChanged) {
   const read_anything::mojom::LineFocus kLineFocus1 =
-      read_anything::mojom::LineFocus::kWindow1;
+      read_anything::mojom::LineFocus::kSmallCursorWindow;
   const read_anything::mojom::LineFocus kLineFocus2 =
       read_anything::mojom::LineFocus::kOff;
   handler_ = CreateHandler();
@@ -632,6 +729,26 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
   const int LineFocus2 = browser()->profile()->GetPrefs()->GetInteger(
       prefs::kAccessibilityReadAnythingLineFocus);
   ASSERT_EQ(LineFocus2, static_cast<int>(kLineFocus2));
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
+                       OnLineFocusChanged_UpdatesEnabledMode) {
+  const read_anything::mojom::LineFocus kLineFocus1 =
+      read_anything::mojom::LineFocus::kSmallCursorWindow;
+  const read_anything::mojom::LineFocus kLineFocus2 =
+      read_anything::mojom::LineFocus::kOff;
+  handler_ = CreateHandler();
+
+  handler_->OnLineFocusChanged(kLineFocus1);
+  const int LineFocus1 = browser()->profile()->GetPrefs()->GetInteger(
+      prefs::kAccessibilityReadAnythingLastNonDisabledLineFocus);
+  ASSERT_EQ(LineFocus1, static_cast<int>(kLineFocus1));
+
+  // When line focus changes to off, enabled mode should not change
+  handler_->OnLineFocusChanged(kLineFocus2);
+  const int LineFocus2 = browser()->profile()->GetPrefs()->GetInteger(
+      prefs::kAccessibilityReadAnythingLastNonDisabledLineFocus);
+  ASSERT_EQ(LineFocus2, static_cast<int>(kLineFocus1));
 }
 
 IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest, OnFontChange) {
@@ -648,6 +765,67 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest, OnFontChange) {
   const std::string font2 = browser()->profile()->GetPrefs()->GetString(
       prefs::kAccessibilityReadAnythingFontName);
   ASSERT_EQ(font2, kFont2);
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
+                       TogglePinStateChangesStateWhenImmersive) {
+  handler_ = CreateHandler();
+  const bool pin_state = handler_->immersive_read_anything_pin_state();
+  handler_->TogglePinState();
+  if (IsImmersiveEnabled()) {
+    EXPECT_NE(pin_state, handler_->immersive_read_anything_pin_state());
+  } else {
+    EXPECT_EQ(pin_state, handler_->immersive_read_anything_pin_state());
+  }
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
+                       TogglePinStatePropagatesChangetoToolbar) {
+  handler_ = CreateHandler();
+  handler_->TogglePinState();
+  if (IsImmersiveEnabled()) {
+    EXPECT_TRUE(PinnedToolbarActionsModel::Get(GetProfile())
+                    ->Contains(kActionSidePanelShowReadAnything));
+  }
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
+                       UpdatesStateWhenToolbarModifiesPinStatus) {
+  handler_ = CreateHandler();
+  const bool pin_state = handler_->immersive_read_anything_pin_state();
+  EXPECT_FALSE(pin_state);
+  auto* pinned_toolbar = PinnedToolbarActionsModel::Get(GetProfile());
+  pinned_toolbar->UpdatePinnedState(kActionSidePanelShowReadAnything, true);
+  if (IsImmersiveEnabled()) {
+    EXPECT_TRUE(handler_->immersive_read_anything_pin_state());
+    EXPECT_CALL(page_, OnPinStatusReceived(true)).Times(1);
+  }
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
+                       TestPinStatusIsCorrectAtStartup) {
+  auto* pinned_toolbar = PinnedToolbarActionsModel::Get(GetProfile());
+  pinned_toolbar->UpdatePinnedState(kActionSidePanelShowReadAnything, true);
+  handler_ = CreateHandler();
+  if (IsImmersiveEnabled()) {
+    EXPECT_TRUE(handler_->immersive_read_anything_pin_state());
+  }
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
+                       TestDontUpdateRendererIfPinStatusDoesntChange) {
+  handler_ = CreateHandler();
+  auto* pinned_toolbar = PinnedToolbarActionsModel::Get(GetProfile());
+  pinned_toolbar->UpdatePinnedState(kActionSidePanelShowReadAnything, false);
+  if (IsImmersiveEnabled()) {
+    EXPECT_CALL(page_, OnPinStatusReceived(_)).Times(0);
+  }
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest, SendPinState) {
+  handler_ = CreateHandler();
+  EXPECT_CALL(page_, OnPinStatusReceived(false)).Times(1);
+  handler_->SendPinStateRequest();
 }
 
 IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest, OnFontSizeChange) {
@@ -724,7 +902,7 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
   OnLanguagePrefChange(kLang2, true);
   OnLanguagePrefChange(kDisabledLang, false);
 
-  const base::Value::List* langs = &browser()->profile()->GetPrefs()->GetList(
+  const base::ListValue* langs = &browser()->profile()->GetPrefs()->GetList(
       prefs::kAccessibilityReadAnythingLanguagesEnabled);
   ASSERT_EQ(langs->size(), 2u);
   ASSERT_EQ((*langs)[0].GetString(), kLang1);
@@ -779,11 +957,11 @@ IN_PROC_BROWSER_TEST_P(
   const char kVoice1[] = "Rapunzel";
   const char kVoice2[] = "Eugene";
   const char kVoice3[] = "Cassandra";
-  base::Value::Dict voices = base::Value::Dict()
-                                 .Set(kLang1, kVoice1)
-                                 .Set(kLang2, kVoice2)
-                                 .Set(kLang3, kVoice3);
-  base::Value::List langs;
+  base::DictValue voices = base::DictValue()
+                               .Set(kLang1, kVoice1)
+                               .Set(kLang2, kVoice2)
+                               .Set(kLang3, kVoice3);
+  base::ListValue langs;
   langs.Append(kLang1);
   langs.Append(kLang2);
   langs.Append(kLang3);
@@ -803,20 +981,20 @@ IN_PROC_BROWSER_TEST_P(
   // Verify the values passed to the page are correct.
   EXPECT_CALL(page_, OnSettingsRestoredFromPrefs(
                          _, _, _, _, _, _, _, expected_speech_rate, _, _,
-                         expected_highlight_granularity, _))
+                         expected_highlight_granularity, _, _))
       .Times(1)
-      .WillOnce(testing::WithArgs<8, 9>(
-          [&](base::Value::Dict voices, base::Value::List langs) {
-            EXPECT_THAT(voices, base::test::DictionaryHasValues(
-                                    base::Value::Dict()
-                                        .Set(kLang1, kVoice1)
-                                        .Set(kLang2, kVoice2)
-                                        .Set(kLang3, kVoice3)));
-            EXPECT_EQ(3u, langs.size());
-            EXPECT_EQ(langs[0].GetString(), kLang1);
-            EXPECT_EQ(langs[1].GetString(), kLang2);
-            EXPECT_EQ(langs[2].GetString(), kLang3);
-          }));
+      .WillOnce(testing::WithArgs<8, 9>([&](base::DictValue voices,
+                                            base::ListValue langs) {
+        EXPECT_THAT(voices,
+                    base::test::DictionaryHasValues(base::DictValue()
+                                                        .Set(kLang1, kVoice1)
+                                                        .Set(kLang2, kVoice2)
+                                                        .Set(kLang3, kVoice3)));
+        EXPECT_EQ(3u, langs.size());
+        EXPECT_EQ(langs[0].GetString(), kLang1);
+        EXPECT_EQ(langs[1].GetString(), kLang2);
+        EXPECT_EQ(langs[2].GetString(), kLang3);
+      }));
 
   handler_ = CreateHandler();
 }
@@ -832,13 +1010,12 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
   OnVoiceChange(kVoice1, kLang1);
   OnVoiceChange(kVoice2, kLang2);
 
-  const base::Value::Dict* voices = &browser()->profile()->GetPrefs()->GetDict(
+  const base::DictValue* voices = &browser()->profile()->GetPrefs()->GetDict(
       prefs::kAccessibilityReadAnythingVoiceName);
   ASSERT_EQ(voices->size(), 2u);
-  EXPECT_THAT(
-      *voices,
-      base::test::DictionaryHasValues(
-          base::Value::Dict().Set(kLang1, kVoice1).Set(kLang2, kVoice2)));
+  EXPECT_THAT(*voices,
+              base::test::DictionaryHasValues(
+                  base::DictValue().Set(kLang1, kVoice1).Set(kLang2, kVoice2)));
 }
 
 IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
@@ -851,7 +1028,7 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
   OnVoiceChange(kVoice1, kLang);
   OnVoiceChange(kVoice2, kLang);
 
-  const base::Value::Dict* voices = &browser()->profile()->GetPrefs()->GetDict(
+  const base::DictValue* voices = &browser()->profile()->GetPrefs()->GetDict(
       prefs::kAccessibilityReadAnythingVoiceName);
   ASSERT_EQ(voices->size(), 1u);
   EXPECT_THAT(*voices,
@@ -868,12 +1045,12 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
   OnVoiceChange(kVoice, kLang1);
   OnVoiceChange(kVoice, kLang2);
 
-  const base::Value::Dict* voices = &browser()->profile()->GetPrefs()->GetDict(
+  const base::DictValue* voices = &browser()->profile()->GetPrefs()->GetDict(
       prefs::kAccessibilityReadAnythingVoiceName);
   ASSERT_EQ(voices->size(), 2u);
   EXPECT_THAT(*voices,
               base::test::DictionaryHasValues(
-                  base::Value::Dict().Set(kLang1, kVoice).Set(kLang2, kVoice)));
+                  base::DictValue().Set(kLang1, kVoice).Set(kLang2, kVoice)));
 }
 
 IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest, BadImageData) {
@@ -1572,6 +1749,58 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
   EXPECT_CALL(page_, OnReadingModeHidden(true)).Times(1);
 }
 
+// TODO(crbug.com/474702670): high failure rates on Mac bots.
+// Activate_OnCloseReadingMode_ListensForPageAck/All.1
+#if BUILDFLAG(IS_MAC)
+#define MAYBE_Activate_OnCloseReadingMode_ListensForPageAck \
+  DISABLED_Activate_OnCloseReadingMode_ListensForPageAck
+#else
+#define MAYBE_Activate_OnCloseReadingMode_ListensForPageAck \
+  Activate_OnCloseReadingMode_ListensForPageAck
+#endif
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
+                       MAYBE_Activate_OnCloseReadingMode_ListensForPageAck) {
+  if (IsImmersiveEnabled()) {
+    handler_ = CreateHandler();
+    auto* controller =
+        ReadAnythingController::From(browser()->GetActiveTabInterface());
+
+    // Open reading mode and getting the starting web contents.
+    controller->ShowImmersiveUI(ReadAnythingOpenTrigger::kAppMenu);
+    BrowserView* browser_view =
+        BrowserView::GetBrowserViewForBrowser(browser());
+    views::View* overlay_view =
+        browser_view->GetWidget()->GetContentsView()->GetViewByID(
+            VIEW_ID_READ_ANYTHING_OVERLAY);
+    ASSERT_TRUE(overlay_view);
+    ReadAnythingImmersiveWebView* web_view =
+        static_cast<ReadAnythingImmersiveWebView*>(overlay_view->children()[0]);
+    web_view->ShowUI();
+    auto* original_contents = GetImmersiveWebContents();
+    ASSERT_NE(original_contents, nullptr);
+
+    // Close reading mode without acknowledging it.
+    controller->CloseImmersiveUI(ReadAnythingCloseReason::kClosedByUser);
+    EXPECT_TRUE(base::test::RunUntil(
+        [&]() { return handler_->ack_timed_out_for_testing(); }));
+
+    // After showing RM again, the web contents should be new
+    controller->ShowImmersiveUI(ReadAnythingOpenTrigger::kAppMenu);
+    auto* new_contents = GetImmersiveWebContents();
+    ASSERT_NE(new_contents, original_contents);
+
+    // Close reading mode again and now acknowledge it.
+    controller->CloseImmersiveUI(ReadAnythingCloseReason::kClosedByUser);
+    handler_->AckReadingModeHidden();
+    EXPECT_TRUE(base::test::RunUntil(
+        [&]() { return !handler_->ack_timed_out_for_testing(); }));
+
+    // After showing RM again, the web contents should be the same.
+    controller->ShowImmersiveUI(ReadAnythingOpenTrigger::kAppMenu);
+    ASSERT_EQ(GetImmersiveWebContents(), new_contents);
+  }
+}
+
 IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
                        Activate_OnDeactivateTab_NotifiesPage) {
   handler_ = CreateHandler();
@@ -1761,17 +1990,124 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerTest,
   }
 }
 
+IN_PROC_BROWSER_TEST_P(
+    ReadAnythingUntrustedPageHandlerTest,
+    OnDistillationStateChanged_EmptyContentTogglesPresentation) {
+  if (IsImmersiveEnabled()) {
+    handler_ = CreateHandler();
+    ReadAnythingController* controller =
+        ReadAnythingController::From(browser()->GetActiveTabInterface());
+    controller->ShowImmersiveUI(ReadAnythingOpenTrigger::kOmniboxChip);
+
+    handler_->OnDistillationStateChanged(
+        read_anything::mojom::ReadAnythingDistillationState::
+            kDistillationEmpty);
+
+    EXPECT_EQ(controller->GetPresentationState(),
+              ReadAnythingController::PresentationState::kInSidePanel);
+  }
+}
+
+IN_PROC_BROWSER_TEST_P(
+    ReadAnythingUntrustedPageHandlerTest,
+    OnDistillationStateChanged_WithContentDoesNotTogglePresentation) {
+  if (IsImmersiveEnabled()) {
+    handler_ = CreateHandler();
+    ReadAnythingController* controller =
+        ReadAnythingController::From(browser()->GetActiveTabInterface());
+    controller->ShowImmersiveUI(ReadAnythingOpenTrigger::kOmniboxChip);
+
+    handler_->OnDistillationStateChanged(
+        read_anything::mojom::ReadAnythingDistillationState::
+            kDistillationWithContent);
+
+    EXPECT_EQ(controller->GetPresentationState(),
+              ReadAnythingController::PresentationState::kInImmersiveOverlay);
+  }
+}
+
 class ReadAnythingUntrustedPageHandlerDistillerTest
     : public ReadAnythingUntrustedPageHandlerTest {
  public:
   ReadAnythingUntrustedPageHandlerDistillerTest()
       : ReadAnythingUntrustedPageHandlerTest(
-            {features::kReadAnythingWithReadability}) {}
+            {features::kReadAnythingWithReadability,
+             features::kReadAnythingReadAloudTSTextSegmentation}) {}
 };
 
-// TODO(crbug.com/470137716): Disabled due to flakiness.
 IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerDistillerTest,
-                       DISABLED_DistillationPopulatesContent) {
+                       NavigateToPdfAfterHandlerCreated_NotifiesOfPdfChange) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  handler_ = CreateHandler();
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  if (base::FeatureList::IsEnabled(chrome_pdf::features::kPdfOopif)) {
+    // Regression test for crbug.com/487308693. With kPdfOopif enabled, RM
+    // receives 3 sequential signals about the current page when it's a pdf.
+    // 1) Page is not a pdf
+    // 2) Page is a pdf but the frame is not loaded
+    // 3) Page is a pdf with the frame loaded
+    // OnReadabilityDistillationStateChanged should only be called on non-pdfs.
+    // Previously we were calling it in step 2 above, but we know it's a pdf at
+    // that point, so we shouldn't be. Now, Chrome
+    // detects the PDF frame immediately via PdfViewerStreamManager which
+    // triggers an early return in `OnActiveAXTreeIDChanged`, bypassing the
+    // Readability distillation block entirely. The 2 expected calls come solely
+    // from the initial test setup on `about:blank` (once for
+    // kDistillationInProgress, once for kDistillationEmpty).
+    EXPECT_CALL(page_, OnReadabilityDistillationStateChanged).Times(2);
+  } else {
+    // When kPdfOopif is disabled, Chrome goes through a transient loading
+    // state where it briefly thinks the PDF is a regular webpage before
+    // the inner PDF frame initializes. During this transient phase, the
+    // Readability distillation block is (incorrectly) executed. The 5 expected
+    // calls are: 2 calls from the initial `about:blank` setup + 3 calls during
+    // the transient phase (kDistillationInProgress in OnActiveAXTreeIDChanged,
+    // the second kDistillationInProgress in RequestDomDistillerDistillation,
+    // and finally kDistillationEmpty).
+    EXPECT_CALL(page_, OnReadabilityDistillationStateChanged).Times(5);
+  }
+
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/pdf/test.pdf")));
+  ASSERT_TRUE(pdf_extension_test_util::EnsurePDFHasLoaded(web_contents));
+  handler_->DidStopLoading();
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerDistillerTest,
+                       NavigateToPdfBeforeHandlerCreated_NotifiesOfPdfChange) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/pdf/test.pdf")));
+  ASSERT_TRUE(pdf_extension_test_util::EnsurePDFHasLoaded(web_contents));
+
+  EXPECT_CALL(page_, OnActiveAXTreeIDChanged(_, _, /*is_pdf=*/true)).Times(1);
+  EXPECT_CALL(page_, OnReadabilityDistillationStateChanged).Times(0);
+  handler_ = CreateHandler();
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerDistillerTest,
+                       OnActiveAXTreeIDChanged_NotifiesOfPdfChange) {
+  ASSERT_TRUE(embedded_test_server()->Start());
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/pdf/test.pdf")));
+  ASSERT_TRUE(pdf_extension_test_util::EnsurePDFHasLoaded(web_contents));
+
+  EXPECT_CALL(page_, OnActiveAXTreeIDChanged(_, _, /*is_pdf=*/true)).Times(2);
+  EXPECT_CALL(page_, OnReadabilityDistillationStateChanged).Times(0);
+
+  handler_ = CreateHandler();
+  handler_->OnActiveAXTreeIDChanged();
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerDistillerTest,
+                       DistillationPopulatesContent) {
   ASSERT_TRUE(embedded_test_server()->Start());
   handler_ = CreateHandler();
 
@@ -1783,17 +2119,159 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerDistillerTest,
   OnActiveAXTreeIDChanged();
 
   EXPECT_TRUE(base::test::RunUntil(
-      [&]() { return handler_->distilled_title_for_testing().has_value(); }));
+      [&]() { return handler_->dom_distiller_title().has_value(); }));
   EXPECT_TRUE(base::test::RunUntil(
-      [&]() { return handler_->distilled_content_for_testing().has_value(); }));
+      [&]() { return handler_->dom_distiller_content().has_value(); }));
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerDistillerTest,
+                       RecordNonHttpDistillationAttempt) {
+  const std::string_view histogram =
+      "Accessibility.ReadAnything.DistillationScheme";
+  base::HistogramTester histogram_tester;
+
+  histogram_tester.ExpectTotalCount(histogram, 0);
+
+  ASSERT_TRUE(embedded_test_server()->Start());
+
+  // It will start at about/blank.
+  handler_ = CreateHandler();
+
+  histogram_tester.ExpectBucketCount(histogram,
+                                     ReadAnythingDistillationScheme::kAbout, 1);
+
+  // Http/https.
+  ASSERT_TRUE(ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL(embedded_test_server()->GetURL("/simple.html")),
+      WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP));
+
+  histogram_tester.ExpectBucketCount(
+      histogram, ReadAnythingDistillationScheme::kHttpOrHttps, 1);
+
+  // Data.
+  ASSERT_TRUE(ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL("data:text/html,<html><body>Main content</body></html>"),
+      WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP));
+
+  histogram_tester.ExpectBucketCount(histogram,
+                                     ReadAnythingDistillationScheme::kData, 1);
+
+  // File.
+  ASSERT_TRUE(ui_test_utils::NavigateToURLWithDisposition(
+      browser(), content::GetTestUrl(".", "simple_page.html"),
+      WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP));
+
+  histogram_tester.ExpectBucketCount(histogram,
+                                     ReadAnythingDistillationScheme::kFile, 1);
+
+  // Blob.
+  // new Blob(["This is a test for Reading Mode."], {type: 'text/plain'});
+  ASSERT_TRUE(ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL("blob:null/5e556357-49b2-4749-b18d-1bd57a1be47f"),
+      WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP));
+
+  histogram_tester.ExpectBucketCount(histogram,
+                                     ReadAnythingDistillationScheme::kBlob, 1);
+
+  // Extension.
+  ASSERT_TRUE(ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL("chrome-extension://test/options.html"),
+      WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP));
+
+  histogram_tester.ExpectBucketCount(
+      histogram, ReadAnythingDistillationScheme::kExtension, 1);
+
+  histogram_tester.ExpectTotalCount(histogram, 6);
+}
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerDistillerTest,
+                       OnActiveAXTreeIDChanged_ResetsWaitingForPdfFrame) {
+  handler_ = CreateHandler();
+  content::WebContents* contents = GetReadAnythingWebContents();
+  page_.receiver_.FlushForTesting();
+
+  // Manually attach a PdfViewerStreamManager to the contents. This simulates
+  // the scenario where we identify the page as a PDF but the PDF frame has not
+  // loaded yet, setting is_waiting_for_pdf_frame_ to true.
+  pdf::PdfViewerStreamManager::Create(contents);
+  handler_->OnActiveAXTreeIDChanged();
+
+  // Remove PdfViewerStreamManager so  subsequent navigations are treated as
+  // normal pages.
+  contents->RemoveUserData(pdf::PdfViewerStreamManager::UserDataKey());
+
+  // Verify that navigating to a normal page correctly resets the PDF waiting
+  // state. If the state isn't reset, we would return early and be stuck in a
+  // waiting state.
+  if (base::FeatureList::IsEnabled(chrome_pdf::features::kPdfOopif)) {
+    EXPECT_CALL(page_, OnActiveAXTreeIDChanged(_, _, /*is_pdf=*/false))
+        .Times(1);
+  } else {
+    EXPECT_CALL(page_, OnActiveAXTreeIDChanged(_, _, /*is_pdf=*/false))
+        .Times(2);
+  }
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), GURL("about:blank")));
+}
+
+// In order to test that Readability isn't used in automated tests,
+// an embedded_test_server needs to be set up in SetUpOnMainThread.
+// Since this isn't needed for the rest of the tests, this is handled
+// in a separate test subclass.
+class ReadAnythingUntrustedPageHandlerAutomationTest
+    : public ReadAnythingUntrustedPageHandlerDistillerTest {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitch(switches::kEnableAutomation);
+  }
+
+  void SetUpOnMainThread() override {
+    ReadAnythingUntrustedPageHandlerDistillerTest::SetUpOnMainThread();
+    embedded_test_server()->ServeFilesFromSourceDirectory(
+        "components/test/data");
+    ASSERT_TRUE(embedded_test_server()->Start());
+  }
+};
+
+IN_PROC_BROWSER_TEST_P(ReadAnythingUntrustedPageHandlerAutomationTest,
+                       AutomationFlag_SkipsDistillation) {
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(),
+      GURL(
+          embedded_test_server()->GetURL("/dom_distiller/simple_article.html")),
+      WindowOpenDisposition::CURRENT_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP);
+
+  EXPECT_CALL(page_, OnReadabilityDistillationStateChanged(
+                         read_anything::mojom::ReadAnythingDistillationState::
+                             kDistillationInProgress));
+  EXPECT_CALL(page_, OnReadabilityDistillationStateChanged(
+                         read_anything::mojom::ReadAnythingDistillationState::
+                             kDistillationEmpty));
+  EXPECT_CALL(page_, UpdateContent("", ""));
+
+  handler_ = CreateHandler();
+
+  // The call happens inside CreateHandler. Let's make sure it's processed.
+  base::RunLoop().RunUntilIdle();
+
+  // Ensure that no distillation occurs.
+  EXPECT_FALSE(handler_->dom_distiller_title().has_value());
+  EXPECT_FALSE(handler_->dom_distiller_content().has_value());
 }
 
 }  // namespace
-
 INSTANTIATE_TEST_SUITE_P(All,
                          ReadAnythingUntrustedPageHandlerTest,
                          testing::Bool());
 
 INSTANTIATE_TEST_SUITE_P(All,
                          ReadAnythingUntrustedPageHandlerDistillerTest,
+                         testing::Bool());
+
+INSTANTIATE_TEST_SUITE_P(All,
+                         ReadAnythingUntrustedPageHandlerAutomationTest,
                          testing::Bool());

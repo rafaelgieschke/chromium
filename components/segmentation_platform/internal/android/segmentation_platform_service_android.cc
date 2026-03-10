@@ -89,13 +89,13 @@ SegmentationPlatformServiceAndroid::SegmentationPlatformServiceAndroid(
     : segmentation_platform_service_(segmentation_platform_service) {
   DCHECK(segmentation_platform_service_);
   JNIEnv* env = base::android::AttachCurrentThread();
-  java_obj_.Reset(env, Java_SegmentationPlatformServiceImpl_create(
+  java_obj_.Reset(env, JSegmentationPlatformServiceImplClass::create(
                            env, reinterpret_cast<int64_t>(this)));
 }
 
 SegmentationPlatformServiceAndroid::~SegmentationPlatformServiceAndroid() {
   JNIEnv* env = base::android::AttachCurrentThread();
-  Java_SegmentationPlatformServiceImpl_clearNativePtr(env, java_obj_);
+  java_obj_->clearNativePtr(env);
 }
 
 void SegmentationPlatformServiceAndroid::GetSelectedSegment(
@@ -148,9 +148,9 @@ void SegmentationPlatformServiceAndroid::GetInputKeysForModel(
 
 void SegmentationPlatformServiceAndroid::CollectTrainingData(
     JNIEnv* env,
-    jint j_segment_id,
-    jlong j_request_id,
-    jlong j_ukm_source_id,
+    int32_t j_segment_id,
+    int64_t j_request_id,
+    int64_t j_ukm_source_id,
     const JavaRef<jobject>& j_param,
     const JavaRef<jobject>& j_callback) {
   segmentation_platform::TrainingLabels training_labels =

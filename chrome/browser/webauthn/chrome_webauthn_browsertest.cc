@@ -25,8 +25,10 @@
 #include "build/build_config.h"
 #include "chrome/browser/actor/actor_keyed_service.h"
 #include "chrome/browser/actor/actor_task.h"
+#include "chrome/browser/actor/actor_task_metadata.h"
+#include "chrome/browser/actor/actor_test_util.h"
 #include "chrome/browser/actor/execution_engine.h"
-#include "chrome/browser/actor/ui/mocks/mock_event_dispatcher.h"
+#include "chrome/browser/actor/ui/test_support/mock_event_dispatcher.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/password_manager/chrome_webauthn_credentials_delegate.h"
@@ -39,6 +41,7 @@
 #include "chrome/browser/webauthn/chrome_authenticator_request_delegate.h"
 #include "chrome/browser/webauthn/passkey_model_factory.h"
 #include "chrome/browser/webauthn/test_util.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
@@ -1154,105 +1157,6 @@ IN_PROC_BROWSER_TEST_F(WebAuthnConditionalUITest,
   EXPECT_EQ(observer_->accounts_.at(0), "0102030405060708090A0B0C0D0E0F10");
 }
 
-// WebAuthnCableExtension exercises code paths where a server sends a caBLEv2
-// extension in a get() request.
-class WebAuthnCableExtension : public WebAuthnBrowserTest {
- public:
-  WebAuthnCableExtension() {
-    scoped_feature_list_.InitWithFeatures(
-        {device::kWebAuthCableExtensionAnywhere}, {});
-  }
-
-  void PostRunTestOnMainThread() override {
-    ChromeAuthenticatorRequestDelegate::SetGlobalObserverForTesting(nullptr);
-    WebAuthnBrowserTest::PostRunTestOnMainThread();
-  }
-
- protected:
-  static constexpr char kRequest[] = R"((() => {
-    return navigator.credentials.get({
-      publicKey: {
-        timeout: 1000,
-        challenge: new Uint8Array([
-            0x79, 0x50, 0x68, 0x71, 0xDA, 0xEE, 0xEE, 0xB9,
-            0x94, 0xC3, 0xC2, 0x15, 0x67, 0x65, 0x26, 0x22,
-            0xE3, 0xF3, 0xAB, 0x3B, 0x78, 0x2E, 0xD5, 0x6F,
-            0x81, 0x26, 0xE2, 0xA6, 0x01, 0x7D, 0x74, 0x50
-        ]).buffer,
-        allowCredentials: [{
-          type: 'public-key',
-          id: new Uint8Array([1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]).buffer,
-        }],
-        userVerification: 'discouraged',
-
-        extensions: {
-          "cableAuthentication": [{
-            version: 2,
-            sessionPreKey: new Uint8Array([$1]).buffer,
-            clientEid: new Uint8Array(),
-            authenticatorEid: new Uint8Array(),
-          }],
-        },
-      },
-    }).then(c => 'webauthn: OK',
-            e => 'error ' + e);
-  })())";
-
-  void DoRequest(std::string server_link_data) {
-    EXPECT_TRUE(ui_test_utils::NavigateToURL(
-        browser(), https_server_.GetURL("www.example.com", "/title1.html")));
-
-    auto virtual_device_factory =
-        std::make_unique<device::test::VirtualFidoDeviceFactory>();
-    virtual_device_factory->mutable_state()->InjectRegistration(
-        kCredentialID, "www.example.com");
-    std::unique_ptr<content::ScopedAuthenticatorEnvironmentForTesting>
-        auth_env =
-            std::make_unique<content::ScopedAuthenticatorEnvironmentForTesting>(
-                std::move(virtual_device_factory));
-
-    ChromeAuthenticatorRequestDelegate::SetGlobalObserverForTesting(&observer_);
-
-    const std::string request =
-        base::ReplaceStringPlaceholders(kRequest, {server_link_data}, nullptr);
-
-    EXPECT_EQ(
-        "webauthn: OK",
-        content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
-                        request));
-  }
-
-  class ExtensionObserver
-      : public ChromeAuthenticatorRequestDelegate::TestObserver {
-   public:
-    void Created(ChromeAuthenticatorRequestDelegate* delegate) override {}
-
-    void OnTransportAvailabilityEnumerated(
-        ChromeAuthenticatorRequestDelegate* delegate,
-        device::FidoRequestHandlerBase::TransportAvailabilityInfo* tai)
-        override {}
-
-    void UIShown(ChromeAuthenticatorRequestDelegate* delegate) override {}
-
-    void CableV2ExtensionSeen(
-        base::span<const uint8_t> server_link_data) override {
-      extensions_.emplace_back(base::HexEncode(server_link_data));
-    }
-
-    std::vector<std::string> extensions_;
-  };
-
-  ExtensionObserver observer_;
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-IN_PROC_BROWSER_TEST_F(WebAuthnCableExtension, ServerLink) {
-  DoRequest("1,2,3,4");
-
-  ASSERT_EQ(observer_.extensions_.size(), 1u);
-  EXPECT_EQ(observer_.extensions_[0], "01020304");
-}
-
 class ChallengeUrlBrowserTest : public WebAuthnBrowserTest {
  public:
   static constexpr char kValidChallenge[] = "1234567890123456";
@@ -1543,7 +1447,7 @@ class WebAuthnImmediateGetTest : public WebAuthnBrowserTest {
  protected:
   static constexpr std::string_view kRequestWithPasswordTemplate = R"(
     navigator.credentials.get({
-    mediation: 'immediate',
+    uiMode: 'immediate',
     password: $1,
     publicKey: {
       challenge: new Uint8Array([1,3,2,7,1,3,2,7]),
@@ -1554,7 +1458,7 @@ class WebAuthnImmediateGetTest : public WebAuthnBrowserTest {
 
   static constexpr std::string_view kRequestWithAllowlistTemplate = R"(
     navigator.credentials.get({
-    mediation: 'immediate',
+    uiMode: 'immediate',
     publicKey: {
       challenge: new Uint8Array([1,3,2,7,1,3,2,7]),
       allowCredentials: [$1],
@@ -1629,9 +1533,13 @@ class WebAuthnActorBrowserTest : public WebAuthnBrowserTest {
 
  public:
   WebAuthnActorBrowserTest() {
-    scoped_feature_list_.InitWithFeatures(
-        {device::kWebAuthnActorCheck, password_manager::features::kActorLogin},
-        {});
+    scoped_feature_list_.InitWithFeaturesAndParameters(
+        /*enabled_features=*/
+        {
+            {device::kWebAuthnActorCheck, {}},
+            {password_manager::features::kActorLogin, {}},
+        },
+        /*disabled_features=*/{});
   }
 
   void SetUpOnMainThread() override {
@@ -1654,26 +1562,19 @@ class WebAuthnActorBrowserTest : public WebAuthnBrowserTest {
 
   void CreateActingTask() {
     auto* actor_service = actor::ActorKeyedService::Get(browser()->profile());
-    std::unique_ptr<actor::ExecutionEngine> execution_engine =
-        std::make_unique<actor::ExecutionEngine>(browser()->profile());
+    actor::TaskId task_id =
+        actor_service->CreateTask(actor::NoEnterprisePolicyChecker());
 
-    std::unique_ptr<actor::ActorTask> actor_task =
-        std::make_unique<actor::ActorTask>(
-            browser()->profile(), std::move(execution_engine),
-            actor::ui::NewUiEventDispatcher(
-                actor_service->GetActorUiStateManager()));
-    actor_task->SetState(actor::ActorTask::State::kActing);
-
-    base::RunLoop loop;
-    actor_task->AddTab(
-        browser()->GetActiveTabInterface()->GetHandle(),
-        base::BindLambdaForTesting([&](actor::mojom::ActionResultPtr result) {
-          EXPECT_TRUE(actor::IsOk(*result));
-          loop.Quit();
-        }));
-    loop.Run();
-
-    actor_service->AddActiveTask(std::move(actor_task));
+    // Perform an arbitrary action in a tab to put the task into
+    // UnderActorControl state and add the tab to the task.
+    tabs::TabInterface* tab = browser()->GetActiveTabInterface();
+    CHECK(tab);
+    auto click = actor::MakeClickRequest(*tab, gfx::Point(1, 1));
+    actor::PerformActionsFuture future;
+    actor_service->PerformActions(task_id, ToRequestList(std::move(click)),
+                                  actor::ActorTaskMetadata(),
+                                  future.GetCallback());
+    EXPECT_TRUE(future.Wait());
   }
 
   void PostRunTestOnMainThread() override {
@@ -1693,9 +1594,9 @@ class WebAuthnActorBrowserTest : public WebAuthnBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(WebAuthnActorBrowserTest, MakeCredentialsActorIsActive) {
-  CreateActingTask();
   ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(), https_server_.GetURL("www.example.com", "/title1.html")));
+  CreateActingTask();
 
   content::EvalJsResult result =
       content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
@@ -1704,11 +1605,11 @@ IN_PROC_BROWSER_TEST_F(WebAuthnActorBrowserTest, MakeCredentialsActorIsActive) {
 }
 
 IN_PROC_BROWSER_TEST_F(WebAuthnActorBrowserTest, GetCredentialsActorIsActive) {
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), https_server_.GetURL("www.example.com", "/title1.html")));
   CreateActingTask();
   virtual_device_factory_->mutable_state()->InjectRegistration(
       kCredentialID, "www.example.com");
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(
-      browser(), https_server_.GetURL("www.example.com", "/title1.html")));
   content::EvalJsResult result =
       content::EvalJs(browser()->tab_strip_model()->GetActiveWebContents(),
                       kGetAssertionCredID1234);

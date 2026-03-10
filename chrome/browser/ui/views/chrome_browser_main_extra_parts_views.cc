@@ -9,8 +9,11 @@
 #include "base/command_line.h"
 #include "base/path_service.h"
 #include "build/build_config.h"
+#include "chrome/browser/bookmarks/bookmark_merged_surface_service.h"
+#include "chrome/browser/bookmarks/bookmark_merged_surface_service_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/net/system_network_context_manager.h"
+#include "chrome/browser/ui/views/bookmarks/bookmark_account_storage_move_dialog.h"
 #include "chrome/browser/ui/views/chrome_constrained_window_views_client.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/chrome_views_delegate.h"
@@ -78,10 +81,6 @@ void ChromeBrowserMainExtraPartsViews::ToolkitInitialized() {
     views_delegate_ = std::make_unique<ChromeViewsDelegate>();
   }
 
-  // Set our raw pointer to the views delegate. This should never be nullptr.
-  views_delegate_ptr_ = views::ViewsDelegate::GetInstance();
-  CHECK(views_delegate_ptr_);
-
   SetConstrainedWindowViewsClient(CreateChromeConstrainedWindowViewsClient());
 
 #if defined(USE_AURA)
@@ -93,10 +92,6 @@ void ChromeBrowserMainExtraPartsViews::ToolkitInitialized() {
   if (!views::LayoutProvider::Get()) {
     layout_provider_ = ChromeLayoutProvider::CreateLayoutProvider();
   }
-}
-
-void ChromeBrowserMainExtraPartsViews::PostCreateMainMessageLoop() {
-  views_delegate_ptr_->InitializeViewsAXManager();
 }
 
 void ChromeBrowserMainExtraPartsViews::PreCreateThreads() {
@@ -166,6 +161,20 @@ void ChromeBrowserMainExtraPartsViews::PreProfileInit() {
 
   exit(EXIT_FAILURE);
 #endif  // BUILDFLAG(IS_LINUX)
+}
+
+void ChromeBrowserMainExtraPartsViews::PostProfileInit(
+    Profile* profile,
+    bool is_initial_profile) {
+  auto* service = BookmarkMergedSurfaceServiceFactory::GetForProfile(profile);
+  if (service) {
+    service->SetShowMoveStorageDialogCallback(base::BindRepeating(
+        [](Browser* browser, const bookmarks::BookmarkNode* node,
+           const bookmarks::BookmarkNode* target_folder, size_t index) {
+          ShowBookmarkAccountStorageMoveDialog(browser, node, target_folder,
+                                               index);
+        }));
+  }
 }
 
 void ChromeBrowserMainExtraPartsViews::PostBrowserStart() {

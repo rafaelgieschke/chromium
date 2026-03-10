@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "base/containers/flat_set.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -21,6 +22,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_view_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/sys_byteorder.h"
 #include "base/task/thread_pool.h"
 #include "base/test/bind.h"
@@ -29,12 +31,15 @@
 #include "base/test/task_environment.h"
 #include "base/test/test_file_util.h"
 #include "base/test/test_future.h"
+#include "base/threading/thread_restrictions.h"
 #include "components/performance_manager/scenario_api/performance_scenario_test_support.h"
 #include "net/base/cache_type.h"
 #include "net/base/features.h"
 #include "net/base/io_buffer.h"
+#include "net/disk_cache/memory_entry_data_hints.h"
 #include "net/disk_cache/simple/simple_util.h"
 #include "net/disk_cache/sql/cache_entry_key.h"
+#include "net/disk_cache/sql/entry_write_buffer.h"
 #include "net/disk_cache/sql/sql_backend_constants.h"
 #include "sql/database.h"
 #include "sql/meta_table.h"
@@ -124,12 +129,8 @@ class SqlPersistentStoreTest : public testing::Test {
                              SqlPersistentStore::Error::kOk) {
     CHECK(store_);
     base::test::TestFuture<SqlPersistentStore::Error> future;
-    auto ret = store_->MaybeLoadInMemoryIndex(future.GetCallback());
-    if (ret) {
-      CHECK_EQ(future.Get(), expected_result);
-      return true;
-    }
-    return false;
+    store_->MaybeLoadInMemoryIndex(future.GetCallback());
+    return future.Get() == expected_result;
   }
 
   // Gets the entry count.
@@ -175,7 +176,6 @@ class SqlPersistentStoreTest : public testing::Test {
 
     auto db = std::make_unique<sql::Database>(
         sql::DatabaseOptions()
-            .set_exclusive_locking(true)
 #if BUILDFLAG(IS_WIN)
             .set_exclusive_database_file_lock(true)
 #endif  // IS_WIN
@@ -230,7 +230,8 @@ class SqlPersistentStoreTest : public testing::Test {
   SqlPersistentStore::Error DoomEntry(const CacheEntryKey& key,
                                       SqlPersistentStore::ResId res_id) {
     base::test::TestFuture<SqlPersistentStore::Error> future;
-    store_->DoomEntry(key, res_id, future.GetCallback());
+    store_->DoomEntry(key, res_id,
+                      /*accept_index_mismatch=*/false, future.GetCallback());
     return future.Get();
   }
 
@@ -286,17 +287,6 @@ class SqlPersistentStoreTest : public testing::Test {
     return future.Get();
   }
 
-  // Synchronous wrapper for UpdateEntryLastUsedByResId.
-  SqlPersistentStore::Error UpdateEntryLastUsedByResId(
-      const CacheEntryKey& key,
-      SqlPersistentStore::ResId res_id,
-      base::Time last_used) {
-    base::test::TestFuture<SqlPersistentStore::Error> future;
-    store_->UpdateEntryLastUsedByResId(key, res_id, last_used,
-                                       future.GetCallback());
-    return future.Get();
-  }
-
   // Synchronous wrapper for UpdateEntryHeaderAndLastUsed.
   SqlPersistentStore::Error UpdateEntryHeaderAndLastUsed(
       const CacheEntryKey& key,
@@ -304,11 +294,8 @@ class SqlPersistentStoreTest : public testing::Test {
       base::Time last_used,
       scoped_refptr<net::IOBuffer> buffer,
       int64_t header_size_delta) {
-    base::test::TestFuture<SqlPersistentStore::Error> future;
-    store_->UpdateEntryHeaderAndLastUsed(
-        key, res_id, last_used, /*new_hints=*/std::nullopt, std::move(buffer),
-        header_size_delta, future.GetCallback());
-    return future.Get();
+    return UpdateEntryHeaderAndLastUsed(key, res_id, last_used, buffer,
+                                        header_size_delta, std::nullopt);
   }
 
   SqlPersistentStore::Error UpdateEntryHeaderAndLastUsed(
@@ -318,29 +305,32 @@ class SqlPersistentStoreTest : public testing::Test {
       scoped_refptr<net::IOBuffer> buffer,
       int64_t header_size_delta,
       const std::optional<MemoryEntryDataHints>& new_hints) {
-    base::test::TestFuture<SqlPersistentStore::Error> future;
-    store_->UpdateEntryHeaderAndLastUsed(key, res_id, last_used, new_hints,
-                                         std::move(buffer), header_size_delta,
-                                         future.GetCallback());
-    return future.Get();
+    base::test::TestFuture<SqlPersistentStore::ResIdOrError> future;
+    store_->WriteEntryDataAndMetadata(
+        key, res_id, /*old_body_end=*/std::nullopt,
+        EntryWriteBuffer(/*buffer=*/nullptr, /*size=*/0, /*offset=*/0),
+        last_used, new_hints, std::move(buffer), header_size_delta,
+        /*doomed_new_entry=*/false, future.GetCallback());
+    auto result = future.Take();
+    return result.error_or(SqlPersistentStore::Error::kOk);
   }
 
   // Synchronous wrapper for WriteEntryData.
   SqlPersistentStore::Error WriteEntryData(const CacheEntryKey& key,
                                            SqlPersistentStore::ResId res_id,
                                            int64_t old_body_end,
-                                           int64_t offset,
-                                           scoped_refptr<net::IOBuffer> buffer,
-                                           int buf_len,
+                                           EntryWriteBuffer buffer,
                                            bool truncate) {
-    base::test::TestFuture<SqlPersistentStore::Error> future;
-    store_->WriteEntryData(key, res_id, old_body_end, offset, std::move(buffer),
-                           buf_len, truncate, future.GetCallback());
-    return future.Get();
+    base::test::TestFuture<SqlPersistentStore::ResIdOrError> future;
+    store_->WriteEntryData(key, res_id, old_body_end, std::move(buffer),
+                           truncate, /*doomed_new_entry=*/false,
+                           future.GetCallback());
+    auto result = future.Take();
+    return result.error_or(SqlPersistentStore::Error::kOk);
   }
 
   // Synchronous wrapper for ReadEntryData.
-  SqlPersistentStore::IntOrError ReadEntryData(
+  SqlPersistentStore::ReadResultOrError ReadEntryData(
       const CacheEntryKey& key,
       SqlPersistentStore::ResId res_id,
       int64_t offset,
@@ -348,7 +338,7 @@ class SqlPersistentStoreTest : public testing::Test {
       int buf_len,
       int64_t body_end,
       bool sparse_reading) {
-    base::test::TestFuture<SqlPersistentStore::IntOrError> future;
+    base::test::TestFuture<SqlPersistentStore::ReadResultOrError> future;
     store_->ReadEntryData(key, res_id, offset, std::move(buffer), buf_len,
                           body_end, sparse_reading, future.GetCallback());
     return future.Take();
@@ -362,9 +352,11 @@ class SqlPersistentStoreTest : public testing::Test {
                                  std::string_view data,
                                  bool truncate) {
     auto buffer = base::MakeRefCounted<net::StringIOBuffer>(std::string(data));
-    ASSERT_EQ(WriteEntryData(key, res_id, old_body_end, offset,
-                             std::move(buffer), data.size(), truncate),
-              SqlPersistentStore::Error::kOk);
+    ASSERT_EQ(
+        WriteEntryData(key, res_id, old_body_end,
+                       EntryWriteBuffer(std::move(buffer), data.size(), offset),
+                       truncate),
+        SqlPersistentStore::Error::kOk);
   }
 
   // Helper to fill a range with a repeated character and write it to the store.
@@ -424,10 +416,16 @@ class SqlPersistentStoreTest : public testing::Test {
   // Synchronous wrapper for StartEviction.
   SqlPersistentStore::Error StartEviction(
       std::vector<SqlPersistentStore::ResIdAndShardId> excluded_list,
-      bool is_idle_time_eviction) {
+      bool is_idle_time_eviction,
+      scoped_refptr<base::RefCountedData<std::atomic_bool>> abort_flag =
+          nullptr) {
+    if (!abort_flag) {
+      abort_flag = base::MakeRefCounted<base::RefCountedData<std::atomic_bool>>(
+          std::in_place, false);
+    }
     base::test::TestFuture<SqlPersistentStore::Error> future;
     store_->StartEviction(std::move(excluded_list), is_idle_time_eviction,
-                          future.GetCallback());
+                          std::move(abort_flag), future.GetCallback());
     return future.Take();
   }
 
@@ -443,8 +441,8 @@ class SqlPersistentStoreTest : public testing::Test {
     auto read_result = ReadEntryData(key, res_id, offset, read_buffer,
                                      buffer_len, body_end, sparse_reading);
     ASSERT_TRUE(read_result.has_value());
-    EXPECT_EQ(read_result.value(), static_cast<int>(expected_data.size()));
-    EXPECT_EQ(std::string_view(read_buffer->data(), read_result.value()),
+    EXPECT_EQ(read_result->read_bytes, static_cast<int>(expected_data.size()));
+    EXPECT_EQ(std::string_view(read_buffer->data(), read_result->read_bytes),
               expected_data);
   }
 
@@ -629,6 +627,94 @@ class SqlPersistentStoreTest : public testing::Test {
   }
 
   void RunCleanupDoomedEntriesTest(base::OnceClosure trigger_cleanup);
+
+  void RunWalCheckpointTest(bool serial_checkpoint, bool multiple_shards);
+
+  // Creates a CacheEntryKey that maps to the first shard (index 0).
+  CacheEntryKey CreateTestCacheEntryKeyForShard0() {
+    const size_t size_of_shards = background_task_runners_.size();
+    std::string key = "key";
+    while (true) {
+      CacheEntryKey cache_entry_key = CacheEntryKey(key);
+      if (cache_entry_key.hash().value() % size_of_shards == 0) {
+        return cache_entry_key;
+      }
+      key += "_";
+    }
+  }
+
+  // Populates the cache with `num_entries` entries of `entry_size`.
+  // The keys are generated as "key_0", "key_1", ...
+  // The entries are created with increasing last_used times, so "key_0" is the
+  // oldest.
+  void PopulateCache(
+      int num_entries,
+      int entry_size,
+      std::vector<SqlPersistentStore::ResId>* res_ids = nullptr) {
+    for (int i = 0; i < num_entries; ++i) {
+      const CacheEntryKey key("key_" + base::NumberToString(i));
+      auto res_id = CreateEntryAndGetResId(key);
+      if (res_ids) {
+        res_ids->push_back(res_id);
+      }
+      std::string data(entry_size, 'a');
+      WriteDataAndAssertSuccess(key, res_id, 0, 0, data, false);
+      UpdateEntryLastUsedByKey(key, base::Time::Now() + base::Milliseconds(i));
+    }
+  }
+
+  // Finds the next entry that would be evicted (the oldest existing entry).
+  // This assumes entries were created with PopulateCache (or similar sequential
+  // keys).
+  void FindNextEntryToEvict(int num_entries,
+                            CacheEntryKey& key_out,
+                            int& index_out) {
+    for (int i = 0; i < num_entries; ++i) {
+      const CacheEntryKey key("key_" + base::NumberToString(i));
+      auto open_result = OpenEntry(key);
+      ASSERT_TRUE(open_result.has_value());
+      if (open_result->has_value()) {
+        key_out = key;
+        index_out = i;
+        break;
+      }
+    }
+    ASSERT_NE(key_out.string(), "");
+  }
+
+  // Starts eviction and waits until the eviction process hits the hook,
+  // pausing execution at that point. This allows testing state during eviction.
+  void StartAndPauseEviction() {
+    base::RunLoop run_loop;
+    auto pause_eviction_signal = std::make_unique<base::WaitableEvent>(
+        base::WaitableEvent::ResetPolicy::MANUAL,
+        base::WaitableEvent::InitialState::NOT_SIGNALED);
+
+    store_->SetEvictionHookForTesting(base::BindLambdaForTesting([&]() {
+      run_loop.Quit();
+      base::ScopedAllowBaseSyncPrimitivesForTesting allow_wait;
+      if (!pause_eviction_signal->IsSignaled()) {
+        pause_eviction_signal->Wait();
+      }
+    }));
+
+    auto abort_flag =
+        base::MakeRefCounted<base::RefCountedData<std::atomic_bool>>(
+            std::in_place, false);
+    base::test::TestFuture<SqlPersistentStore::Error> eviction_future;
+    store_->StartEviction({}, false, abort_flag, eviction_future.GetCallback());
+
+    run_loop.Run();
+    abort_flag->data.store(true);
+    pause_eviction_signal->Signal();
+
+    ASSERT_EQ(eviction_future.Get(), SqlPersistentStore::Error::kOk);
+    EXPECT_TRUE(store_->HasPendingEviction());
+
+    store_->SetEvictionHookForTesting(base::DoNothing());
+  }
+
+  void RunStartEvictionEvictsOlderEntriesFirstTest();
 
   base::test::TaskEnvironment task_environment_{
       base::test::TaskEnvironment::TimeSource::MOCK_TIME};
@@ -1996,259 +2082,365 @@ TEST_F(SqlPersistentStoreTest, UpdateEntryLastUsedByKeyNonExistentWithIndex) {
   EXPECT_EQ(*error, SqlPersistentStore::Error::kNotFound);
 }
 
-TEST_F(SqlPersistentStoreTest, UpdateEntryLastUsedByResIdSuccess) {
+class SqlPersistentStoreWriteEntryTest
+    : public SqlPersistentStoreTest,
+      public testing::WithParamInterface<std::tuple<bool, bool, bool>> {
+ public:
+  static std::string ParamToString(
+      const testing::TestParamInfo<std::tuple<bool, bool, bool>>& info) {
+    auto [has_hints, has_body, has_head] = info.param;
+    return base::StringPrintf("%s_%s_%s", has_hints ? "HasHints" : "NoHints",
+                              has_body ? "HasBody" : "NoBody",
+                              has_head ? "HasHead" : "NoHead");
+  }
+
+ protected:
+  bool has_hints() const { return std::get<0>(GetParam()); }
+  bool has_body() const { return std::get<1>(GetParam()); }
+  bool has_head() const { return std::get<2>(GetParam()); }
+
+  void SetupBody(std::optional<int64_t>& old_body_end,
+                 EntryWriteBuffer& write_buffer,
+                 int64_t& expected_body_end,
+                 std::string& body_data) {
+    if (!has_body()) {
+      return;
+    }
+    old_body_end = 0;
+    body_data = "body_data";
+    auto buffer = base::MakeRefCounted<net::StringIOBuffer>(body_data);
+    write_buffer = EntryWriteBuffer(std::move(buffer), body_data.size(), 0);
+    expected_body_end = body_data.size();
+  }
+
+  void SetupHeader(scoped_refptr<net::IOBuffer>& head_buffer,
+                   int64_t& header_size_delta,
+                   std::string& head_data) {
+    if (!has_head()) {
+      return;
+    }
+    head_data = "head_data";
+    head_buffer = base::MakeRefCounted<net::StringIOBuffer>(head_data);
+    header_size_delta = head_data.size();
+  }
+
+  void HeaderChangeTest(const std::string& initial_header,
+                        const std::string& new_header);
+
+  std::optional<MemoryEntryDataHints> SetupHints() {
+    if (!has_hints()) {
+      return std::nullopt;
+    }
+    return MemoryEntryDataHints(42);
+  }
+};
+
+INSTANTIATE_TEST_SUITE_P(All,
+                         SqlPersistentStoreWriteEntryTest,
+                         testing::Combine(testing::Bool(),
+                                          testing::Bool(),
+                                          testing::Bool()),
+                         SqlPersistentStoreWriteEntryTest::ParamToString);
+
+TEST_P(SqlPersistentStoreWriteEntryTest, Success) {
   CreateAndInitStore();
   const CacheEntryKey kKey("my-key");
+  const auto res_id = CreateEntryAndGetResId(kKey);
 
-  auto create_result = CreateEntry(kKey);
-  ASSERT_TRUE(create_result.has_value());
-  const base::Time create_time = create_result->last_used;
-  const auto res_id = create_result->res_id;
+  std::optional<int64_t> old_body_end;
+  EntryWriteBuffer write_buffer;
+  int64_t expected_body_end = 0;
+  std::string body_data;
+  SetupBody(old_body_end, write_buffer, expected_body_end, body_data);
 
-  // Open to verify initial time.
-  auto open_result1 = OpenEntry(kKey);
-  ASSERT_TRUE(open_result1.has_value() && open_result1->has_value());
-  EXPECT_EQ((*open_result1)->last_used, create_time);
+  scoped_refptr<net::IOBuffer> head_buffer;
+  int64_t header_size_delta = 0;
+  std::string head_data;
+  SetupHeader(head_buffer, header_size_delta, head_data);
 
-  // Advance time and update.
-  task_environment_.AdvanceClock(base::Minutes(5));
-  const base::Time kNewTime = base::Time::Now();
-  ASSERT_NE(kNewTime, create_time);
+  auto hints = SetupHints();
 
-  ASSERT_EQ(UpdateEntryLastUsedByResId(kKey, res_id, kNewTime),
-            SqlPersistentStore::Error::kOk);
+  const base::Time kTime = base::Time::Now();
 
-  // Setting the same time should succeed.
-  ASSERT_EQ(UpdateEntryLastUsedByResId(kKey, res_id, kNewTime),
-            SqlPersistentStore::Error::kOk);
+  base::test::TestFuture<SqlPersistentStore::ResIdOrError> future;
+  store_->WriteEntryDataAndMetadata(
+      kKey, res_id, old_body_end, std::move(write_buffer), kTime, hints,
+      head_buffer, header_size_delta, /*doomed_new_entry=*/false,
+      future.GetCallback());
+  ASSERT_TRUE(future.Get().has_value());
 
-  // Open again to verify the updated time.
-  auto open_result2 = OpenEntry(kKey);
-  ASSERT_TRUE(open_result2.has_value() && open_result2->has_value());
-  EXPECT_EQ((*open_result2)->last_used, kNewTime);
+  // Verify.
+  auto details = GetResourceEntryDetails(kKey);
+  ASSERT_TRUE(details.has_value());
+  EXPECT_EQ(details->last_used, kTime);
+  EXPECT_THAT(details->bytes_usage,
+              kKey.string().size() + body_data.size() + head_data.size());
+  EXPECT_EQ(details->head_data, head_data);
+  EXPECT_EQ(details->body_end, expected_body_end);
+  if (has_body()) {
+    CheckBlobData(res_id, {{0, body_data}});
+  } else {
+    CheckBlobData(res_id, {});
+  }
+  EXPECT_THAT(GetResourceHints(kKey),
+              hints.value_or(MemoryEntryDataHints(0)).value());
+
+  // Verify in-memory stats.
+  EXPECT_EQ(GetSizeOfAllEntries(), kSqlBackendStaticResourceSize +
+                                       kKey.string().size() + body_data.size() +
+                                       head_data.size());
 }
 
-TEST_F(SqlPersistentStoreTest, UpdateEntryLastUsedByResIdOnNonExistentEntry) {
+TEST_P(SqlPersistentStoreWriteEntryTest, SuccessCreateNew) {
+  CreateAndInitStore();
+  const CacheEntryKey kKey("my-key");
+  std::optional<int64_t> old_body_end;
+  EntryWriteBuffer write_buffer;
+  int64_t expected_body_end = 0;
+  std::string body_data;
+  SetupBody(old_body_end, write_buffer, expected_body_end, body_data);
+
+  scoped_refptr<net::IOBuffer> head_buffer;
+  int64_t header_size_delta = 0;
+  std::string head_data;
+  SetupHeader(head_buffer, header_size_delta, head_data);
+
+  auto hints = SetupHints();
+
+  const base::Time kTime = base::Time::Now();
+
+  base::test::TestFuture<SqlPersistentStore::ResIdOrError> future;
+  // Passing nullopt res_id to create a new entry.
+  store_->WriteEntryDataAndMetadata(
+      kKey, /*res_id=*/std::nullopt, old_body_end, std::move(write_buffer),
+      kTime, hints, head_buffer, header_size_delta, /*doomed_new_entry=*/false,
+      future.GetCallback());
+  ASSERT_TRUE(future.Get().has_value());
+  const auto res_id = future.Get().value();
+
+  EXPECT_EQ(GetEntryCount(), 1);
+
+  // Verify.
+  auto details = GetResourceEntryDetails(kKey);
+  ASSERT_TRUE(details.has_value());
+  EXPECT_EQ(details->last_used, kTime);
+  EXPECT_THAT(details->bytes_usage,
+              kKey.string().size() + body_data.size() + head_data.size());
+  EXPECT_EQ(details->head_data, head_data);
+  EXPECT_EQ(details->body_end, expected_body_end);
+  if (has_body()) {
+    CheckBlobData(res_id, {{0, body_data}});
+  } else {
+    CheckBlobData(res_id, {});
+  }
+  EXPECT_THAT(GetResourceHints(kKey),
+              hints.value_or(MemoryEntryDataHints(0)).value());
+
+  // Verify in-memory stats.
+  EXPECT_EQ(GetSizeOfAllEntries(), kSqlBackendStaticResourceSize +
+                                       kKey.string().size() + body_data.size() +
+                                       head_data.size());
+}
+
+TEST_P(SqlPersistentStoreWriteEntryTest, SuccessCreateNewDoomed) {
+  CreateAndInitStore();
+  const CacheEntryKey kKey("my-key");
+  std::optional<int64_t> old_body_end;
+  EntryWriteBuffer write_buffer;
+  int64_t expected_body_end = 0;
+  std::string body_data;
+  SetupBody(old_body_end, write_buffer, expected_body_end, body_data);
+
+  scoped_refptr<net::IOBuffer> head_buffer;
+  int64_t header_size_delta = 0;
+  std::string head_data;
+  SetupHeader(head_buffer, header_size_delta, head_data);
+
+  auto hints = SetupHints();
+
+  const base::Time kTime = base::Time::Now();
+
+  base::test::TestFuture<SqlPersistentStore::ResIdOrError> future;
+  // Passing nullopt res_id to create a new entry with doomed_new_entry=true.
+  store_->WriteEntryDataAndMetadata(
+      kKey, /*res_id=*/std::nullopt, old_body_end, std::move(write_buffer),
+      kTime, hints, head_buffer, header_size_delta, /*doomed_new_entry=*/true,
+      future.GetCallback());
+  ASSERT_TRUE(future.Get().has_value());
+  const auto res_id = future.Get().value();
+
+  // The entry count should not increase.
+  EXPECT_EQ(GetEntryCount(), 0);
+
+  // Verify the entry exists but is doomed.
+  auto details = GetResourceEntryDetails(kKey);
+  ASSERT_TRUE(details.has_value());
+  EXPECT_TRUE(details->doomed);
+  EXPECT_EQ(details->last_used, kTime);
+  EXPECT_EQ(details->head_data, head_data);
+  EXPECT_EQ(details->body_end, expected_body_end);
+  if (has_body()) {
+    CheckBlobData(res_id, {{0, body_data}});
+  } else {
+    CheckBlobData(res_id, {});
+  }
+
+  // Verify in-memory stats (should be 0 as it's doomed).
+  EXPECT_EQ(GetSizeOfAllEntries(), 0);
+
+  // Verify OpenEntry fails.
+  auto result = OpenEntry(kKey);
+  ASSERT_TRUE(result.has_value());
+  EXPECT_FALSE(result->has_value());
+}
+
+TEST_P(SqlPersistentStoreWriteEntryTest, NonExistentEntry) {
+  CreateAndInitStore();
+  const CacheEntryKey kKey("non-existent");
+  const SqlPersistentStore::ResId res_id(123);
+
+  std::optional<int64_t> old_body_end;
+  EntryWriteBuffer write_buffer;
+  int64_t expected_body_end = 0;
+  std::string body_data;
+  SetupBody(old_body_end, write_buffer, expected_body_end, body_data);
+
+  scoped_refptr<net::IOBuffer> head_buffer;
+  int64_t header_size_delta = 0;
+  std::string head_data;
+  SetupHeader(head_buffer, header_size_delta, head_data);
+
+  auto hints = SetupHints();
+
+  base::test::TestFuture<SqlPersistentStore::ResIdOrError> future;
+  store_->WriteEntryDataAndMetadata(
+      kKey, res_id, old_body_end, std::move(write_buffer), base::Time::Now(),
+      hints, head_buffer, header_size_delta, /*doomed_new_entry=*/false,
+      future.GetCallback());
+  ASSERT_EQ(future.Get().error(), SqlPersistentStore::Error::kNotFound);
+}
+
+TEST_P(SqlPersistentStoreWriteEntryTest, DoomedEntry) {
+  CreateAndInitStore();
+  const CacheEntryKey kKey("doomed");
+  const auto res_id = CreateEntryAndGetResId(kKey);
+  ASSERT_EQ(DoomEntry(kKey, res_id), SqlPersistentStore::Error::kOk);
+
+  std::optional<int64_t> old_body_end;
+  EntryWriteBuffer write_buffer;
+  int64_t expected_body_end = 0;
+  std::string body_data;
+  SetupBody(old_body_end, write_buffer, expected_body_end, body_data);
+
+  scoped_refptr<net::IOBuffer> head_buffer;
+  int64_t header_size_delta = 0;
+  std::string head_data;
+  SetupHeader(head_buffer, header_size_delta, head_data);
+
+  auto hints = SetupHints();
+
+  base::test::TestFuture<SqlPersistentStore::ResIdOrError> future;
+  store_->WriteEntryDataAndMetadata(
+      kKey, res_id, old_body_end, std::move(write_buffer), base::Time::Now(),
+      hints, head_buffer, header_size_delta, /*doomed_new_entry=*/false,
+      future.GetCallback());
+  ASSERT_EQ(future.Get().error(), SqlPersistentStore::Error::kNotFound);
+}
+
+void SqlPersistentStoreWriteEntryTest::HeaderChangeTest(
+    const std::string& initial_header,
+    const std::string& new_header) {
+  if (!has_head()) {
+    GTEST_SKIP();
+  }
+
   CreateAndInitStore();
   const CacheEntryKey kKey("key");
-  ASSERT_EQ(UpdateEntryLastUsedByResId(kKey, SqlPersistentStore::ResId(123),
-                                       base::Time::Now()),
-            SqlPersistentStore::Error::kNotFound);
-  EXPECT_EQ(GetEntryCount(), 0);
-}
-
-TEST_F(SqlPersistentStoreTest, UpdateEntryLastUsedByResIdOnDoomedEntry) {
-  CreateAndInitStore();
-  const CacheEntryKey kKey("doomed-key");
-
-  // Create and then doom the entry.
-  const auto res_id = CreateEntryAndGetResId(kKey);
-  ASSERT_EQ(DoomEntry(kKey, res_id), SqlPersistentStore::Error::kOk);
-
-  // Attempting to update a doomed entry should fail as if it's not found.
-  ASSERT_EQ(UpdateEntryLastUsedByResId(kKey, res_id, base::Time::Now()),
-            SqlPersistentStore::Error::kNotFound);
-}
-
-TEST_F(SqlPersistentStoreTest, UpdateEntryHeaderAndLastUsedSuccessInitial) {
-  CreateAndInitStore();
-  const CacheEntryKey kKey("my-key");
   const auto res_id = CreateEntryAndGetResId(kKey);
 
-  // Initial bytes_usage is just the key size.
-  const int64_t initial_bytes_usage = kKey.string().size();
-  EXPECT_EQ(GetSizeOfAllEntries(),
-            kSqlBackendStaticResourceSize + initial_bytes_usage);
+  const base::Time kInitialTime = base::Time::Now();
 
-  // Prepare new header data.
-  const std::string kNewHeadData = "new_header_data";
-  auto buffer = base::MakeRefCounted<net::StringIOBuffer>(kNewHeadData);
+  // Initial header.
+  auto initial_buffer =
+      base::MakeRefCounted<net::StringIOBuffer>(initial_header);
 
-  // Advance time for new last_used.
-  task_environment_.AdvanceClock(base::Minutes(1));
-  const base::Time new_last_used = base::Time::Now();
-
-  // Update the entry. Previous header size is 0 as it was null.
-  ASSERT_EQ(
-      UpdateEntryHeaderAndLastUsed(kKey, res_id, new_last_used, buffer,
-                                   /*header_size_delta=*/kNewHeadData.size()),
-      SqlPersistentStore::Error::kOk);
+  base::test::TestFuture<SqlPersistentStore::ResIdOrError> future;
+  store_->WriteEntryDataAndMetadata(
+      kKey, res_id, std::nullopt, EntryWriteBuffer(), kInitialTime,
+      std::nullopt, initial_buffer, initial_header.size(),
+      /*doomed_new_entry=*/false, future.GetCallback());
+  ASSERT_TRUE(future.Get().has_value());
 
   // Verify in-memory stats.
-  const int64_t expected_bytes_usage =
-      initial_bytes_usage + kNewHeadData.size();
-  EXPECT_EQ(GetSizeOfAllEntries(),
-            kSqlBackendStaticResourceSize + expected_bytes_usage);
+  EXPECT_EQ(GetSizeOfAllEntries(), kSqlBackendStaticResourceSize +
+                                       kKey.string().size() +
+                                       initial_header.size());
 
-  // Verify database content.
+  // Replace header.
+  auto new_head_buffer = base::MakeRefCounted<net::StringIOBuffer>(new_header);
+
+  std::optional<int64_t> old_body_end;
+  EntryWriteBuffer write_buffer;
+  int64_t expected_body_end = 0;
+  std::string body_data;
+  SetupBody(old_body_end, write_buffer, expected_body_end, body_data);
+
+  auto hints = SetupHints();
+
+  const base::Time kNewTime = kInitialTime + base::Seconds(1);
+
+  int64_t delta =
+      static_cast<int64_t>(new_header.size()) - initial_header.size();
+
+  future.Clear();
+  store_->WriteEntryDataAndMetadata(
+      kKey, res_id, old_body_end, std::move(write_buffer), kNewTime, hints,
+      new_head_buffer, delta, /*doomed_new_entry=*/false, future.GetCallback());
+  ASSERT_TRUE(future.Get().has_value());
+
+  // Verify.
   auto details = GetResourceEntryDetails(kKey);
   ASSERT_TRUE(details.has_value());
-  EXPECT_EQ(details->last_used, new_last_used);
-  EXPECT_EQ(details->bytes_usage, expected_bytes_usage);
-  EXPECT_EQ(details->head_data, kNewHeadData);
-}
-
-TEST_F(SqlPersistentStoreTest, UpdateEntryHeaderAndLastUsedSuccessReplace) {
-  CreateAndInitStore();
-  const CacheEntryKey kKey("my-key");
-  const auto res_id = CreateEntryAndGetResId(kKey);
-
-  // Initial update with some header data.
-  const std::string kInitialHeadData = "initial_data";
-  auto initial_buffer =
-      base::MakeRefCounted<net::StringIOBuffer>(kInitialHeadData);
-  ASSERT_EQ(
-      UpdateEntryHeaderAndLastUsed(kKey, res_id, base::Time::Now(),
-                                   initial_buffer, kInitialHeadData.size()),
-      SqlPersistentStore::Error::kOk);
-
-  const int64_t initial_bytes_usage =
-      kKey.string().size() + kInitialHeadData.size();
-  EXPECT_EQ(GetSizeOfAllEntries(),
-            kSqlBackendStaticResourceSize + initial_bytes_usage);
-
-  // Prepare new header data of the same size.
-  const std::string kNewHeadData = "updated_data";
-  ASSERT_EQ(kNewHeadData.size(), kInitialHeadData.size());
-  auto new_buffer = base::MakeRefCounted<net::StringIOBuffer>(kNewHeadData);
-
-  // Advance time for new last_used.
-  task_environment_.AdvanceClock(base::Minutes(1));
-  const base::Time new_last_used = base::Time::Now();
-
-  // Update the entry.
-  ASSERT_EQ(
-      UpdateEntryHeaderAndLastUsed(kKey, res_id, new_last_used, new_buffer,
-                                   /*header_size_delta=*/0),
-      SqlPersistentStore::Error::kOk);
-
-  // Verify in-memory stats (should be unchanged as size is same).
-  EXPECT_EQ(GetSizeOfAllEntries(),
-            kSqlBackendStaticResourceSize + initial_bytes_usage);
-
-  // Verify database content.
-  auto details = GetResourceEntryDetails(kKey);
-  ASSERT_TRUE(details.has_value());
-  EXPECT_EQ(details->last_used, new_last_used);
-  EXPECT_EQ(details->bytes_usage, initial_bytes_usage);
-  EXPECT_EQ(details->head_data, kNewHeadData);
-}
-
-TEST_F(SqlPersistentStoreTest, UpdateEntryHeaderAndLastUsedSuccessGrow) {
-  CreateAndInitStore();
-  const CacheEntryKey kKey("my-key");
-  const auto res_id = CreateEntryAndGetResId(kKey);
-
-  // Initial update with some header data.
-  const std::string kInitialHeadData = "short";
-  auto initial_buffer =
-      base::MakeRefCounted<net::StringIOBuffer>(kInitialHeadData);
-  ASSERT_EQ(
-      UpdateEntryHeaderAndLastUsed(kKey, res_id, base::Time::Now(),
-                                   initial_buffer, kInitialHeadData.size()),
-      SqlPersistentStore::Error::kOk);
-
-  const int64_t initial_bytes_usage =
-      kKey.string().size() + kInitialHeadData.size();
-  EXPECT_EQ(GetSizeOfAllEntries(),
-            kSqlBackendStaticResourceSize + initial_bytes_usage);
-
-  // Prepare new, larger header data.
-  const std::string kNewHeadData = "much_longer_header_data";
-  ASSERT_GT(kNewHeadData.size(), kInitialHeadData.size());
-  auto new_buffer = base::MakeRefCounted<net::StringIOBuffer>(kNewHeadData);
-
-  // Update the entry.
-  ASSERT_EQ(
-      UpdateEntryHeaderAndLastUsed(
-          kKey, res_id, base::Time::Now(), new_buffer,
-          static_cast<int64_t>(kNewHeadData.size()) - kInitialHeadData.size()),
-      SqlPersistentStore::Error::kOk);
+  EXPECT_EQ(details->last_used, kNewTime);
+  EXPECT_THAT(details->bytes_usage,
+              kKey.string().size() + body_data.size() + new_header.size());
+  EXPECT_EQ(details->head_data, new_header);
+  EXPECT_EQ(details->body_end, expected_body_end);
+  if (has_body()) {
+    CheckBlobData(res_id, {{0, body_data}});
+  } else {
+    CheckBlobData(res_id, {});
+  }
+  EXPECT_THAT(GetResourceHints(kKey),
+              hints.value_or(MemoryEntryDataHints(0)).value());
 
   // Verify in-memory stats.
-  const int64_t expected_bytes_usage =
-      kKey.string().size() + kNewHeadData.size();
-  EXPECT_EQ(GetSizeOfAllEntries(),
-            kSqlBackendStaticResourceSize + expected_bytes_usage);
-
-  // Verify database content.
-  auto details = GetResourceEntryDetails(kKey);
-  ASSERT_TRUE(details.has_value());
-  EXPECT_EQ(details->bytes_usage, expected_bytes_usage);
-  EXPECT_EQ(details->head_data, kNewHeadData);
+  EXPECT_EQ(GetSizeOfAllEntries(), kSqlBackendStaticResourceSize +
+                                       kKey.string().size() + body_data.size() +
+                                       new_header.size());
 }
 
-TEST_F(SqlPersistentStoreTest, UpdateEntryHeaderAndLastUsedSuccessShrink) {
-  CreateAndInitStore();
-  const CacheEntryKey kKey("my-key");
-  const auto res_id = CreateEntryAndGetResId(kKey);
-
-  // Initial update with large header data.
-  const std::string kInitialHeadData = "much_longer_header_data";
-  auto initial_buffer =
-      base::MakeRefCounted<net::StringIOBuffer>(kInitialHeadData);
-  ASSERT_EQ(
-      UpdateEntryHeaderAndLastUsed(kKey, res_id, base::Time::Now(),
-                                   initial_buffer, kInitialHeadData.size()),
-      SqlPersistentStore::Error::kOk);
-
-  const int64_t initial_bytes_usage =
-      kKey.string().size() + kInitialHeadData.size();
-  EXPECT_EQ(GetSizeOfAllEntries(),
-            kSqlBackendStaticResourceSize + initial_bytes_usage);
-
-  // Prepare new, smaller header data.
-  const std::string kNewHeadData = "short";
-  ASSERT_LT(kNewHeadData.size(), kInitialHeadData.size());
-  auto new_buffer = base::MakeRefCounted<net::StringIOBuffer>(kNewHeadData);
-
-  // Update the entry.
-  ASSERT_EQ(
-      UpdateEntryHeaderAndLastUsed(
-          kKey, res_id, base::Time::Now(), new_buffer,
-          static_cast<int64_t>(kNewHeadData.size()) - kInitialHeadData.size()),
-      SqlPersistentStore::Error::kOk);
-
-  // Verify in-memory stats.
-  const int64_t expected_bytes_usage =
-      kKey.string().size() + kNewHeadData.size();
-  EXPECT_EQ(GetSizeOfAllEntries(),
-            kSqlBackendStaticResourceSize + expected_bytes_usage);
-
-  // Verify database content.
-  auto details = GetResourceEntryDetails(kKey);
-  ASSERT_TRUE(details.has_value());
-  EXPECT_EQ(details->bytes_usage, expected_bytes_usage);
-  EXPECT_EQ(details->head_data, kNewHeadData);
+TEST_P(SqlPersistentStoreWriteEntryTest, HeaderReplace) {
+  HeaderChangeTest("initial", "replace");  // same length
 }
 
-TEST_F(SqlPersistentStoreTest, UpdateEntryHeaderAndLastUsedNotFound) {
-  CreateAndInitStore();
-  const CacheEntryKey kKey("non-existent-key");
-  auto buffer = base::MakeRefCounted<net::StringIOBuffer>("data");
-
-  ASSERT_EQ(
-      UpdateEntryHeaderAndLastUsed(kKey, SqlPersistentStore::ResId(100),
-                                   base::Time::Now(), buffer, buffer->size()),
-      SqlPersistentStore::Error::kNotFound);
+TEST_P(SqlPersistentStoreWriteEntryTest, HeaderGrow) {
+  HeaderChangeTest("short", "much_longer_header_data");
 }
 
-TEST_F(SqlPersistentStoreTest, UpdateEntryHeaderAndLastUsedDoomedEntry) {
-  CreateAndInitStore();
-  const CacheEntryKey kKey("doomed-key");
-  const auto res_id = CreateEntryAndGetResId(kKey);
-  ASSERT_EQ(DoomEntry(kKey, res_id), SqlPersistentStore::Error::kOk);
-
-  auto buffer = base::MakeRefCounted<net::StringIOBuffer>("data");
-  ASSERT_EQ(UpdateEntryHeaderAndLastUsed(kKey, res_id, base::Time::Now(),
-                                         buffer, buffer->size()),
-            SqlPersistentStore::Error::kNotFound);
+TEST_P(SqlPersistentStoreWriteEntryTest, HeaderShrink) {
+  HeaderChangeTest("much_longer_header_data", "short");
 }
 
-TEST_F(SqlPersistentStoreTest,
-       UpdateEntryHeaderAndLastUsedCorruptionDetectedAndRolledBack) {
+TEST_P(SqlPersistentStoreWriteEntryTest,
+       BytesUsageMismatchCorruptionDetectedAndRolledBack) {
+  if (!has_head() && !has_body()) {
+    GTEST_SKIP();
+  }
+
   CreateAndInitStore();
-  const CacheEntryKey kKey("my-key");
+  const CacheEntryKey kKey("key");
+  const base::Time kInitialTime = base::Time::Now();
   auto create_result = CreateEntry(kKey);
   ASSERT_TRUE(create_result.has_value());
   const auto res_id = create_result->res_id;
@@ -2256,8 +2448,8 @@ TEST_F(SqlPersistentStoreTest,
   const int64_t initial_size_of_all_entries = GetSizeOfAllEntries();
   const int32_t initial_entry_count = GetEntryCount();
 
-  // Manually corrupt the bytes_usage to a very small value.
-  const int64_t corrupted_bytes_usage = 1;
+  // Manually corrupt the bytes_usage to a a negative value.
+  const int64_t corrupted_bytes_usage = -100;
   {
     auto db_handle = ManuallyOpenDatabase();
     sql::Statement statement(db_handle->GetUniqueStatement(
@@ -2267,26 +2459,32 @@ TEST_F(SqlPersistentStoreTest,
     ASSERT_TRUE(statement.Run());
   }
 
-  ASSERT_EQ(GetSizeOfAllEntries(), initial_size_of_all_entries);
-  ASSERT_EQ(GetEntryCount(), initial_entry_count);
+  std::optional<int64_t> old_body_end;
+  EntryWriteBuffer write_buffer;
+  int64_t expected_body_end = 0;
+  std::string body_data;
+  SetupBody(old_body_end, write_buffer, expected_body_end, body_data);
 
-  // Prepare a new header.
-  const std::string kNewHeadData = "new_header_data";
-  auto buffer = base::MakeRefCounted<net::StringIOBuffer>(kNewHeadData);
+  scoped_refptr<net::IOBuffer> head_buffer;
+  int64_t header_size_delta = 0;
+  std::string head_data;
+  SetupHeader(head_buffer, header_size_delta, head_data);
+
+  auto hints = SetupHints();
+
+  const base::Time kNewTime = kInitialTime + base::Seconds(1);
 
   base::HistogramTester histogram_tester;
-
-  // Update the entry. This should trigger corruption detection because
-  // `bytes_usage` in the DB is inconsistent. The operation should fail and the
-  // transaction should be rolled back.
-  ASSERT_EQ(
-      UpdateEntryHeaderAndLastUsed(kKey, res_id, base::Time::Now(), buffer,
-                                   /*header_size_delta=*/buffer->size()),
-      SqlPersistentStore::Error::kInvalidData);
+  base::test::TestFuture<SqlPersistentStore::ResIdOrError> future;
+  store_->WriteEntryDataAndMetadata(
+      kKey, res_id, old_body_end, std::move(write_buffer), kNewTime, hints,
+      head_buffer, header_size_delta, /*doomed_new_entry=*/false,
+      future.GetCallback());
+  ASSERT_EQ(future.Get().error(), SqlPersistentStore::Error::kInvalidData);
 
   // Verify that `ResultWithCorruption` UMA was recorded in the histogram.
   histogram_tester.ExpectUniqueSample(
-      "Net.SqlDiskCache.Backend.UpdateEntryHeaderAndLastUsed."
+      "Net.SqlDiskCache.Backend.WriteEntryDataAndMetadata."
       "ResultWithCorruption",
       SqlPersistentStore::Error::kInvalidData, 1);
 
@@ -2301,6 +2499,131 @@ TEST_F(SqlPersistentStoreTest,
   EXPECT_EQ(details->last_used, initial_last_used);
   EXPECT_EQ(details->bytes_usage, corrupted_bytes_usage);
   EXPECT_EQ(details->head_data, "");  // Header should remain empty.
+}
+
+TEST_P(SqlPersistentStoreWriteEntryTest,
+       BodyEndMismatchCorruptionDetectedAndRolledBack) {
+  if (!has_body()) {
+    GTEST_SKIP();
+  }
+
+  CreateAndInitStore();
+  const CacheEntryKey kKey("key");
+  const base::Time kInitialTime = base::Time::Now();
+  auto create_result = CreateEntry(kKey);
+  ASSERT_TRUE(create_result.has_value());
+  const auto res_id = create_result->res_id;
+  const base::Time initial_last_used = create_result->last_used;
+
+  // Write some initial data so body_end is not 0.
+  const std::string kInitialData = "initial";
+  WriteDataAndAssertSuccess(kKey, res_id, 0, 0, kInitialData, false);
+  // body_end is now kInitialData.size().
+
+  const int64_t initial_size_of_all_entries = GetSizeOfAllEntries();
+  const int32_t initial_entry_count = GetEntryCount();
+
+  // Corrupt the body_end in the resources table.
+  {
+    auto db_handle = ManuallyOpenDatabase();
+    sql::Statement statement(db_handle->GetUniqueStatement(
+        "UPDATE resources SET body_end = 0 WHERE res_id = ?"));
+    statement.BindInt64(0, res_id.value());
+    ASSERT_TRUE(statement.Run());
+  }
+
+  // Setup other params.
+  // We pass the CORRECT old_body_end, but the DB is corrupted (0).
+  // We append data so TrimOverlappingBlobs is not triggered (offset ==
+  // old_body_end).
+  std::optional<int64_t> old_body_end = kInitialData.size();
+  auto buffer = base::MakeRefCounted<net::StringIOBuffer>("data");
+  // Offset is at the end of initial data (appending).
+  EntryWriteBuffer write_buffer(std::move(buffer), 4, kInitialData.size());
+
+  scoped_refptr<net::IOBuffer> head_buffer;
+  int64_t header_size_delta = 0;
+  std::string head_data;
+  SetupHeader(head_buffer, header_size_delta, head_data);
+
+  auto hints = SetupHints();
+
+  const base::Time kNewTime = kInitialTime + base::Seconds(1);
+  base::HistogramTester histogram_tester;
+  base::test::TestFuture<SqlPersistentStore::ResIdOrError> future;
+  store_->WriteEntryDataAndMetadata(
+      kKey, res_id, old_body_end, std::move(write_buffer), kNewTime, hints,
+      head_buffer, header_size_delta, /*doomed_new_entry=*/false,
+      future.GetCallback());
+  ASSERT_EQ(future.Get().error(), SqlPersistentStore::Error::kBodyEndMismatch);
+
+  // Verify that `ResultWithCorruption` UMA was recorded in the histogram.
+  histogram_tester.ExpectUniqueSample(
+      "Net.SqlDiskCache.Backend.WriteEntryDataAndMetadata."
+      "ResultWithCorruption",
+      SqlPersistentStore::Error::kBodyEndMismatch, 1);
+
+  // Verify that the store status was NOT changed due to rollback.
+  EXPECT_EQ(GetEntryCount(), initial_entry_count);
+  EXPECT_EQ(GetSizeOfAllEntries(), initial_size_of_all_entries);
+
+  // Verify database content was rolled back to its state before the UPDATE
+  // call.
+  auto details = GetResourceEntryDetails(kKey);
+  ASSERT_TRUE(details.has_value());
+  EXPECT_EQ(details->last_used, initial_last_used);
+  EXPECT_EQ(details->bytes_usage, kKey.string().size() + kInitialData.size());
+  EXPECT_EQ(details->head_data, "");  // Header should remain empty.
+}
+
+TEST_P(SqlPersistentStoreWriteEntryTest, MultipleBuffers) {
+  if (!has_body()) {
+    GTEST_SKIP();
+  }
+
+  CreateAndInitStore();
+  const CacheEntryKey kKey("key");
+  const auto res_id = CreateEntryAndGetResId(kKey);
+
+  const std::string kData1 = "body1 ";
+  const std::string kData2 = "body2";
+  const std::string kCombinedBodyData = kData1 + kData2;
+
+  EntryWriteBuffer write_buffer;
+  write_buffer.buffers.push_back(
+      base::MakeRefCounted<net::StringIOBuffer>(kData1));
+  write_buffer.buffers.push_back(
+      base::MakeRefCounted<net::StringIOBuffer>(kData2));
+  write_buffer.size = kCombinedBodyData.size();
+  write_buffer.offset = 0;
+
+  scoped_refptr<net::IOBuffer> head_buffer;
+  int64_t header_size_delta = 0;
+  std::string head_data;
+  SetupHeader(head_buffer, header_size_delta, head_data);
+
+  auto hints = SetupHints();
+
+  const base::Time kTime = base::Time::Now();
+  base::test::TestFuture<SqlPersistentStore::ResIdOrError> future;
+  store_->WriteEntryDataAndMetadata(
+      kKey, res_id, /*old_body_end=*/0, std::move(write_buffer), kTime, hints,
+      head_buffer, header_size_delta, /*doomed_new_entry=*/false,
+      future.GetCallback());
+  ASSERT_TRUE(future.Get().has_value());
+
+  // Verify.
+  auto details = GetResourceEntryDetails(kKey);
+  ASSERT_TRUE(details.has_value());
+  EXPECT_EQ(details->last_used, kTime);
+  EXPECT_THAT(
+      details->bytes_usage,
+      kKey.string().size() + kCombinedBodyData.size() + head_data.size());
+  EXPECT_EQ(details->head_data, head_data);
+  EXPECT_EQ(details->body_end, kCombinedBodyData.size());
+  CheckBlobData(res_id, {{0, kCombinedBodyData}});
+  EXPECT_THAT(GetResourceHints(kKey),
+              hints.value_or(MemoryEntryDataHints(0)).value());
 }
 
 TEST_F(SqlPersistentStoreTest, OpenEntryCheckSumError) {
@@ -2475,8 +2798,9 @@ TEST_F(SqlPersistentStoreTest, TrimOverlappingBlobsInvalidDataSizeMismatch) {
   auto overwrite_buffer =
       base::MakeRefCounted<net::StringIOBuffer>(kOverwriteData);
   EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/kInitialData.size(),
-                           /*offset=*/2, overwrite_buffer,
-                           kOverwriteData.size(), /*truncate=*/false),
+                           EntryWriteBuffer(std::move(overwrite_buffer),
+                                            kOverwriteData.size(), 2),
+                           /*truncate=*/false),
             SqlPersistentStore::Error::kInvalidData);
 }
 
@@ -2502,8 +2826,9 @@ TEST_F(SqlPersistentStoreTest, TrimOverlappingBlobsCheckSumError) {
   auto overwrite_buffer =
       base::MakeRefCounted<net::StringIOBuffer>(kOverwriteData);
   EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/kInitialData.size(),
-                           /*offset=*/2, overwrite_buffer,
-                           kOverwriteData.size(), /*truncate=*/false),
+                           EntryWriteBuffer(std::move(overwrite_buffer),
+                                            kOverwriteData.size(), 2),
+                           /*truncate=*/false),
             SqlPersistentStore::Error::kCheckSumError);
 }
 
@@ -2526,8 +2851,9 @@ TEST_F(SqlPersistentStoreTest, TrimOverlappingBlobsInvalidDataRangeOverflow) {
   auto overwrite_buffer =
       base::MakeRefCounted<net::StringIOBuffer>(kOverwriteData);
   EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/kInitialData.size(),
-                           /*offset=*/5, overwrite_buffer,
-                           kOverwriteData.size(), /*truncate=*/false),
+                           EntryWriteBuffer(std::move(overwrite_buffer),
+                                            kOverwriteData.size(), 5),
+                           /*truncate=*/false),
             SqlPersistentStore::Error::kInvalidData);
 }
 
@@ -2551,7 +2877,7 @@ TEST_F(SqlPersistentStoreTest, TruncateExistingBlobsInvalidDataSizeMismatch) {
   // This write will truncate the entry, triggering TruncateExistingBlobs,
   // which should detect the inconsistency.
   EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/kInitialData.size(),
-                           /*offset=*/5, /*buffer=*/nullptr, /*buf_len=*/0,
+                           EntryWriteBuffer(nullptr, 0, 5),
                            /*truncate=*/true),
             SqlPersistentStore::Error::kInvalidData);
 }
@@ -2572,7 +2898,7 @@ TEST_F(SqlPersistentStoreTest, TruncateExistingBlobsInvalidDataRangeOverflow) {
   // This write will truncate the entry, triggering TruncateExistingBlobs,
   // which should detect the overflow.
   EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/kInitialData.size(),
-                           /*offset=*/1, /*buffer=*/nullptr, /*buf_len=*/0,
+                           EntryWriteBuffer(nullptr, 0, 1),
                            /*truncate=*/true),
             SqlPersistentStore::Error::kInvalidData);
 }
@@ -2585,35 +2911,41 @@ TEST_F(SqlPersistentStoreTest, WriteEntryDataInvalidArgument) {
   const int buf_len = buffer->size();
 
   // Test with negative old_body_end.
-  EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/-1, /*offset=*/0,
-                           buffer, buf_len, /*truncate=*/false),
+  EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/-1,
+                           EntryWriteBuffer(buffer, buf_len, 0),
+                           /*truncate=*/false),
             SqlPersistentStore::Error::kInvalidArgument);
 
   // Test with negative offset.
-  EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/0, /*offset=*/-1,
-                           buffer, buf_len, /*truncate=*/false),
+  EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/0,
+                           EntryWriteBuffer(buffer, buf_len, -1),
+                           /*truncate=*/false),
             SqlPersistentStore::Error::kInvalidArgument);
 
   // Test with offset + buf_len overflow.
-  EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/0,
-                           /*offset=*/std::numeric_limits<int64_t>::max(),
-                           buffer, buf_len, /*truncate=*/false),
-            SqlPersistentStore::Error::kInvalidArgument);
+  EXPECT_EQ(
+      WriteEntryData(kKey, res_id, /*old_body_end=*/0,
+                     EntryWriteBuffer(buffer, buf_len,
+                                      std::numeric_limits<int64_t>::max()),
+                     /*truncate=*/false),
+      SqlPersistentStore::Error::kInvalidArgument);
 
   // Test with negative buf_len.
-  EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/0, /*offset=*/0,
-                           buffer, /*buf_len=*/-1, /*truncate=*/false),
+  EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/0,
+                           EntryWriteBuffer(buffer, -1, 0),
+                           /*truncate=*/false),
             SqlPersistentStore::Error::kInvalidArgument);
 
   // Test with null buffer but positive buf_len.
-  EXPECT_EQ(
-      WriteEntryData(kKey, res_id, /*old_body_end=*/0, /*offset=*/0,
-                     /*buffer=*/nullptr, /*buf_len=*/1, /*truncate=*/false),
-      SqlPersistentStore::Error::kInvalidArgument);
+  EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/0,
+                           EntryWriteBuffer(nullptr, 1, 0),
+                           /*truncate=*/false),
+            SqlPersistentStore::Error::kInvalidArgument);
 
   // Test with buf_len > buffer->size().
-  EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/0, /*offset=*/0,
-                           buffer, buf_len + 1, /*truncate=*/false),
+  EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/0,
+                           EntryWriteBuffer(buffer, buf_len + 1, 0),
+                           /*truncate=*/false),
             SqlPersistentStore::Error::kInvalidArgument);
 }
 
@@ -2635,8 +2967,9 @@ TEST_F(SqlPersistentStoreTest, WriteEntryDataInvalidDataBodyEndMismatch) {
   const std::string kOverwriteData = "abc";
   auto overwrite_buffer =
       base::MakeRefCounted<net::StringIOBuffer>(kOverwriteData);
-  EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/5, /*offset=*/8,
-                           overwrite_buffer, kOverwriteData.size(),
+  EXPECT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/5,
+                           EntryWriteBuffer(std::move(overwrite_buffer),
+                                            kOverwriteData.size(), 8),
                            /*truncate=*/false),
             SqlPersistentStore::Error::kBodyEndMismatch);
 }
@@ -2756,8 +3089,10 @@ TEST_F(SqlPersistentStoreTest, TruncateWithNullBuffer) {
   // Now, truncate the entry to a smaller size using a null buffer.
   const int64_t kTruncateOffset = 5;
   ASSERT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/kInitialData.size(),
-                           /*offset=*/kTruncateOffset, /*buffer=*/nullptr,
-                           /*buf_len=*/0, /*truncate=*/true),
+                           EntryWriteBuffer(
+                               /*buffer=*/nullptr, /*size=*/0,
+                               /*offset=*/kTruncateOffset),
+                           /*truncate=*/true),
             SqlPersistentStore::Error::kOk);
 
   // Read back and verify.
@@ -2804,10 +3139,12 @@ TEST_F(SqlPersistentStoreTest, TruncateMultipleBlobsWithZeroLengthWrite) {
   WriteAndVerifySingleByteBlobs(kKey, res_id, "01234");
 
   // Truncate at offset 2 with a zero-length write.
-  ASSERT_EQ(
-      WriteEntryData(kKey, res_id, /*old_body_end=*/5, /*offset=*/2,
-                     /*buffer=*/nullptr, /*buf_len=*/0, /*truncate=*/true),
-      SqlPersistentStore::Error::kOk);
+  ASSERT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/5,
+                           EntryWriteBuffer(
+                               /*buffer=*/nullptr, /*size=*/0,
+                               /*offset=*/2),
+                           /*truncate=*/true),
+            SqlPersistentStore::Error::kOk);
 
   // The new body end should be the offset = 2.
   const int64_t new_body_end = 2;
@@ -2867,10 +3204,12 @@ TEST_F(SqlPersistentStoreTest, WriteEntryDataNotFound) {
   CreateAndInitStore();
   const CacheEntryKey kKey("non-existent-key");
   auto write_buffer = base::MakeRefCounted<net::StringIOBuffer>("data");
-  ASSERT_EQ(WriteEntryData(kKey, SqlPersistentStore::ResId(100),
-                           /*old_body_end=*/0, /*offset=*/0, write_buffer,
-                           write_buffer->size(), /*truncate=*/false),
-            SqlPersistentStore::Error::kNotFound);
+  ASSERT_EQ(
+      WriteEntryData(kKey, SqlPersistentStore::ResId(100),
+                     /*old_body_end=*/0,
+                     EntryWriteBuffer(write_buffer, write_buffer->size(), 0),
+                     /*truncate=*/false),
+      SqlPersistentStore::Error::kNotFound);
 }
 
 TEST_F(SqlPersistentStoreTest, WriteEntryDataNullBufferNoTruncate) {
@@ -2888,7 +3227,8 @@ TEST_F(SqlPersistentStoreTest, WriteEntryDataNullBufferNoTruncate) {
 
   // Writing a null buffer with truncate=false should be a no-op.
   ASSERT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/initial_body_end,
-                           /*offset=*/5, /*buffer=*/nullptr, /*buf_len=*/0,
+                           EntryWriteBuffer(
+                               /*buffer=*/nullptr, /*size=*/0, /*offset=*/5),
                            /*truncate=*/false),
             SqlPersistentStore::Error::kOk);
 
@@ -2919,10 +3259,11 @@ TEST_F(SqlPersistentStoreTest, WriteEntryDataZeroLengthBufferNoTruncate) {
 
   // Writing a zero-length buffer with truncate=false should be a no-op.
   auto zero_buffer = base::MakeRefCounted<net::IOBufferWithSize>(0);
-  ASSERT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/initial_body_end,
-                           /*offset=*/5, zero_buffer, /*buf_len=*/0,
-                           /*truncate=*/false),
-            SqlPersistentStore::Error::kOk);
+  ASSERT_EQ(
+      WriteEntryData(kKey, res_id, /*old_body_end=*/initial_body_end,
+                     EntryWriteBuffer(zero_buffer, /*size=*/0, /*offset=*/5),
+                     /*truncate=*/false),
+      SqlPersistentStore::Error::kOk);
 
   // Verify size and content are unchanged.
   auto details = GetResourceEntryDetails(kKey);
@@ -2949,8 +3290,10 @@ TEST_F(SqlPersistentStoreTest, TruncateWithNullBufferExtendingBody) {
   // Now, truncate the entry to a larger size using a null buffer.
   const int64_t kTruncateOffset = 20;
   ASSERT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/kInitialData.size(),
-                           /*offset=*/kTruncateOffset, /*buffer=*/nullptr,
-                           /*buf_len=*/0, /*truncate=*/true),
+                           EntryWriteBuffer(
+                               /*buffer=*/nullptr, /*size=*/0,
+                               /*offset=*/kTruncateOffset),
+                           /*truncate=*/true),
             SqlPersistentStore::Error::kOk);
 
   // Read back and verify. The new space should be zero-filled.
@@ -2979,8 +3322,10 @@ TEST_F(SqlPersistentStoreTest, ExtendWithNullBufferNoTruncate) {
   // truncate.
   const int64_t kExtendOffset = 20;
   ASSERT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/kInitialData.size(),
-                           /*offset=*/kExtendOffset, /*buffer=*/nullptr,
-                           /*buf_len=*/0, /*truncate=*/false),
+                           EntryWriteBuffer(
+                               /*buffer=*/nullptr, /*size=*/0,
+                               /*offset=*/kExtendOffset),
+                           /*truncate=*/false),
             SqlPersistentStore::Error::kOk);
 
   // Read back and verify. The new space should be zero-filled.
@@ -3060,10 +3405,12 @@ TEST_F(SqlPersistentStoreTest, WriteEntryDataComplexOverlap) {
   VerifyBodyEndAndBytesUsage(kKey, 7, kKey.string().size() + 7);
 
   // 9. Null buffer truncate.
-  ASSERT_EQ(
-      WriteEntryData(kKey, res_id, /*old_body_end=*/7, /*offset=*/5,
-                     /*buffer=*/nullptr, /*buf_len=*/0, /*truncate=*/true),
-      SqlPersistentStore::Error::kOk);
+  ASSERT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/7,
+                           EntryWriteBuffer(/*buffer=*/nullptr,
+                                            /*size=*/0,
+                                            /*offset=*/5),
+                           /*truncate=*/true),
+            SqlPersistentStore::Error::kOk);
   ReadAndVerifyData(kKey, res_id, 0, 5, 5, false, "DDDDD");
   CheckBlobData(res_id, {{0, "DDDDD"}});
   VerifyBodyEndAndBytesUsage(kKey, 5, kKey.string().size() + 5);
@@ -3075,6 +3422,103 @@ TEST_F(SqlPersistentStoreTest, WriteEntryDataComplexOverlap) {
                     base::MakeStringViewWithNulChars("DDDDD\0\0\0\0\0SPARSE"));
   CheckBlobData(res_id, {{0, "DDDDD"}, {10, "SPARSE"}});
   VerifyBodyEndAndBytesUsage(kKey, 16, kKey.string().size() + 11);
+}
+
+TEST_F(SqlPersistentStoreTest, WriteEntryDataWithMultipleBuffers) {
+  CreateAndInitStore();
+  const CacheEntryKey kKey("my-key");
+  const auto res_id = CreateEntryAndGetResId(kKey);
+
+  const std::string kData1 = "part1 ";
+  const std::string kData2 = "part2 ";
+  const std::string kData3 = "part3";
+  const std::string kCombinedData = kData1 + kData2 + kData3;
+
+  EntryWriteBuffer write_buffer;
+  write_buffer.buffers.push_back(
+      base::MakeRefCounted<net::StringIOBuffer>(kData1));
+  write_buffer.buffers.push_back(
+      base::MakeRefCounted<net::StringIOBuffer>(kData2));
+  write_buffer.buffers.push_back(
+      base::MakeRefCounted<net::StringIOBuffer>(kData3));
+  write_buffer.size = kCombinedData.size();
+  write_buffer.offset = 0;
+
+  ASSERT_EQ(WriteEntryData(kKey, res_id, /*old_body_end=*/0,
+                           std::move(write_buffer), /*truncate=*/false),
+            SqlPersistentStore::Error::kOk);
+
+  // Read back and verify.
+  ReadAndVerifyData(kKey, res_id, /*offset=*/0,
+                    /*buffer_len=*/kCombinedData.size(),
+                    /*body_end=*/kCombinedData.size(),
+                    /*sparse_reading=*/false, kCombinedData);
+  // Verify blob data in the database.
+  CheckBlobData(res_id, {{0, kCombinedData}});
+}
+
+TEST_F(SqlPersistentStoreTest, WriteEntryDataCreatesNew) {
+  CreateAndInitStore();
+  const CacheEntryKey kKey("my-key");
+  const std::string kData = "more data";
+  auto write_buffer = base::MakeRefCounted<net::StringIOBuffer>(kData);
+  const base::Time kTime = base::Time::Now();
+
+  base::test::TestFuture<SqlPersistentStore::ResIdOrError> future;
+  store_->WriteEntryData(kKey, kTime, /*old_body_end=*/0,
+                         EntryWriteBuffer(write_buffer, kData.size(), 0),
+                         /*truncate=*/false, /*doomed_new_entry=*/false,
+                         future.GetCallback());
+
+  auto result = future.Take();
+  ASSERT_TRUE(result.has_value());
+  SqlPersistentStore::ResId res_id = *result;
+
+  EXPECT_EQ(GetEntryCount(), 1);
+  auto details = GetResourceEntryDetails(kKey);
+  ASSERT_TRUE(details.has_value());
+  EXPECT_EQ(details->body_end, static_cast<int64_t>(kData.size()));
+  EXPECT_EQ(details->last_used, kTime);
+
+  CheckBlobData(res_id, {{0, kData}});
+}
+
+TEST_F(SqlPersistentStoreTest, WriteEntryDataCreatesNewDoomed) {
+  CreateAndInitStore();
+  const CacheEntryKey kKey("my-key");
+  const std::string kData = "more data";
+  auto write_buffer = base::MakeRefCounted<net::StringIOBuffer>(kData);
+  const base::Time kTime = base::Time::Now();
+
+  base::test::TestFuture<SqlPersistentStore::ResIdOrError> future;
+  store_->WriteEntryData(kKey, kTime, /*old_body_end=*/0,
+                         EntryWriteBuffer(write_buffer, kData.size(), 0),
+                         /*truncate=*/false, /*doomed_new_entry=*/true,
+                         future.GetCallback());
+
+  auto result = future.Take();
+  ASSERT_TRUE(result.has_value());
+  SqlPersistentStore::ResId res_id = *result;
+
+  // The entry count should not increase.
+  EXPECT_EQ(GetEntryCount(), 0);
+
+  // Verify the entry exists but is doomed.
+  auto details = GetResourceEntryDetails(kKey);
+  ASSERT_TRUE(details.has_value());
+  EXPECT_TRUE(details->doomed);
+  EXPECT_EQ(details->body_end, static_cast<int64_t>(kData.size()));
+  EXPECT_EQ(details->last_used, kTime);
+
+  CheckBlobData(res_id, {{0, kData}});
+
+  // Verify in-memory stats (should be 0 as it's doomed).
+  EXPECT_EQ(GetSizeOfAllEntries(), 0);
+
+  // Verify OpenEntry fails.
+  auto open_result = OpenEntry(kKey);
+  ASSERT_TRUE(open_result.has_value());
+  EXPECT_FALSE(open_result->has_value());
 }
 
 TEST_F(SqlPersistentStoreTest, SparseRead) {
@@ -3426,7 +3870,7 @@ TEST_F(SqlPersistentStoreTest, DoomEntryCallbackNotRunOnStoreDestruction) {
   const CacheEntryKey kKey("my-key");
   const auto res_id = CreateEntryAndGetResId(kKey);
   bool callback_run = false;
-  store_->DoomEntry(kKey, res_id,
+  store_->DoomEntry(kKey, res_id, /*accept_index_mismatch=*/false,
                     base::BindLambdaForTesting([&](SqlPersistentStore::Error) {
                       callback_run = true;
                     }));
@@ -3532,16 +3976,19 @@ TEST_F(SqlPersistentStoreTest,
 }
 
 TEST_F(SqlPersistentStoreTest,
-       UpdateEntryLastUsedByResIdCallbackNotRunOnStoreDestruction) {
+       UpdateLastUsedByResIdCallbackNotRunOnStoreDestruction) {
   CreateAndInitStore();
   const CacheEntryKey kKey("my-key");
   const auto res_id = CreateEntryAndGetResId(kKey);
 
   bool callback_run = false;
-  store_->UpdateEntryLastUsedByResId(
-      kKey, res_id, base::Time::Now(),
+  store_->WriteEntryDataAndMetadata(
+      kKey, res_id, /*old_body_end=*/std::nullopt,
+      EntryWriteBuffer(/*buffer=*/nullptr, /*size=*/0, /*offset=*/0),
+      base::Time::Now(), /*new_hints=*/std::nullopt, /*head_buffer=*/nullptr,
+      /*header_size_delta=*/0, /*doomed_new_entry=*/false,
       base::BindLambdaForTesting(
-          [&](SqlPersistentStore::Error) { callback_run = true; }));
+          [&](SqlPersistentStore::ResIdOrError) { callback_run = true; }));
   store_.reset();
   FlushPendingTask();
 
@@ -3556,11 +4003,13 @@ TEST_F(SqlPersistentStoreTest,
 
   bool callback_run = false;
   auto buffer = base::MakeRefCounted<net::StringIOBuffer>("data");
-  store_->UpdateEntryHeaderAndLastUsed(
-      kKey, res_id, base::Time::Now(), /*new_hints=*/std::nullopt, buffer,
-      buffer->size(),
+  store_->WriteEntryDataAndMetadata(
+      kKey, res_id, /*old_body_end=*/std::nullopt,
+      EntryWriteBuffer(/*buffer=*/nullptr, /*size=*/0, /*offset=*/0),
+      base::Time::Now(), /*new_hints=*/std::nullopt, buffer, buffer->size(),
+      /*doomed_new_entry=*/false,
       base::BindLambdaForTesting(
-          [&](SqlPersistentStore::Error) { callback_run = true; }));
+          [&](SqlPersistentStore::ResIdOrError) { callback_run = true; }));
   store_.reset();
   FlushPendingTask();
 
@@ -3575,11 +4024,11 @@ TEST_F(SqlPersistentStoreTest, WriteDataCallbackNotRunOnStoreDestruction) {
   auto write_buffer = base::MakeRefCounted<net::StringIOBuffer>(kData);
   bool callback_run = false;
   store_->WriteEntryData(
-      kKey, res_id, /*old_body_end=*/0, /*offset=*/0, write_buffer,
-      kData.size(),
-      /*truncate=*/false,
+      kKey, res_id, /*old_body_end=*/0,
+      EntryWriteBuffer(std::move(write_buffer), kData.size(), 0),
+      /*truncate=*/false, /*doomed_new_entry=*/false,
       base::BindLambdaForTesting(
-          [&](SqlPersistentStore::Error) { callback_run = true; }));
+          [&](SqlPersistentStore::ResIdOrError) { callback_run = true; }));
   store_.reset();
   FlushPendingTask();
   EXPECT_FALSE(callback_run);
@@ -3595,7 +4044,7 @@ TEST_F(SqlPersistentStoreTest, ReadDataCallbackNotRunOnStoreDestruction) {
       kKey, res_id, /*offset=*/0, read_buffer, read_buffer->size(),
       /*body_end=*/10, /*sparse_reading=*/false,
       base::BindLambdaForTesting(
-          [&](SqlPersistentStore::IntOrError) { callback_run = true; }));
+          [&](SqlPersistentStore::ReadResultOrError) { callback_run = true; }));
   store_.reset();
   FlushPendingTask();
   EXPECT_FALSE(callback_run);
@@ -3968,7 +4417,9 @@ TEST_F(SqlPersistentStoreTest, ShouldStartEvictionReturnsFalseWhileInProgress) {
             SqlPersistentStore::EvictionUrgency::kNeeded);
 
   base::test::TestFuture<SqlPersistentStore::Error> future;
-  store_->StartEviction({}, /*is_idle_time_eviction=*/false,
+  auto flag = base::MakeRefCounted<base::RefCountedData<std::atomic_bool>>(
+      std::in_place, false);
+  store_->StartEviction({}, /*is_idle_time_eviction=*/false, flag,
                         future.GetCallback());
 
   // While eviction is in progress, ShouldStartEviction should return false.
@@ -4008,8 +4459,7 @@ int SqlPersistentStoreTest::GetNumberForWritesRequiredForCheckpoint(
   int64_t previous_wal_size = wal_size;
 
   int number_of_writes = 0;
-  const CacheEntryKey kKey("my-key");
-  const auto res_id = CreateEntryAndGetResId(kKey);
+  const auto res_id = CreateEntryAndGetResId(entry_key);
   while (true) {
     WriteDataAndAssertSuccess(entry_key, res_id,
                               /*old_body_end=*/number_of_writes,
@@ -4034,15 +4484,26 @@ int SqlPersistentStoreTest::GetNumberForWritesRequiredForCheckpoint(
   return number_of_writes;
 }
 
-TEST_F(SqlPersistentStoreTest, WalCheckpoint) {
+void SqlPersistentStoreTest::RunWalCheckpointTest(bool serial_checkpoint,
+                                                  bool multiple_shards) {
   // Set small thresholds to shorten the test execution time.
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeaturesAndParameters(
       {{net::features::kDiskCacheBackendExperiment,
         {{net::features::kDiskCacheBackendParam.name, "sql"},
          {net::features::kSqlDiskCacheForceCheckpointThreshold.name, "200"},
-         {net::features::kSqlDiskCacheIdleCheckpointThreshold.name, "100"}}}},
+         {net::features::kSqlDiskCacheIdleCheckpointThreshold.name, "100"},
+         {net::features::kSqlDiskCacheSerialCheckpoint.name,
+          serial_checkpoint ? "true" : "false"}}}},
       {});
+
+  if (multiple_shards) {
+    // Add more task runners to have more shards.
+    background_task_runners_.emplace_back(
+        base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()}));
+    background_task_runners_.emplace_back(
+        base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()}));
+  }
 
   auto test_helper = PerformanceScenarioTestHelper::Create();
 
@@ -4052,7 +4513,7 @@ TEST_F(SqlPersistentStoreTest, WalCheckpoint) {
   test_helper->SetInputScenario(ScenarioScope::kGlobal,
                                 InputScenario::kNoInput);
 
-  const CacheEntryKey kKey("my-key");
+  const CacheEntryKey kKey = CreateTestCacheEntryKeyForShard0();
   const std::string_view kData = "a";
   int idle_checkpoint_write_count = 0;
   int non_idle_checkpoint_write_count = 0;
@@ -4134,6 +4595,25 @@ TEST_F(SqlPersistentStoreTest, WalCheckpoint) {
   test_helper->SetLoadingScenario(ScenarioScope::kGlobal,
                                   LoadingScenario::kNoPageLoading);
   MaybeRunCheckpoint(/*expected_result=*/true);
+
+  // Checkpoint should be executed and the database size should change.
+  ASSERT_NE(CheckedGetFileSize(db_path), previous_db_size);
+}
+
+TEST_F(SqlPersistentStoreTest, WalCheckpoint) {
+  RunWalCheckpointTest(/*serial_checkpoint=*/false, /*multiple_shards=*/false);
+}
+
+TEST_F(SqlPersistentStoreTest, WalCheckpointSerial) {
+  RunWalCheckpointTest(/*serial_checkpoint=*/true, /*multiple_shards=*/false);
+}
+
+TEST_F(SqlPersistentStoreTest, WalCheckpointMultipleShards) {
+  RunWalCheckpointTest(/*serial_checkpoint=*/false, /*multiple_shards=*/true);
+}
+
+TEST_F(SqlPersistentStoreTest, WalCheckpointSerialMultipleShards) {
+  RunWalCheckpointTest(/*serial_checkpoint=*/true, /*multiple_shards=*/true);
 }
 
 TEST_F(SqlPersistentStoreTest, IndexState) {
@@ -4160,8 +4640,8 @@ TEST_F(SqlPersistentStoreTest, IndexState) {
   // Load the in memory index.
   EXPECT_TRUE(LoadInMemoryIndex());
 
-  // In memory index load process should not be triggered twice.
-  EXPECT_FALSE(LoadInMemoryIndex());
+  // Calling LoadInMemoryIndex should not cause crash.
+  EXPECT_TRUE(LoadInMemoryIndex());
 
   // After loading the in memory index, returns kHashNotFound.
   EXPECT_EQ(store_->GetIndexStateForHash(kKey1.hash()),
@@ -4282,8 +4762,8 @@ TEST_F(SqlPersistentStoreTest, LoadIndexOnInitFeature) {
   EXPECT_EQ(store_->GetIndexStateForHash(CacheEntryKey("other").hash()),
             SqlPersistentStore::IndexState::kHashNotFound);
 
-  // MaybeLoadInMemoryIndex() should do nothing.
-  EXPECT_FALSE(LoadInMemoryIndex());
+  // MaybeLoadInMemoryIndex() should not cause crash.
+  EXPECT_TRUE(LoadInMemoryIndex());
 }
 
 TEST_F(SqlPersistentStoreTest, IndexLoadNotInitializedFailure) {
@@ -4335,8 +4815,8 @@ TEST_F(SqlPersistentStoreTest, SimulateDbFailure) {
   EXPECT_EQ(UpdateEntryLastUsedByKey(kKey, base::Time::Now()),
             SqlPersistentStore::Error::kFailedForTesting);
 
-  EXPECT_EQ(UpdateEntryLastUsedByResId(kKey, SqlPersistentStore::ResId(1),
-                                       base::Time::Now()),
+  EXPECT_EQ(UpdateEntryHeaderAndLastUsed(kKey, SqlPersistentStore::ResId(1),
+                                         base::Time::Now(), nullptr, 0),
             SqlPersistentStore::Error::kFailedForTesting);
 
   // Prepare new header data.
@@ -4347,8 +4827,8 @@ TEST_F(SqlPersistentStoreTest, SimulateDbFailure) {
                                    base::Time::Now(), buffer, buffer->size()),
       SqlPersistentStore::Error::kFailedForTesting);
 
-  EXPECT_EQ(WriteEntryData(kKey, SqlPersistentStore::ResId(1), 0, 0, buffer, 0,
-                           false),
+  EXPECT_EQ(WriteEntryData(kKey, SqlPersistentStore::ResId(1), 0,
+                           EntryWriteBuffer(buffer, 0, 0), false),
             SqlPersistentStore::Error::kFailedForTesting);
 
   auto read_data_result =
@@ -4367,7 +4847,7 @@ TEST_F(SqlPersistentStoreTest, SimulateDbFailure) {
             SqlPersistentStore::Error::kFailedForTesting);
 
   EXPECT_EQ(StartEviction({}, /*is_idle_time_eviction=*/false),
-            SqlPersistentStore::Error::kOk);
+            SqlPersistentStore::Error::kFailedForTesting);
 
   EXPECT_FALSE(OpenNextEntry(SqlPersistentStore::EntryIterator()).has_value());
 
@@ -4419,8 +4899,8 @@ TEST_F(SqlPersistentStoreTest, AfterRazeAndPoisoned) {
   EXPECT_EQ(UpdateEntryLastUsedByKey(kKey, base::Time::Now()),
             SqlPersistentStore::Error::kDatabaseClosed);
 
-  EXPECT_EQ(UpdateEntryLastUsedByResId(kKey, SqlPersistentStore::ResId(1),
-                                       base::Time::Now()),
+  EXPECT_EQ(UpdateEntryHeaderAndLastUsed(kKey, SqlPersistentStore::ResId(1),
+                                         base::Time::Now(), nullptr, 0),
             SqlPersistentStore::Error::kDatabaseClosed);
 
   // Prepare new header data.
@@ -4431,8 +4911,9 @@ TEST_F(SqlPersistentStoreTest, AfterRazeAndPoisoned) {
                                    base::Time::Now(), buffer, buffer->size()),
       SqlPersistentStore::Error::kDatabaseClosed);
 
-  EXPECT_EQ(WriteEntryData(kKey, SqlPersistentStore::ResId(1), 0, 0, buffer, 0,
-                           false),
+  EXPECT_EQ(WriteEntryData(kKey, SqlPersistentStore::ResId(1), 0,
+                           EntryWriteBuffer(buffer, 0, 0),
+                           /*truncate=*/false),
             SqlPersistentStore::Error::kDatabaseClosed);
 
   auto read_data_result =
@@ -4453,7 +4934,7 @@ TEST_F(SqlPersistentStoreTest, AfterRazeAndPoisoned) {
   EXPECT_FALSE(OpenNextEntry(SqlPersistentStore::EntryIterator()).has_value());
 
   EXPECT_EQ(StartEviction({}, /*is_idle_time_eviction=*/false),
-            SqlPersistentStore::Error::kOk);
+            SqlPersistentStore::Error::kDatabaseClosed);
 
   EXPECT_TRUE(LoadInMemoryIndex(SqlPersistentStore::Error::kDatabaseClosed));
 }
@@ -4554,9 +5035,13 @@ TEST_F(SqlPersistentStoreTest, IdleTimeEviction) {
   test_helper->SetInputScenario(ScenarioScope::kGlobal,
                                 InputScenario::kNoInput);
 
-  // Idle time eviction should be aborted
+  // Idle time eviction should be aborted.
+  // Therefore, it has not been deleted down to the low water mark.
   ASSERT_EQ(StartEviction({}, /*is_idle_time_eviction=*/true),
-            SqlPersistentStore::Error::kAbortedDueToBrowserActivity);
+            SqlPersistentStore::Error::kOk);
+  const int64_t kLowWatermark =
+      kMaxBytes * kSqlBackendEvictionLowWaterMarkPermille / 1000;  // 9000
+  EXPECT_GT(GetSizeOfAllEntries(), kLowWatermark);
 
   // Set the state to idle.
   test_helper->SetLoadingScenario(ScenarioScope::kGlobal,
@@ -4569,9 +5054,400 @@ TEST_F(SqlPersistentStoreTest, IdleTimeEviction) {
             SqlPersistentStore::Error::kOk);
 
   // Eviction should have run and reduced the size.
-  const int64_t kLowWatermark =
-      kMaxBytes * kSqlBackendEvictionLowWaterMarkPermille / 1000;  // 9000
   EXPECT_LE(GetSizeOfAllEntries(), kLowWatermark);
+}
+
+TEST_F(SqlPersistentStoreTest, IdleTimeEvictionAbortsDuringEviction) {
+  const int64_t kMaxBytes = 100000;
+  const int64_t kIdleTimeHighWatermark =
+      kMaxBytes * kSqlBackendIdleTimeEvictionHighWaterMarkPermille /
+      1000;  // 92500
+
+  CreateStore(kMaxBytes);
+  store_->EnableStrictCorruptionCheckForTesting();
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  // Add entries to trigger idle time eviction.
+  int i = 0;
+  while (GetSizeOfAllEntries() <= kIdleTimeHighWatermark) {
+    const CacheEntryKey key(base::StringPrintf("key%d", i++));
+    auto create_result = CreateEntry(key);
+    ASSERT_TRUE(create_result.has_value());
+  }
+
+  EXPECT_EQ(store_->GetEvictionUrgency(),
+            SqlPersistentStore::EvictionUrgency::kIdleTime);
+
+  auto test_helper = PerformanceScenarioTestHelper::Create();
+
+  // Set the state to idle.
+  test_helper->SetLoadingScenario(ScenarioScope::kGlobal,
+                                  LoadingScenario::kNoPageLoading);
+  test_helper->SetInputScenario(ScenarioScope::kGlobal,
+                                InputScenario::kNoInput);
+
+  // Set hook to simulate user activity during eviction.
+  store_->SetEvictionHookForTesting(base::BindLambdaForTesting([&]() {
+    test_helper->SetLoadingScenario(ScenarioScope::kGlobal,
+                                    LoadingScenario::kVisiblePageLoading);
+  }));
+
+  // Start idle time eviction. It should start, but abort mid-way.
+  ASSERT_EQ(StartEviction({}, /*is_idle_time_eviction=*/true),
+            SqlPersistentStore::Error::kOk);
+
+  // Eviction should have run partially, so size reduced, but likely not fully
+  // to low watermark if it aborted early.
+  EXPECT_LE(GetSizeOfAllEntries(), kIdleTimeHighWatermark);
+  EXPECT_GT(GetSizeOfAllEntries(),
+            kMaxBytes * kSqlBackendEvictionLowWaterMarkPermille / 1000);
+}
+
+TEST_F(SqlPersistentStoreTest, EvictionPausesOnAbortFlagSet) {
+  const int64_t kMaxBytes = 100 * 1024;
+  CreateStore(kMaxBytes);
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  // Fill with enough data to trigger the mandatory eviction.
+  const int kEntrySize = 1024;
+  const int kNumEntries = 100;
+  PopulateCache(kNumEntries, kEntrySize);
+
+  // Start eviction, pause it halfway.
+  StartAndPauseEviction();
+  EXPECT_EQ(store_->GetEvictionUrgency(),
+            SqlPersistentStore::EvictionUrgency::kNeeded);
+
+  // Eviction should happen until the total size is less than the high water
+  // mark.
+  EXPECT_LE(GetSizeOfAllEntries(),
+            kMaxBytes * kSqlBackendEvictionHighWaterMarkPermille / 1000);
+  // Eviction is paused when the total size becomes less than the high water
+  // mark, so it does not decrease to the low water mark.
+  EXPECT_GE(GetSizeOfAllEntries(),
+            kMaxBytes * kSqlBackendEvictionLowWaterMarkPermille / 1000);
+
+  // Resume eviction.
+  EXPECT_EQ(StartEviction({}, false), SqlPersistentStore::Error::kOk);
+  EXPECT_FALSE(store_->HasPendingEviction());
+
+  // Eviction is executed until the total size becomes smaller than the low
+  // water mark.
+  EXPECT_LE(GetSizeOfAllEntries(),
+            kMaxBytes * kSqlBackendEvictionLowWaterMarkPermille / 1000);
+}
+
+TEST_F(SqlPersistentStoreTest, ResumeEvictionCanBePaused) {
+  const int64_t kMaxBytes = 100 * 1024;
+  CreateStore(kMaxBytes);
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  // Fill with enough data to have a gap between mandatory and target.
+  const int kEntrySize = 1024;
+  const int kNumEntries = 100;
+  PopulateCache(kNumEntries, kEntrySize);
+
+  // 1. Start eviction, pause it halfway.
+  StartAndPauseEviction();
+
+  // 2. Resume eviction, but pause it AGAIN.
+  StartAndPauseEviction();
+  // Should still have pending eviction.
+  EXPECT_TRUE(store_->HasPendingEviction());
+
+  // 3. Finally finish it.
+  EXPECT_EQ(StartEviction({}, false), SqlPersistentStore::Error::kOk);
+  EXPECT_FALSE(store_->HasPendingEviction());
+}
+
+TEST_F(SqlPersistentStoreTest, ResumeEvictionRespectsExcludedResIds) {
+  const int64_t kMaxBytes = 100 * 1024;
+  CreateStore(kMaxBytes);
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  const int kEntrySize = 1024;
+  const int kNumEntries = 100;
+  std::vector<SqlPersistentStore::ResId> res_ids;
+  PopulateCache(kNumEntries, kEntrySize, &res_ids);
+
+  // Start eviction, pause it halfway.
+  StartAndPauseEviction();
+
+  // Find the next entry to be evicted.
+  CacheEntryKey existing_entry_key;
+  int existing_entry_index;
+  FindNextEntryToEvict(kNumEntries, existing_entry_key, existing_entry_index);
+  auto excluded_id = SqlPersistentStore::ResIdAndShardId(
+      res_ids[existing_entry_index],
+      store_->GetShardIdForHash(existing_entry_key.hash()));
+
+  // Resume eviction with exclusion.
+  ASSERT_EQ(StartEviction({excluded_id}, false),
+            SqlPersistentStore::Error::kOk);
+
+  // The excluded entry should still exist.
+  auto open_result = OpenEntry(existing_entry_key);
+  ASSERT_TRUE(open_result.has_value());
+  EXPECT_TRUE(open_result->has_value());
+
+  // Another entry should be gone.
+  const CacheEntryKey evicted_key(
+      "key_" + base::NumberToString(existing_entry_index + 1));
+  auto open_result_evicted = OpenEntry(evicted_key);
+  ASSERT_TRUE(open_result_evicted.has_value());
+  EXPECT_FALSE(open_result_evicted->has_value());
+}
+
+TEST_F(SqlPersistentStoreTest, ResumeEvictionHandlesModifiedEntrySize) {
+  const int64_t kMaxBytes = 100 * 1024;
+  CreateStore(kMaxBytes);
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  const int kEntrySize = 1024;
+  const int kNumEntries = 100;
+  std::vector<SqlPersistentStore::ResId> res_ids;
+  PopulateCache(kNumEntries, kEntrySize, &res_ids);
+
+  // Setup pause.
+  StartAndPauseEviction();
+
+  // Find the next entry to be evicted.
+  CacheEntryKey existing_entry_key;
+  int existing_entry_index;
+  FindNextEntryToEvict(kNumEntries, existing_entry_key, existing_entry_index);
+
+  // Modify the existing_entry_key entry by appending data.
+  const SqlPersistentStore::ResId res_id = res_ids[existing_entry_index];
+  const int kAppendSize = 5000;
+  EntryWriteBuffer write_buffer(
+      base::MakeRefCounted<net::StringIOBuffer>(std::string(kAppendSize, 'b')),
+      kAppendSize, 0);
+  ASSERT_EQ(WriteEntryData(existing_entry_key, res_id, kEntrySize,
+                           std::move(write_buffer), false),
+            SqlPersistentStore::Error::kOk);
+
+  // Resume eviction.
+  ASSERT_EQ(StartEviction({}, false), SqlPersistentStore::Error::kOk);
+
+  // Verify `existing_entry_key` is evicted.
+  auto final_result = OpenEntry(existing_entry_key);
+  ASSERT_TRUE(final_result.has_value());
+  EXPECT_FALSE(final_result->has_value());
+
+  // Verify total size is correct (should be below low watermark).
+  // The fact that key_0 was larger than expected should simply mean we freed
+  // more space.
+  EXPECT_LE(GetSizeOfAllEntries(),
+            kMaxBytes * kSqlBackendEvictionLowWaterMarkPermille / 1000);
+}
+
+TEST_F(SqlPersistentStoreTest, ResumeEvictionDatabaseError) {
+  const int64_t kMaxBytes = 100 * 1024;
+  CreateStore(kMaxBytes);
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  // Fill up.
+  const int kEntrySize = 1024;
+  const int kNumEntries = 100;
+  PopulateCache(kNumEntries, kEntrySize);
+
+  // Setup pause.
+  StartAndPauseEviction();
+
+  // Simulate DB failure.
+  store_->SetSimulateDbFailureForTesting(true);
+
+  // Resume eviction, should fail.
+  EXPECT_EQ(StartEviction({}, false),
+            SqlPersistentStore::Error::kFailedForTesting);
+}
+
+TEST_F(SqlPersistentStoreTest, ResumePendingEvictionInternalNotFound) {
+  const int64_t kMaxBytes = 100 * 1024;
+  CreateStore(kMaxBytes);
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  const int kEntrySize = 1024;
+  const int kNumEntries = 100;
+  std::vector<SqlPersistentStore::ResId> res_ids;
+  PopulateCache(kNumEntries, kEntrySize, &res_ids);
+
+  // Setup pause.
+  StartAndPauseEviction();
+
+  // Manually delete an entry that is likely to be next in eviction.
+  CacheEntryKey existing_key;
+  int index;
+  FindNextEntryToEvict(kNumEntries, existing_key, index);
+  ASSERT_EQ(DeleteLiveEntry(existing_key), SqlPersistentStore::Error::kOk);
+
+  // Resume eviction should succeed even if an entry is not found.
+  ASSERT_EQ(StartEviction({}, false), SqlPersistentStore::Error::kOk);
+  EXPECT_FALSE(store_->HasPendingEviction());
+}
+
+// Regression test for crbug.com/488877236.
+TEST_F(SqlPersistentStoreTest, ResumePendingEvictionDoomedEntry) {
+  const int64_t kMaxBytes = 100 * 1024;
+  CreateStore(kMaxBytes);
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  const int kEntrySize = 1024;
+  const int kNumEntries = 100;
+  std::vector<SqlPersistentStore::ResId> res_ids;
+  PopulateCache(kNumEntries, kEntrySize, &res_ids);
+
+  // Setup pause.
+  StartAndPauseEviction();
+
+  // Doom an entry that is likely to be next in eviction.
+  CacheEntryKey existing_key;
+  int index;
+  FindNextEntryToEvict(kNumEntries, existing_key, index);
+  ASSERT_EQ(DoomEntry(existing_key, res_ids[index]),
+            SqlPersistentStore::Error::kOk);
+
+  // Resume eviction. This would have previously triggered the DCHECK failure
+  // because the entry count was double-decremented.
+  ASSERT_EQ(StartEviction({}, false), SqlPersistentStore::Error::kOk);
+  EXPECT_FALSE(store_->HasPendingEviction());
+}
+
+TEST_F(SqlPersistentStoreTest,
+       ResumeEvictionWithMultipleShardsBiasedToShardZero) {
+  // Add another task runner to enable multiple shards.
+  background_task_runners_.emplace_back(
+      base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()}));
+
+  const int64_t kMaxBytes = 100 * 1024;
+  CreateStore(kMaxBytes);
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  // Fill up using keys only for Shard 0.
+  const int kEntrySize = 1024;
+  const int kNumEntries = 100;
+  for (int i = 0; i < kNumEntries; ++i) {
+    std::string key_str = "key_" + base::NumberToString(i);
+    // Ensure it falls into Shard 0.
+    CacheEntryKey key(key_str);
+    while (store_->GetShardIdForHash(key.hash()).value() != 0) {
+      key_str += "_retry";
+      key = CacheEntryKey(key_str);
+    }
+
+    const auto res_id = CreateEntryAndGetResId(key);
+    std::string data(kEntrySize, 'a');
+    WriteDataAndAssertSuccess(key, res_id, 0, 0, data, false);
+    UpdateEntryLastUsedByKey(key, base::Time::Now() + base::Milliseconds(i));
+  }
+
+  // Setup pause.
+  StartAndPauseEviction();
+
+  // Resume eviction should succeed.
+  ASSERT_EQ(StartEviction({}, false), SqlPersistentStore::Error::kOk);
+  EXPECT_FALSE(store_->HasPendingEviction());
+}
+
+TEST_F(SqlPersistentStoreTest, ResumeEvictionWithMultipleShards) {
+  // Add another task runner to enable multiple shards.
+  background_task_runners_.emplace_back(
+      base::ThreadPool::CreateSequencedTaskRunner({base::MayBlock()}));
+
+  const int64_t kMaxBytes = 100 * 1024;
+  CreateStore(kMaxBytes);
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  // Fill up normally (should distribute across shards).
+  const int kEntrySize = 1024;
+  const int kNumEntries = 100;
+  PopulateCache(kNumEntries, kEntrySize);
+
+  // Setup pause.
+  StartAndPauseEviction();
+
+  // Resume eviction should succeed.
+  ASSERT_EQ(StartEviction({}, false), SqlPersistentStore::Error::kOk);
+  EXPECT_FALSE(store_->HasPendingEviction());
+}
+
+TEST_F(SqlPersistentStoreTest, IdleTimeResumeEvictionAbortsDuringEviction) {
+  const int64_t kMaxBytes = 100 * 1024;
+  CreateStore(kMaxBytes);
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  // Fill with enough data to trigger the mandatory eviction.
+  const int kEntrySize = 1024;
+  const int kNumEntries = 100;
+  PopulateCache(kNumEntries, kEntrySize);
+
+  // 1. Start normal eviction and pause it.
+  StartAndPauseEviction();
+
+  // 2. Resume eviction as IDLE time eviction.
+  auto test_helper = PerformanceScenarioTestHelper::Create();
+  test_helper->SetLoadingScenario(ScenarioScope::kGlobal,
+                                  LoadingScenario::kNoPageLoading);
+  test_helper->SetInputScenario(ScenarioScope::kGlobal,
+                                InputScenario::kNoInput);
+
+  // Set hook to simulate activity.
+  store_->SetEvictionHookForTesting(base::BindLambdaForTesting([&]() {
+    test_helper->SetLoadingScenario(ScenarioScope::kGlobal,
+                                    LoadingScenario::kVisiblePageLoading);
+  }));
+
+  // Resume eviction should return kOk (aborted).
+  ASSERT_EQ(StartEviction({}, /*is_idle_time_eviction=*/true),
+            SqlPersistentStore::Error::kOk);
+
+  // Since it aborted, we still have pending eviction.
+  EXPECT_TRUE(store_->HasPendingEviction());
+
+  // Resume a non-idle time eviction.
+  ASSERT_EQ(StartEviction({}, /*is_idle_time_eviction=*/false),
+            SqlPersistentStore::Error::kOk);
+
+  // All pending evictions are completed.
+  EXPECT_FALSE(store_->HasPendingEviction());
+  EXPECT_LE(GetSizeOfAllEntries(),
+            kMaxBytes * kSqlBackendEvictionLowWaterMarkPermille / 1000);
+}
+
+TEST_F(SqlPersistentStoreTest, ResumeEvictionSyncFinishOnAbortFlagSet) {
+  const int64_t kMaxBytes = 100000;
+  const int64_t kHighWatermark =
+      kMaxBytes * kSqlBackendEvictionHighWaterMarkPermille / 1000;  // 95000
+
+  CreateStore(kMaxBytes);
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  // Add entries until just beyond the high water mark.
+  int i = 0;
+  while (GetSizeOfAllEntries() <= kHighWatermark) {
+    const CacheEntryKey key(base::StringPrintf("key%d", i++));
+    auto create_result = CreateEntry(key);
+    ASSERT_TRUE(create_result.has_value());
+  }
+  EXPECT_EQ(GetEntryCount(), i);
+
+  // Setup pause.
+  StartAndPauseEviction();
+
+  // StartAndPauseEviction() definitely deletes one entry, so the total size
+  // becomes less than (or equal to) the high water mark.
+  EXPECT_LE(GetSizeOfAllEntries(), kHighWatermark);
+  EXPECT_EQ(GetEntryCount(), i - 1);
+
+  auto abort_flag =
+      base::MakeRefCounted<base::RefCountedData<std::atomic_bool>>(
+          std::in_place, true);
+  base::test::TestFuture<SqlPersistentStore::Error> eviction_future;
+  store_->StartEviction({}, false, abort_flag, eviction_future.GetCallback());
+  // If the abort flag is true and the total size is less than (or equal to)
+  // the high water mark, the resume eviction process synchronously returns OK.
+  ASSERT_TRUE(eviction_future.IsReady());
+  ASSERT_EQ(eviction_future.Get(), SqlPersistentStore::Error::kOk);
 }
 
 TEST_F(SqlPersistentStoreTest, DoomEntryWhileIndexLoading) {
@@ -4595,13 +5471,15 @@ TEST_F(SqlPersistentStoreTest, DoomEntryWhileIndexLoading) {
 
   // 3. Start loading the index.
   base::test::TestFuture<SqlPersistentStore::Error> load_index_future;
-  ASSERT_TRUE(store_->MaybeLoadInMemoryIndex(load_index_future.GetCallback()));
+  store_->MaybeLoadInMemoryIndex(load_index_future.GetCallback());
 
   // 4. Doom two entries while index loading is in flight.
   base::test::TestFuture<SqlPersistentStore::Error> doom_future1;
-  store_->DoomEntry(kKey1, res_id1, doom_future1.GetCallback());
+  store_->DoomEntry(kKey1, res_id1, /*accept_index_mismatch=*/false,
+                    doom_future1.GetCallback());
   base::test::TestFuture<SqlPersistentStore::Error> doom_future3;
-  store_->DoomEntry(kKey3, res_id3, doom_future3.GetCallback());
+  store_->DoomEntry(kKey3, res_id3, /*accept_index_mismatch=*/false,
+                    doom_future3.GetCallback());
 
   // 5. Wait for index loading to complete.
   EXPECT_EQ(load_index_future.Get(), SqlPersistentStore::Error::kOk);
@@ -4732,5 +5610,307 @@ TEST_F(SqlPersistentStoreTest, SetAndGetEntryInMemoryData) {
   ASSERT_TRUE(reloaded_hints.has_value());
   EXPECT_EQ(reloaded_hints->value(), hints_value);
 }
+
+TEST_F(SqlPersistentStoreTest, StartEvictionEvictsLargerEntriesFirst) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeatureWithParameters(
+      net::features::kDiskCacheBackendExperiment,
+      {{"SqlDiskCacheSizeAndPriorityAwareEviction", "true"}});
+
+  const int64_t kMaxBytes = 10000;
+  const int64_t kHighWatermark =
+      kMaxBytes * kSqlBackendEvictionHighWaterMarkPermille / 1000;  // 9500
+  const int64_t kLowWatermark =
+      kMaxBytes * kSqlBackendEvictionLowWaterMarkPermille / 1000;  // 9000
+
+  CreateStore(kMaxBytes);
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  // Add 9 entries of 600 bytes body.
+  // Each entry size = 600 + 300 (overhead) + 4 (key size "keyN") = 904.
+  // Total size = 8136.
+  std::vector<CacheEntryKey> keys;
+  for (int i = 0; i < 9; ++i) {
+    const CacheEntryKey key(base::StringPrintf("key%d", i));
+    keys.push_back(key);
+    auto res_id = CreateEntryAndGetResId(key);
+    FillDataInRange(key, res_id, 0, 0, 600, 'a');
+  }
+
+  // Add 1 entry of 1200 bytes body.
+  // Entry size = 1200 + 300 + 9 (key size "large_key") = 1509.
+  // Total size = 8136 + 1509 = 9645 (> 9500).
+  const CacheEntryKey large_key("large_key");
+  auto large_res_id = CreateEntryAndGetResId(large_key);
+  FillDataInRange(large_key, large_res_id, 0, 0, 1200, 'b');
+
+  // Set all entries to the same last_used time.
+  base::Time now = base::Time::Now();
+  for (const auto& key : keys) {
+    ASSERT_EQ(UpdateEntryLastUsedByKey(key, now),
+              SqlPersistentStore::Error::kOk);
+  }
+  ASSERT_EQ(UpdateEntryLastUsedByKey(large_key, now),
+            SqlPersistentStore::Error::kOk);
+
+  // Advance clock so time_since_last_used > 0.
+  task_environment_.FastForwardBy(base::Seconds(10));
+
+  EXPECT_GT(GetSizeOfAllEntries(), kHighWatermark);
+  EXPECT_EQ(store_->GetEvictionUrgency(),
+            SqlPersistentStore::EvictionUrgency::kNeeded);
+
+  // Start eviction.
+  ASSERT_EQ(StartEviction({}, /*is_idle_time_eviction=*/false),
+            SqlPersistentStore::Error::kOk);
+
+  // After eviction, size should be <= low watermark (9000).
+  // Target to remove = 9645 - 9000 = 645.
+  // Evicting the 1509-byte entry should be enough.
+  EXPECT_LE(GetSizeOfAllEntries(), kLowWatermark);
+  EXPECT_EQ(GetEntryCount(), 9);
+
+  // Verify the larger entry is gone.
+  auto open_large = OpenEntry(large_key);
+  ASSERT_TRUE(open_large.has_value());
+  EXPECT_FALSE(open_large->has_value());
+
+  // Verify smaller entries are still there.
+  for (const auto& key : keys) {
+    auto open_result = OpenEntry(key);
+    ASSERT_TRUE(open_result.has_value());
+    EXPECT_TRUE(open_result->has_value());
+  }
+}
+
+void SqlPersistentStoreTest::RunStartEvictionEvictsOlderEntriesFirstTest() {
+  const int64_t kMaxBytes = 10000;
+  const int64_t kHighWatermark =
+      kMaxBytes * kSqlBackendEvictionHighWaterMarkPermille / 1000;  // 9500
+  const int64_t kLowWatermark =
+      kMaxBytes * kSqlBackendEvictionLowWaterMarkPermille / 1000;  // 9000
+
+  CreateStore(kMaxBytes);
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  // Add 10 entries of same size.
+  // Each entry size = 650 + 300 + 4 = 954.
+  // Total size = 9540 (> 9500).
+  std::vector<CacheEntryKey> keys;
+  base::Time now = base::Time::Now();
+  for (int i = 0; i < 10; ++i) {
+    const CacheEntryKey key(base::StringPrintf("key%d", i));
+    keys.push_back(key);
+    auto res_id = CreateEntryAndGetResId(key);
+    FillDataInRange(key, res_id, 0, 0, 650, 'a');
+    // Vary last_used: key0 is oldest, key9 is newest.
+    ASSERT_EQ(UpdateEntryLastUsedByKey(key, now + base::Seconds(i)),
+              SqlPersistentStore::Error::kOk);
+  }
+
+  // Advance clock.
+  task_environment_.FastForwardBy(base::Seconds(20));
+
+  EXPECT_GT(GetSizeOfAllEntries(), kHighWatermark);
+
+  // Start eviction.
+  ASSERT_EQ(StartEviction({}, /*is_idle_time_eviction=*/false),
+            SqlPersistentStore::Error::kOk);
+
+  // Size should be <= 9000. Target to remove = 9540 - 9000 = 540.
+  // 1 entry (954 bytes) should be evicted.
+  EXPECT_LE(GetSizeOfAllEntries(), kLowWatermark);
+  EXPECT_EQ(GetEntryCount(), 9);
+
+  // Verify the oldest entry (key0) is gone.
+  auto open_oldest = OpenEntry(keys[0]);
+  ASSERT_TRUE(open_oldest.has_value());
+  EXPECT_FALSE(open_oldest->has_value());
+
+  // Verify newest entries are still there.
+  for (int i = 1; i < 10; ++i) {
+    auto open_result = OpenEntry(keys[i]);
+    ASSERT_TRUE(open_result.has_value());
+    EXPECT_TRUE(open_result->has_value());
+  }
+}
+
+TEST_F(SqlPersistentStoreTest,
+       StartEvictionEvictsOlderEntriesFirstSizeAndPriorityAwareEviction) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeatureWithParameters(
+      net::features::kDiskCacheBackendExperiment,
+      {{"SqlDiskCacheSizeAndPriorityAwareEviction", "true"}});
+
+  RunStartEvictionEvictsOlderEntriesFirstTest();
+}
+
+TEST_F(SqlPersistentStoreTest,
+       StartEvictionEvictsOlderEntriesFirstLeastRecentlyUsedEviction) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeatureWithParameters(
+      net::features::kDiskCacheBackendExperiment,
+      {{"SqlDiskCacheSizeAndPriorityAwareEviction", "false"}});
+
+  RunStartEvictionEvictsOlderEntriesFirstTest();
+}
+
+TEST_F(SqlPersistentStoreTest, StartEvictionPrioritizesHighPriorityEntries) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitWithFeaturesAndParameters(
+      {{net::features::kDiskCacheBackendExperiment,
+        {{"SqlDiskCacheSizeAndPriorityAwareEviction", "true"}}},
+       {net::features::kSimpleCachePrioritizedCaching, {}}},
+      {});
+
+  const int64_t kMaxBytes = 10000;
+  const int64_t kHighWatermark =
+      kMaxBytes * kSqlBackendEvictionHighWaterMarkPermille / 1000;  // 9500
+  const int64_t kLowWatermark =
+      kMaxBytes * kSqlBackendEvictionLowWaterMarkPermille / 1000;  // 9000
+
+  CreateStore(kMaxBytes);
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  // Add 9 low priority entries.
+  // Each entry size = 650 + 300 + 4 = 954. Total = 8586.
+  std::vector<CacheEntryKey> low_priority_keys;
+  for (int i = 0; i < 9; ++i) {
+    const CacheEntryKey key(base::StringPrintf("low%d", i));
+    low_priority_keys.push_back(key);
+    auto res_id = CreateEntryAndGetResId(key);
+    FillDataInRange(key, res_id, 0, 0, 650, 'a');
+  }
+
+  // Add 1 high priority entry, same size and age.
+  // Size = 650 + 300 + 13 ("high_priority") = 963.
+  // Total size = 8586 + 963 = 9549 (> 9500).
+  const CacheEntryKey high_priority_key("high_priority");
+  auto high_priority_res_id = CreateEntryAndGetResId(high_priority_key);
+  FillDataInRange(high_priority_key, high_priority_res_id, 0, 0, 650, 'b');
+
+  // Set hints to HINT_HIGH_PRIORITY.
+  ASSERT_EQ(UpdateEntryHeaderAndLastUsed(
+                high_priority_key, high_priority_res_id, base::Time::Now(),
+                nullptr, 0, MemoryEntryDataHints(HINT_HIGH_PRIORITY)),
+            SqlPersistentStore::Error::kOk);
+
+  // Set all to same age.
+  base::Time now = base::Time::Now();
+  for (const auto& key : low_priority_keys) {
+    ASSERT_EQ(UpdateEntryLastUsedByKey(key, now),
+              SqlPersistentStore::Error::kOk);
+  }
+  ASSERT_EQ(UpdateEntryLastUsedByKey(high_priority_key, now),
+            SqlPersistentStore::Error::kOk);
+
+  // Advance clock.
+  task_environment_.FastForwardBy(base::Seconds(10));
+
+  EXPECT_GT(GetSizeOfAllEntries(), kHighWatermark);
+
+  // Start eviction.
+  ASSERT_EQ(StartEviction({}, /*is_idle_time_eviction=*/false),
+            SqlPersistentStore::Error::kOk);
+
+  // One entry should be evicted. Target to remove = 9549 - 9000 = 549.
+  EXPECT_LE(GetSizeOfAllEntries(), kLowWatermark);
+  EXPECT_EQ(GetEntryCount(), 9);
+
+  // Verify the high priority entry is still there.
+  auto open_high = OpenEntry(high_priority_key);
+  ASSERT_TRUE(open_high.has_value());
+  EXPECT_TRUE(open_high->has_value());
+
+  // Verify one of the low priority entries is gone.
+  int gone_count = 0;
+  for (const auto& key : low_priority_keys) {
+    auto open_result = OpenEntry(key);
+    if (open_result.has_value() && !open_result->has_value()) {
+      gone_count++;
+    }
+  }
+  EXPECT_EQ(gone_count, 1);
+}
+
+#if DCHECK_IS_ON()
+TEST_F(SqlPersistentStoreTest, DetectAndFixEntryCountMetadataInconsistency) {
+  CreateAndCloseInitializedStore();
+
+  // Manually set the entry count to 1 to cause an inconsistency
+  // (the actual entry count is 0).
+  {
+    auto db_handle = ManuallyOpenDatabase();
+    auto meta_table = ManuallyOpenMetaTable(db_handle.get());
+    ASSERT_TRUE(meta_table->SetValue(kSqlBackendMetaTableKeyEntryCount, 1));
+  }
+
+  // Re-open the store.
+  CreateStore();
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  // The store loads the incorrect metadata.
+  EXPECT_EQ(GetEntryCount(), 1);
+
+  // Set up the DumpWithoutCrashing callback.
+  static bool g_dump_called = false;
+  base::debug::SetDumpWithoutCrashingFunction([]() { g_dump_called = true; });
+
+  // Trigger a transaction that updates the store status.
+  const CacheEntryKey kKey("my-key");
+  CreateEntryAndGetResId(kKey);
+
+  // DumpWithoutCrashing should have been called due to the inconsistency.
+  EXPECT_TRUE(g_dump_called);
+
+  // The metadata should be corrected to 1.
+  // We added 1 entry to an actually empty database.
+  EXPECT_EQ(GetEntryCount(), 1);
+
+  // Clean up the callback and the throttling.
+  base::debug::SetDumpWithoutCrashingFunction(nullptr);
+  base::debug::ResetDumpWithoutCrashingThrottlingForTesting();
+}
+
+TEST_F(SqlPersistentStoreTest, DetectAndFixTotalSizeMetadataInconsistency) {
+  CreateAndCloseInitializedStore();
+
+  // Manually set the total size to 1000 to cause an inconsistency
+  // (the actual total size is 0).
+  {
+    auto db_handle = ManuallyOpenDatabase();
+    auto meta_table = ManuallyOpenMetaTable(db_handle.get());
+    ASSERT_TRUE(meta_table->SetValue(kSqlBackendMetaTableKeyTotalSize, 1000));
+  }
+
+  // Re-open the store.
+  CreateStore();
+  ASSERT_EQ(Init(), SqlPersistentStore::Error::kOk);
+
+  // The store loads the incorrect metadata.
+  EXPECT_EQ(GetSizeOfAllEntries(), 1000);
+
+  // Set up the DumpWithoutCrashing callback.
+  static bool g_dump_called = false;
+  base::debug::SetDumpWithoutCrashingFunction([]() { g_dump_called = true; });
+
+  // Trigger a transaction that updates the store status.
+  const CacheEntryKey kKey("my-key");
+  CreateEntryAndGetResId(kKey);
+
+  // DumpWithoutCrashing should have been called due to the inconsistency.
+  EXPECT_TRUE(g_dump_called);
+
+  // The metadata should be corrected to the actual size.
+  // We added 1 entry to an actually empty database.
+  // Total size is just the static resource size + key size.
+  EXPECT_EQ(GetSizeOfAllEntries(),
+            kSqlBackendStaticResourceSize + kKey.string().size());
+
+  // Clean up the callback and the throttling.
+  base::debug::SetDumpWithoutCrashingFunction(nullptr);
+  base::debug::ResetDumpWithoutCrashingThrottlingForTesting();
+}
+#endif  // DCHECK_IS_ON()
 
 }  // namespace disk_cache

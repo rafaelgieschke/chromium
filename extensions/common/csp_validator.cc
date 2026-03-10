@@ -15,7 +15,6 @@
 #include <vector>
 
 #include "base/check_op.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -193,7 +192,7 @@ bool isNonWildcardTLD(const std::string& url,
 
   std::string host(url, start_of_host, end_of_host - start_of_host);
   // Global wildcards are not allowed.
-  if (host.empty() || base::Contains(host, "*")) {
+  if (host.empty() || host.contains("*")) {
     return false;
   }
 
@@ -201,7 +200,7 @@ bool isNonWildcardTLD(const std::string& url,
     return true;
 
   // Allow *.googleapis.com to be allowlisted for backwards-compatibility.
-  // (crbug.com/409952)
+  // (crbug.com/41129714)
   if (host == "googleapis.com")
     return true;
 

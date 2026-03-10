@@ -148,6 +148,16 @@ TEST_F(BnplMetricsTest, LogSelectBnplIssuerDialogResult_IssuerSelected) {
       /*expected_bucket_count=*/1);
 }
 
+TEST_F(BnplMetricsTest, LogSelectBnplIssuerDialogResult_TabOrBrowserClosed) {
+  base::HistogramTester histogram_tester;
+  LogSelectBnplIssuerDialogResult(
+      SelectBnplIssuerDialogResult::kTabOrBrowserClosed);
+  histogram_tester.ExpectUniqueSample(
+      "Autofill.Bnpl.SelectionDialogResult",
+      SelectBnplIssuerDialogResult::kTabOrBrowserClosed,
+      /*expected_bucket_count=*/1);
+}
+
 TEST_P(BnplMetricsTest, LogBnplIssuerSelection) {
   base::HistogramTester histogram_tester;
   IssuerId issuer_id = GetIssuerId();
@@ -276,6 +286,18 @@ TEST_P(BnplMetricsTest, LogBnplTosDialogResult_CancelButtonClicked) {
       /*expected_bucket_count=*/1);
 }
 
+TEST_P(BnplMetricsTest, LogBnplTosDialogResult_TabOrBrowserClosed) {
+  base::HistogramTester histogram_tester;
+  IssuerId issuer_id = GetIssuerId();
+
+  LogBnplTosDialogResult(BnplTosDialogResult::kTabOrBrowserClosed, issuer_id);
+  histogram_tester.ExpectUniqueSample(
+      base::StrCat({"Autofill.Bnpl.TosDialogResult.",
+                    GetHistogramSuffixFromIssuerId(issuer_id)}),
+      BnplTosDialogResult::kTabOrBrowserClosed,
+      /*expected_bucket_count=*/1);
+}
+
 TEST_F(BnplMetricsTest, LogBnplSelectionDialogShown) {
   base::HistogramTester histogram_tester;
 
@@ -320,7 +342,7 @@ class BnplFormEventsMetricsTest : public AutofillMetricsBaseTest,
   FormData form_;
 };
 
-TEST_F(BnplFormEventsMetricsTest, SuggestionsShownOnBnplEligibleMerchant) {
+TEST_F(BnplFormEventsMetricsTest, SuggestionsShownOnBnplEligiblePage) {
   base::HistogramTester histogram_tester;
 
   autofill_manager().OnAskForValuesToFillTest(
@@ -335,15 +357,17 @@ TEST_F(BnplFormEventsMetricsTest, SuggestionsShownOnBnplEligibleMerchant) {
   DidShowAutofillSuggestions(form(), /*field_index=*/form().fields().size() - 1,
                              SuggestionType::kCreditCardEntry);
 
-  histogram_tester.ExpectBucketCount("Autofill.FormEvents.CreditCard.Bnpl",
-                                     BnplFormEvent::kSuggestionsShown, 1);
+  histogram_tester.ExpectBucketCount(
+      "Autofill.FormEvents.CreditCard.Bnpl",
+      BnplFormEvent::kSuggestionsShownOnBnplEligiblePage, 1);
 
   // To ensure the metrics logs only once per page.
   DidShowAutofillSuggestions(form(), /*field_index=*/form().fields().size() - 1,
                              SuggestionType::kCreditCardEntry);
 
-  histogram_tester.ExpectBucketCount("Autofill.FormEvents.CreditCard.Bnpl",
-                                     BnplFormEvent::kSuggestionsShown, 1);
+  histogram_tester.ExpectBucketCount(
+      "Autofill.FormEvents.CreditCard.Bnpl",
+      BnplFormEvent::kSuggestionsShownOnBnplEligiblePage, 1);
 }
 
 TEST_F(BnplFormEventsMetricsTest, BnplSuggestionsNotShownDueToUrl) {
@@ -361,8 +385,9 @@ TEST_F(BnplFormEventsMetricsTest, BnplSuggestionsNotShownDueToUrl) {
   DidShowAutofillSuggestions(form(), /*field_index=*/form().fields().size() - 1,
                              SuggestionType::kCreditCardEntry);
 
-  histogram_tester.ExpectBucketCount("Autofill.FormEvents.CreditCard.Bnpl",
-                                     BnplFormEvent::kSuggestionsShown, 0);
+  histogram_tester.ExpectBucketCount(
+      "Autofill.FormEvents.CreditCard.Bnpl",
+      BnplFormEvent::kSuggestionsShownOnBnplEligiblePage, 0);
 }
 
 TEST_F(BnplFormEventsMetricsTest, SuggestionAccepted) {

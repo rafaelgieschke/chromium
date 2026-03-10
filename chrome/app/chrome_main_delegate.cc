@@ -29,6 +29,7 @@
 #include "base/process/process.h"
 #include "base/process/process_handle.h"
 #include "base/profiler/thread_group_profiler.h"
+#include "base/rand_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -119,6 +120,7 @@
 #include "base/win/resource_exhaustion.h"
 #include "chrome/browser/chrome_browser_main_win.h"
 #include "chrome/browser/win/browser_util.h"
+#include "chrome/browser/win/isolated_browser_support.h"
 #include "chrome/child/v8_crashpad_support_win.h"
 #include "chrome/chrome_elf/chrome_elf_main.h"
 #include "chrome/common/chrome_version.h"
@@ -705,6 +707,14 @@ bool IsCanaryDev() {
          channel == version_info::Channel::DEV;
 }
 
+bool IsHangWatcherCrashReportingEnabled() {
+  const auto channel = chrome::GetChannel();
+  const bool canary_dev_beta = (channel == version_info::Channel::CANARY ||
+                                channel == version_info::Channel::DEV ||
+                                channel == version_info::Channel::BETA);
+  return canary_dev_beta || base::ShouldRecordSubsampledMetric(0.01);
+}
+
 }  // namespace
 
 #if BUILDFLAG(IS_ANDROID)
@@ -848,7 +858,6 @@ std::optional<int> ChromeMainDelegate::PostEarlyInitialization(
   std::string actual_locale = LoadLocalState(
       chrome_feature_list_creator, invoked_in_browser->is_running_test);
   chrome_feature_list_creator->SetApplicationLocale(actual_locale);
-  chrome_feature_list_creator->OverrideCachedUIStrings();
 
   // On Chrome OS, initialize D-Bus clients that depend on feature list.
 #if BUILDFLAG(IS_CHROMEOS)
@@ -948,17 +957,6 @@ void ChromeMainDelegate::CommonEarlyInitialization() {
       command_line->GetSwitchValueASCII(switches::kProcessType);
   bool is_browser_process = process_type.empty();
 
-#if BUILDFLAG(IS_WIN)
-  if (base::FeatureList::IsEnabled(features::kDisableBoostPriority) &&
-      features::kDisableBoostPriorityMode.Get() ==
-          features::DisableBoostPriorityMode::kAtStartup) {
-    // The second argument to this function *disables* boosting if true. See
-    // https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-setprocesspriorityboost
-    SetProcessPriorityBoost(/*hProcess=*/base::GetCurrentProcessHandle(),
-                            /*bDisablePriorityBoost=*/true);
-  }
-#endif
-
   // Enable Split cache by default here and not in content/ so as to not
   // impact non-Chrome embedders like WebView, Cronet etc. This only enables
   // it if not already overridden by command line, field trial etc.
@@ -993,16 +991,8 @@ void ChromeMainDelegate::CommonEarlyInitialization() {
     hang_watcher_process_type = base::HangWatcher::ProcessType::kUnknownProcess;
   }
 
-  const bool emit_crashes =
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC) || \
-    BUILDFLAG(IS_WIN)
-      IsCanaryDev();
-#else
-      false;
-#endif
-
-  base::HangWatcher::InitializeOnMainThread(hang_watcher_process_type,
-                                            emit_crashes);
+  base::HangWatcher::InitializeOnMainThread(
+      hang_watcher_process_type, IsHangWatcherCrashReportingEnabled());
 
   base::features::Init();
 }
@@ -1154,6 +1144,20 @@ std::optional<int> ChromeMainDelegate::BasicStartupComplete() {
 #if !DCHECK_IS_ON()
   base::win::DisableHandleVerifier();
 #endif
+
+  // Attempt to launch an isolated browser. If this is successful, this browser
+  // process becomes the stub, and will terminate after the main browser has
+  // terminated, with the exit code from the main browser.
+  if (is_browser && chrome::IsIsolationEnabled(&command_line)) {
+    const auto isolated_process = chrome::LaunchIsolatedBrowser(command_line);
+    if (isolated_process.has_value()) {
+      int exit_code = 0;
+      if (isolated_process->WaitForExit(&exit_code)) {
+        return exit_code;
+      }
+      return CHROME_RESULT_CODE_INVALID_ISOLATED_BROWSER_PROCESS;
+    }
+  }
 
 #endif  // BUILDFLAG(IS_WIN)
 
@@ -1360,7 +1364,7 @@ void ChromeMainDelegate::PreSandboxStartup() {
 #if BUILDFLAG(IS_WIN)
   // TODO(zturner): Throbber icons and cursors are still stored in chrome.dll,
   // this can be killed once those are merged into resources.pak. See
-  // BrowserFrameViewWin::InitThrobberIcons(), https://crbug.com/368327 and
+  // BrowserFrameViewWin::InitThrobberIcons(), https://crbug.com/41104393 and
   // https://crbug.com/1178117.
   ui::SetResourcesDataDLL(_AtlBaseModule.GetResourceInstance());
 #endif

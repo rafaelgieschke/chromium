@@ -96,10 +96,6 @@ void EmptyChromeClient::OpenFileChooser(LocalFrame*,
 void EmptyChromeClient::AttachRootLayer(scoped_refptr<cc::Layer>, LocalFrame*) {
 }
 
-String EmptyChromeClient::AcceptLanguages() {
-  return String();
-}
-
 bool EmptyChromeClient::StartDeferringCommits(LocalFrame& main_frame,
                                               base::TimeDelta timeout,
                                               cc::PaintHoldingReason reason) {
@@ -131,7 +127,9 @@ void EmptyLocalFrameClient::BeginNavigation(
     SourceLocation*,
     mojo::PendingRemote<mojom::blink::NavigationStateKeepAliveHandle>,
     bool is_container_initiated,
-    bool has_rel_opener) {}
+    bool has_rel_opener,
+    mojo::PendingReceiver<
+        mojom::blink::NavigationResumeDeferredCommitListener>) {}
 
 void EmptyLocalFrameClient::DispatchWillSendSubmitEvent(HTMLFormElement*) {}
 

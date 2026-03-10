@@ -22,7 +22,6 @@ import './site_permissions/site_permissions.js';
 import './site_permissions/site_permissions_by_site.js';
 import './toolbar.js';
 
-import {CrContainerShadowMixinLit} from 'chrome://resources/cr_elements/cr_container_shadow_mixin_lit.js';
 import {getToastManager} from 'chrome://resources/cr_elements/cr_toast/cr_toast_manager.js';
 import type {CrViewManagerElement} from 'chrome://resources/cr_elements/cr_view_manager/cr_view_manager.js';
 import {I18nMixinLit} from 'chrome://resources/cr_elements/i18n_mixin_lit.js';
@@ -80,16 +79,14 @@ declare global {
 
 export interface ExtensionsManagerElement {
   $: {
+    scrollableShadow: HTMLElement,
     toolbar: ExtensionsToolbarElement,
     viewManager: CrViewManagerElement,
-    'items-list': ExtensionsItemListElement,
+    itemsList: ExtensionsItemListElement,
   };
 }
 
-// TODO(crbug.com/40270029): Always show a top shadow for the DETAILS, ERRORS and
-// SITE_PERMISSIONS_ALL_SITES pages.
-const ExtensionsManagerElementBase =
-    I18nMixinLit(CrContainerShadowMixinLit(CrLitElement));
+const ExtensionsManagerElementBase = I18nMixinLit(CrLitElement);
 
 export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
   static get is() {
@@ -211,6 +208,25 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
    */
   private navigationListener_: number|null = null;
 
+  override connectedCallback() {
+    super.connectedCallback();
+
+    document.documentElement.classList.remove('loading');
+    // https://github.com/microsoft/TypeScript/issues/13569
+    (document as any).fonts.load('bold 12px Roboto');
+
+    this.navigationListener_ = navigation.addListener(newPage => {
+      this.changePage_(newPage);
+    });
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    assert(this.navigationListener_);
+    assert(navigation.removeListener(this.navigationListener_));
+    this.navigationListener_ = null;
+  }
+
   override firstUpdated(changedProperties: PropertyValues<this>) {
     super.firstUpdated(changedProperties);
 
@@ -259,25 +275,6 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
       // sidebar or menu when it's about to disappear when `this.narrow_`
       // changes.
     }
-  }
-
-  override connectedCallback() {
-    super.connectedCallback();
-
-    document.documentElement.classList.remove('loading');
-    // https://github.com/microsoft/TypeScript/issues/13569
-    (document as any).fonts.load('bold 12px Roboto');
-
-    this.navigationListener_ = navigation.addListener(newPage => {
-      this.changePage_(newPage);
-    });
-  }
-
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    assert(this.navigationListener_);
-    assert(navigation.removeListener(this.navigationListener_));
-    this.navigationListener_ = null;
   }
 
   /**
@@ -339,7 +336,7 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
 
         if (currentIndex >= 0) {
           this.updateItem_(listId, currentIndex, eventData.extensionInfo);
-        } else {
+        } else if (eventData.event_type === EventType.INSTALLED) {
           this.addItem_(listId, eventData.extensionInfo);
         }
 
@@ -372,14 +369,14 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
     }
   }
 
-  protected onFilterChanged_(event: CustomEvent<string>) {
+  protected onSearchChanged_(event: CustomEvent<string>) {
     if (this.currentPage_!.page !== Page.LIST) {
       navigation.navigateTo({page: Page.LIST});
     }
     this.filter = event.detail;
   }
 
-  protected onMenuButtonClick_() {
+  protected onCrToolbarMenuClick_() {
     this.showDrawer_ = true;
     setTimeout(() => {
       this.shadowRoot.querySelector('cr-drawer')!.openDrawer();
@@ -527,7 +524,7 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
 
         // In the rare case where the item cannot be focused despite existing,
         // focus the search bar.
-        if (!this.$['items-list'].focusItemButton(itemToFocusId)) {
+        if (!this.$.itemsList.focusItemButton(itemToFocusId)) {
           this.$.toolbar.focusSearchInput();
         }
       } else {
@@ -555,7 +552,7 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
     if (this.currentPage_!.page === Page.LIST) {
       // Wait for the items list to be updated with the new value before trying
       // to focus an item.
-      this.$['items-list'].updateComplete.then(() => {
+      this.$.itemsList.updateComplete.then(() => {
         this.focusAfterItemRemoved_(listId, index);
       });
     } else if (
@@ -661,6 +658,11 @@ export class ExtensionsManagerElement extends ExtensionsManagerElementBase {
         `${loadTimeData.getString('title')} - ${this.detailViewItem_!.name}` :
         loadTimeData.getString('title');
     this.currentPage_ = newPage;
+
+    this.$.scrollableShadow.classList.toggle(
+        'force-on',
+        toPage === Page.DETAILS || toPage === Page.ERRORS ||
+            toPage === Page.SITE_PERMISSIONS_ALL_SITES);
   }
 
   /**

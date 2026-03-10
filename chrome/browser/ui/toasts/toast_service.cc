@@ -8,13 +8,20 @@
 
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
+#include "build/branding_buildflags.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/actor/resources/grit/actor_browser_resources.h"
+#include "chrome/browser/glic/browser_ui/glic_vector_icon_manager.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/skills/skills_ui_window_controller.h"
+#include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/commerce/commerce_ui_tab_helper.h"
+#include "chrome/browser/ui/side_panel/side_panel_entry_id.h"
+#include "chrome/browser/ui/side_panel/side_panel_enums.h"
+#include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/collaboration_messaging_observer.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/collaboration_messaging_observer_factory.h"
@@ -23,13 +30,11 @@
 #include "chrome/browser/ui/toasts/api/toast_specification.h"
 #include "chrome/browser/ui/toasts/toast_controller.h"
 #include "chrome/browser/ui/toasts/toast_features.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_entry_id.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_enums.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/autofill/core/common/autofill_features.h"
 #include "components/commerce/core/commerce_feature_list.h"
 #include "components/data_sharing/public/features.h"
 #include "components/omnibox/browser/vector_icons.h"
@@ -39,11 +44,9 @@
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/tabs/public/tab_interface.h"
+#include "components/translate/core/browser/translate_manager.h"
 #include "components/vector_icons/vector_icons.h"
 #include "ui/menus/simple_menu_model.h"
-#if BUILDFLAG(ENABLE_GLIC)
-#include "chrome/browser/glic/browser_ui/glic_vector_icon_manager.h"
-#endif
 
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
 #include "components/plus_addresses/core/browser/resources/vector_icons.h"
@@ -51,13 +54,7 @@
 
 namespace {
 const gfx::VectorIcon& GetTaskInProgressIcon() {
-#if BUILDFLAG(ENABLE_GLIC)
-  if (base::FeatureList::IsEnabled(features::kGlicActorUiTaskIconV2)) {
-    return glic::GlicVectorIconManager::GetVectorIcon(
-        IDR_ACTOR_AUTO_BROWSE_ICON);
-  }
-#endif
-  return kScreensaverAutoIcon;
+  return glic::GlicVectorIconManager::GetVectorIcon(IDR_ACTOR_AUTO_BROWSE_ICON);
 }
 }  // namespace
 
@@ -126,24 +123,6 @@ void ToastService::RegisterToasts(
                                   IDS_NON_MILESTONE_UPDATE_TOAST_BODY)
           .AddGlobalScoped()
           .Build());
-
-  if (base::FeatureList::IsEnabled(commerce::kProductSpecifications)) {
-    toast_registry_->RegisterToast(
-        ToastId::kAddedToComparisonTable,
-        ToastSpecification::Builder(omnibox::kProductSpecificationsAddedIcon,
-                                    IDS_COMPARE_PAGE_ACTION_ADDED)
-            .AddCloseButton()
-            .AddActionButton(IDS_COMPARE_ADDED_TO_TABLE_TOAST_ACTION_BUTTON,
-                             base::BindRepeating(
-                                 [](BrowserWindowInterface* window) {
-                                   window->GetActiveTabInterface()
-                                       ->GetTabFeatures()
-                                       ->commerce_ui_tab_helper()
-                                       ->OnOpenComparePageClicked();
-                                 },
-                                 base::Unretained(browser_window_interface)))
-            .Build());
-  }
 
   if (base::FeatureList::IsEnabled(
           plus_addresses::features::kPlusAddressesEnabled)) {
@@ -283,11 +262,13 @@ void ToastService::RegisterToasts(
           .SetToastAsActionable()
           .Build());
 
-  if (features::kGlicActorUiToast.Get()) {
+  if (base::FeatureList::IsEnabled(features::kGlicActorUi) &&
+      features::kGlicActorUiToast.Get()) {
     toast_registry_->RegisterToast(
         ToastId::kGeminiWorkingOnTask,
         ToastSpecification::Builder(GetTaskInProgressIcon(),
                                     IDS_TASK_IN_PROGRESS_TOAST_BODY)
+            .AddGlobalScoped()
             .AddCloseButton()
             .Build());
   }
@@ -346,4 +327,68 @@ void ToastService::RegisterToasts(
                   base::Unretained(browser_window_interface)))
           .AddCloseButton()
           .Build());
+
+  toast_registry_->RegisterToast(
+      ToastId::kSkillSaved,
+      ToastSpecification::Builder(kCheckIcon, IDS_SKILL_SAVED_TOAST_BODY)
+          .AddCloseButton()
+          .AddActionButton(IDS_SKILL_SAVED_TOAST_BUTTON,
+                           base::BindRepeating(
+                               [](BrowserWindowInterface* window) {
+                                 skills::SkillsUiWindowController::From(window)
+                                     ->InvokeLastSavedSkill();
+                               },
+                               base::Unretained(browser_window_interface)))
+          .AddGlobalScoped()
+          .Build());
+
+  toast_registry_->RegisterToast(
+      ToastId::kSkillDeleted,
+      ToastSpecification::Builder(kDeleteIcon, IDS_SKILL_DELETED_TOAST_BODY)
+          .Build());
+
+  toast_registry_->RegisterToast(
+      ToastId::kRecordReplay, ToastSpecification::Builder(kInfoIcon).Build());
+
+  toast_registry_->RegisterToast(
+      ToastId::kAutoSignIn,
+      ToastSpecification::Builder(vector_icons::kPasswordManagerIcon,
+                                  IDS_MANAGE_PASSWORDS_AUTO_SIGNIN_TOAST_BODY)
+          .AddMenu()
+          .Build());
+
+  if (base::FeatureList::IsEnabled(
+          autofill::features::kAutofillAiWalletPrivatePasses)) {
+    toast_registry_->RegisterToast(
+        ToastId::kAutofillAiWalletErrorMessage,
+        ToastSpecification::Builder(vector_icons::kPersonTextIcon)
+            .AddGlobalScoped()
+            .Build());
+  }
+
+  if (base::FeatureList::IsEnabled(toast_features::kTranslateToast)) {
+    toast_registry_->RegisterToast(
+        ToastId::kTranslate,
+        ToastSpecification::Builder(vector_icons::kTranslateIcon,
+                                    IDS_TRANSLATE_TOAST_BODY)
+            .AddActionButton(
+                IDS_TRANSLATE_TOAST_UNDO_BUTTON,
+                base::BindRepeating(
+                    [](BrowserWindowInterface* window) {
+                      content::WebContents* web_contents =
+                          window->GetActiveTabInterface()->GetContents();
+                      if (!web_contents) {
+                        return;
+                      }
+                      ChromeTranslateClient* chrome_translate_client =
+                          ChromeTranslateClient::FromWebContents(web_contents);
+                      if (chrome_translate_client) {
+                        chrome_translate_client->UndoTranslate();
+                      }
+                    },
+                    base::Unretained(browser_window_interface)))
+            .AddCloseButton()
+            .Build());
+  }
+
 }  // RegisterToasts() end.

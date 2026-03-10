@@ -6,8 +6,9 @@
 
 #include <memory>
 
+#include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/frame/top_container_background.h"
+#include "chrome/browser/ui/views/frame/themed_background.h"
 #include "chrome/browser/ui/views/side_panel/side_panel.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_animation_coordinator.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_animation_ids.h"
@@ -16,6 +17,7 @@
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor_extra/shadow.h"
+#include "ui/gfx/color_utils.h"
 #include "ui/gfx/geometry/rounded_corners_f.h"
 #include "ui/views/layout/delegating_layout_manager.h"
 #include "ui/views/layout/layout_provider.h"
@@ -40,8 +42,12 @@ class ShadowOverlayView::CornerView : public views::View {
   // of the overlay. They will render correctly by virtue of being on a layer.
   static constexpr int kCornerOutset = 1;
 
+  // Additional amount to overpaint the border to prevent subpixel issues with
+  // antialiasing and alignment between webcontents and corners.
+  static constexpr float kCornerSubpixelOverpaint = 0.5f;
+
   CornerView(Corner corner, BrowserView& browser_view) : corner_(corner) {
-    SetBackground(std::make_unique<TopContainerBackground>(&browser_view));
+    SetBackground(std::make_unique<ThemedBackground>(&browser_view));
   }
   ~CornerView() override = default;
 
@@ -59,7 +65,7 @@ class ShadowOverlayView::CornerView : public views::View {
  private:
   // Returns the clip path for the corner.
   //
-  // The contents need to be drawn by `TopContainerBackground` to ensure that
+  // The contents need to be drawn by `ThemedBackground` to ensure that
   // the correct content is drawn in all themes (including themes that e.g. use
   // an image background). However, the corner shape still needs to be drawn; in
   // order to ensure that only the opaque portion of the corner is painted a
@@ -79,44 +85,46 @@ class ShadowOverlayView::CornerView : public views::View {
   SkPath GetClipPath() const {
     gfx::Rect visible_area = GetLocalBounds();
     visible_area.Inset(kCornerOutset);
+    gfx::RectF clip_area = gfx::RectF(GetLocalBounds());
+    clip_area.Outset(kCornerSubpixelOverpaint);
 
     SkPathBuilder path;
     switch (corner_) {
       case Corner::kTopLeading:
-        path.moveTo(0, 0);
-        path.lineTo(visible_area.right(), 0);
+        path.moveTo(clip_area.x(), clip_area.y());
+        path.lineTo(visible_area.right(), clip_area.y());
         path.lineTo(visible_area.right(), visible_area.y());
         path.arcTo(SkVector(visible_area.width(), visible_area.height()), 0,
                    SkPathBuilder::kSmall_ArcSize, SkPathDirection::kCCW,
                    SkPoint(visible_area.x(), visible_area.bottom()));
-        path.lineTo(0, visible_area.bottom());
+        path.lineTo(clip_area.x(), visible_area.bottom());
         break;
       case Corner::kTopTrailing:
-        path.moveTo(width(), 0);
-        path.lineTo(width(), visible_area.bottom());
+        path.moveTo(clip_area.right(), clip_area.y());
+        path.lineTo(clip_area.right(), visible_area.bottom());
         path.lineTo(visible_area.right(), visible_area.bottom());
         path.arcTo(SkVector(visible_area.width(), visible_area.height()), 0,
                    SkPathBuilder::kSmall_ArcSize, SkPathDirection::kCCW,
                    SkPoint(visible_area.x(), visible_area.y()));
-        path.lineTo(visible_area.x(), 0);
+        path.lineTo(visible_area.x(), clip_area.y());
         break;
       case Corner::kBottomLeading:
-        path.moveTo(0, height());
-        path.lineTo(0, visible_area.y());
+        path.moveTo(clip_area.x(), clip_area.bottom());
+        path.lineTo(clip_area.x(), visible_area.y());
         path.lineTo(visible_area.x(), visible_area.y());
         path.arcTo(SkVector(visible_area.width(), visible_area.height()), 0,
                    SkPathBuilder::kSmall_ArcSize, SkPathDirection::kCCW,
                    SkPoint(visible_area.right(), visible_area.bottom()));
-        path.lineTo(visible_area.right(), height());
+        path.lineTo(visible_area.right(), clip_area.bottom());
         break;
       case Corner::kBottomTrailing:
-        path.moveTo(width(), height());
-        path.lineTo(visible_area.x(), height());
+        path.moveTo(clip_area.right(), clip_area.bottom());
+        path.lineTo(visible_area.x(), clip_area.bottom());
         path.lineTo(visible_area.x(), visible_area.bottom());
         path.arcTo(SkVector(visible_area.width(), visible_area.height()), 0,
                    SkPathBuilder::kSmall_ArcSize, SkPathDirection::kCCW,
                    SkPoint(visible_area.right(), visible_area.y()));
-        path.lineTo(width(), visible_area.y());
+        path.lineTo(clip_area.right(), visible_area.y());
         break;
     }
 
@@ -137,6 +145,8 @@ class ShadowOverlayView::ShadowBox : public views::View {
   METADATA_HEADER(ShadowBox, views::View)
 
  public:
+  static constexpr int kShadowElevation = 4;
+
   ShadowBox() { SetCanProcessEventsWithinSubtree(false); }
   ~ShadowBox() override = default;
 
@@ -154,9 +164,12 @@ class ShadowOverlayView::ShadowBox : public views::View {
 
       view_shadow_ = std::make_unique<views::ViewShadow>(this, elevation);
       view_shadow_->SetRoundedCornerRadius(rounded_corner_radius);
+      view_shadow_->shadow()->SetElevation(kShadowElevation);
+      UpdateShadowColors();
     } else {
       view_shadow_.reset();
       DestroyLayer();
+      was_dark_ = std::nullopt;
     }
   }
 
@@ -168,11 +181,50 @@ class ShadowOverlayView::ShadowBox : public views::View {
     view_shadow_->shadow()->shadow_layer()->SetOpacity(opacity);
   }
 
+  // views::View:
+  void OnThemeChanged() override {
+    views::View::OnThemeChanged();
+    if (view_shadow_) {
+      UpdateShadowColors();
+    }
+  }
+
  private:
+  void UpdateShadowColors() {
+    // These are the UX targets:
+    // light: 0 0 4px 0 rgba(0, 0, 0, 0.10),
+    //        0 2px 6px 0 rgba(0, 0, 0, 0.17)
+    // dark:  0 0 4px 0 rgba(0, 0, 0, 0.20),
+    //        0 2px 6px 0 rgba(0, 0, 0, 0.40)
+
+    // These are the defaults for the MD shadow at 4 height.
+    // box-shadow: 0 0 4px rgba(0, 0, 0, .12),
+    //             0 4px 8px rgba(0, 0, 0, .24)
+
+    // This is an attempt to approximate the target values with only color.
+    static constexpr std::array<std::pair<SkColor, SkColor>, 2> kShadowColors{
+        std::make_pair(SkColorSetARGB(26, 0, 0, 0),
+                       SkColorSetARGB(43, 0, 0, 0)),
+        std::make_pair(SkColorSetARGB(51, 0, 0, 0),
+                       SkColorSetARGB(102, 0, 0, 0))};
+
+    const bool is_dark =
+        color_utils::IsDark(GetColorProvider()->GetColor(kColorToolbar));
+    if (was_dark_ == is_dark) {
+      return;
+    }
+    was_dark_ = is_dark;
+    ui::Shadow::ElevationToColorsMap map;
+    map.emplace(kShadowElevation, kShadowColors[is_dark ? 1 : 0]);
+    view_shadow_->shadow()->SetElevationToColorsMap(map);
+    SchedulePaint();
+  }
+
   // The shadow and elevation around main_container to visually separate the
   // container from MainRegionBackground when the toolbar_height_side_panel is
   // visible.
   std::unique_ptr<views::ViewShadow> view_shadow_;
+  std::optional<bool> was_dark_;
 };
 
 using ShadowBox = ShadowOverlayView::ShadowBox;
@@ -293,7 +345,7 @@ views::ProposedLayout ShadowOverlayView::CalculateProposedLayout(
 }
 
 void ShadowOverlayView::OnAnimationSequenceProgressed(
-    const SidePanelAnimationCoordinator::SidePanelAnimationId& animation_id,
+    SidePanelAnimationId animation_id,
     double animation_value) {
   CHECK_EQ(kShadowOverlayOpacityAnimation, animation_id);
 
@@ -301,7 +353,7 @@ void ShadowOverlayView::OnAnimationSequenceProgressed(
 }
 
 void ShadowOverlayView::OnAnimationSequenceEnded(
-    const SidePanelAnimationCoordinator::SidePanelAnimationId& animation_id) {
+    SidePanelAnimationId animation_id) {
   // When the animation ends, set the final opacity based on whether the side
   // panel is closing or opening.
   const double ending_opacity =

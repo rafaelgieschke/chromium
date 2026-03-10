@@ -170,9 +170,6 @@
       <message name="IDS_FUSEBOX_ADD_CURRENT_TAB" desc="The text displayed in the omnibox attachments popup. When clicked - adds the curernt tab as context." formatter_data="android_java">
         Add current tab
       </message>
-      <message name="IDS_FUSEBOX_MAX_ATTACHMENTS" desc="The text displayed in a snackbar when the max number of omnibox attachments is reached" formatter_data="android_java">
-        Add up to 10 files, tabs, or images
-      </message>
       <message name="IDS_FUSEBOX_UPLOAD_FAILED" desc="The text displayed in a snackbar when an attachment fails to upload" formatter_data="android_java">
         Unable to add attachments
       </message>
@@ -181,6 +178,15 @@
       </message>
       <message name="IDS_OMNIBOX_EMPTY_HINT_FOR_IMAGE_GENERATION" desc="The text displayed in the omnibox when it is empty and image generation is selected." formatter_data="android_java">
         Describe your image
+      </message>
+      <message name="IDS_FUSEBOX_TOOLS_HEADER" desc="The text in attachments popup to indicate following buttons are all tools." formatter_data="android_java">
+        Tools
+      </message>
+      <message name="IDS_FUSEBOX_MODELS_HEADER" desc="The text in attachments popup to indicate following buttons are all models." formatter_data="android_java">
+        Gemini 3 models
+      </message>
+      <message name="IDS_FUSEBOX_MODEL_PRO" desc="The text in attachments popup for the button to switch the active model to pro." formatter_data="android_java">
+        Pro
       </message>
     </if>
   </if>
@@ -407,7 +413,7 @@
     Try AI Mode
   </message>
   <message name="IDS_ACC_SEND_BUTTON_SEARCH_OR_NAVIGATE" desc="Accessibility text for the Omnibox `Send` button, announced when the user is in the search/open URL context" formatter_data="android_java">
-    Navigate
+    Submit
   </message>
   <message name="IDS_ACC_SEND_BUTTON_SEND_TO_AI" desc="Accessibility text for the Omnibox `Send` button, announced when the user is in the AI Mode context" formatter_data="android_java">
     Send to assistant
@@ -497,6 +503,10 @@
   </message>
   <message name="IDS_ACC_ASK_KEYWORD_MODE_WITH_SHORTCUT" desc="Announcement when entering keyword mode for an engine that is suitable for asking vs. searching (e.g. Gemini) with shortcut.">
     <ph name="KEYWORD_SHORTCUT">$1<ex>gemini</ex></ph>, Ask <ph name="KEYWORD_SUFFIX">$2<ex>Gemini</ex></ph>
+  </message>
+
+  <message name="IDS_OMNIBOX_KEYWORD_TEXT_MD" desc="Text shown in the search button at the front of the omnibox when the user has selected a keyword, in MD (no final colon)">
+    Search <ph name="SITE_NAME">$1<ex>google.com</ex></ph>
   </message>
 
   <!-- Accessibility labels for the omnibox thumbs up feedback button. -->

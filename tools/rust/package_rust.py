@@ -56,37 +56,33 @@ def main():
     with open(os.path.join(THIRD_PARTY_DIR, BUILDLOG_NAME),
               'w',
               encoding='utf-8') as log:
-        # Build the Rust toolchain.
-        build_cmd = [sys.executable, os.path.join(THIS_DIR, 'build_rust.py')]
-        TeeCmd(build_cmd, log)
-
-        # Build bindgen.
+        # Build the Rust toolchain, bindgen and crubit.
         build_cmd = [
             sys.executable,
-            os.path.join(THIS_DIR, 'build_bindgen.py')
+            os.path.join(THIS_DIR, 'build_rust.py'), '--build-bindgen',
+            '--build-crubit'
         ]
         TeeCmd(build_cmd, log)
 
-        # Build Crubit.
-        build_cmd = [sys.executable, os.path.join(THIS_DIR, 'build_crubit.py')]
-        # TODO: crbug.com/40226863 - Remove `fail_hard=False` once we can depend
-        # on the OSS Crubit build staying green with latest Rust and Clang.
-        TeeCmd(build_cmd, log, fail_hard=False)
-
     # Strip everything in bin/ to reduce the package size.
+    print('Stripping binaries to reduce the package size ...')
     bin_dir_path = os.path.join(RUST_TOOLCHAIN_OUT_DIR, 'bin')
     if sys.platform != 'win32' and os.path.exists(bin_dir_path):
         for f in os.listdir(bin_dir_path):
             file_path = os.path.join(bin_dir_path, f)
             if not os.path.islink(file_path):
+                print(f'    Stripping {f} ...')
                 subprocess.call(['strip', file_path])
 
+    print('Creating a tar package ...')
     with tarfile.open(os.path.join(THIRD_PARTY_DIR,
                                    RUST_TOOLCHAIN_PACKAGE_NAME),
                       'w:xz',
                       preset=9 | lzma.PRESET_EXTREME) as tar:
         for f in sorted(os.listdir(RUST_TOOLCHAIN_OUT_DIR)):
             tar.add(os.path.join(RUST_TOOLCHAIN_OUT_DIR, f), arcname=f)
+        for f in tar.getnames():
+            print(f'    Packaged {f}')
 
     os.chdir(THIRD_PARTY_DIR)
     MaybeUpload(args.upload, args.bucket, RUST_TOOLCHAIN_PACKAGE_NAME,

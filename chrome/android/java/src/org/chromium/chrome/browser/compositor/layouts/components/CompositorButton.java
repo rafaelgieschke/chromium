@@ -40,12 +40,18 @@ public class CompositorButton extends StripLayoutView {
                 }
             };
 
-    @IntDef({ButtonType.NEW_TAB, ButtonType.INCOGNITO_SWITCHER, ButtonType.TAB_CLOSE})
+    @IntDef({
+        ButtonType.NEW_TAB,
+        ButtonType.INCOGNITO_SWITCHER,
+        ButtonType.TAB_CLOSE,
+        ButtonType.GLIC
+    })
     @Retention(RetentionPolicy.SOURCE)
     public @interface ButtonType {
         int NEW_TAB = 0;
         int INCOGNITO_SWITCHER = 1;
         int TAB_CLOSE = 2;
+        int GLIC = 3;
     }
 
     public interface TooltipHandler {
@@ -64,6 +70,9 @@ public class CompositorButton extends StripLayoutView {
     private boolean mIsPressedFromMouse;
     private boolean mIsHovered;
     private String mAccessibilityDescriptionIncognito = "";
+
+    private @Nullable String mText;
+    private int mTextResourceId;
 
     private final @Nullable TooltipHandler mTooltipHandler;
 
@@ -340,5 +349,33 @@ public class CompositorButton extends StripLayoutView {
      */
     public boolean getShouldApplyHoverBackground() {
         return isHovered() || isPressedFromMouse();
+    }
+
+    /**
+     * @param text The text to be displayed on the button.
+     */
+    public void setText(@Nullable String text) {
+        mText = text;
+    }
+
+    /**
+     * @return The text displayed on the button.
+     */
+    public @Nullable String getText() {
+        return mText;
+    }
+
+    /**
+     * @param textResourceId The resource ID for the generated text bitmap.
+     */
+    public void setTextResourceId(int textResourceId) {
+        mTextResourceId = textResourceId;
+    }
+
+    /**
+     * @return The resource ID for the generated text bitmap.
+     */
+    public int getTextResourceId() {
+        return mTextResourceId;
     }
 }

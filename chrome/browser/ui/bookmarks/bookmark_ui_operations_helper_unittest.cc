@@ -13,9 +13,11 @@
 
 #include "base/memory/raw_ptr.h"
 #include "base/notreached.h"
+#include "base/pickle.h"
 #include "base/scoped_observation.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/test/test_future.h"
 #include "chrome/browser/bookmarks/bookmark_merged_surface_service.h"
 #include "chrome/browser/bookmarks/bookmark_merged_surface_service_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -67,8 +69,8 @@ class BookmarkUIOperationsHelperTest : public testing::Test {
     profile_ = profile_builder.Build();
     profile_->GetTestingPrefService()->SetManagedPref(
         bookmarks::prefs::kManagedBookmarks,
-        base::Value::List().Append(
-            base::Value::Dict()
+        base::ListValue().Append(
+            base::DictValue()
                 .Set("name", "Google")
                 .Set("url", GURL("http://google.com/").spec())));
     CHECK(managed_bookmark_service());
@@ -106,6 +108,12 @@ class BookmarkUIOperationsHelperTest : public testing::Test {
           bookmark_merged_surface_service_.get(), &parent_folder_.value());
     }
     return helper_.get();
+  }
+
+  bool CanPasteFromClipboardSync(internal::BookmarkUIOperationsHelper* helper) {
+    base::test::TestFuture<bool> future;
+    helper->CanPasteFromClipboard(future.GetCallback());
+    return future.Get();
   }
 
  private:
@@ -226,7 +234,7 @@ TYPED_TEST(BookmarkUIOperationsHelperTest, PasteBookmarkFromURL) {
   EXPECT_FALSE(bookmarks::BookmarkNodeData::ClipboardContainsBookmarks());
 
   internal::BookmarkUIOperationsHelper* helper = this->CreateHelper(new_folder);
-  EXPECT_FALSE(helper->CanPasteFromClipboard());
+  EXPECT_FALSE(this->CanPasteFromClipboardSync(helper));
 
   // Write some valid url to the clipboard.
   {
@@ -234,9 +242,13 @@ TYPED_TEST(BookmarkUIOperationsHelperTest, PasteBookmarkFromURL) {
     clipboard_writer.WriteText(url_text);
   }
   // Now we should be able to paste from the clipboard.
-  EXPECT_TRUE(helper->CanPasteFromClipboard());
+  EXPECT_TRUE(this->CanPasteFromClipboardSync(helper));
 
-  helper->PasteFromClipboard(0);
+  {
+    base::test::TestFuture<void> future;
+    helper->PasteFromClipboard(0, future.GetCallback());
+    EXPECT_TRUE(future.Wait());
+  }
   ASSERT_EQ(1u, new_folder->children().size());
 
   // Url for added node should be same as url_text.
@@ -268,9 +280,13 @@ TYPED_TEST(BookmarkUIOperationsHelperTest, MakeTitleUnique) {
   internal::BookmarkUIOperationsHelper* helper =
       this->CreateHelper(bookmark_bar_node);
   // Now we should be able to paste from the clipboard.
-  EXPECT_TRUE(helper->CanPasteFromClipboard());
+  EXPECT_TRUE(this->CanPasteFromClipboardSync(helper));
 
-  helper->PasteFromClipboard(1);
+  {
+    base::test::TestFuture<void> future;
+    helper->PasteFromClipboard(1, future.GetCallback());
+    EXPECT_TRUE(future.Wait());
+  }
   ASSERT_EQ(2u, bookmark_bar_node->children().size());
 
   // Url for added node should be same as url_text.
@@ -301,9 +317,13 @@ TYPED_TEST(BookmarkUIOperationsHelperTest, CopyPasteMetaInfo) {
 
   internal::BookmarkUIOperationsHelper* helper = this->CreateHelper(folder);
   // And make sure we can paste a bookmark from the clipboard.
-  EXPECT_TRUE(helper->CanPasteFromClipboard());
+  EXPECT_TRUE(this->CanPasteFromClipboardSync(helper));
 
-  helper->PasteFromClipboard(0);
+  {
+    base::test::TestFuture<void> future;
+    helper->PasteFromClipboard(0, future.GetCallback());
+    EXPECT_TRUE(future.Wait());
+  }
   ASSERT_EQ(1u, folder->children().size());
 
   // Verify that the pasted node contains the same meta info.
@@ -332,7 +352,7 @@ TYPED_TEST(BookmarkUIOperationsHelperTest, CopyPaste) {
       this->CreateHelper(model->bookmark_bar_node());
 
   // And make sure we can paste a bookmark from the clipboard.
-  EXPECT_TRUE(helper->CanPasteFromClipboard());
+  EXPECT_TRUE(this->CanPasteFromClipboardSync(helper));
 
   // Write some text to the clipboard.
   {
@@ -341,7 +361,7 @@ TYPED_TEST(BookmarkUIOperationsHelperTest, CopyPaste) {
   }
 
   // Now we shouldn't be able to paste from the clipboard.
-  EXPECT_FALSE(helper->CanPasteFromClipboard());
+  EXPECT_FALSE(this->CanPasteFromClipboardSync(helper));
 }
 
 TYPED_TEST(BookmarkUIOperationsHelperTest, CopyPasteMultipleNodes) {
@@ -364,9 +384,13 @@ TYPED_TEST(BookmarkUIOperationsHelperTest, CopyPasteMultipleNodes) {
       this->CreateHelper(model->bookmark_bar_node());
 
   // And make sure we can paste a bookmark from the clipboard.
-  EXPECT_TRUE(helper->CanPasteFromClipboard());
+  EXPECT_TRUE(this->CanPasteFromClipboardSync(helper));
 
-  helper->PasteFromClipboard(1);
+  {
+    base::test::TestFuture<void> future;
+    helper->PasteFromClipboard(1, future.GetCallback());
+    EXPECT_TRUE(future.Wait());
+  }
   EXPECT_EQ(model->bookmark_bar_node()->children().size(),
             bookmark_bar_children + 2u);
   CHECK_EQ(model->bookmark_bar_node()->children()[1]->GetTitle(),
@@ -402,9 +426,13 @@ TYPED_TEST(BookmarkUIOperationsHelperTest, CutToClipboard) {
   internal::BookmarkUIOperationsHelper* helper =
       this->CreateHelper(model->other_node());
   // And make sure we can paste from the clipboard.
-  EXPECT_TRUE(helper->CanPasteFromClipboard());
+  EXPECT_TRUE(this->CanPasteFromClipboardSync(helper));
 
-  helper->PasteFromClipboard(0);
+  {
+    base::test::TestFuture<void> future;
+    helper->PasteFromClipboard(0, future.GetCallback());
+    EXPECT_TRUE(future.Wait());
+  }
   EXPECT_EQ(model->other_node()->children().size(), 2u);
   CHECK_EQ(model->other_node()->children()[0]->GetTitle(), u"foo bar 1 ");
   CHECK_EQ(model->other_node()->children()[1]->GetTitle(), u"foo bar 2 ");
@@ -425,11 +453,50 @@ TYPED_TEST(BookmarkUIOperationsHelperTest, PasteNonEditableNodes) {
   internal::BookmarkUIOperationsHelper* helper =
       this->CreateHelper(model->bookmark_bar_node());
   // And make sure we can paste a bookmark from the clipboard.
-  EXPECT_TRUE(helper->CanPasteFromClipboard());
+  EXPECT_TRUE(this->CanPasteFromClipboardSync(helper));
 
   // But it can't be pasted into a non-editable folder.
   helper = this->CreateHelper(this->managed_bookmark_service()->managed_node());
-  EXPECT_FALSE(helper->CanPasteFromClipboard());
+  EXPECT_FALSE(this->CanPasteFromClipboardSync(helper));
+}
+
+TYPED_TEST(BookmarkUIOperationsHelperTest, PasteBookmarkFromEmptyBookmarkNode) {
+  // Only when bookmarks are copied to the BookmarkPermanentNode will
+  // PermanentFolderOrderingTracker::AddNodesAsCopiesOfNodeData be invoked.
+  const BookmarkNode* bar_folder = this->model()->bookmark_bar_node();
+  internal::BookmarkUIOperationsHelper* helper = this->CreateHelper(bar_folder);
+
+  // Now we shouldn't be able to paste from the clipboard.
+  EXPECT_FALSE(this->CanPasteFromClipboardSync(helper));
+  EXPECT_FALSE(bookmarks::BookmarkNodeData::ClipboardContainsBookmarks());
+
+  // Write empty bookmark node to the clipboard.
+  std::string url = "http://www.google.com/";
+  base::Pickle pickle;
+  bookmarks::BookmarkNodeData().WriteToPickle(base::FilePath(), &pickle);
+  {
+    ui::ScopedClipboardWriter clipboard_writer(ui::ClipboardBuffer::kCopyPaste);
+    clipboard_writer.WriteBookmark(u"foobar", url);
+    clipboard_writer.WritePickledData(
+        pickle, ui::ClipboardFormatType::CustomPlatformType(
+                    std::string("chromium/x-bookmark-entries")));
+  }
+
+  // Now we should be able to paste from the clipboard.
+  EXPECT_TRUE(this->CanPasteFromClipboardSync(helper));
+  EXPECT_TRUE(bookmarks::BookmarkNodeData::ClipboardContainsBookmarks());
+
+  // Load from the pickle data first; the bookmark node data is empty at this
+  // point, fall back to loading from Clipboard::BookmarkData. Otherwise, the
+  // empty BookmarkNodeData::Element will trigger a CHECK assertion in
+  // PermanentFolderOrderingTracker::AddNodesAsCopiesOfNodeData.
+  {
+    base::test::TestFuture<void> future;
+    helper->PasteFromClipboard(0, future.GetCallback());
+    EXPECT_TRUE(future.Wait());
+  }
+  ASSERT_EQ(1u, bar_folder->children().size());
+  EXPECT_EQ(url, bar_folder->children()[0]->url().spec());
 }
 
 #endif  // !BUILDFLAG(IS_MAC)

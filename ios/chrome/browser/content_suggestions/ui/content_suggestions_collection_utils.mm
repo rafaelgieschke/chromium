@@ -289,7 +289,10 @@ CGFloat HeightForLogoHeader(SearchEngineLogoState logo_state,
            2 * (ntp_home::kHeaderIconMargin + ntp_home::kIdentityAvatarPadding);
   }
 
-  header_height += kTopSpacingMaterial;
+  // Minimize spacing between AI-mode entrypoint on large size class.
+  if (!base::FeatureList::IsEnabled(kAIMNTPEntrypointTablet)) {
+    header_height += kTopSpacingMaterial;
+  }
 
   return header_height;
 }
@@ -322,6 +325,7 @@ void ConfigureVoiceSearchButton(UIButton* voice_search_button,
   UIButtonConfiguration* buttonConfig =
       [UIButtonConfiguration plainButtonConfiguration];
   buttonConfig.contentInsets = NSDirectionalEdgeInsetsMake(0, 0, 0, 0);
+  buttonConfig.background.backgroundColor = [UIColor clearColor];
   voice_search_button.configuration = buttonConfig;
   UIImage* mic_image = CustomSymbolWithPointSize(
       kVoiceSymbol, kSymbolContentSuggestionsPointSize);
@@ -347,6 +351,7 @@ void ConfigureLensButtonAppearance(UIButton* lens_button,
   UIButtonConfiguration* buttonConfig =
       [UIButtonConfiguration plainButtonConfiguration];
   buttonConfig.contentInsets = NSDirectionalEdgeInsetsMake(0, 0, 0, 0);
+  buttonConfig.background.backgroundColor = [UIColor clearColor];
   lens_button.configuration = buttonConfig;
   lens_button.accessibilityLabel = l10n_util::GetNSString(IDS_IOS_ACCNAME_LENS);
   lens_button.accessibilityIdentifier = @"Lens";
@@ -375,6 +380,7 @@ void ConfigureMIAButton(UIButton* mia_button, BOOL use_color_icon) {
   UIButtonConfiguration* buttonConfig =
       [UIButtonConfiguration plainButtonConfiguration];
   buttonConfig.contentInsets = NSDirectionalEdgeInsetsMake(0, 0, 0, 0);
+  buttonConfig.background.backgroundColor = [UIColor clearColor];
   mia_button.configuration = buttonConfig;
 
   UIImage* magnifier_icon = CustomSymbolWithPointSize(
@@ -383,7 +389,6 @@ void ConfigureMIAButton(UIButton* mia_button, BOOL use_color_icon) {
   magnifier_icon = use_color_icon ? MakeSymbolMulticolor(magnifier_icon)
                                   : MakeSymbolMonochrome(magnifier_icon);
   [mia_button setImage:magnifier_icon forState:UIControlStateNormal];
-  // TODO(crbug.com/425339867): Handle button accessibility
 
   mia_button.pointerInteractionEnabled = YES;
   // Make the pointer shape fit the location bar's semi-circle end shape.

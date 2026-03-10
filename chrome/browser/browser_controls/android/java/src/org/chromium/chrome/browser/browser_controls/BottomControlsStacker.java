@@ -17,7 +17,6 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.cc.input.BrowserControlsState;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.ui.OffsetTagConstraints;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.display.DisplayUtil;
@@ -46,23 +45,24 @@ public class BottomControlsStacker implements BrowserControlsStateProvider.Obser
     @IntDef({
         LayerType.PROGRESS_BAR,
         LayerType.TABSTRIP_TOOLBAR,
-        LayerType.TABSTRIP_TOOLBAR_BELOW_READALOUD,
         LayerType.READ_ALOUD_PLAYER,
         LayerType.BOTTOM_TOOLBAR,
         LayerType.BOTTOM_CHIN,
+        LayerType.BOTTOM_SHEET,
         LayerType.TEST_BOTTOM_LAYER
     })
     public @interface LayerType {
         // The progress bar during page loading. This layer has a height of 0 and overlaps the next
         // visible layer in the stack.
         int PROGRESS_BAR = 0;
-        int TABSTRIP_TOOLBAR = 1;
         int READ_ALOUD_PLAYER = 2;
-        // Temporary layer that allows us to flag guard the new behavior of stacking the tabstrip
-        // toolbar below, rather than above, the readadloud player.
-        int TABSTRIP_TOOLBAR_BELOW_READALOUD = 3;
+        int TABSTRIP_TOOLBAR = 3;
         int BOTTOM_TOOLBAR = 4;
         int BOTTOM_CHIN = 5;
+        // Bottom sheet as a browser control layer. This is used to position bottom sheet in
+        // respect to other bottom controls, and/or specialized bottom sheets that can push web
+        // content up in PEEK state.
+        int BOTTOM_SHEET = 6;
 
         // Layer that's used for testing.
         int TEST_BOTTOM_LAYER = 100;
@@ -119,10 +119,10 @@ public class BottomControlsStacker implements BrowserControlsStateProvider.Obser
     // The pre-defined stack order for different bottom controls.
     private static final @LayerType int[] STACK_ORDER =
             new int[] {
+                LayerType.BOTTOM_SHEET,
                 LayerType.PROGRESS_BAR,
-                LayerType.TABSTRIP_TOOLBAR,
                 LayerType.READ_ALOUD_PLAYER,
-                LayerType.TABSTRIP_TOOLBAR_BELOW_READALOUD,
+                LayerType.TABSTRIP_TOOLBAR,
                 LayerType.BOTTOM_TOOLBAR,
                 LayerType.BOTTOM_CHIN,
                 LayerType.TEST_BOTTOM_LAYER
@@ -354,39 +354,37 @@ public class BottomControlsStacker implements BrowserControlsStateProvider.Obser
             @BrowserControlsState int constraints,
             boolean shouldUpdateOffsets) {
         mBrowserControlsState = constraints;
-        if (ChromeFeatureList.sBcivBottomControls.isEnabled()) {
-            mOffsetTagsInfo = offsetTagsInfo;
-            int additionalHeight = 0;
-            for (int layerType : STACK_ORDER) {
-                BottomControlsLayer layer = mLayers.get(layerType);
-                if (layer == null) continue;
+        mOffsetTagsInfo = offsetTagsInfo;
+        int additionalHeight = 0;
+        for (int layerType : STACK_ORDER) {
+            BottomControlsLayer layer = mLayers.get(layerType);
+            if (layer == null) continue;
 
-                if (isLayerNonScrollable(layer.getType())) {
-                    layer.clearOffsetTag();
-                } else {
-                    additionalHeight += layer.updateOffsetTag(offsetTagsInfo);
-                }
+            if (isLayerNonScrollable(layer.getType())) {
+                layer.clearOffsetTag();
+            } else {
+                additionalHeight += layer.updateOffsetTag(offsetTagsInfo);
             }
+        }
 
-            int totalHeight = mTotalHeight;
-            if (totalHeight == INVALID_HEIGHT) {
-                // TODO(crbug.com/463962392): Investigate if this causes any other bugs.
-                Log.w(TAG, "Using mTotalHeight before initialization");
+        int totalHeight = mTotalHeight;
+        if (totalHeight == INVALID_HEIGHT) {
+            // TODO(crbug.com/463962392): Investigate if this causes any other bugs.
+            Log.w(TAG, "Using mTotalHeight before initialization");
 
-                totalHeight = 0;
-            }
+            totalHeight = 0;
+        }
 
-            mBrowserControlsSizer.setBottomControlsAdditionalHeight(additionalHeight);
-            offsetTagsInfo.mBottomControlsConstraints =
-                    new OffsetTagConstraints(0, 0, 0, totalHeight + additionalHeight);
+        mBrowserControlsSizer.setBottomControlsAdditionalHeight(additionalHeight);
+        offsetTagsInfo.mBottomControlsConstraints =
+                new OffsetTagConstraints(0, 0, 0, totalHeight + additionalHeight);
 
-            if (shouldUpdateOffsets) {
-                repositionLayers(
-                        mBrowserControlsSizer.getBottomControlOffset(),
-                        mBrowserControlsSizer.getBottomControlsMinHeightOffset(),
-                        false,
-                        isVisibilityForced());
-            }
+        if (shouldUpdateOffsets) {
+            repositionLayers(
+                    mBrowserControlsSizer.getBottomControlOffset(),
+                    mBrowserControlsSizer.getBottomControlsMinHeightOffset(),
+                    false,
+                    isVisibilityForced());
         }
     }
 
@@ -414,7 +412,6 @@ public class BottomControlsStacker implements BrowserControlsStateProvider.Obser
             int bottomControlsMinHeightOffset,
             boolean animated,
             boolean offsetsAppliedByBrowser) {
-
         // 0. Initialize the offset for each layer.
         SparseIntArray yOffsetOfLayers = new SparseIntArray(STACK_ORDER.length);
         int height = 0;
@@ -455,7 +452,7 @@ public class BottomControlsStacker implements BrowserControlsStateProvider.Obser
             //
             // When the offsets are applied by the browser, the browser should be in full control of
             // the layers' positions, and the behavior is identical to having BCIV disabled.
-            if (ChromeFeatureList.sBcivBottomControls.isEnabled() && !offsetsAppliedByBrowser) {
+            if (!offsetsAppliedByBrowser) {
                 layerYOffset = mLayerRestingOffsets.get(type);
             } else {
                 boolean shouldScrollOff = shouldLayerScrollOff(layer, totalMinHeight);
@@ -493,7 +490,6 @@ public class BottomControlsStacker implements BrowserControlsStateProvider.Obser
                     minHeightBottomOffset = Math.min(minHeightBottomOffset, mTotalHeight);
                 }
 
-
                 logIfHeightMismatch(
                         "Heights before #repositionLayers",
                         mTotalHeight,
@@ -505,7 +501,6 @@ public class BottomControlsStacker implements BrowserControlsStateProvider.Obser
 
             yOffsetOfLayers.put(type, layerYOffset);
         }
-
 
         // 2. If animated, compare and fix the yOffset with the previous mLayerOffsets if reposition
         // is caused by an animated browser controls height adjustment. This needs to run in a
@@ -613,14 +608,12 @@ public class BottomControlsStacker implements BrowserControlsStateProvider.Obser
             // than one non-scrollable layer exists.
             mHasMoreThanOneNonScrollableLayer = minHeight != 0;
 
-            if (ChromeFeatureList.sBcivBottomControls.isEnabled()) {
-                if (shouldScrollOff) {
-                    if (mOffsetTagsInfo != null) {
-                        layer.updateOffsetTag(mOffsetTagsInfo);
-                    }
-                } else {
-                    layer.clearOffsetTag();
+            if (shouldScrollOff) {
+                if (mOffsetTagsInfo != null) {
+                    layer.updateOffsetTag(mOffsetTagsInfo);
                 }
+            } else {
+                layer.clearOffsetTag();
             }
 
             height += layer.getHeight();

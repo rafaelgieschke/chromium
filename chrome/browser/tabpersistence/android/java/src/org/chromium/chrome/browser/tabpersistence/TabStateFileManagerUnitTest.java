@@ -7,6 +7,8 @@ package org.chromium.chrome.browser.tabpersistence;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
+import static org.chromium.chrome.browser.url_constants.UrlConstantResolver.getOriginalNativeNtpUrl;
+
 import androidx.annotation.Nullable;
 
 import org.junit.Assert;
@@ -31,6 +33,7 @@ import org.chromium.chrome.browser.tab.flatbuffer.TabLaunchTypeAtCreation;
 import org.chromium.chrome.browser.tab.flatbuffer.UserAgentType;
 import org.chromium.chrome.browser.tabpersistence.FlatBufferTabStateSerializer.TabStateFlatBufferDeserializeResult;
 import org.chromium.chrome.test.util.ByteBufferTestUtils;
+import org.chromium.url.GURL;
 
 import java.io.DataOutputStream;
 import java.io.File;
@@ -60,6 +63,7 @@ public class TabStateFileManagerUnitTest {
     private static final int LARGE_BYTE_BUFFER_SIZE = Integer.MAX_VALUE / 4;
     private static final boolean CONTENT_IS_SENSITIVE = true;
     private static final boolean IS_PINNED = true;
+    private static final GURL URL = new GURL(getOriginalNativeNtpUrl());
 
     @Rule public TemporaryFolder temporaryFolder = new TemporaryFolder();
 
@@ -93,6 +97,23 @@ public class TabStateFileManagerUnitTest {
         validateTestTabState(
                 TabStateFileManager.restoreTabStateInternal(file, false, mCipherFactory),
                 tabGroupId);
+    }
+
+    @Test
+    public void testRestoreTabStateInternal_NullCipherFactoryAndUnencrypted() throws IOException {
+        Token tabGroupId = null;
+        File file = createTestTabStateFile();
+        TabState state = createTabStateWithMappedByteBuffer(file, tabGroupId);
+        TabStateFileManager.saveStateInternal(file, state, false, mCipherFactory);
+
+        validateTestTabState(
+                TabStateFileManager.restoreTabStateInternal(file, false, null), tabGroupId);
+    }
+
+    @Test(expected = AssertionError.class)
+    public void testRestoreTabStateInternal_NullCipherFactoryAndEncrypted() throws IOException {
+        File file = createTestTabStateFile();
+        TabStateFileManager.restoreTabStateInternal(file, true, null);
     }
 
     @Test
@@ -598,6 +619,7 @@ public class TabStateFileManagerUnitTest {
         state.tabGroupId = tabGroupId;
         state.tabHasSensitiveContent = CONTENT_IS_SENSITIVE;
         state.isPinned = IS_PINNED;
+        state.url = URL;
         return state;
     }
 
@@ -630,6 +652,7 @@ public class TabStateFileManagerUnitTest {
         assertEquals(TIMESTAMP, state.lastNavigationCommittedTimestampMillis);
         assertEquals(CONTENT_IS_SENSITIVE, state.tabHasSensitiveContent);
         assertEquals(IS_PINNED, state.isPinned);
+        assertEquals(URL, state.url);
         if (tabGroupId == null) {
             assertNull(state.tabGroupId);
         } else {

@@ -218,7 +218,11 @@ export class ReadingListAppElement extends ReadingListAppElementBase {
     this.unreadExpanded_ = true;
   }
 
-  protected updateFocusedItem_() {
+  protected onViewportFilled_() {
+    this.updateFocusedItem_();
+  }
+
+  private updateFocusedItem_() {
     this.focusedItem_ = this.focusedIndex_ === -1 ?
         null :
         this.querySelector<HTMLElement>(
@@ -245,7 +249,7 @@ export class ReadingListAppElement extends ReadingListAppElementBase {
   private createHeaderEntry_(title: string): ReadLaterEntry {
     return {
       title: title,
-      url: {url: ''},
+      url: '',
       displayUrl: '',
       updateTime: 0n,
       read: false,
@@ -392,7 +396,7 @@ export class ReadingListAppElement extends ReadingListAppElementBase {
     );
   }
 
-  protected async onItemKeyDown_(e: KeyboardEvent) {
+  protected async onItemKeydown_(e: KeyboardEvent) {
     if (e.shiftKey || !navigationKeys.has(e.key)) {
       return;
     }

@@ -9,7 +9,6 @@
 <translation id="101823271612280837">Ukurekhoda kumisiwe. Ayikwazi ukusebenzisa ideshibhodi yegeyimu kumodi yethebulethi.</translation>
 <translation id="1024364763893396229">Londoloza i-<ph name="NAME" /> yakho</translation>
 <translation id="1032891413405719768">Ibhethri le-Stylus liphansi</translation>
-<translation id="1036073649888683237">Ukuze uphathe izaziso, iya kokuthi Amasethingi</translation>
 <translation id="1036348656032585052">Vala</translation>
 <translation id="1037492556044956303"><ph name="DEVICE_NAME" /> kungeziwe</translation>
 <translation id="1038106730571050514">Bonisa iziphakamiso</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">Isithombe sakamuva <ph name="INDEX" /> kwezingu-<ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Goqa iGoogle Tasks</translation>
 <translation id="2208323208084708176">Imodi ehlanganisiwe yedeskithophu</translation>
-<translation id="2210311543574621570">Uzobona ibhodi lokunamathisela lapho ucindezela futhi ubamba u-Ctrl + V. Ungavala lesi sinqamuleli ngokuvala ifulegi elithi #clipboard-history-longpress ku-chrome://flags.</translation>
 <translation id="2215920961700443347">Ayikho i-inthanethi. Xhuma ku-inthanethi uphinde uzame futhi.</translation>
 <translation id="2222841058024245321">Itafula 7</translation>
 <translation id="2223384056430485343">Ekuhlukaniseni isikrini</translation>
@@ -428,6 +426,7 @@ Kuxhunywe amadivayisi angu-<ph name="DEVICECOUNT" /></translation>
 <translation id="2478076885740497414">Faka uhlelo lokusebenza</translation>
 <translation id="2482878487686419369">Izaziso</translation>
 <translation id="2484513351006226581">Shaya u-<ph name="KEYBOARD_SHORTCUT" /> ukuze ushintshe isendlalelo sekhibhodi.</translation>
+<translation id="2485422356828889247">Khipha</translation>
 <translation id="2486214324139475545"><ph name="DESK_NAME" /> buka kuqala. Itafula elisebenzayo.</translation>
 <translation id="2486405091093637109">Okuthi "<ph name="DISPLAY_NAME" />" kushintshele ekucaceni okungu-<ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz). Ngaphandle kokuqinisekisa, amasethingi angaphambilini azobuyiselwa ngo-<ph name="TIMEOUT_SECONDS" />.</translation>
 <translation id="2487915095798731898">Joyina</translation>
@@ -2195,7 +2194,6 @@ Ukuze uvale idivayisi, cindezela futhi ubambe inkinobho yamandla kudivayisi futh
 <translation id="8241650983304689286">Engeza ithebhu ekubukeni okusha okuhlukanisiwe</translation>
 <translation id="8247060538831475781">I-<ph name="CONNECTION_STATUS" />, Amandla esignali angu-<ph name="SIGNAL_STRENGTH" />, iphethwe umlawuli wakho <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Bonisa konke okuqukethwe kweGoogle Drive</translation>
-<translation id="8257510091797044096">Setha idivayisi yakho</translation>
 <translation id="8261506727792406068">Susa</translation>
 <translation id="8262312463845990408">Guqula Ukudlala</translation>
 <translation id="8268302343625273732">Bona yonke imisebenzi ezokwenziwa kuGoogle Classroom</translation>

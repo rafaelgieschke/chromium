@@ -57,6 +57,9 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration);
 // Wait until `matcher` is accessible (not nil) on the device.
 - (void)waitForMatcher:(id<GREYMatcher>)matcher;
 
+// Returns YES if `matcher` is sufficiently_visible;
+- (BOOL)isMatcherSufficientlyVisible:(id<GREYMatcher>)matcher;
+
 #pragma mark - Device Utilities
 
 // Returns YES if running on an iPad.
@@ -98,14 +101,14 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration);
 // Returns whether the current layout is showing the bottom omnibox.
 - (BOOL)isCurrentLayoutBottomOmnibox;
 
-// Returns whether the Enhanced Safe Browsing Infobar Promo feature is enabled.
-- (BOOL)isEnhancedSafeBrowsingInfobarEnabled;
-
 // Returns whether the Ask Gemini Chip feature is enabled.
 - (BOOL)isAskGeminiChipEnabled;
 
 // Returns whether the ComposeboxIOS feature is enabled.
 - (BOOL)isComposeboxIOSEnabled;
+
+// Returns whether the Proactive Suggestions Framework feature is enabled.
+- (BOOL)isProactiveSuggestionsFrameworkEnabled;
 
 // Returns the interface orientation of the scene.
 - (UIInterfaceOrientation)interfaceOrientation;
@@ -154,17 +157,29 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration);
 - (void)sceneOpenURL:(const GURL&)URL;
 
 // Loads `URL` in the current WebState with transition type
+// ui::PAGE_TRANSITION_TYPED, and waits for the loading to complete within a
+// specified `timeout`. This timeout is used for both webView appearance and
+// page load; time taken is approximately `timeout` for page load but total time
+// could take up to double the `timeout`.
+- (void)loadURL:(const GURL&)URL withTimeout:(base::TimeDelta)timeout;
+
+// Loads `URL` in the current WebState with transition type
+// ui::PAGE_TRANSITION_TYPED, and waits for the loading to complete within a
+// specified `timeout`. This timeout is used for both webView appearance and
+// page load; time taken is approximately `timeout` for page load but total time
+// could take up to double the `timeout`. Returns nil on success, or else an
+// NSError indicating why the operation failed.
+- (NSError*)loadURL:(const GURL&)URL
+    timeoutWithError:(base::TimeDelta)timeout [[nodiscard]];
+
+// Loads `URL` in the current WebState with transition type
 // ui::PAGE_TRANSITION_TYPED, and if waitForCompletion is YES
 // waits for the loading to complete within a timeout.
-// Returns nil on success, or else an NSError indicating why the operation
-// failed.
 - (void)loadURL:(const GURL&)URL waitForCompletion:(BOOL)wait;
 
 // Loads `URL` in the current WebState with transition type
 // ui::PAGE_TRANSITION_TYPED, and waits for the loading to complete within a
 // timeout.
-// If the condition is not met within a timeout returns an NSError indicating
-// why the operation failed, otherwise nil.
 - (void)loadURL:(const GURL&)URL;
 
 // Returns YES if the current WebState is loading.
@@ -234,9 +249,6 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration);
 // Waits for there to be `count` number of incognito tabs within a timeout, or a
 // GREYAssert is induced.
 - (void)waitForIncognitoTabCount:(NSUInteger)count;
-
-// Loads `URL` as if it was opened from an external application.
-- (void)openURLFromExternalApp:(const GURL&)URL;
 
 // Programmatically dismisses settings screen.
 - (void)dismissSettings;
@@ -752,6 +764,9 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration);
 // Returns YES if kTestFeature is enabled.
 - (BOOL)isTestFeatureEnabled;
 
+// Returns YES if Fullscreen smooth scrolling is supported.
+- (BOOL)isFullscreenSmoothScrollingSupported;
+
 // Returns YES if DemographicMetricsReporting feature is enabled.
 - (BOOL)isDemographicMetricsReportingEnabled [[nodiscard]];
 
@@ -769,9 +784,6 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration);
 // Returns whether the app is configured to, and running in an environment which
 // can, open multiple windows.
 - (BOOL)areMultipleWindowsSupported;
-
-// Returns whether the NewOverflowMenu feature is enabled.
-- (BOOL)isNewOverflowMenuEnabled;
 
 // Returns whether the UseLensToSearchForImage feature is enabled;
 - (BOOL)isUseLensToSearchForImageEnabled;
@@ -830,6 +842,10 @@ id<GREYAction> grey_longPressWithDuration(base::TimeDelta duration);
 // Creates a `AppGroupCommand` based on the provided text and writes it the
 // shared NSUserDefaults.
 - (void)setAppGroupCommandToSearchText:(NSString*)text;
+
+// Creates an incognito `AppGroupCommand` based on the provided text and writes
+// it the shared NSUserDefaults.
+- (void)setAppGroupCommandToIncognitoSearchText:(NSString*)text;
 
 #pragma mark - Pref Utilities (EG2)
 

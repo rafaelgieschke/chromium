@@ -9,7 +9,7 @@ import android.os.SystemClock;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.flags.ActivityType;
@@ -83,11 +83,12 @@ public class LegacyTabStartupMetricsTracker {
     private boolean mRegisteredFirstPaintPreForeground;
 
     public LegacyTabStartupMetricsTracker(
-            long activityId, ObservableSupplier<TabModelSelector> tabModelSelectorSupplier) {
+            long activityId,
+            MonotonicObservableSupplier<TabModelSelector> tabModelSelectorSupplier) {
         mActivityId = activityId;
         mActivityStartTimeMs = SystemClock.uptimeMillis();
         TraceEvent.startupActivityStart(mActivityId, mActivityStartTimeMs);
-        tabModelSelectorSupplier.addObserver(this::registerObservers);
+        tabModelSelectorSupplier.addSyncObserverAndPostIfNonNull(this::registerObservers);
     }
 
     /**

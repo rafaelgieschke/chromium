@@ -10,7 +10,6 @@
 #include <string>
 #include <string_view>
 
-#include "base/containers/contains.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
@@ -53,17 +52,15 @@ constexpr char kStaticEncodeKey[] = "staticEncode";
 constexpr char kUrlKey[] = "url";
 
 std::map<std::string, std::string> ParseParams(std::string_view param_string) {
-  url::Component query(0, param_string.size());
+  url::Component query(param_string);
   url::Component key;
   url::Component value;
   constexpr int kMaxUriDecodeLen = 2048;
   std::map<std::string, std::string> params;
   while (url::ExtractQueryKeyValue(param_string, &query, &key, &value)) {
-    url::RawCanonOutputW<kMaxUriDecodeLen> output;
-    url::DecodeURLEscapeSequences(param_string.substr(value.begin, value.len),
-                                  url::DecodeURLMode::kUTF8OrIsomorphic,
-                                  &output);
-    params.insert({std::string(param_string.substr(key.begin, key.len)),
+    url::UrlEscapeDecoder<kMaxUriDecodeLen> output(
+        value.AsViewOn(param_string), url::DecodeUrlMode::kUtf8OrIsomorphic);
+    params.insert({std::string(key.AsViewOn(param_string)),
                    base::UTF16ToUTF8(output.view())});
   }
   return params;

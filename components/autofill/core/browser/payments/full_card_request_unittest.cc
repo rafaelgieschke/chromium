@@ -143,7 +143,7 @@ class FullCardRequestTest : public testing::Test {
     request_ = std::make_unique<FullCardRequest>(&autofill_client());
     personal_data().test_payments_data_manager().SetAccountInfoForPayments(
         autofill_client_.GetIdentityManager()->GetPrimaryAccountInfo(
-            signin::ConsentLevel::kSync));
+            signin::ConsentLevel::kSignin));
     // Silence the warning from PaymentsNetworkInterface about matching sync and
     // Payments server types.
     base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
@@ -291,7 +291,7 @@ TEST_F(FullCardRequestTest, GetFullCardPanAndCvcForMaskedServerCardViaFido) {
   request().GetFullCardViaFIDO(
       CreditCard(CreditCard::RecordType::kMaskedServerCard, "server_id"),
       UnmaskCardReason::kAutofill, result_delegate().AsWeakPtr(),
-      base::Value::Dict());
+      base::DictValue());
   OnDidGetRealPan(PaymentsRpcResult::kSuccess, "4111");
 }
 

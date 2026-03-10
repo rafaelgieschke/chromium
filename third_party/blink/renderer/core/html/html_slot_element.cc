@@ -31,7 +31,6 @@
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 
 #include "base/containers/adapters.h"
-#include "base/containers/contains.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_assigned_nodes_options.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
@@ -102,7 +101,7 @@ HeapVector<Member<Node>> CollectFlattenedAssignedNodes(
       if (!child.IsSlotable())
         continue;
       if (auto* child_slot = ToHTMLSlotElementIfSupportsAssignmentOrNull(child))
-        nodes.AppendVector(CollectFlattenedAssignedNodes(*child_slot));
+        nodes.append_range(CollectFlattenedAssignedNodes(*child_slot));
       else
         nodes.push_back(child);
     }
@@ -111,7 +110,7 @@ HeapVector<Member<Node>> CollectFlattenedAssignedNodes(
       DCHECK(node->IsSlotable());
       if (auto* assigned_node_slot =
               ToHTMLSlotElementIfSupportsAssignmentOrNull(*node))
-        nodes.AppendVector(CollectFlattenedAssignedNodes(*assigned_node_slot));
+        nodes.append_range(CollectFlattenedAssignedNodes(*assigned_node_slot));
       else
         nodes.push_back(node);
     }
@@ -199,7 +198,7 @@ void HTMLSlotElement::Assign(const HeapVector<Member<Node>>& nodes) {
 
   HeapLinkedHashSet<WeakMember<Node>> removed_nodes;
   for (Node* node : manually_assigned_nodes_) {
-    if (!base::Contains(added_nodes, node)) {
+    if (!added_nodes.Contains(node)) {
       removed_nodes.insert(node);
     }
   }

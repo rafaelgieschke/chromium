@@ -9,7 +9,6 @@
 <translation id="101823271612280837">Жаздыруу токтотулду. Оюн тактасын планшет режиминде колдонуу мүмкүн эмес.</translation>
 <translation id="1024364763893396229"><ph name="NAME" /> түзмөгүңүздү сактаңыз</translation>
 <translation id="1032891413405719768">Стилус батареясынын кубаты аз</translation>
-<translation id="1036073649888683237">Билдирүүлөрдү башкаруу үчүн параметрлерге өтүңүз</translation>
 <translation id="1036348656032585052">Өчүрүү</translation>
 <translation id="1037492556044956303"><ph name="DEVICE_NAME" /> кошулду</translation>
 <translation id="1038106730571050514">Сунуштарды көрсөтүү</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">Акыркы сүрөт (<ph name="TOTAL_COUNT" /> ичинен <ph name="INDEX" />).</translation>
 <translation id="2201687081523799384">Google Tasks'ты жыйыштыруу</translation>
 <translation id="2208323208084708176">Биргелешкен иш тактасы режими</translation>
-<translation id="2210311543574621570">Ctrl + V баскычтарын коё бербей басып турганыңызда алмашуу буферин көрөсүз. chrome://flags дарегиндеги #clipboard-history-longpress желекчесин өчүрүп, бул ыкчам баскычты өчүрө аласыз.</translation>
 <translation id="2215920961700443347">Интернет жок. Интернетке туташып, кайталап көрүңүз.</translation>
 <translation id="2222841058024245321">7-иш такта</translation>
 <translation id="2223384056430485343">Бөлүнгөн экранда</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">Колдонмону орнотуу</translation>
 <translation id="2482878487686419369">Билдирмелер</translation>
 <translation id="2484513351006226581">Баскычтоптун калыбын которуу үчүн <ph name="KEYBOARD_SHORTCUT" /> басып коюңуз.</translation>
+<translation id="2485422356828889247">Орнотуудан чыгаруу</translation>
 <translation id="2486214324139475545"><ph name="DESK_NAME" /> алдын ала көрүү. Жигердүү иш такта.</translation>
 <translation id="2486405091093637109">"<ph name="DISPLAY_NAME" />" <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Герц) дааналыгына өзгөрдү. Ырасталбаса, мурунку параметрлер <ph name="TIMEOUT_SECONDS" /> кийин калыбына келтирилет.</translation>
 <translation id="2487915095798731898">Кошулуу</translation>
@@ -459,7 +458,7 @@
 <translation id="256712445991462162">жалгаштырылган лупа</translation>
 <translation id="2573588302192866788"><ph name="NAME" /> менен туташпай койду</translation>
 <translation id="2575685495496069081">Бир нече аккаунт менен кирүү өчүрүлгөн</translation>
-<translation id="2579264398927991698">Орнотулган программанын жаңыртуулары</translation>
+<translation id="2579264398927991698">Орнотулган программаны жаңыртуу</translation>
 <translation id="2586657967955657006">Алмашуу буфери</translation>
 <translation id="2596078834055697711">Терезенин скриншотун тартып алуу</translation>
 <translation id="2598725286293895280">Иш тактада колдоого алынбаган колдонмолор бар</translation>
@@ -2195,7 +2194,6 @@
 <translation id="8241650983304689286">Өтмөктү жаңы бөлүп көрүү режимине кошуу</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, Сигналдын күчү <ph name="SIGNAL_STRENGTH" />, Телефондун батареясы <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Google Drive'дагы бардык контентти көрсөтүү</translation>
-<translation id="8257510091797044096">Түзмөгүңүздү тууралап алыңыз</translation>
 <translation id="8261506727792406068">Жок кылуу</translation>
 <translation id="8262312463845990408">Ойнотууну өчүрүү/күйгүзүү</translation>
 <translation id="8268302343625273732">Google Класстагы бардык тапшырмаларды көрүү</translation>

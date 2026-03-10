@@ -1,6 +1,7 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="uk">
+<translation id="1035560095760914532">Розмістіть вебпереглядач Chrome у нижній частині екрана, щоб у будь-який момент мати до нього доступ</translation>
 <translation id="1076643793026027628">Chrome автоматично відкриває посилання YouTube, надіслані із сеансу в анонімному режимі, у тому самому режимі.</translation>
 <translation id="1081114897601629648">Ці паролі не імпортовано в Google Менеджер паролів, оскільки вони не відповідають вимогам.</translation>
 <translation id="1086486568852410168">Шукати через Об’єктив</translation>
@@ -86,6 +87,10 @@
 <translation id="2767464022270041271">Немає збережених паролів. Google Менеджер паролів зможе перевірити ваші паролі, коли ви їх збережете.</translation>
 <translation id="2788811701191021538">Відкриває сторінку налаштувань способів оплати в Chrome.</translation>
 <translation id="2876628302275096482">Докладніше про те, <ph name="BEGIN_LINK" />як Chrome захищає ваші дані<ph name="END_LINK" /></translation>
+<translation id="288992067439702510">Ви додали максимальну кількість закладок у Google Chrome (<ph name="LIMIT" />), тому деякі з них іще не збережено у вашому обліковому записі Google.
+
+Щоб зберегти нові закладки в обліковому записі, видаліть деякі з наявних. Якщо вийти зараз, незбережені закладки буде видалено.</translation>
+<translation id="2901621928549457170">Миттєво відкривайте Chrome на iPad</translation>
 <translation id="2922914028977213693">Натисніть тут, щоб користуватися всіма можливостями Chrome на iPad.</translation>
 <translation id="292371311537977079">Налаштування Chrome</translation>
 <translation id="2923827943290349720">Блокувати анонімні вкладки після закриття Chrome</translation>
@@ -170,6 +175,8 @@
 <translation id="5119391094379141756">Виберіть Chrome</translation>
 <translation id="5123188916260706415">Шукати за допомогою голосу в Chrome</translation>
 <translation id="5162467219239570114">Версія Chrome застаріла. Якщо оновлень в <ph name="BEGIN_LINK" />App Store<ph name="END_LINK" /> немає, можливо, ваш пристрій більше не підтримує нові версії Chrome.</translation>
+<translation id="5172049865623113551">Миттєво відкривайте Chrome на iPhone</translation>
+<translation id="5179095426828744632">Швидше відкривайте Chrome із панелі Dock</translation>
 <translation id="5184329579814168207">Відкрити в Chrome</translation>
 <translation id="5190139289262548459">Ваша організація (<ph name="DOMAIN" />) керує обліковим записом, у який ви ввійшли, і тим, як використовується Chrome.</translation>
 <translation id="5209238444239954363">Chrome не вдалося перевірити наявність оновлень. Повторіть спробу пізніше.</translation>
@@ -308,7 +315,6 @@
 <translation id="787226752901403048">Увійдіть у Chrome, щоб ділитися групами вкладок, приєднуватися до них і втілювати ідеї в життя разом з іншими користувачами</translation>
 <translation id="7897703007638178753">Переглянути останні вкладки в Chrome</translation>
 <translation id="7948283758957877064">Що нового в Chrome</translation>
-<translation id="7996707498590516621">Створити зображення за допомогою Gemini у Chrome</translation>
 <translation id="8000174216052461231">Порада щодо Chrome: отримайте найвищий рівень безпеки в Chrome</translation>
 <translation id="8006014511203279255">Відкривайте посилання з повідомлень або інших додатків за допомогою Chrome.</translation>
 <translation id="8014670471808569312">Chrome запропонує зберегти ваш пароль.</translation>
@@ -320,6 +326,7 @@
 <translation id="8136856065410661948">Ці дані використовуватимуться, щоб створювати події в Календарі Apple на основі даних у Chrome і Google Об’єктиві.</translation>
 <translation id="8154120522323162874">Щоб користуватися всіма можливостями Chrome, завершіть налаштування вебпереглядача.</translation>
 <translation id="8160472928944011082">Не вдається оновити Chrome</translation>
+<translation id="8213550501565480896">Зробіть Chrome вебпереглядачем за умовчанням</translation>
 <translation id="8245080522851805544">Захищайте конфіденційність вебперегляду за допомогою автентифікації пристрою, коли закриваєте Chrome</translation>
 <translation id="8248887045858762645">Порада щодо Chrome</translation>
 <translation id="8265730590513812063">Відкрийте меню Chrome</translation>
@@ -351,6 +358,7 @@
 <translation id="8788269841521769222">Пароль не потрібно запам’ятовувати. Його буде збережено в Менеджері паролів Google облікового запису <ph name="EMAIL" />.</translation>
 <translation id="8796490717897731471"><ph name="EMAIL" />. Вебпереглядачем Chrome керує адміністратор.</translation>
 <translation id="880967149107462122">Перейдіть у налаштування Chrome</translation>
+<translation id="8840947648682778034">Тема Chrome для iPhone чи iPad</translation>
 <translation id="8842132678697187091">Тут можна відкрити Google Об’єктив.</translation>
 <translation id="8850736900032787670">Щоб отримувати персоналізований контент на основі своїх інтересів, увійдіть в обліковий запис Chrome.</translation>
 <translation id="8855781063981781621">Щоб вимкнути режим блокування входу в Chrome, відключіть його на своєму пристрої iPad.</translation>

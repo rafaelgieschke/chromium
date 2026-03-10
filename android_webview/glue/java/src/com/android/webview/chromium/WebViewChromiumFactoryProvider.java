@@ -55,8 +55,8 @@ import org.chromium.android_webview.common.CommandLineUtil;
 import org.chromium.android_webview.common.DeveloperModeUtils;
 import org.chromium.android_webview.common.FlagOverrideHelper;
 import org.chromium.android_webview.common.Lifetime;
-import org.chromium.android_webview.common.PlatformServiceBridge;
 import org.chromium.android_webview.common.ProductionSupportedFlagList;
+import org.chromium.android_webview.common.SafeModeActionIds;
 import org.chromium.android_webview.common.SafeModeController;
 import org.chromium.android_webview.common.WebViewCachedFlags;
 import org.chromium.android_webview.safe_mode.BrowserSafeModeActionList;
@@ -86,6 +86,7 @@ import org.chromium.support_lib_boundary.ProcessGlobalConfigConstants;
 import java.io.File;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -439,11 +440,29 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                 ctx = ctx.createCredentialProtectedStorageContext();
             }
 
+            // Initialize some of SafeMode. It's not safe to use the data directory yet so don't
+            // actually *do* anything. We need to do this early to check whether it's safe to use
+            // cached flags or not.
+            String webViewPackageName = AwBrowserProcess.getWebViewPackageName();
+            SafeModeController controller = SafeModeController.getInstance();
+            controller.registerActions(BrowserSafeModeActionList.sList);
+            mIsSafeModeEnabled = controller.isSafeModeEnabled(ctx, webViewPackageName);
+            RecordHistogram.recordBooleanHistogram(
+                    "Android.WebView.SafeMode.SafeModeEnabled", mIsSafeModeEnabled);
+            Set<String> safeModeActions =
+                    mIsSafeModeEnabled
+                            ? controller.queryActions(ctx, webViewPackageName)
+                            : new HashSet<>();
+
             try (StrictModeContext ignored = StrictModeContext.allowDiskWrites()) {
                 // Since N, getSharedPreferences creates the preference dir if it doesn't exist,
                 // causing a disk write.
                 mWebViewPrefs = ctx.getSharedPreferences(CHROMIUM_PREFS_NAME, Context.MODE_PRIVATE);
-                WebViewCachedFlags.init(mWebViewPrefs);
+                if (safeModeActions.contains(SafeModeActionIds.DELETE_VARIATIONS_SEED)) {
+                    WebViewCachedFlags.initForSafeMode(mWebViewPrefs);
+                } else {
+                    WebViewCachedFlags.init(mWebViewPrefs);
+                }
             }
 
             if (WebViewCachedFlags.get()
@@ -470,7 +489,9 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                 CommandLineUtil.initCommandLine();
             }
 
-            if (shouldEnableContextExperiment(ctx)) {
+            ManifestMetadataUtil.ensureMetadataCacheInitialized(ctx);
+
+            if (shouldEnableContextExperiment()) {
                 try (DualTraceEvent ignored =
                         DualTraceEvent.scoped(
                                 "WebViewChromiumFactoryProvider.enableContextExperiment")) {
@@ -555,7 +576,6 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                 checkProcessUid();
             }
 
-            String webViewPackageName = AwBrowserProcess.getWebViewPackageName();
             boolean isDeveloperModeEnabled =
                     DeveloperModeUtils.isDeveloperModeEnabled(webViewPackageName);
             RecordHistogram.recordBooleanHistogram(
@@ -601,12 +621,27 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                             dataDirectoryBasePath, cacheDirectoryBasePath, dataDirectorySuffix);
                 }
 
+                boolean enableSystemTracing =
+                        WebViewCachedFlags.get()
+                                .isCachedFeatureEnabled(
+                                        TracingServiceFeatures.ENABLE_PERFETTO_SYSTEM_TRACING);
                 if (WebViewCachedFlags.get()
-                        .isCachedFeatureEnabled(AwFeatures.WEBVIEW_EARLY_PERFETTO_INIT)) {
-                    AwBrowserProcess.initPerfetto(
-                            WebViewCachedFlags.get()
-                                    .isCachedFeatureEnabled(
-                                            TracingServiceFeatures.ENABLE_PERFETTO_SYSTEM_TRACING));
+                        .isCachedFeatureEnabled(AwFeatures.WEBVIEW_EARLY_TRACING_INIT)) {
+                    AwBrowserProcess.disableTracingInitDuringBrowserMain();
+                    AwBrowserProcess.initTracing(
+                            enableSystemTracing, /* runningOnBackgroundThread= */ false);
+                } else if (WebViewCachedFlags.get()
+                        .isCachedFeatureEnabled(AwFeatures.WEBVIEW_BACKGROUND_TRACING_INIT)) {
+                    AwBrowserProcess.disableTracingInitDuringBrowserMain();
+                    AwBrowserProcess.markTracingInitializedOnBackground();
+                    // Posting as USER_VISIBLE because startup will eventually wait if it isn't done
+                    // yet.
+                    PostTask.postTask(
+                            TaskTraits.USER_VISIBLE,
+                            () ->
+                                    AwBrowserProcess.initTracing(
+                                            enableSystemTracing,
+                                            /* runningOnBackgroundThread= */ true));
                 }
 
                 try (DualTraceEvent e2 =
@@ -634,20 +669,15 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
                 AwContentsStatics.logFlagOverridesWithNative(flagOverrides);
             }
 
-            SafeModeController controller = SafeModeController.getInstance();
-            controller.registerActions(BrowserSafeModeActionList.sList);
-            mIsSafeModeEnabled = controller.isSafeModeEnabled(webViewPackageName);
-            RecordHistogram.recordBooleanHistogram(
-                    "Android.WebView.SafeMode.SafeModeEnabled", mIsSafeModeEnabled);
+            // Here is where we can actually execute the safe mode actions.
             if (mIsSafeModeEnabled) {
                 try {
                     long safeModeQueryExecuteStart = SystemClock.elapsedRealtime();
-                    Set<String> actions = controller.queryActions(webViewPackageName);
                     Log.w(
                             TAG,
                             "WebViewSafeMode is enabled: received %d SafeModeActions",
-                            actions.size());
-                    controller.executeActions(actions);
+                            safeModeActions.size());
+                    controller.executeActions(safeModeActions);
                     long safeModeQueryExecuteEnd = SystemClock.elapsedRealtime();
                     RecordHistogram.recordTimesHistogram(
                             "Android.WebView.SafeMode.QueryAndExecuteBlockingTime",
@@ -667,11 +697,6 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
             if (WebViewCachedFlags.get()
                     .isCachedFeatureEnabled(AwFeatures.WEBVIEW_MOVE_WORK_TO_PROVIDER_INIT)) {
-                PostTask.postTask(
-                        TaskTraits.USER_VISIBLE,
-                        () -> {
-                            PlatformServiceBridge.getInstance();
-                        });
                 mAwInit.runNonUiThreadCapableStartupTasks();
             }
 
@@ -680,17 +705,27 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
             helper.applyFlagOverrides(
                     Map.of(AwFeatures.WEBVIEW_FILE_SYSTEM_ACCESS, shouldEnableFileSystemAccess()));
 
-            // Apply user-agent reduction overrides for WebView. These features
-            // are intended to be enabled only for Android B+.
+            // Set user-agent reduction command-line switches and feature flags for WebView.
+            // We set command line switches as well because we want to read the configuration before
+            // feature flags are set for enabling `getDefaultUserAgent` to not wait for browser
+            // startup.
+            // These features are intended to be enabled only for Android B+.
             // 1) ReduceUserAgentMinorVersion: Enables reduction of the user-agent minor version.
             // 2) WebViewReduceUAAndroidVersionDeviceModel: Enables reduction of the user-agent
             //    Android version and device model.
+            boolean shouldEnableUserAgentReduction = shouldEnableUserAgentReduction();
             helper.applyFlagOverrides(
                     Map.of(
                             AwFeatures.WEBVIEW_REDUCE_UA_ANDROID_VERSION_DEVICE_MODEL,
-                            shouldEnableUserAgentReduction(),
+                            shouldEnableUserAgentReduction,
                             BlinkFeatures.REDUCE_USER_AGENT_MINOR_VERSION,
-                            shouldEnableUserAgentReduction()));
+                            shouldEnableUserAgentReduction));
+            if (shouldEnableUserAgentReduction) {
+                CommandLine.getInstance()
+                        .appendSwitch(AwSwitches.WEBVIEW_REDUCE_USER_AGENT_MINOR_VERSION);
+                CommandLine.getInstance()
+                        .appendSwitch(AwSwitches.WEBVIEW_REDUCE_UA_ANDROID_VERSION_DEVICE_MODEL);
+            }
 
             setSingleton(this);
         }
@@ -729,14 +764,28 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         }
     }
 
+    // The startup tasks are setup to run based on the following logic:
+    // 1. The AndroidX preference is checked first,
+    // 2. If it's not set, the manifest metadata is checked,
+    // 3. Then the commandline switch is checked,
+    // 4. Finally, the feature flag is checked.
     private void setupStartupTaskExperiments(AndroidXProcessGlobalConfig androidXConfig) {
         switch (androidXConfig.getUiThreadStartupMode()) {
             case ProcessGlobalConfigConstants.UI_THREAD_STARTUP_MODE_DEFAULT:
-                setStartupTaskExperimentValues(
-                        shouldEnableStartupTasksExperiment(),
-                        shouldEnableStartupTasksExperimentP2(),
-                        shouldEnableStartupTasksYieldToNativeExperiment());
-                return;
+                {
+                    if (ManifestMetadataUtil.shouldForceSyncBrowserStartup()) {
+                        setStartupTaskExperimentValues(
+                                /* enablePhase1= */ false,
+                                /* enablePhase2= */ false,
+                                /* enableYieldToNative= */ false);
+                    } else {
+                        setStartupTaskExperimentValues(
+                                shouldEnableStartupTasksExperiment(),
+                                shouldEnableStartupTasksExperimentP2(),
+                                shouldEnableStartupTasksYieldToNativeExperiment());
+                    }
+                    return;
+                }
             case ProcessGlobalConfigConstants.UI_THREAD_STARTUP_MODE_SYNC:
                 setStartupTaskExperimentValues(
                         /* enablePhase1= */ false,
@@ -995,24 +1044,15 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         return mInitInfo;
     }
 
-    private boolean shouldEnableContextExperiment(Context ctx) {
+    private boolean shouldEnableContextExperiment() {
         // Command line switch overrides all other conditions.
         if (CommandLine.getInstance().hasSwitch(AwSwitches.WEBVIEW_USE_SEPARATE_RESOURCE_CONTEXT)) {
             return true;
         }
-
         // Don't enable on V+.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
             return !isRegisterResourcePathsAvailable();
         }
-
-        // Allow the developer to opt in or opt out of the experiment.
-        ManifestMetadataUtil.ensureMetadataCacheInitialized(ctx);
-        Boolean valueFromManifest = ManifestMetadataUtil.shouldEnableContextExperiment();
-        if (valueFromManifest != null) {
-            return valueFromManifest;
-        }
-
         return true;
     }
 

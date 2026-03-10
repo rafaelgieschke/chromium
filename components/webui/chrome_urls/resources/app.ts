@@ -58,17 +58,6 @@ export class ChromeUrlsAppElement extends CrLitElement {
   protected loadUrlsTimeout_: number|null = null;
   // </if>
 
-  override updated(changedProperties: PropertyValues<this>) {
-    super.updated(changedProperties);
-
-    const changedPrivateProperties =
-        changedProperties as Map<PropertyKey, unknown>;
-    if (changedPrivateProperties.has('internalUrlInfos_') &&
-        this.internalUrlInfos_.length > 0) {
-      this.onHashChanged_(CrRouter.getInstance().getHash());
-    }
-  }
-
   override connectedCallback() {
     super.connectedCallback();
 
@@ -99,6 +88,17 @@ export class ChromeUrlsAppElement extends CrLitElement {
     // </if>
   }
 
+  override updated(changedProperties: PropertyValues<this>) {
+    super.updated(changedProperties);
+
+    const changedPrivateProperties =
+        changedProperties as Map<PropertyKey, unknown>;
+    if (changedPrivateProperties.has('internalUrlInfos_') &&
+        this.internalUrlInfos_.length > 0) {
+      this.onHashChanged_(CrRouter.getInstance().getHash());
+    }
+  }
+
   // <if expr="is_ios">
   private onLoadUrlsTimeout_() {
     // Set a longer timeout for retries, because the backend reply needs to come
@@ -115,7 +115,7 @@ export class ChromeUrlsAppElement extends CrLitElement {
       // Since we use GURL on the C++ side, we need to remove the trailing
       // '/' here for nicer display.
       function getPrettyUrl(url: Url): Url {
-        return {url: url.url.replace(/\/$/, '')};
+        return url.replace(/\/$/, '');
       }
       urlsData.webuiUrls.forEach(info => {
         info.url = getPrettyUrl(info.url);
@@ -164,8 +164,7 @@ export class ChromeUrlsAppElement extends CrLitElement {
     // If a host was provided, redirects to it when debug pages are enabled.
     if (enabled && host) {
       const hostUrl = new URL(host);
-      if (this.internalUrlInfos_.some(
-              info => info.url.url === hostUrl.origin)) {
+      if (this.internalUrlInfos_.some(info => info.url === hostUrl.origin)) {
         OpenWindowProxyImpl.getInstance().openUrl(host);
       }
     }
@@ -176,7 +175,7 @@ export class ChromeUrlsAppElement extends CrLitElement {
   }
 
   protected isChromeUrlsUrl_(info: WebuiUrlInfo): boolean {
-    return info.url.url === 'chrome://chrome-urls';
+    return info.url === 'chrome://chrome-urls';
   }
 }
 

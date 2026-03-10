@@ -9,6 +9,7 @@
 
 #include "ash/constants/ash_features.h"
 #include "ash/constants/ash_switches.h"
+#include "ash/constants/webui_url_constants.h"
 #include "ash/display/refresh_rate_controller.h"
 #include "ash/multi_user/multi_user_window_manager.h"
 #include "ash/public/cpp/new_window_delegate.h"
@@ -22,7 +23,6 @@
 #include "ash/system/video_conference/fake_video_conference_tray_controller.h"
 #include "ash/system/video_conference/video_conference_tray_controller.h"
 #include "ash/webui/annotator/annotator_client_impl.h"
-#include "ash/webui/sanitize_ui/url_constants.h"
 #include "ash/webui/system_apps/public/system_web_app_type.h"
 #include "base/check.h"
 #include "base/check_deref.h"
@@ -43,7 +43,7 @@
 #include "chrome/browser/ash/growth/campaigns_manager_session.h"
 #include "chrome/browser/ash/input_device_settings/peripherals_app_delegate_impl.h"
 #include "chrome/browser/ash/login/signin/signin_error_notifier_factory.h"
-#include "chrome/browser/ash/magic_boost/magic_boost_state_ash.h"
+#include "chrome/browser/ash/magic_boost/magic_boost_state.h"
 #include "chrome/browser/ash/mahi/mahi_manager_impl.h"
 #include "chrome/browser/ash/mahi/media_app/mahi_media_app_content_manager_impl.h"
 #include "chrome/browser/ash/mahi/media_app/mahi_media_app_events_proxy_impl.h"
@@ -447,7 +447,7 @@ void ChromeBrowserMainExtraPartsAsh::PreProfileInit() {
   // Needs to be initialized before `read_write_cards_manager_`. This is because
   // `QuickAnswersState` needs `MagicBoostState` to be initialized before it is
   // constructed.
-  magic_boost_state_ash_ = std::make_unique<ash::MagicBoostStateAsh>();
+  magic_boost_state_ = std::make_unique<ash::MagicBoostState>();
 
   read_write_cards_manager_ =
       std::make_unique<chromeos::ReadWriteCardsManagerImpl>(
@@ -528,13 +528,11 @@ void ChromeBrowserMainExtraPartsAsh::PostProfileInit(Profile* profile,
             g_browser_process->GetFeatures()->application_locale_storage());
   }
 
-  if (ash::features::IsWelcomeExperienceEnabled()) {
-    peripherals_app_delegate_ =
-        std::make_unique<ash::PeripheralsAppDelegateImpl>();
-    ash::Shell::Get()
-        ->input_device_settings_controller()
-        ->SetPeripheralsAppDelegate(peripherals_app_delegate_.get());
-  }
+  peripherals_app_delegate_ =
+      std::make_unique<ash::PeripheralsAppDelegateImpl>();
+  ash::Shell::Get()
+      ->input_device_settings_controller()
+      ->SetPeripheralsAppDelegate(peripherals_app_delegate_.get());
 
   // Initialize TabScrubber after the Ash Shell has been initialized.
   ash::TabScrubber::GetInstance();
@@ -606,6 +604,7 @@ void ChromeBrowserMainExtraPartsAsh::PostMainMessageLoopRun() {
 
   wallpaper_controller_client_.reset();
   vpn_list_forwarder_.reset();
+  tablet_mode_page_behavior_.reset();
 
   tab_cluster_ui_client_.reset();
 
@@ -654,7 +653,7 @@ void ChromeBrowserMainExtraPartsAsh::PostMainMessageLoopRun() {
   read_write_cards_manager_.reset();
 
   // Must be destructed after `read_write_cards_manager_`.
-  magic_boost_state_ash_.reset();
+  magic_boost_state_.reset();
 
   mahi_media_app_content_manager_.reset();
   mahi_media_app_events_proxy_.reset();

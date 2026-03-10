@@ -24,10 +24,10 @@ import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.Callback;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.cc.input.BrowserControlsState;
@@ -221,15 +221,15 @@ public class TopControlsStackerUnitTest {
     }
 
     @Mock private BrowserControlsSizer mBrowserControlsSizer;
-    @Mock private BrowserControlsVisibilityDelegate mVisibilityDelegate;
     @Captor private ArgumentCaptor<Callback<Integer>> mVisibilityCallbackCaptor;
 
+    private BrowserControlsVisibilityDelegate mVisibilityDelegate;
     private TopControlsStacker mTopControlsStacker;
 
     @Before
     public void setUp() {
         MockitoAnnotations.openMocks(this);
-        doReturn(BrowserControlsState.BOTH).when(mVisibilityDelegate).get();
+        mVisibilityDelegate = new BrowserControlsVisibilityDelegate(BrowserControlsState.BOTH);
         doReturn(true).when(mBrowserControlsSizer).offsetOverridden();
         mTopControlsStacker = new TopControlsStacker(mBrowserControlsSizer, mVisibilityDelegate);
     }
@@ -352,8 +352,7 @@ public class TopControlsStackerUnitTest {
         // Simulate a browser controls state change without offset tag update.
         reset(mBrowserControlsSizer);
 
-        verify(mVisibilityDelegate).addObserver(mVisibilityCallbackCaptor.capture());
-        mVisibilityCallbackCaptor.getValue().onResult(BrowserControlsState.SHOWN);
+        mVisibilityDelegate.set(BrowserControlsState.SHOWN);
         assertControlsHeight(100, 100);
         toolbar.assertHasNoOffsetTags();
     }
@@ -857,6 +856,41 @@ public class TopControlsStackerUnitTest {
     }
 
     @Test
+    public void repositionLayer_ChangeHeight_AddBottomLayer_ScrollDisabled() {
+        TestLayer tabStrip = TestLayer.tabStripLayer();
+        TestLayer toolbar = TestLayer.toolbarLayer();
+        TestLayer bookmark = TestLayer.bookmarkLayer();
+
+        mTopControlsStacker.setScrollingDisabled(true);
+        mTopControlsStacker.addControl(tabStrip);
+        mTopControlsStacker.addControl(toolbar);
+        mTopControlsStacker.requestLayerUpdateSync(false);
+
+        // All layers should be at resting.
+        assertControlsHeight(150, 150);
+        tabStrip.assertOffset(0).assertAtResting(true);
+        toolbar.assertOffset(50).assertAtResting(true);
+
+        var simulator = new TestBrowserControlsOffsetHelper(0, 150);
+        simulator.commitCurrentOffset();
+        tabStrip.assertOffset(0).assertAtResting(true);
+        toolbar.assertOffset(50).assertAtResting(true);
+
+        mTopControlsStacker.addControl(bookmark);
+        mTopControlsStacker.requestLayerUpdateSync(false);
+
+        assertControlsHeight(270, 270);
+        tabStrip.assertOffset(0).assertAtResting(true);
+        toolbar.assertOffset(50).assertAtResting(true);
+        bookmark.assertOffset(150).assertAtResting(true);
+
+        simulator.driveMinHeightOffsetBy(120);
+        tabStrip.assertOffset(0).assertAtResting(true);
+        toolbar.assertOffset(50).assertAtResting(true);
+        bookmark.assertOffset(150).assertAtResting(true);
+    }
+
+    @Test
     public void testPrepForAnimation() {
         doReturn(false).when(mBrowserControlsSizer).offsetOverridden();
 
@@ -1328,7 +1362,7 @@ public class TopControlsStackerUnitTest {
         verify(mTopControlsStacker, never()).updateLayersInternally(anyBoolean(), anyBoolean());
 
         // Execute the posted runnable.
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         // Verify that requestLayerUpdateSync is called only once with animate=true.
         verify(mTopControlsStacker, times(1)).updateLayersInternally(true, true);
@@ -1369,7 +1403,6 @@ public class TopControlsStackerUnitTest {
         }
 
         public void driveMinHeightOffsetBy(int delta) {
-            mCurrentTopOffset += delta;
             mCurrentTopControlsMinHeightOffset += delta;
             commitCurrentOffset();
         }
@@ -1405,7 +1438,7 @@ public class TopControlsStackerUnitTest {
             doReturn(mCurrentTopOffset).when(mBrowserControlsSizer).getTopControlOffset();
             doReturn(mCurrentTopControlsMinHeightOffset)
                     .when(mBrowserControlsSizer)
-                    .getTopControlOffset();
+                    .getTopControlsMinHeightOffset();
             mTopControlsStacker.onControlsOffsetChanged(
                     mCurrentTopOffset,
                     mCurrentTopControlsMinHeightOffset,

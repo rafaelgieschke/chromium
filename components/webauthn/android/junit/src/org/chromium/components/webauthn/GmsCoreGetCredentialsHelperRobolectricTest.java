@@ -19,7 +19,6 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.annotation.Config;
@@ -53,7 +52,8 @@ public class GmsCoreGetCredentialsHelperRobolectricTest {
 
     @Before
     public void setUp() {
-        MockitoAnnotations.initMocks(this);
+        GmsCoreUtils.setGmsCoreVersionForTesting(244400000);
+
         Fido2ApiCallHelper.overrideInstanceForTesting(mFido2ApiCallHelperMock);
         mHelper = GmsCoreGetCredentialsHelper.getInstance();
         mCredentials = new ArrayList<>();
@@ -128,7 +128,6 @@ public class GmsCoreGetCredentialsHelperRobolectricTest {
 
     @Test
     public void testGetCredentials_featureEnabled_cacheSuccess() {
-        GmsCoreUtils.setGmsCoreVersionForTesting(244400000);
         HistogramWatcher histogramWatcher =
                 HistogramWatcher.newBuilder()
                         .expectIntRecord(
@@ -161,7 +160,6 @@ public class GmsCoreGetCredentialsHelperRobolectricTest {
 
     @Test
     public void testGetCredentials_featureEnabledGoogleDomain_invokesFido2() {
-        GmsCoreUtils.setGmsCoreVersionForTesting(244400000);
         HistogramWatcher histogramWatcher =
                 HistogramWatcher.newBuilder()
                         .expectIntRecord(
@@ -197,7 +195,6 @@ public class GmsCoreGetCredentialsHelperRobolectricTest {
 
     @Test
     public void testGetCredentials_paymentRequest_invokesFido2() {
-        GmsCoreUtils.setGmsCoreVersionForTesting(244400000);
         HistogramWatcher histogramWatcher =
                 HistogramWatcher.newBuilder()
                         .expectIntRecord(
@@ -231,7 +228,6 @@ public class GmsCoreGetCredentialsHelperRobolectricTest {
 
     @Test
     public void testGetCredentials_getMatchingCredentialIds_invokesFido2() {
-        GmsCoreUtils.setGmsCoreVersionForTesting(244400000);
         HistogramWatcher histogramWatcher =
                 HistogramWatcher.newBuilder()
                         .expectIntRecord(
@@ -264,7 +260,6 @@ public class GmsCoreGetCredentialsHelperRobolectricTest {
 
     @Test
     public void testGetCredentials_checkForMatchingCredentials_invokesFido2() {
-        GmsCoreUtils.setGmsCoreVersionForTesting(244400000);
         HistogramWatcher histogramWatcher =
                 HistogramWatcher.newBuilder()
                         .expectIntRecord(

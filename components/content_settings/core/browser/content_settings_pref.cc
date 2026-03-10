@@ -5,6 +5,7 @@
 #include "components/content_settings/core/browser/content_settings_pref.h"
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -28,11 +29,13 @@
 #include "components/content_settings/core/browser/permission_settings_info.h"
 #include "components/content_settings/core/browser/permission_settings_registry.h"
 #include "components/content_settings/core/common/content_settings.h"
+#include "components/content_settings/core/common/content_settings.mojom-shared.h"
 #include "components/content_settings/core/common/content_settings_constraints.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/content_settings/core/common/content_settings_utils.h"
 #include "components/content_settings/core/common/features.h"
 #include "components/content_settings/core/common/pref_names.h"
+#include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "services/preferences/public/cpp/dictionary_value_update.h"
 #include "services/preferences/public/cpp/scoped_pref_update.h"
@@ -68,68 +71,66 @@ bool IsValueAllowedForType(const base::Value& value, ContentSettingsType type) {
 
 // Extract a timestamp from `dict[key]`.
 // Will return base::Time() if no timestamp exists.
-base::Time GetTimeFromDictKey(const base::Value::Dict& dict,
+base::Time GetTimeFromDictKey(const base::DictValue& dict,
                               const std::string& key) {
   return base::ValueToTime(dict.Find(key)).value_or(base::Time());
 }
 
 // Extract a timestamp from `dict[key]`.
 // Will return base::Time() if no timestamp exists.
-base::TimeDelta GetTimeDeltaFromDictKey(const base::Value::Dict& dict,
+base::TimeDelta GetTimeDeltaFromDictKey(const base::DictValue& dict,
                                         const std::string& key) {
   return base::ValueToTimeDelta(dict.Find(key)).value_or(base::TimeDelta());
 }
 
 // Extract a timestamp from `dictionary[kLastModifiedKey]`.
 // Will return base::Time() if no timestamp exists.
-base::Time GetLastModified(const base::Value::Dict& dictionary) {
+base::Time GetLastModified(const base::DictValue& dictionary) {
   return GetTimeFromDictKey(dictionary, kLastModifiedKey);
 }
 
 // Extract a timestamp from `dictionary[kExpirationKey]`.
 // Will return base::Time() if no timestamp exists.
-base::Time GetExpiration(const base::Value::Dict& dictionary) {
+base::Time GetExpiration(const base::DictValue& dictionary) {
   return GetTimeFromDictKey(dictionary, kExpirationKey);
 }
 
 // Extract a timestamp from `dictionary[kLastUsedKey]`.
 // Will return base::Time() if no timestamp exists.
-base::Time GetLastUsed(const base::Value::Dict& dictionary) {
+base::Time GetLastUsed(const base::DictValue& dictionary) {
   return GetTimeFromDictKey(dictionary, kLastUsedKey);
 }
 
 // Extract a timestamp from `dictionary[kLastVisit]`.
 // Will return base::Time() if no timestamp exists.
-base::Time GetLastVisit(const base::Value::Dict& dictionary) {
+base::Time GetLastVisit(const base::DictValue& dictionary) {
   return GetTimeFromDictKey(dictionary, kLastVisitKey);
 }
 
 // Extract a TimeDelta from `dictionary[kLifetimeKey]`.
 // Will return base::TimeDelta() if no value exists for that key.
-base::TimeDelta GetLifetime(const base::Value::Dict& dictionary) {
+base::TimeDelta GetLifetime(const base::DictValue& dictionary) {
   return GetTimeDeltaFromDictKey(dictionary, kLifetimeKey);
 }
 
 // Extract a bool from `dictionary[kDecidedByRelatedWebsiteSets]`.
 // Will return false if no value exists for that key.
-bool GetDecidedByRelatedWebsiteSets(const base::Value::Dict& dictionary) {
+bool GetDecidedByRelatedWebsiteSets(const base::DictValue& dictionary) {
   return dictionary.FindBool(kDecidedByRelatedWebsiteSets).value_or(false);
 }
 
 // Extract a SessionModel from |dictionary[kSessionModelKey]|. Will return
-// SessionModel::DURABLE if no model exists.
-content_settings::mojom::SessionModel GetSessionModel(
-    const base::Value::Dict& dictionary) {
+// SessionModel::DURABLE if no model exists and nullopt if it contains an
+// invalid enum value.
+std::optional<content_settings::mojom::SessionModel> GetSessionModel(
+    const base::DictValue& dictionary) {
   int model_int = dictionary.FindInt(kSessionModelKey).value_or(0);
-  if ((model_int >
-       static_cast<int>(content_settings::mojom::SessionModel::kMaxValue)) ||
-      (model_int < 0)) {
-    model_int = 0;
-  }
-
   content_settings::mojom::SessionModel session_model =
       static_cast<content_settings::mojom::SessionModel>(model_int);
-  return session_model;
+  if (content_settings::mojom::IsKnownEnumValue(session_model)) {
+    return session_model;
+  }
+  return std::nullopt;
 }
 
 }  // namespace
@@ -291,7 +292,7 @@ void ContentSettingsPref::ReadContentSettingsFromPref() {
 }
 
 void ContentSettingsPref::ReadSettingsFromDictionary(
-    const base::Value::Dict& all_settings_dictionary,
+    const base::DictValue& all_settings_dictionary,
     prefs::DictionaryValueUpdate* mutable_settings) {
   // Accumulates non-canonical pattern strings found in Prefs for which the
   // corresponding canonical pattern is also in Prefs. In these cases the
@@ -344,12 +345,13 @@ void ContentSettingsPref::ReadSettingsFromDictionary(
                  << pattern_str << " with value: " << i.second.DebugString();
       continue;
     }
-    const base::Value::Dict& settings_dictionary = i.second.GetDict();
+    const base::DictValue& settings_dictionary = i.second.GetDict();
 
     // Check to see if the setting is expired or not. This may be due to a past
     // expiration date or a SessionModel of UserSession.
     base::Time expiration = GetExpiration(settings_dictionary);
-    mojom::SessionModel session_model = GetSessionModel(settings_dictionary);
+    std::optional<mojom::SessionModel> session_model =
+        GetSessionModel(settings_dictionary);
     if (ShouldRemoveSetting(expiration, session_model)) {
       expired_patterns_to_remove.push_back(pattern_str);
       continue;
@@ -385,7 +387,7 @@ void ContentSettingsPref::ReadSettingsFromDictionary(
       metadata.set_last_used(last_used);
       metadata.set_last_visited(last_visited);
       metadata.SetExpirationAndLifetime(expiration, lifetime);
-      metadata.set_session_model(session_model);
+      metadata.set_session_model(session_model.value());
       metadata.set_decided_by_related_website_sets(
           GetDecidedByRelatedWebsiteSets(settings_dictionary));
 
@@ -430,7 +432,10 @@ void ContentSettingsPref::ReadSettingsFromDictionary(
 
 bool ContentSettingsPref::ShouldRemoveSetting(
     base::Time expiration,
-    content_settings::mojom::SessionModel session_model) {
+    std::optional<content_settings::mojom::SessionModel> session_model) {
+  if (!session_model) {
+    return true;
+  }
   if (!content_settings::ShouldTypeExpireActively(content_type_) &&
       !expiration.is_null() && expiration < clock_->Now()) {
     // Delete if an expiration date is set and in the past.
@@ -445,7 +450,7 @@ bool ContentSettingsPref::ShouldRemoveSetting(
 
   // Clear non-restorable user session settings, or non-Durable settings when no
   // restoring a previous session.
-  switch (session_model) {
+  switch (session_model.value()) {
     case content_settings::mojom::SessionModel::DURABLE:
       return false;
     case content_settings::mojom::SessionModel::USER_SESSION:
@@ -492,7 +497,7 @@ void ContentSettingsPref::UpdatePref(
     if (!found && !value.is_none()) {
       settings_dictionary =
           pattern_pairs_settings->SetDictionaryWithoutPathExpansion(
-              pattern_str, base::Value::Dict());
+              pattern_str, base::DictValue());
     }
 
     if (!settings_dictionary) {

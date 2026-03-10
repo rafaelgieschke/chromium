@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/functional/callback_forward.h"
-#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/apps/link_capturing/intent_picker_info.h"
 #include "chrome/browser/lifetime/browser_close_manager.h"
@@ -43,7 +42,6 @@ class Browser;
 class BrowserView;
 class DownloadBubbleUIController;
 class ExclusiveAccessContext;
-class ExtensionsContainer;
 class FindBar;
 class GURL;
 class LocationBar;
@@ -347,9 +345,6 @@ class BrowserWindow : public ui::BaseWindow {
   // Focuses the toolbar (for accessibility).
   virtual void FocusToolbar() = 0;
 
-  // Returns the ExtensionsContainer associated with the window, if any.
-  virtual ExtensionsContainer* GetExtensionsContainer() = 0;
-
   // Called from toolbar subviews during their show/hide animations.
   virtual void ToolbarSizeChanged(bool is_animating) = 0;
 
@@ -482,12 +477,6 @@ class BrowserWindow : public ui::BaseWindow {
                                      const std::string& target_language,
                                      const std::u16string& text_selection) = 0;
 
-  // Shows the one-click sign in confirmation UI. |email| holds the full email
-  // address of the account that has signed in.
-  virtual void ShowOneClickSigninConfirmation(
-      const std::u16string& email,
-      base::OnceCallback<void(bool)> confirmed_callback) = 0;
-
   // Returns the DownloadBubbleUIController. Returns null if Download Bubble
   // UI is not enabled, or if the download toolbar button does not exist.
   virtual DownloadBubbleUIController* GetDownloadBubbleUIController() = 0;
@@ -602,16 +591,8 @@ class BrowserWindow : public ui::BaseWindow {
   // Shows a confirmation dialog about enabling caret browsing.
   virtual void ShowCaretBrowsingDialog() = 0;
 
-  // Create and open the tab search bubble. Optionally force it to open to the
-  // given section and organization feature.
-  virtual void CreateTabSearchBubble(
-      tab_search::mojom::TabSearchSection section,
-      tab_search::mojom::TabOrganizationFeature organization_feature) = 0;
-  void CreateTabSearchBubble(tab_search::mojom::TabSearchSection section =
-                                 tab_search::mojom::TabSearchSection::kSearch) {
-    CreateTabSearchBubble(section,
-                          tab_search::mojom::TabOrganizationFeature::kNone);
-  }
+  // Create and open the tab search bubble.
+  virtual void CreateTabSearchBubble() = 0;
 
   // Closes the tab search bubble if open for the given browser instance.
   virtual void CloseTabSearchBubble() = 0;
@@ -622,13 +603,9 @@ class BrowserWindow : public ui::BaseWindow {
   // Shows an Incognito history disclaimer dialog.
   virtual void ShowIncognitoHistoryDisclaimerDialog() = 0;
 
-  // Returns true when the borderless mode should be displayed instead
-  // of a full titlebar. This is only supported for desktop web apps.
-  virtual bool IsBorderlessModeEnabled() const = 0;
-
-  // Notifies `BrowserView` about the resizable boolean having been set with
-  // `window.setResizable(bool)` API.
-  virtual void OnWebApiWindowResizableChanged() = 0;
+  // Returns true when the window should be in unframed display mode. Only
+  // supported in IWAs.
+  virtual bool IsUnframedModeEnabled() const = 0;
 
   // Returns the overall resizability of the `BrowserView` when considering
   // both the value set by the `window.setResizable(bool)` API and browser's

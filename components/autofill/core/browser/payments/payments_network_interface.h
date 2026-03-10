@@ -42,7 +42,7 @@ namespace payments {
 using GetCardUploadDetailsCallback = base::OnceCallback<void(
     PaymentsAutofillClient::PaymentsRpcResult result,
     const std::u16string& context_token,
-    std::unique_ptr<base::Value::Dict> legal_message,
+    std::unique_ptr<base::DictValue> legal_message,
     std::vector<std::pair<int, int>> supported_card_bin_ranges)>;
 
 // PaymentsNetworkInterface issues Payments RPCs and manages responses and failure
@@ -132,23 +132,26 @@ class PaymentsNetworkInterface : public PaymentsNetworkInterfaceBase {
 
   // Determine if the user meets the Payments service conditions for upload.
   // The service uses `app_locale` and `billing_customer_number` to determine
-  // which legal message to display. `country_code` is the first two characters
-  // of the IBAN, representing its country of origin. `callback` is the
-  // callback function that is triggered when a response is received from the
-  // server, and the callback is triggered with that response's result. The
-  // `validation_regex` is used to validate whether the given IBAN can be saved
-  // to the server. The legal message will always be returned upon a successful
-  // response via `callback`. A successful response does not guarantee that the
-  // legal message is valid, callers should parse the legal message and use it
-  // to decide if IBAN upload save should be offered.
+  // which legal message to display. `client_behavior_signals` is used by
+  // Payments server to track Chrome behaviors. `country_code` is the first
+  // two characters of the IBAN, representing its country of origin.
+  // `callback` is the callback function that is triggered when a response is
+  // received from the server, and the callback is triggered with that
+  // response's result. The `validation_regex` is used to validate whether the
+  // given IBAN can be saved to the server. The legal message will always be
+  // returned upon a successful response via `callback`. A successful response
+  // does not guarantee that the legal message is valid, callers should parse
+  // the legal message and use it to decide if IBAN upload save should be
+  // offered.
   virtual void GetIbanUploadDetails(
       const std::string& app_locale,
+      const std::vector<ClientBehaviorConstants>& client_behavior_signals,
       int64_t billing_customer_number,
       const std::string& country_code,
       base::OnceCallback<void(PaymentsAutofillClient::PaymentsRpcResult result,
                               const std::u16string& validation_regex,
                               const std::u16string& context_token,
-                              std::unique_ptr<base::Value::Dict>)> callback);
+                              std::unique_ptr<base::DictValue>)> callback);
 
   // The user has indicated that they would like to upload an IBAN. This request
   // will fail server-side if a successful call to GetIbanUploadDetails has not

@@ -7,7 +7,6 @@ package org.chromium.chrome.browser.signin;
 import static org.chromium.build.NullUtil.assertNonNull;
 import static org.chromium.build.NullUtil.assumeNonNull;
 
-import android.accounts.Account;
 import android.accounts.AccountManager;
 import android.app.Activity;
 import android.content.Context;
@@ -42,6 +41,7 @@ import org.chromium.chrome.browser.privacy.settings.PrivacyPreferencesManagerImp
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.profiles.ProfileProvider;
 import org.chromium.chrome.browser.ui.device_lock.DeviceLockCoordinator;
+import org.chromium.chrome.browser.ui.signin.SigninSurveyController;
 import org.chromium.chrome.browser.ui.signin.SigninUtils;
 import org.chromium.chrome.browser.ui.signin.fullscreen_signin.FullscreenSigninConfig;
 import org.chromium.chrome.browser.ui.signin.fullscreen_signin.FullscreenSigninCoordinator;
@@ -51,6 +51,7 @@ import org.chromium.components.browser_ui.device_lock.DeviceLockActivityLauncher
 import org.chromium.components.signin.AccountManagerFacadeProvider;
 import org.chromium.components.signin.metrics.AccountConsistencyPromoAction;
 import org.chromium.components.signin.metrics.SigninAccessPoint;
+import org.chromium.google_apis.gaia.CoreAccountId;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modaldialog.ModalDialogManagerHolder;
 
@@ -89,7 +90,8 @@ public class SigninFirstRunFragment extends Fragment
                                 /* dismissText= */ FullscreenSigninConfig
                                         .DISMISS_TEXT_NOT_INITIALIZED,
                                 /* logoId= */ 0,
-                                /* shouldDisableSignin= */ DeviceInfo.isAutomotive()),
+                                /* shouldDisableSignin= */ DeviceInfo.isAutomotive(),
+                                /* surveyType= */ SigninSurveyController.SigninSurveyType.FRE),
                         SigninAccessPoint.START_PAGE);
 
         var pageDelegate = assumeNonNull(getPageDelegate());
@@ -323,17 +325,18 @@ public class SigninFirstRunFragment extends Fragment
 
     /** Implements {@link FullscreenSigninCoordinator.Delegate}. */
     @Override
-    public void displayDeviceLockPage(Account selectedAccount) {
+    public void displayDeviceLockPage(CoreAccountId selectedAccountId) {
         Profile profile =
                 ProfileProvider.getOrCreateProfile(
                         assertNonNull(getProfileSupplier().get()), false);
+
         mDeviceLockCoordinator =
                 new DeviceLockCoordinator(
                         this,
                         assumeNonNull(getPageDelegate()).getWindowAndroid(),
                         profile,
                         getActivity(),
-                        selectedAccount);
+                        selectedAccountId);
     }
 
     /** Implements {@link DeviceLockCoordinator.Delegate}. */

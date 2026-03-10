@@ -8,7 +8,8 @@ import android.content.Context;
 
 import androidx.appcompat.content.res.AppCompatResources;
 
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
+import org.chromium.base.supplier.NullableObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
@@ -18,6 +19,7 @@ import org.chromium.chrome.browser.ai.PageSummaryButtonController;
 import org.chromium.chrome.browser.bookmarks.AddToBookmarksToolbarButtonController;
 import org.chromium.chrome.browser.bookmarks.BookmarkModel;
 import org.chromium.chrome.browser.bookmarks.TabBookmarker;
+import org.chromium.chrome.browser.glic.GlicToolbarButtonController;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.tab_group_suggestion.toolbar.GroupSuggestionsButtonController;
 import org.chromium.chrome.browser.tab_group_suggestion.toolbar.GroupSuggestionsButtonDataProvider;
@@ -43,27 +45,30 @@ public class TabbedAdaptiveToolbarBehavior implements AdaptiveToolbarBehavior {
     private final ActivityTabProvider mActivityTabProvider;
     private final ActivityLifecycleDispatcher mActivityLifecycleDispatcher;
     private final Supplier<TabBookmarker> mTabBookmarkerSupplier;
-    private final ObservableSupplier<BookmarkModel> mBookmarkModelSupplier;
+    private final NullableObservableSupplier<BookmarkModel> mBookmarkModelSupplier;
     private final Supplier<@Nullable TabCreatorManager> mTabCreatorManagerSupplier;
     private final Runnable mRegisterVoiceSearchRunnable;
     private final Supplier<GroupSuggestionsButtonController>
             mGroupSuggestionsButtonControllerSupplier;
     private final Supplier<TabModelSelector> mTabModelSelectorSupplier;
     private final Supplier<ModalDialogManager> mModalDialogManagerSupplier;
-    private final ObservableSupplier<@StripVisibilityState Integer> mTabStripVisibilitySupplier;
+    private final MonotonicObservableSupplier<@StripVisibilityState Integer>
+            mTabStripVisibilitySupplier;
+    private final Runnable mToggleGlicCallback;
 
     public TabbedAdaptiveToolbarBehavior(
             Context context,
             ActivityLifecycleDispatcher activityLifecycleDispatcher,
             Supplier<@Nullable TabCreatorManager> tabCreatorManagerSupplier,
             Supplier<TabBookmarker> tabBookmarkerSupplier,
-            ObservableSupplier<BookmarkModel> bookmarkModelSupplier,
+            NullableObservableSupplier<BookmarkModel> bookmarkModelSupplier,
             ActivityTabProvider activityTabProvider,
             Runnable registerVoiceSearchRunnable,
             Supplier<GroupSuggestionsButtonController> groupSuggestionsButtonController,
             Supplier<TabModelSelector> tabModelSelectorSupplier,
             Supplier<ModalDialogManager> modalDialogManagerSupplier,
-            ObservableSupplier<@StripVisibilityState Integer> tabStripVisibilitySupplier) {
+            MonotonicObservableSupplier<@StripVisibilityState Integer> tabStripVisibilitySupplier,
+            Runnable toggleGlicCallback) {
         mContext = context;
         mActivityLifecycleDispatcher = activityLifecycleDispatcher;
         mTabCreatorManagerSupplier = tabCreatorManagerSupplier;
@@ -75,6 +80,7 @@ public class TabbedAdaptiveToolbarBehavior implements AdaptiveToolbarBehavior {
         mTabModelSelectorSupplier = tabModelSelectorSupplier;
         mModalDialogManagerSupplier = modalDialogManagerSupplier;
         mTabStripVisibilitySupplier = tabStripVisibilitySupplier;
+        mToggleGlicCallback = toggleGlicCallback;
     }
 
     @Override
@@ -119,11 +125,22 @@ public class TabbedAdaptiveToolbarBehavior implements AdaptiveToolbarBehavior {
             controller.addButtonVariant(AdaptiveToolbarButtonVariant.TAB_GROUPING, tabGrouping);
         }
 
+        if (AdaptiveToolbarFeatures.isGlicActionEnabled()) {
+            controller.addButtonVariant(
+                    AdaptiveToolbarButtonVariant.GLIC,
+                    new GlicToolbarButtonController(
+                            mContext, mActivityTabProvider, mToggleGlicCallback));
+        }
+
         mRegisterVoiceSearchRunnable.run();
     }
 
     @Override
     public int resultFilter(List<Integer> segmentationResults) {
+        if (AdaptiveToolbarFeatures.isGlicActionEnabled()
+                && segmentationResults.contains(AdaptiveToolbarButtonVariant.GLIC)) {
+            return AdaptiveToolbarButtonVariant.GLIC;
+        }
         return AdaptiveToolbarBehavior.defaultResultFilter(mContext, segmentationResults);
     }
 

@@ -8,6 +8,7 @@
 #include "base/feature_list.h"
 #include "base/hash/sha1.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
@@ -17,6 +18,7 @@
 #include "media/base/audio_timestamp_helper.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/encryption_scheme.h"
+#include "media/base/limits.h"
 #include "media/base/media_util.h"
 #include "media/base/supported_types.h"
 #include "media/base/video_aspect_ratio.h"
@@ -32,6 +34,9 @@
 #if BUILDFLAG(ENABLE_PLATFORM_HEVC)
 #include "media/formats/mp4/hevc.h"
 #endif
+#if BUILDFLAG(ENABLE_PLATFORM_DOLBY_VISION)
+#include "media/formats/mp4/dolby_vision.h"
+#endif  // BUILDFLAG(ENABLE_PLATFORM_DOLBY_VISION)
 #endif
 
 namespace media {
@@ -134,18 +139,6 @@ base::span<const uint32_t> GetSkipSamples(const AVPacket* packet) {
 }
 
 }  // namespace
-
-// Allows faster SIMD YUV convert. Also, FFmpeg overreads/-writes occasionally.
-// See video_get_buffer() in libavcodec/utils.c.
-static const int kFFmpegOutputBufferPaddingSize = 16;
-
-static_assert(VideoFrame::kFrameSizePadding >= kFFmpegOutputBufferPaddingSize,
-              "VideoFrame padding size does not fit ffmpeg requirement");
-
-static_assert(
-    VideoFrame::kFrameAddressAlignment >= kFFmpegBufferAddressAlignment &&
-    VideoFrame::kFrameAddressAlignment % kFFmpegBufferAddressAlignment == 0,
-    "VideoFrame frame address alignment does not fit ffmpeg requirement");
 
 static const AVRational kMicrosBase = { 1, base::Time::kMicrosecondsPerSecond };
 
@@ -409,11 +402,16 @@ bool AVCodecContextToAudioDecoderConfig(const AVCodecContext* codec_context,
       codec_context->sample_fmt, codec_context->codec_id);
 
   ChannelLayout channel_layout =
-      codec_context->ch_layout.nb_channels > 8
-          ? CHANNEL_LAYOUT_DISCRETE
-          : ChannelLayoutToChromeChannelLayout(
-                codec_context->ch_layout.u.mask,
-                codec_context->ch_layout.nb_channels);
+      ChannelLayoutToChromeChannelLayout(codec_context->ch_layout);
+
+  // If there is a mismatch of `channel_layout` and `nb_channels`, we trust the
+  // count. We skip this check for DISCRETE layouts since it does not have a
+  // specific channel count.
+  if (channel_layout != CHANNEL_LAYOUT_DISCRETE &&
+      ChannelLayoutToChannelCount(channel_layout) !=
+          codec_context->ch_layout.nb_channels) {
+    channel_layout = GuessChannelLayout(codec_context->ch_layout.nb_channels);
+  }
 
   switch (codec) {
     // For AC3/EAC3 we enable only demuxing, but not decoding, so FFmpeg does
@@ -462,11 +460,10 @@ bool AVCodecContextToAudioDecoderConfig(const AVCodecContext* codec_context,
         .copy_from_nonoverlapping(AVCodecContextExtraDataToSpan(codec_context));
   }
 
-  config->Initialize(codec, sample_format, channel_layout, codec_context->sample_rate,
-                     extra_data, encryption_scheme, seek_preroll,
-                     codec_context->delay);
-  if (channel_layout == CHANNEL_LAYOUT_DISCRETE)
-    config->SetChannelsForDiscrete(codec_context->ch_layout.nb_channels);
+  config->Initialize(codec, sample_format,
+                     {channel_layout, codec_context->ch_layout.nb_channels},
+                     codec_context->sample_rate, extra_data, encryption_scheme,
+                     seek_preroll, codec_context->delay);
 
 #if BUILDFLAG(ENABLE_PLATFORM_AC3_EAC3_AUDIO)
   // These are bitstream formats unknown to ffmpeg, so they don't have
@@ -793,9 +790,17 @@ bool AVStreamToVideoDecoderConfig(const AVStream* stream,
        AVCodecParametersCodedSideToSpan(stream->codecpar)) {
     switch (side_data.type) {
       case AV_PKT_DATA_DISPLAYMATRIX: {
-        CHECK_EQ(side_data.size, sizeof(int32_t) * 3 * 3);
+        constexpr size_t kNumElements = 3 * 3;
+        CHECK_EQ(side_data.size, sizeof(int32_t) * kNumElements);
+        // SAFETY: The FFmpeg API guarantees that `side_data.data` is a valid
+        // pointer to `side_data.size` bytes of data. The size is checked to be
+        // 3x3 matrix of int32_t.
+        // See:
+        // https://ffmpeg.org/doxygen/trunk/group__lavc__packet__side__data.html#gga9a80bfcacc586b483a973272800edb97aab8c149a1e6c67aad340733becec87e1
         video_transformation = VideoTransformation::FromFFmpegDisplayMatrix(
-            reinterpret_cast<int32_t*>(side_data.data));
+            UNSAFE_BUFFERS(base::span<const int32_t, kNumElements>(
+                reinterpret_cast<const int32_t*>(side_data.data),
+                kNumElements)));
         break;
       }
       case AV_PKT_DATA_MASTERING_DISPLAY_METADATA: {
@@ -862,12 +867,20 @@ bool AVStreamToVideoDecoderConfig(const AVStream* stream,
             type.profile = VideoCodecProfile::VIDEO_CODEC_PROFILE_UNKNOWN;
             break;
         }
+
+        auto dv_color_space = mp4::ParseDolbyVisionColorSpace(
+            type.profile, dovi->dv_bl_signal_compatibility_id);
+        if (dv_color_space.IsSpecified()) {
+          type.color_space = dv_color_space;
+        }
+
         // Treat dolby vision contents as dolby vision codec only if the
         // device support clear DV decoding, otherwise use the original
         // HEVC or AVC codec and profile.
         if (media::IsDecoderSupportedVideoType(type)) {
           codec = type.codec;
           profile = type.profile;
+          color_space = type.color_space;
         }
         break;
       }
@@ -906,8 +919,22 @@ void VideoDecoderConfigToAVCodecContext(
   ApplyCodecContextSecuritySettings(codec_context);
 }
 
-ChannelLayout ChannelLayoutToChromeChannelLayout(int64_t layout, int channels) {
-  switch (layout) {
+ChannelLayout ChannelLayoutToChromeChannelLayout(
+    const AVChannelLayout& layout) {
+  // TODO(crbug.com/475344578): We currently register 1st order ambisonics to be
+  // seen as a quad channel layout. While this is incorrect (we should return
+  // DISCRETE), we are not sure how common this case exists. Need to see
+  // histograms first before a potential breaking change.
+  if (layout.order == AV_CHANNEL_ORDER_AMBISONIC) {
+    constexpr int kMaxAmbisonicsChannels = 32;
+    static_assert(kMaxAmbisonicsChannels == media::limits::kMaxChannels,
+                  "kMaxAmbisonicsChannels does not match kMaxChannels.");
+    base::UmaHistogramExactLinear("Media.Audio.Layouts.Ambisonic.ChannelCount",
+                                  layout.nb_channels,
+                                  kMaxAmbisonicsChannels + 1);
+  }
+
+  switch (layout.u.mask) {
     case AV_CH_LAYOUT_MONO:
       return CHANNEL_LAYOUT_MONO;
     case AV_CH_LAYOUT_STEREO:
@@ -970,7 +997,7 @@ ChannelLayout ChannelLayoutToChromeChannelLayout(int64_t layout, int channels) {
     default:
       // FFmpeg channel_layout is 0 for .wav and .mp3.  Attempt to guess layout
       // based on the channel count.
-      return GuessChannelLayout(channels);
+      return GuessChannelLayout(layout.nb_channels);
   }
 }
 

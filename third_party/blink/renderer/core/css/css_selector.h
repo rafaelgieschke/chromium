@@ -235,9 +235,11 @@ class CORE_EXPORT CSSSelector {
 
   enum PseudoType {
     kPseudoActive,
+    kPseudoActiveOption,
     kPseudoActiveViewTransition,
     kPseudoActiveViewTransitionType,
     kPseudoAfter,
+    kPseudoAnimatedImage,
     kPseudoAny,
     kPseudoAnyLink,
     kPseudoAutofill,
@@ -260,6 +262,7 @@ class CORE_EXPORT CSSSelector {
     kPseudoEnabled,
     kPseudoEnd,
     kPseudoFileSelectorButton,
+    kPseudoFiltered,
     kPseudoFirstChild,
     kPseudoFirstLetter,
     kPseudoFirstLine,
@@ -317,12 +320,16 @@ class CORE_EXPORT CSSSelector {
     kPseudoSearchText,
     kPseudoPickerIcon,
     kPseudoPicker,
+    kPseudoSelectHasSlottedButton,
     kPseudoSelection,
     kPseudoSelectorFragmentAnchor,
     kPseudoSingleButton,
     kPseudoStart,
     kPseudoState,
     kPseudoTarget,
+    kPseudoTextField,
+    kPseudoToolFormActive,
+    kPseudoToolSubmitActive,
     kPseudoUnknown,
     // Something that was unparsable, but contained either a nesting
     // selector (&), or a :scope pseudo-class, and must therefore be kept
@@ -618,8 +625,13 @@ class CORE_EXPORT CSSSelector {
     bits_.set<IsLastInComplexSelectorField>(is_last);
   }
 
-  // https://drafts.csswg.org/selectors/#compound
-  bool IsCompound() const;
+  // This checks a little bit more than the definition in
+  // https://www.w3.org/TR/selectors-4/#compound .  It checks that:
+  // (a) the selector is compound, that is, that it doesn't have
+  //     combinators or pseudo-elements, and
+  // (b) any pseudo-classes that contain selectors as arguments are also
+  //     compound.
+  bool IsFullyCompound() const;
 
   enum LinkMatchMask {
     kMatchLink = 1,
@@ -675,6 +687,10 @@ class CORE_EXPORT CSSSelector {
   bool IsPseudoParent() const {
     return Match() == kPseudoClass && GetPseudoType() == kPseudoParent;
   }
+
+  // Returns true if the provided pseudo-class supports invalidation and can be
+  // passed to Element::PseudoStateChanged, otherwise false.
+  static bool SupportsPseudoStateChange(PseudoType);
 
   void Trace(Visitor* visitor) const;
 
@@ -997,8 +1013,8 @@ inline CSSSelector::CSSSelector(CSSSelector&& o)
   // constructor (i.e., using similar code as in the copy constructor above)
   // after moving to Oilpan, copying the bits one by one. We already allow
   // memcpy + memset by traits, so we can do it by ourselves, too.
-  UNSAFE_TODO(memcpy(this, &o, sizeof(*this)));
-  UNSAFE_TODO(memset(&o, 0, sizeof(o)));
+  UNSAFE_BUFFERS(memcpy(this, &o, sizeof(*this)));
+  UNSAFE_BUFFERS(memset(&o, 0, sizeof(o)));
 }
 
 inline CSSSelector::~CSSSelector() {
@@ -1064,7 +1080,7 @@ inline bool CSSSelector::IsIdClassOrAttributeSelector() const {
 
 inline void swap(CSSSelector& a, CSSSelector& b) {
   char tmp[sizeof(CSSSelector)];
-  UNSAFE_TODO({
+  UNSAFE_BUFFERS({
     memcpy(tmp, &a, sizeof(CSSSelector));
     memcpy(&a, &b, sizeof(CSSSelector));
     memcpy(&b, tmp, sizeof(CSSSelector));

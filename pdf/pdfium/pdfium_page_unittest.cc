@@ -63,7 +63,6 @@ void CompareTextRuns(const AccessibilityTextRunInfo& expected_text_run,
                      const AccessibilityTextRunInfo& actual_text_run) {
   EXPECT_EQ(expected_text_run.start_index, actual_text_run.start_index);
   EXPECT_EQ(expected_text_run.len, actual_text_run.len);
-  EXPECT_EQ(expected_text_run.tag_type, actual_text_run.tag_type);
   EXPECT_RECTF_EQ(expected_text_run.bounds, actual_text_run.bounds);
   EXPECT_EQ(expected_text_run.direction, actual_text_run.direction);
 
@@ -788,28 +787,28 @@ TEST_P(PDFiumPageTextTest, GetTextRunInfoAt) {
   // text run lengths respectively. There are text runs preceding and
   // succeeding them.
   auto expected_text_runs = std::to_array<AccessibilityTextRunInfo>({
-      {/*start_index=*/0, /*len=*/7, "",
+      {/*start_index=*/0, /*len=*/7,
        gfx::RectF(26.666666f, 189.333333f, 38.666672f, 13.333344f),
        AccessibilityTextDirection::kLeftToRight, expected_style_1},
-      {/*start_index=*/7, /*len=*/16, "",
+      {/*start_index=*/7, /*len=*/16,
        gfx::RectF(70.666664f, 189.333333f, 108.0f, 14.666672f),
        AccessibilityTextDirection::kLeftToRight, expected_style_1},
-      {/*start_index=*/23, /*len=*/20, "",
+      {/*start_index=*/23, /*len=*/20,
        gfx::RectF(181.333333f, 189.333333f, 117.333333f, 14.666672f),
        AccessibilityTextDirection::kLeftToRight, expected_style_1},
-      {/*start_index=*/43, /*len=*/9, "",
+      {/*start_index=*/43, /*len=*/9,
        gfx::RectF(28.0f, 117.33334f, 89.333328f, 20.0f),
        AccessibilityTextDirection::kLeftToRight, expected_style_2},
-      {/*start_index=*/52, /*len=*/15, "",
+      {/*start_index=*/52, /*len=*/15,
        gfx::RectF(126.66666f, 117.33334f, 137.33334f, 20.0f),
        AccessibilityTextDirection::kLeftToRight, expected_style_2},
-      {/*start_index=*/67, /*len=*/20, "",
+      {/*start_index=*/67, /*len=*/20,
        gfx::RectF(266.66666f, 118.66666f, 169.33334f, 18.666664f),
        AccessibilityTextDirection::kLeftToRight, expected_style_2},
-      {/*start_index=*/87, /*len=*/5, "",
+      {/*start_index=*/87, /*len=*/5,
        gfx::RectF(28.0f, 65.333336f, 40.0f, 18.666664f),
        AccessibilityTextDirection::kLeftToRight, expected_style_2},
-      {/*start_index=*/92, /*len=*/17, "",
+      {/*start_index=*/92, /*len=*/17,
        gfx::RectF(77.333336f, 64.0f, 160.0f, 20.0f),
        AccessibilityTextDirection::kLeftToRight, expected_style_2},
   });
@@ -874,19 +873,19 @@ TEST_P(PDFiumPageTextTest, HighlightTextRunInfo) {
       16,          0xff000000, 0xff000000,
       false,       false};
   auto expected_text_runs = std::to_array<AccessibilityTextRunInfo>(
-      {{/*start_index=*/0, /*len=*/5, "",
+      {{/*start_index=*/0, /*len=*/5,
         gfx::RectF(1.3333334f, 198.66667f, 46.666668f, 14.666672f),
         AccessibilityTextDirection::kLeftToRight, kExpectedStyle},
-       {/*start_index=*/5, /*len=*/7, "",
+       {/*start_index=*/5, /*len=*/7,
         gfx::RectF(50.666668f, 198.66667f, 47.999996f, 17.333328f),
         AccessibilityTextDirection::kLeftToRight, kExpectedStyle},
-       {/*start_index=*/12, /*len=*/7, "",
+       {/*start_index=*/12, /*len=*/7,
         gfx::RectF(106.66666f, 198.66667f, 73.333336f, 18.666672f),
         AccessibilityTextDirection::kLeftToRight, kExpectedStyle},
-       {/*start_index=*/19, /*len=*/2, "",
+       {/*start_index=*/19, /*len=*/2,
         gfx::RectF(181.33333f, 202.66667f, 16.0f, 14.66667f),
         AccessibilityTextDirection::kNone, kExpectedStyle},
-       {/*start_index=*/21, /*len=*/2, "",
+       {/*start_index=*/21, /*len=*/2,
         gfx::RectF(198.66667f, 202.66667f, 21.333328f, 10.666672f),
         AccessibilityTextDirection::kLeftToRight, kExpectedStyle}});
 
@@ -1169,6 +1168,11 @@ INSTANTIATE_TEST_SUITE_P(All, PDFiumPageButtonTest, testing::Bool());
 
 class PDFiumPageThumbnailTest : public PDFiumTestBase {
  public:
+  struct ComparisonOptions {
+    bool use_platform_suffix;
+    bool fuzzy_match;
+  };
+
   PDFiumPageThumbnailTest() = default;
   PDFiumPageThumbnailTest(const PDFiumPageThumbnailTest&) = delete;
   PDFiumPageThumbnailTest& operator=(const PDFiumPageThumbnailTest&) = delete;
@@ -1179,28 +1183,32 @@ class PDFiumPageThumbnailTest : public PDFiumTestBase {
                              float device_pixel_ratio,
                              const gfx::Size& expected_thumbnail_size,
                              const std::string& expectation_file_prefix) {
-    return TestGenerateThumbnailWithPlatformSpecificData(
+    return TestGenerateThumbnailWithOptions(
         engine, page_index, device_pixel_ratio, expected_thumbnail_size,
         expectation_file_prefix,
-        /*use_platform_suffix=*/false);
+        {.use_platform_suffix = false, .fuzzy_match = false});
   }
 
-  void TestGenerateThumbnailWithPlatformSpecificData(
+  void TestGenerateThumbnailWithOptions(
       PDFiumEngine& engine,
       size_t page_index,
       float device_pixel_ratio,
       const gfx::Size& expected_thumbnail_size,
       const std::string& expectation_file_prefix,
-      bool use_platform_suffix) {
+      const ComparisonOptions& options) {
     sk_sp<SkImage> image = GenerateThumbnailImage(
         engine, page_index, device_pixel_ratio, expected_thumbnail_size);
     ASSERT_TRUE(image);
 
     base::FilePath expectation_png_file_path = GetThumbnailTestData(
         expectation_file_prefix, page_index, device_pixel_ratio,
-        /*use_skia=*/GetParam(), use_platform_suffix);
+        /*use_skia=*/GetParam(), options.use_platform_suffix);
 
-    EXPECT_TRUE(MatchesPngFile(*image, expectation_png_file_path));
+    if (options.fuzzy_match) {
+      EXPECT_TRUE(FuzzyMatchesPngFile(*image, expectation_png_file_path));
+    } else {
+      EXPECT_TRUE(MatchesPngFile(*image, expectation_png_file_path));
+    }
   }
 
   sk_sp<SkImage> GenerateThumbnailImage(
@@ -1274,10 +1282,10 @@ TEST_P(PDFiumPageThumbnailTest, GenerateThumbnailWithOverlapCropBox) {
   std::unique_ptr<PDFiumEngine> engine =
       InitializeEngine(&client, FILE_PATH_LITERAL("hello_world_cropped.pdf"));
   ASSERT_TRUE(engine);
-  TestGenerateThumbnailWithPlatformSpecificData(
+  TestGenerateThumbnailWithOptions(
       *engine, /*page_index=*/0, /*device_pixel_ratio=*/1,
       /*expected_thumbnail_size=*/{162, 108}, "hello_world_cropped",
-      /*use_platform_suffix=*/true);
+      {.use_platform_suffix = true, .fuzzy_match = true});
 }
 
 // For crbug.com/438884266

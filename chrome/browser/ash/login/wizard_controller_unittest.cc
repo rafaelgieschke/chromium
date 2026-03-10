@@ -20,6 +20,7 @@
 #include "build/config/chromebox_for_meetings/buildflags.h"
 #include "chrome/browser/ash/app_mode/kiosk_chrome_app_manager.h"
 #include "chrome/browser/ash/app_mode/kiosk_cryptohome_remover.h"
+#include "chrome/browser/ash/browser_delegate/browser_controller_impl.h"
 #include "chrome/browser/ash/input_method/input_method_configuration.h"
 #include "chrome/browser/ash/login/enrollment/mock_enrollment_launcher.h"
 #include "chrome/browser/ash/login/startup_utils.h"
@@ -61,6 +62,7 @@
 #include "chromeos/ash/components/dbus/update_engine/fake_update_engine_client.h"
 #include "chromeos/ash/components/install_attributes/stub_install_attributes.h"
 #include "chromeos/ash/components/login/auth/auth_events_recorder.h"
+#include "chromeos/ash/components/login/session/session_termination_manager.h"
 #include "chromeos/ash/components/network/network_handler_test_helper.h"
 #include "chromeos/ash/components/settings/cros_settings.h"
 #include "chromeos/ash/components/settings/device_settings_cache.h"
@@ -121,11 +123,11 @@ constexpr StaticOobeScreenId kGaiaSigninScreen = GaiaScreenHandler::kScreenId;
 #endif  // !BUILDFLAG(PLATFORM_CFM)
 
 // Converts an arbitrary number of arguments to a list of `base::Value`.
-base::Value::List ToList() {
-  return base::Value::List();
+base::ListValue ToList() {
+  return base::ListValue();
 }
 template <typename A, typename... Args>
-base::Value::List ToList(A&& value, Args&&... values) {
+base::ListValue ToList(A&& value, Args&&... values) {
   auto list = ToList(values...);
   list.Insert(list.begin(), base::Value(std::move(value)));
   return list;
@@ -193,6 +195,9 @@ class WizardControllerTestBase : public ::testing::Test {
   }
 
   void SetUp() override {
+    TestingBrowserProcess::GetGlobal()->SetSharedURLLoaderFactory(
+        test_url_loader_factory_.GetSafeWeakWrapper());
+
     SessionManagerClient::InitializeFake();
 
     DeviceSettingsService::Get()->StartProcessing(
@@ -202,6 +207,8 @@ class WizardControllerTestBase : public ::testing::Test {
 
     profile_manager_ = std::make_unique<TestingProfileManager>(
         TestingBrowserProcess::GetGlobal());
+
+    browser_controller_ = std::make_unique<ash::BrowserControllerImpl>();
     network_handler_test_helper_ = std::make_unique<NetworkHandlerTestHelper>();
     input_method::Initialize(TestingBrowserProcess::GetGlobal()->local_state(),
                              TestingBrowserProcess::GetGlobal()
@@ -271,11 +278,15 @@ class WizardControllerTestBase : public ::testing::Test {
     // Need to call `StartTearDown` otherwise timezone resolver still registered
     // with prefs when we delete profile manager.
     TestingBrowserProcess::GetGlobal()->platform_part()->StartTearDown();
+
+    browser_controller_.reset();
     profile_ = nullptr;
     profile_manager_.reset();
 
     DeviceSettingsService::Get()->StopProcessing();
     SessionManagerClient::Shutdown();
+
+    TestingBrowserProcess::GetGlobal()->SetSharedURLLoaderFactory(nullptr);
   }
 
   void FakeInstallAttributesForDemoMode() {
@@ -293,10 +304,13 @@ class WizardControllerTestBase : public ::testing::Test {
       std::make_unique<content::BrowserTaskEnvironment>(
           base::test::TaskEnvironment::ThreadingMode::MULTIPLE_THREADS,
           base::test::TaskEnvironment::TimeSource::MOCK_TIME);
+  network::TestURLLoaderFactory test_url_loader_factory_;
 
+  ash::SessionTerminationManager session_termination_manager_;
   user_manager::TypedScopedUserManager<user_manager::FakeUserManager>
       fake_user_manager_{std::make_unique<user_manager::FakeUserManager>()};
   std::unique_ptr<TestingProfileManager> profile_manager_;
+  std::unique_ptr<ash::BrowserControllerImpl> browser_controller_;
   raw_ptr<Profile> profile_ = nullptr;
   std::unique_ptr<ui::TestContextFactories> test_context_factories_;
   std::unique_ptr<AshTestHelper> ash_test_helper_;
@@ -344,13 +358,14 @@ class WizardControllerTest : public WizardControllerTestBase {
     fake_update_engine_client_ = UpdateEngineClient::InitializeFakeForTest();
 
     auto wizard_controller = std::make_unique<WizardController>(
+        TestingBrowserProcess::GetGlobal()->local_state(),
+        TestingBrowserProcess::GetGlobal()
+            ->GetFeatures()
+            ->application_locale_storage(),
+        TestingBrowserProcess::GetGlobal()->shared_url_loader_factory(),
         fake_login_display_host_->GetWizardContext());
     wizard_controller_ = wizard_controller.get();
     fake_login_display_host_->SetWizardController(std::move(wizard_controller));
-    test_url_loader_factory_ =
-        std::make_unique<network::TestURLLoaderFactory>();
-    wizard_controller_->SetSharedURLLoaderFactoryForTesting(
-        test_url_loader_factory_->GetSafeWeakWrapper());
 
     // Make sure to test OOBE on an "official" build.
     OverrideBranding(/*is_branded=*/true);
@@ -360,7 +375,6 @@ class WizardControllerTest : public WizardControllerTestBase {
     cros_network_config_test_helper_.network_state_helper()
         .ResetDevicesAndServices();
 
-    test_url_loader_factory_.reset();
     wizard_controller_ = nullptr;
     fake_update_engine_client_ = nullptr;
     fake_login_display_host_.reset();
@@ -423,7 +437,6 @@ class WizardControllerTest : public WizardControllerTestBase {
   network_config::CrosNetworkConfigTestHelper cros_network_config_test_helper_;
   std::unique_ptr<FakeLoginDisplayHost> fake_login_display_host_;
   std::unique_ptr<content::TestWebContentsFactory> web_contents_factory_;
-  std::unique_ptr<network::TestURLLoaderFactory> test_url_loader_factory_;
   SigninProfileHandler signing_profile_handler_;
 };
 
@@ -576,7 +589,7 @@ TEST_F(WizardControllerAfterRollbackTest, ImportNetworkConfigAfterRollback) {
   ASSERT_TRUE(imported_config != nullptr);
   ASSERT_TRUE(imported_config->is_dict());
 
-  const base::Value::List* network_list =
+  const base::ListValue* network_list =
       imported_config->GetDict().FindList("NetworkConfigurations");
   ASSERT_TRUE(network_list);
 

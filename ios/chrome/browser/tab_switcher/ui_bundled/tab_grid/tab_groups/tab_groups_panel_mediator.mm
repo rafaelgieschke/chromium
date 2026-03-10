@@ -31,10 +31,11 @@
 #import "ios/chrome/browser/share_kit/model/sharing_state.h"
 #import "ios/chrome/browser/shared/model/web_state_list/tab_group.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/tab_grid_commands.h"
 #import "ios/chrome/browser/shared/public/commands/tab_groups_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
+#import "ios/chrome/browser/shared/ui/util/color_palette/tab_group_color_palette.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/grid/grid_toolbars_mutator.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/tab_groups/tab_group_sync_service_observer_bridge.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/tab_groups/tab_groups_panel_cell.h"
@@ -322,6 +323,7 @@ NSString* CreationText(base::Time creation_date) {
 }
 
 - (void)newTabButtonTapped:(id)sender {
+  CHECK(!IsChromeNextIaEnabled());
   if (base::FeatureList::IsEnabled(kTabRecallNewTabGroupButton)) {
     // Start the tab group creation.
     [self.tabGroupsCommands showTabGroupCreationWithoutTabs];
@@ -385,7 +387,11 @@ NSString* CreationText(base::Time creation_date) {
     itemData.title = l10n_util::GetPluralNSStringF(
         IDS_IOS_TAB_GROUP_TABS_NUMBER, numberOfTabs);
   }
-  itemData.color = tab_groups::ColorForTabGroupColorId(group->color());
+  if (IsTabGroupColorOnSurfaceEnabled()) {
+    itemData.color = [TabGroupColorPalette commonColor:group->color()];
+  } else {
+    itemData.color = tab_groups::ColorForTabGroupColorId(group->color());
+  }
   itemData.creationText = CreationText(group->creation_time());
   itemData.numberOfTabs = static_cast<NSUInteger>(numberOfTabs);
 
@@ -462,7 +468,7 @@ NSString* CreationText(base::Time creation_date) {
 }
 
 - (void)updateAppWithOutOfDateMessageItem:(TabGroupsPanelItem*)item {
-  [_applicationHandler showAppStorePage];
+  [_sceneHandler showAppStorePage];
 }
 
 - (void)deleteOutOfDateMessageItem:(TabGroupsPanelItem*)item {

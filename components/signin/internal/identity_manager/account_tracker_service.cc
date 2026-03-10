@@ -13,7 +13,6 @@
 
 #include "base/check.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -59,8 +58,9 @@ enum class AccountInPrefState {
   kValid = 0,
   kEmptyAccount = 1,
   kEmptyEmailOrGaiaId = 2,
+  kEmptyAccountId = 3,
 
-  kMaxValue = kEmptyEmailOrGaiaId,
+  kMaxValue = kEmptyAccountId,
 };
 
 // Reads a PNG image from disk and decodes it. If the reading/decoding attempt
@@ -231,7 +231,7 @@ void AccountTrackerService::StartTrackingAccount(
   // TODO(crbug.com/40283610): Change into a CHECK once there are no crash
   // reports for tracking empty account ids.
   DUMP_WILL_BE_CHECK(!account_id.empty());
-  if (!base::Contains(accounts_, account_id)) {
+  if (!accounts_.contains(account_id)) {
     DVLOG(1) << "StartTracking " << account_id;
     AccountInfo account_info;
     account_info.account_id = account_id;
@@ -240,13 +240,13 @@ void AccountTrackerService::StartTrackingAccount(
 }
 
 bool AccountTrackerService::IsTrackingAccount(const CoreAccountId& account_id) {
-  return base::Contains(accounts_, account_id);
+  return accounts_.contains(account_id);
 }
 
 void AccountTrackerService::StopTrackingAccount(
     const CoreAccountId& account_id) {
   DVLOG(1) << "StopTracking " << account_id;
-  if (base::Contains(accounts_, account_id)) {
+  if (accounts_.contains(account_id)) {
     AccountInfo account_info = std::move(accounts_[account_id]);
     RemoveFromPrefs(account_info);
     RemoveAccountImageFromDisk(account_id);
@@ -260,8 +260,8 @@ void AccountTrackerService::StopTrackingAccount(
 
 void AccountTrackerService::SetAccountInfoFromUserInfo(
     const CoreAccountId& account_id,
-    const base::Value::Dict& user_info) {
-  DCHECK(base::Contains(accounts_, account_id));
+    const AccountInfo& fetched_user_info) {
+  DCHECK(accounts_.contains(account_id));
   AccountInfo& account_info = accounts_[account_id];
 
   AccountInPrefState state = AccountInPrefState::kValid;
@@ -270,35 +270,32 @@ void AccountTrackerService::SetAccountInfoFromUserInfo(
   } else if (account_info.gaia.empty() || account_info.email.empty()) {
     // This may happen if account capabilities are fetched first.
     state = AccountInPrefState::kEmptyEmailOrGaiaId;
+  } else if (account_info.GetAccountId().empty()) {
+    // Needed to investigate https://crbug.com/483657395.
+    state = AccountInPrefState::kEmptyAccountId;
   }
   base::UmaHistogramEnumeration("Signin.AccountInPref.State", state);
 
-  std::optional<AccountInfo> maybe_account_info =
-      signin::AccountInfoFromUserInfo(user_info);
-  if (maybe_account_info) {
-    DCHECK(!maybe_account_info->gaia.empty());
-    DCHECK(!maybe_account_info->email.empty());
-    maybe_account_info->account_id = PickAccountIdForAccount(
-        maybe_account_info->gaia, maybe_account_info->email);
+  CHECK(!fetched_user_info.gaia.empty());
+  CHECK(!fetched_user_info.email.empty());
+  AccountInfo user_info_copy = fetched_user_info;
+  user_info_copy.account_id =
+      PickAccountIdForAccount(fetched_user_info.gaia, fetched_user_info.email);
 
-    // Whether the existing account in pref matches the fetched account.
-    bool accounts_matching =
-        maybe_account_info->account_id == account_info.account_id;
-    base::UmaHistogramBoolean("Signin.AccountInPref.MatchingFetchedAccount",
-                              accounts_matching);
+  // Whether the existing account in pref matches the fetched account.
+  bool accounts_matching = user_info_copy.account_id == account_info.account_id;
+  base::UmaHistogramBoolean("Signin.AccountInPref.MatchingFetchedAccount",
+                            accounts_matching);
 
-    if (accounts_matching) {
-      account_info.UpdateWith(maybe_account_info.value());
-    } else {
-      DLOG(ERROR) << "Cannot set account info from user info as account ids "
-                     "do not match: existing_account_info = {"
-                  << account_info << "} new_account_info = {"
-                  << maybe_account_info.value() << "}";
-    }
+  if (accounts_matching) {
+    account_info.UpdateWith(user_info_copy);
+  } else {
+    DLOG(ERROR) << "Cannot set account info from user info as account ids "
+                   "do not match: existing_account_info = {"
+                << account_info << "} new_account_info = {" << user_info_copy
+                << "}";
   }
 
-  // TODO(msarda): Should account update notification be sent if the account was
-  // not updated (e.g. |maybe_account_info|==nullopt)?
   if (!account_info.gaia.empty()) {
     NotifyAccountUpdated(account_info);
   }
@@ -327,7 +324,7 @@ void AccountTrackerService::SetAccountImage(
 void AccountTrackerService::SetAccountCapabilities(
     const CoreAccountId& account_id,
     const AccountCapabilities& account_capabilities) {
-  DCHECK(base::Contains(accounts_, account_id));
+  DCHECK(accounts_.contains(account_id));
   AccountInfo& account_info = accounts_[account_id];
 
   bool modified = account_info.capabilities.UpdateWith(account_capabilities);
@@ -353,7 +350,7 @@ void AccountTrackerService::SetAccountCapabilities(
 
 void AccountTrackerService::SetIsChildAccount(const CoreAccountId& account_id,
                                               bool is_child_account) {
-  DCHECK(base::Contains(accounts_, account_id)) << account_id.ToString();
+  DCHECK(accounts_.contains(account_id)) << account_id.ToString();
   AccountInfo& account_info = accounts_[account_id];
   bool modified = UpdateAccountInfoChildStatus(account_info, is_child_account);
   if (!modified) {
@@ -368,7 +365,7 @@ void AccountTrackerService::SetIsChildAccount(const CoreAccountId& account_id,
 void AccountTrackerService::SetIsAdvancedProtectionAccount(
     const CoreAccountId& account_id,
     bool is_under_advanced_protection) {
-  DCHECK(base::Contains(accounts_, account_id)) << account_id.ToString();
+  DCHECK(accounts_.contains(account_id)) << account_id.ToString();
   AccountInfo& account_info = accounts_[account_id];
   if (account_info.is_under_advanced_protection ==
       is_under_advanced_protection) {
@@ -422,7 +419,7 @@ void AccountTrackerService::MigrateToGaiaId() {
     // If there is already an account keyed to the current account's gaia id,
     // assume this is the result of a partial migration and skip the account
     // that is currently inspected.
-    if (base::Contains(accounts_, new_account_id)) {
+    if (accounts_.contains(new_account_id)) {
       continue;
     }
 
@@ -444,7 +441,7 @@ void AccountTrackerService::MigrateToGaiaId() {
 
   // Remove any obsolete account.
   for (const auto& account_id : to_remove) {
-    DCHECK(base::Contains(accounts_, account_id));
+    DCHECK(accounts_.contains(account_id));
     AccountInfo& account_info = accounts_[account_id];
     RemoveAccountImageFromDisk(account_id);
     RemoveFromPrefs(account_info);
@@ -582,10 +579,10 @@ void AccountTrackerService::OnAccountImageUpdated(
     return;
   }
 
-  base::Value::Dict* dict = nullptr;
+  base::DictValue* dict = nullptr;
   ScopedListPrefUpdate update(pref_service_, prefs::kAccountInfo);
   for (base::Value& value : *update) {
-    base::Value::Dict* maybe_dict = value.GetIfDict();
+    base::DictValue* maybe_dict = value.GetIfDict();
     if (maybe_dict) {
       const std::string* account_key =
           maybe_dict->FindString(signin::kAccountIdKey);
@@ -612,10 +609,10 @@ void AccountTrackerService::RemoveAccountImageFromDisk(
 }
 
 void AccountTrackerService::LoadFromPrefs() {
-  const base::Value::List& list = pref_service_->GetList(prefs::kAccountInfo);
+  const base::ListValue& list = pref_service_->GetList(prefs::kAccountInfo);
   std::set<CoreAccountId> to_remove;
   for (size_t i = 0; i < list.size(); ++i) {
-    const base::Value::Dict* dict = list[i].GetIfDict();
+    const base::DictValue* dict = list[i].GetIfDict();
     if (!dict) {
       continue;
     }
@@ -684,11 +681,11 @@ void AccountTrackerService::LoadFromPrefs() {
                            accounts_.size());
 }
 
-base::Value::Dict* AccountTrackerService::FindOrCreateDictForAccount(
+base::DictValue* AccountTrackerService::FindOrCreateDictForAccount(
     ScopedListPrefUpdate& update,
     const CoreAccountId& account_id) {
   for (base::Value& value : *update) {
-    base::Value::Dict* dict = value.GetIfDict();
+    base::DictValue* dict = value.GetIfDict();
     if (dict) {
       const std::string* account_key = dict->FindString(signin::kAccountIdKey);
       if (account_key && *account_key == account_id.ToString()) {
@@ -697,8 +694,8 @@ base::Value::Dict* AccountTrackerService::FindOrCreateDictForAccount(
     }
   }
 
-  update->Append(base::Value::Dict());
-  base::Value::Dict* new_dict = &update->back().GetDict();
+  update->Append(base::DictValue());
+  base::DictValue* new_dict = &update->back().GetDict();
   new_dict->Set(signin::kAccountIdKey, account_id.ToString());
   return new_dict;
 }
@@ -709,7 +706,7 @@ void AccountTrackerService::SaveToPrefs(const AccountInfo& account_info) {
   }
 
   ScopedListPrefUpdate update(pref_service_, prefs::kAccountInfo);
-  base::Value::Dict* dict =
+  base::DictValue* dict =
       FindOrCreateDictForAccount(update, account_info.account_id);
   dict->Merge(signin::SerializeAccountInfo(account_info));
 }
@@ -755,7 +752,7 @@ CoreAccountId AccountTrackerService::PickAccountIdForAccount(
 CoreAccountId AccountTrackerService::SeedAccountInfo(
     const GaiaId& gaia,
     const std::string& email,
-    signin_metrics::AccessPoint access_point) {
+    std::optional<signin_metrics::AccessPoint> access_point) {
   AccountInfo account_info;
   account_info.gaia = gaia;
   account_info.email = email;
@@ -781,7 +778,7 @@ CoreAccountId AccountTrackerService::SeedAccountInfo(AccountInfo info) {
     return CoreAccountId();
   }
 
-  const bool already_exists = base::Contains(accounts_, info.account_id);
+  const bool already_exists = accounts_.contains(info.account_id);
   StartTrackingAccount(info.account_id);
   AccountInfo& account_info = accounts_[info.account_id];
   DCHECK(!already_exists || account_info.gaia.empty() ||
@@ -814,14 +811,21 @@ void AccountTrackerService::SeedAccountsInfo(
   DVLOG(1) << "AccountTrackerService.SeedAccountsInfo: "
            << " number of accounts " << accounts.size();
 
+  if (primary_account_id) {
+    // The primary account must be present in the account list.
+    CHECK(std::ranges::contains(accounts, *primary_account_id,
+                                &AccountInfo::GetAccountId),
+          base::NotFatalUntil::M148);
+  }
+
   if (should_remove_stale_accounts) {
     // Remove the accounts deleted from the device, but don't remove the primary
     // account.
     for (const auto& account : GetAccounts()) {
       CoreAccountId curr_account_id = account.account_id;
       if (curr_account_id != primary_account_id &&
-          !base::Contains(accounts, curr_account_id,
-                          &AccountInfo::account_id)) {
+          !std::ranges::contains(accounts, curr_account_id,
+                                 &AccountInfo::account_id)) {
         RemoveAccount(curr_account_id);
       }
     }

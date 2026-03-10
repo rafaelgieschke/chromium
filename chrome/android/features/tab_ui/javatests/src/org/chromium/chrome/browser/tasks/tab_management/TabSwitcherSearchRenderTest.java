@@ -70,7 +70,6 @@ import java.util.concurrent.ExecutionException;
 @Features.DisableFeatures({
     ChromeFeatureList.ANDROID_SURFACE_COLOR_UPDATE,
     ChromeFeatureList.GRID_TAB_SWITCHER_SURFACE_COLOR_UPDATE,
-    ChromeFeatureList.GRID_TAB_SWITCHER_UPDATE,
     ChromeFeatureList.ANDROID_THEME_MODULE,
     ChromeFeatureList.HISTORY_PANE_ANDROID,
     OmniboxFeatureList.ANDROID_HUB_SEARCH_TAB_GROUPS
@@ -85,7 +84,7 @@ public class TabSwitcherSearchRenderTest {
     @Rule
     public ChromeRenderTestRule mRenderTestRule =
             ChromeRenderTestRule.Builder.withPublicCorpus()
-                    .setRevision(14)
+                    .setRevision(17)
                     .setBugComponent(Component.UI_BROWSER_MOBILE_TAB_SWITCHER)
                     .build();
 
@@ -154,6 +153,7 @@ public class TabSwitcherSearchRenderTest {
     @MediumTest
     @Feature({"RenderTest"})
     @Restriction(PHONE)
+    @DisabledTest(message="Flaky. See crbug.com/476144003")
     @EnableFeatures({OmniboxFeatureList.ANDROID_HUB_SEARCH_TAB_GROUPS})
     public void testHubSearchBox_PhoneLandscape() throws IOException {
         ChromeTabbedActivity cta = mCtaTestRule.getActivity();

@@ -52,6 +52,7 @@
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/keyboard_codes.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "ui/base/cursor/cursor.h"
@@ -1003,6 +1004,85 @@ TEST_F(EventHandlerTest, SelectionOnDoublePressPreventDefaultMousePress) {
   EXPECT_TRUE(Selection().GetSelectionInDOMTree().IsNone());
 }
 
+// Regression test for crbug.com/427367148:
+// Cancelling pointerdown should not suppress dblclick for touch-originated
+// gestures. When pointerdown is cancelled via preventDefault(), mouse events
+// (mousedown, mousemove, mouseup) are suppressed, but click and dblclick
+// should still fire to maintain interop with Firefox and Safari.
+TEST_F(EventHandlerTest, DblclickFiredWhenPointerdownCanceled) {
+  GetDocument().GetSettings()->SetScriptEnabled(true);
+  SetHtmlInnerHTML(
+      "<div id='target' style='width:200px;height:200px;'></div>"
+      "<div id='result'></div>");
+  Element* script = GetDocument().CreateRawElement(html_names::kScriptTag);
+  script->SetInnerHTMLWithoutTrustedTypes(
+      R"HTML(
+        let target = document.getElementById('target');
+        let result = document.getElementById('result');
+        target.addEventListener('pointerdown', (e) => {
+          e.preventDefault();
+        });
+        target.addEventListener('dblclick', (e) => {
+          result.textContent = 'dblclick-fired';
+        });
+      )HTML");
+  GetDocument().body()->AppendChild(script);
+  GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kTest);
+
+  gfx::PointF tap_point(100, 100);
+  uint32_t touch_id_1 = 100;
+  uint32_t touch_id_2 = 101;
+
+  // Simulate first tap: pointerdown (cancelled) -> gesture tap down ->
+  // pointerup -> tap.
+  WebPointerEvent pointer_down_1 = CreateMinimalTouchPointerEvent(
+      WebInputEvent::Type::kPointerDown, tap_point);
+  pointer_down_1.unique_touch_event_id = touch_id_1;
+  GetDocument().GetFrame()->GetEventHandler().HandlePointerEvent(
+      pointer_down_1, Vector<WebPointerEvent>(), Vector<WebPointerEvent>());
+
+  TapDownEventBuilder tap_down_1(tap_point);
+  tap_down_1.unique_touch_event_id = touch_id_1;
+  GetDocument().GetFrame()->GetEventHandler().HandleGestureEvent(tap_down_1);
+
+  WebPointerEvent pointer_up_1 = CreateMinimalTouchPointerEvent(
+      WebInputEvent::Type::kPointerUp, tap_point);
+  pointer_up_1.unique_touch_event_id = touch_id_1;
+  GetDocument().GetFrame()->GetEventHandler().HandlePointerEvent(
+      pointer_up_1, Vector<WebPointerEvent>(), Vector<WebPointerEvent>());
+
+  TapEventBuilder tap_1(tap_point, 1);
+  tap_1.primary_unique_touch_event_id = touch_id_1;
+  GetDocument().GetFrame()->GetEventHandler().HandleGestureEvent(tap_1);
+
+  // Simulate second tap: pointerdown (cancelled) -> gesture tap down ->
+  // pointerup -> tap with tap_count=2.
+  WebPointerEvent pointer_down_2 = CreateMinimalTouchPointerEvent(
+      WebInputEvent::Type::kPointerDown, tap_point);
+  pointer_down_2.unique_touch_event_id = touch_id_2;
+  GetDocument().GetFrame()->GetEventHandler().HandlePointerEvent(
+      pointer_down_2, Vector<WebPointerEvent>(), Vector<WebPointerEvent>());
+
+  TapDownEventBuilder tap_down_2(tap_point);
+  tap_down_2.data.tap_down.tap_down_count = 2;
+  tap_down_2.unique_touch_event_id = touch_id_2;
+  GetDocument().GetFrame()->GetEventHandler().HandleGestureEvent(tap_down_2);
+
+  WebPointerEvent pointer_up_2 = CreateMinimalTouchPointerEvent(
+      WebInputEvent::Type::kPointerUp, tap_point);
+  pointer_up_2.unique_touch_event_id = touch_id_2;
+  GetDocument().GetFrame()->GetEventHandler().HandlePointerEvent(
+      pointer_up_2, Vector<WebPointerEvent>(), Vector<WebPointerEvent>());
+
+  TapEventBuilder tap_2(tap_point, 2);
+  tap_2.primary_unique_touch_event_id = touch_id_2;
+  GetDocument().GetFrame()->GetEventHandler().HandleGestureEvent(tap_2);
+
+  // dblclick should have fired even though pointerdown was cancelled.
+  WebElement result_elem = GetDocument().getElementById(AtomicString("result"));
+  EXPECT_EQ("dblclick-fired", result_elem.TextContent().Utf8());
+}
+
 TEST_F(EventHandlerTest, ClearHandleAfterTap) {
   SetHtmlInnerHTML("<textarea cols=50  rows=10>Enter text</textarea>");
 
@@ -1108,7 +1188,7 @@ TEST_F(EventHandlerTest, MisspellingContextMenuEvent) {
   ASSERT_TRUE(Selection().IsHandleVisible());
 
   GetDocument().GetFrame()->GetEventHandler().ShowNonLocatedContextMenu(
-      nullptr, kMenuSourceTouchHandle);
+      nullptr, ui::mojom::blink::MenuSourceType::kTouchHandle);
 
   ASSERT_TRUE(Selection().GetSelectionInDOMTree().IsCaret());
   ASSERT_TRUE(Selection().IsHandleVisible());
@@ -2234,32 +2314,23 @@ TEST_F(EventHandlerSimTest, TestUpdateHoverAfterJSScrollAtBeginFrame) {
   // Find the scrollable area and set scroll offset.
   ScrollableArea* scrollable_area =
       GetDocument().GetLayoutView()->GetScrollableArea();
-  bool finished = false;
-  scrollable_area->SetScrollOffset(
-      ScrollOffset(0, 1000), mojom::blink::ScrollType::kProgrammatic,
-      cc::ScrollSourceType::kAbsoluteScroll,
-      mojom::blink::ScrollBehavior::kSmooth,
-      ScrollableArea::ScrollCallback(BindOnce(
-          [](bool* finished, ScrollableArea::ScrollCompletionMode) {
-            *finished = true;
-          },
-          Unretained(&finished))));
+  scrollable_area->SetScrollOffset(ScrollOffset(0, 1000),
+                                   mojom::blink::ScrollType::kProgrammatic,
+                                   cc::ScrollSourceType::kAbsoluteScroll,
+                                   mojom::blink::ScrollBehavior::kSmooth);
   Compositor().BeginFrame();
   LocalFrameView* frame_view = GetDocument().View();
   ASSERT_EQ(0, frame_view->LayoutViewport()->GetScrollOffset().y());
-  ASSERT_FALSE(finished);
   // Scrolling is in progress but the hover is not updated yet.
   Compositor().BeginFrame();
   // Start scroll animation, but it is not finished.
   Compositor().BeginFrame();
   ASSERT_GT(frame_view->LayoutViewport()->GetScrollOffset().y(), 0);
-  ASSERT_FALSE(finished);
 
   // Mark hover state dirty but the hover state does not change after the
   // animation finishes.
   Compositor().BeginFrame(1);
   ASSERT_EQ(1000, frame_view->LayoutViewport()->GetScrollOffset().y());
-  ASSERT_TRUE(finished);
   EXPECT_TRUE(element->IsHovered());
 
   // Hover state is updated after the begin frame.
@@ -2399,6 +2470,49 @@ TEST_F(EventHandlerSimTest, SmallCustomCursorIntersectsViewport) {
         GetDocument().GetFrame()->GetChromeClient().LastSetCursorForTesting();
     EXPECT_EQ(ui::mojom::blink::CursorType::kCustom, cursor.type());
   }
+}
+
+TEST_F(EventHandlerSimTest, LargeCustomHiDpiSvgCursorIsRejected) {
+  WebView().MainFrameViewWidget()->Resize(gfx::Size(800, 600));
+  DeviceEmulationParams params;
+  // At a DSF of 1.2, the dimensions of the image (128x128 CSS pixels) will not
+  // round-trip between CSS pixels and device pixels.
+  params.device_scale_factor = 1.2;
+  WebView().EnableDeviceEmulation(params);
+
+  SimRequest request("https://example.com/test.html", "text/html");
+  SimSubresourceRequest cursor_request("https://example.com/128x128.svg",
+                                       "image/svg+xml");
+  LoadURL("https://example.com/test.html");
+  request.Complete(R"HTML(
+    <!DOCTYPE html>
+    <style>
+    #target {
+      width: 100vw;
+      height: 100vh;
+      cursor: url('128x128.svg'), auto;
+     }
+     </style>
+     <div id="target"></div>
+  )HTML");
+  GetDocument().UpdateStyleAndLayoutTree();
+
+  cursor_request.Complete(R"SVG(
+    <svg xmlns="http://www.w3.org/2000/svg" width="128px" height="128px">
+    </svg>
+  )SVG");
+
+  Compositor().BeginFrame();
+
+  EventHandler& event_handler = GetDocument().GetFrame()->GetEventHandler();
+  const gfx::PointF point(400, 300);
+  WebMouseEvent mouse_move_event(WebMouseEvent::Type::kMouseMove, point, point,
+                                 WebPointerProperties::Button::kNoButton, 0, 0,
+                                 WebInputEvent::GetStaticTimeStampForTests());
+  event_handler.HandleMouseMoveEvent(mouse_move_event, {}, {});
+  const ui::Cursor& cursor =
+      GetDocument().GetFrame()->GetChromeClient().LastSetCursorForTesting();
+  EXPECT_EQ(ui::mojom::blink::CursorType::kPointer, cursor.type());
 }
 
 TEST_F(EventHandlerSimTest, NeverExposeKeyboardEvent) {
@@ -3556,8 +3670,13 @@ TEST_F(EventHandlerSimTest, ValidClickPointerIdForUnseenPointerEvent) {
 TEST_F(EventHandlerSimTest, GestureTapHoverState) {
   ResizeView(gfx::Size(800, 600));
 
-  // RecomputeMouseHoverState() bails early if we are not focused.
-  GetPage().SetFocused(true);
+  // With this feature enabled, RecomputeMouseHoverState() fires synthetic
+  // mouse events for inactive pages. If the feature is disabled, we need to
+  // focus the page to avoid the early exit in RecomputeMouseHoverState().
+  // See crbug.com/385474535 for more details.
+  if (!RuntimeEnabledFeatures::SyntheticMouseHoverOverInactivePageEnabled()) {
+    GetPage().SetFocused(true);
+  }
 
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");

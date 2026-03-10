@@ -42,8 +42,6 @@
 //! This bridge is built using the `cxx` crate, which automates the generation
 //! of safe FFI bindings between the two languages.
 
-use cxx;
-
 use symphonia::core::audio::{AudioBufferRef, RawSampleBuffer};
 use symphonia::core::codecs::CodecParameters;
 use symphonia::core::errors::Error;
@@ -58,16 +56,18 @@ use symphonia::core::units::TimeBase;
 /// language. The `namespace = "media"` directive places all generated C++ code
 /// within the `media` namespace.
 #[cxx::bridge(namespace = "media")]
-mod ffi {
+pub mod ffi {
     /// This identifies the compression format of the audio data.
     #[repr(i32)]
     #[derive(Debug, Clone, Copy)]
     enum SymphoniaAudioCodec {
         Flac,
+        Mp3
     }
 
     /// We currently only output interleaved data, and usually in F32. However,
     /// that is not guaranteed by Symphonia.
+    #[derive(Debug)]
     enum SymphoniaSampleFormat {
         Unknown,
         U8,
@@ -84,6 +84,8 @@ mod ffi {
         codec: SymphoniaAudioCodec,
         /// Codec-specific initialization data (e.g., AAC headers).
         extra_data: Vec<u8>,
+        /// Expected bytes per sample from the container/config.
+        bytes_per_sample: u8,
     }
 
     /// Represents a single, encoded audio packet to be sent to the decoder.
@@ -109,6 +111,10 @@ mod ffi {
         sample_rate: u32,
         /// The number of audio frames in the buffer.
         num_frames: usize,
+        /// The number of channels.
+        channel_count: u32,
+        /// The channels, represented as a bit mask.
+        channel_mask: u32,
     }
 
     /// Detailed status code indicating the result of a decoder initialization
@@ -219,6 +225,8 @@ fn default_audio_buffer() -> ffi::SymphoniaAudioBuffer {
         sample_format: ffi::SymphoniaSampleFormat::Unknown,
         sample_rate: 0,
         num_frames: 0,
+        channel_count: 0,
+        channel_mask: 0,
     }
 }
 
@@ -270,15 +278,17 @@ enum GenericRawSampleBuffer {
 /// methods to access it as a raw byte slice (`&[u8]`). This is crucial
 /// for passing the data across the FFI boundary. It is reused across `decode`
 /// calls to reduce allocations.
-struct SymphoniaRawSampleBuffer {
+pub struct SymphoniaRawSampleBuffer {
     /// The inner buffer, holding the type-specific sample data.
     inner: GenericRawSampleBuffer,
+    /// The signal specification of the buffer (channels, rate).
+    spec: symphonia::core::audio::SignalSpec,
 }
 
 impl SymphoniaRawSampleBuffer {
     /// Creates a new, empty `SymphoniaRawSampleBuffer` with a capacity and
     /// specification derived from a decoded `AudioBufferRef`.
-    fn new_buffer_for(buf: &AudioBufferRef) -> Result<SymphoniaRawSampleBuffer, String> {
+    pub fn new_buffer_for(buf: &AudioBufferRef) -> Result<SymphoniaRawSampleBuffer, String> {
         let capacity = buf.capacity() as u64;
         let spec = *buf.spec();
 
@@ -300,7 +310,7 @@ impl SymphoniaRawSampleBuffer {
             }
             _ => Err("Symphonia returned an unsupported buffer type"),
         };
-        Ok(Self { inner: buf_result? })
+        Ok(Self { inner: buf_result?, spec })
     }
 
     /// Determines the FFI `SymphoniaSampleFormat` from the inner buffer type.
@@ -339,9 +349,13 @@ impl SymphoniaRawSampleBuffer {
 struct DecoderImpl {
     /// The boxed trait object for the `symphonia` decoder.
     decoder: Box<dyn symphonia::core::codecs::Decoder>,
+
     /// A reusable buffer for decoded samples to avoid reallocation.
     /// It is `None` until the first successful decode.
     sample_buffer: Option<SymphoniaRawSampleBuffer>,
+
+    /// Expected bytes per sample.
+    bytes_per_sample: u8,
 }
 
 /// The opaque Rust decoder type exposed to C++ through the FFI bridge.
@@ -360,6 +374,7 @@ fn to_symphonia_codec_type(
 ) -> Result<symphonia::core::codecs::CodecType, String> {
     match codec {
         ffi::SymphoniaAudioCodec::Flac => Ok(symphonia::core::codecs::CODEC_TYPE_FLAC),
+        ffi::SymphoniaAudioCodec::Mp3 => Ok(symphonia::core::codecs::CODEC_TYPE_MP3),
 
         // TODO(crbug.com/40074653): should support other formats.
         _ => Err(format!("Unsupported codec provided. codec={:?}", codec)),
@@ -437,7 +452,13 @@ fn init_symphonia_decoder_impl(config: &ffi::SymphoniaDecoderConfig) -> InitResu
         .make(&codec_params, &Default::default())
         .map_err(|e| (ffi::SymphoniaInitStatus::DecoderError, e.to_string()))?;
 
-    Ok(SymphoniaDecoder { decoder_impl: Some(DecoderImpl { decoder, sample_buffer: None }) })
+    Ok(SymphoniaDecoder {
+        decoder_impl: Some(DecoderImpl {
+            decoder,
+            sample_buffer: None,
+            bytes_per_sample: config.bytes_per_sample,
+        }),
+    })
 }
 
 /// FFI-exposed function to initialize a decoder.
@@ -469,20 +490,46 @@ impl From<&Error> for ffi::SymphoniaDecodeStatus {
 
 /// Creates an FFI `SymphoniaAudioBuffer` from a decoded Symphonia
 /// `AudioBufferRef`.
-fn create_audio_buffer(
+pub fn create_audio_buffer(
     buffer_ref: AudioBufferRef,
     sample_buffer: &mut SymphoniaRawSampleBuffer,
+    bytes_per_sample: u8,
 ) -> Result<ffi::SymphoniaAudioBuffer, String> {
     let sample_rate = buffer_ref.spec().rate;
     let num_frames = buffer_ref.frames();
+    let channel_count = buffer_ref.spec().channels.count() as u32;
+    let channel_mask = buffer_ref.spec().channels.bits();
 
     // Populate the sample byte buffer.
     sample_buffer.copy_from_buffer(buffer_ref);
-    let data = sample_buffer.as_bytes().to_vec();
-    let sample_format = sample_buffer.sample_format();
+    let mut sample_format = sample_buffer.sample_format();
+
+    // Ensure we output S16 if requested (Symphonia outputs it as S32 regardless).
+    let should_shift = sample_format == ffi::SymphoniaSampleFormat::S32 && bytes_per_sample == 2;
+    let data = if should_shift {
+        sample_format = ffi::SymphoniaSampleFormat::S16;
+        let s32_data = sample_buffer.as_bytes();
+        let mut s16_data = Vec::with_capacity(s32_data.len() / 2);
+        for chunk in s32_data.chunks_exact(4) {
+            let sample = i32::from_ne_bytes(chunk.try_into().unwrap());
+            // Shift right by 16 to get back the original 16 bits.
+            let downsampled = (sample >> 16) as i16;
+            s16_data.extend_from_slice(&downsampled.to_ne_bytes());
+        }
+        s16_data
+    } else {
+        sample_buffer.as_bytes().to_vec()
+    };
 
     // TODO(crbug.com/40074653): avoid copy here?
-    Ok(ffi::SymphoniaAudioBuffer { data, sample_format, sample_rate, num_frames })
+    Ok(ffi::SymphoniaAudioBuffer {
+        data,
+        sample_format,
+        sample_rate,
+        num_frames,
+        channel_count,
+        channel_mask,
+    })
 }
 
 /// Type alias for the result of a decoding operation.
@@ -495,7 +542,7 @@ impl From<DecodeResult> for ffi::SymphoniaDecodeResult {
             Ok(buffer) => ffi::SymphoniaDecodeResult {
                 status: ffi::SymphoniaDecodeStatus::Ok,
                 error_str: String::new(),
-                buffer: buffer,
+                buffer,
             },
             Err((status, error_str)) => ffi::SymphoniaDecodeResult {
                 status,
@@ -526,7 +573,24 @@ impl SymphoniaDecoder {
             .map_err(|e| ((&e).into(), e.to_string()))?;
 
         // Lazily initialize the sample buffer on the first successful decode.
-        if decoder_impl.sample_buffer.is_none() {
+        // We also need to re-initialize if the spec (channel count, rate) or capacity
+        // requirements change (e.g. mid-stream configuration change).
+        let spec = *buffer.spec();
+        let capacity = buffer.capacity();
+        let needs_realloc = match &decoder_impl.sample_buffer {
+            Some(sb) => {
+                sb.spec != spec
+                    || impl_generic_buffer_func!(
+                        GenericRawSampleBuffer,
+                        sb.inner,
+                        buf,
+                        buf.capacity() < capacity
+                    )
+            }
+            None => true,
+        };
+
+        if needs_realloc {
             decoder_impl.sample_buffer =
                 Some(SymphoniaRawSampleBuffer::new_buffer_for(&buffer).map_err(|e| {
                     (ffi::SymphoniaDecodeStatus::InvalidDecodedBufferSampleFormat, e.to_string())
@@ -534,8 +598,12 @@ impl SymphoniaDecoder {
         }
 
         Ok(Box::new(
-            create_audio_buffer(buffer, decoder_impl.sample_buffer.as_mut().unwrap())
-                .map_err(|e| (ffi::SymphoniaDecodeStatus::InsufficentData, e.to_string()))?,
+            create_audio_buffer(
+                buffer,
+                decoder_impl.sample_buffer.as_mut().unwrap(),
+                decoder_impl.bytes_per_sample,
+            )
+            .map_err(|e| (ffi::SymphoniaDecodeStatus::InsufficentData, e.to_string()))?,
         ))
     }
 

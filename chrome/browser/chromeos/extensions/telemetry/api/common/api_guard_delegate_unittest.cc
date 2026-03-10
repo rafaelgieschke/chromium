@@ -10,7 +10,6 @@
 #include <utility>
 #include <vector>
 
-#include "ash/constants/ash_features.h"
 #include "ash/public/cpp/session/session_controller.h"
 #include "ash/public/cpp/session/session_types.h"
 #include "ash/session/session_controller_impl.h"
@@ -23,7 +22,6 @@
 #include "base/strings/string_util.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/test/bind.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
 #include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/extensions/telemetry/api/common/hardware_info_delegate.h"
@@ -221,11 +219,11 @@ class ApiGuardDelegateTest
   void CreateExtension() {
     extension_ =
         extensions::ExtensionBuilder("Test ChromeOS System Extension")
-            .SetManifestKey("chromeos_system_extension", base::Value::Dict())
+            .SetManifestKey("chromeos_system_extension", base::DictValue())
             .SetManifestKey(
                 "externally_connectable",
-                base::Value::Dict().Set(
-                    "matches", base::Value::List().Append(matches_origin())))
+                base::DictValue().Set(
+                    "matches", base::ListValue().Append(matches_origin())))
             .SetID(extension_id())
             .SetLocation(extensions::mojom::ManifestLocation::kInternal)
             .Build();
@@ -509,12 +507,6 @@ class ApiGuardDelegateShimlessRMAAppTest : public ApiGuardDelegateTest {
   ~ApiGuardDelegateShimlessRMAAppTest() override = default;
 
   void SetUp() override {
-    feature_list_.InitWithFeatures(
-        {
-            ::ash::features::kShimlessRMA3pDiagnostics,
-        },
-        {});
-
     chromeos_system_extension_info_ =
         ScopedChromeOSSystemExtensionInfo::CreateForTesting();
     // TODO(b/293560424): Remove this override after we add some valid IWA id to
@@ -573,7 +565,6 @@ class ApiGuardDelegateShimlessRMAAppTest : public ApiGuardDelegateTest {
                             Profile* profile) override {}
 
  private:
-  base::test::ScopedFeatureList feature_list_;
   std::unique_ptr<ScopedChromeOSSystemExtensionInfo>
       chromeos_system_extension_info_;
 };

@@ -59,6 +59,9 @@
 - (void)stop {
   [_mediator disconnect];
   _mediator = nil;
+
+  [_guidedTourCoordinator stop];
+  _guidedTourCoordinator = nil;
 }
 
 #pragma mark - Property Implementation.
@@ -133,6 +136,13 @@
                 delegate:self];
   [_guidedTourCoordinator start];
   _guidedTourCompletionBlock = completion;
+}
+
+- (void)hideTabGridToolbarGuidedTour {
+  [self.topToolbar resetLastPageControlHighlight];
+  _guidedTourCompletionBlock = nil;
+  [_guidedTourCoordinator stop];
+  _guidedTourCoordinator = nil;
 }
 
 #pragma mark - GuidedTourCoordinatorDelegate

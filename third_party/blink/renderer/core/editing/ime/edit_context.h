@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_IME_EDIT_CONTEXT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_IME_EDIT_CONTEXT_H_
 
+#include "third_party/blink/public/mojom/input/input_handler.mojom-blink.h"
 #include "third_party/blink/public/platform/web_text_input_type.h"
 #include "third_party/blink/public/web/web_input_method_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
@@ -118,9 +119,6 @@ class CORE_EXPORT EditContext final : public EventTarget,
   // EventTarget overrides
   const AtomicString& InterfaceName() const override;
   ExecutionContext* GetExecutionContext() const override;
-  void AddedEventListener(
-      const AtomicString& event_type,
-      RegisteredEventListener& registered_listener) override;
 
   void SetExecutionContext(ExecutionContext* context);
 
@@ -132,6 +130,12 @@ class CORE_EXPORT EditContext final : public EventTarget,
   void Trace(Visitor*) const override;
 
   // WebInputMethodController overrides.
+  bool SetComposition(const WebString& text,
+                      const std::vector<ui::ImeTextSpan>& ime_text_spans,
+                      const WebRange& replacement_range,
+                      int selection_start,
+                      int selection_end,
+                      mojom::blink::ImeState ime_state) override;
   bool SetComposition(const WebString& text,
                       const std::vector<ui::ImeTextSpan>& ime_text_spans,
                       const WebRange& replacement_range,
@@ -177,6 +181,14 @@ class CORE_EXPORT EditContext final : public EventTarget,
   // For English typing.
   bool InsertText(const WebString& text);
 
+  // Clamps `selection_start_` and `selection_end_` to be within `text_` length.
+  // This is necessary because `updateText` can shorten the text buffer without
+  // adjusting selection offsets leaving stale offsets that exceed the `text_`
+  // length. Must be called before delete operations to prevent out-of-bounds
+  // access.
+  // TODO(crbug.com/379170477): This can be removed when `updateText` adjusts
+  // the selection offsets to stay within `text_` bounds.
+  void EnsureSelectionWithinTextBounds();
   void DeleteBackward();
   void DeleteForward();
   void DeleteWordBackward();
@@ -286,13 +298,6 @@ class CORE_EXPORT EditContext final : public EventTarget,
   // otherwise returns selection_start_.
   uint32_t OrderedSelectionEnd() const;
 
-  // TODO(crbug.com/379170477): These can be removed when `updateText` adjusts
-  // the selection offsets to stay within `text_` bounds.
-  // Returns minimum of `selection_start_` and `text_` length.
-  uint32_t BoundedSelectionStart() const;
-  // Returns minimum of `selection_end_` and `text_` length.
-  uint32_t BoundedSelectionEnd() const;
-
   // EditContext member variables.
   String text_;
 
@@ -319,6 +324,12 @@ class CORE_EXPORT EditContext final : public EventTarget,
   // composition_range_end_ should always be >= composition_range_start_.
   uint32_t composition_range_start_ = 0;
   uint32_t composition_range_end_ = 0;
+  // This flag tracks whether `FinishComposingText` is currently in progress.
+  // This is used to guard against re-entrant calls to `FinishComposingText`
+  // when editContext associations are changed during compositionend or
+  // textformatupdate event dispatch.
+  bool finish_composing_in_progress_ = false;
+
   // Elements that are associated with this EditContext.
   HeapVector<Member<HTMLElement>> attached_elements_;
 

@@ -66,12 +66,13 @@ namespace blink {
 class BarProp;
 class CSSStyleDeclaration;
 class CustomElementRegistry;
+class ScrollResult;
 class Document;
 class DocumentInit;
 class DOMSelection;
 class DOMViewport;
 class DOMVisualViewport;
-class CrashReportStorage;
+class CrashReportContext;
 class Element;
 class ExceptionState;
 class External;
@@ -119,6 +120,13 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   USING_PRE_FINALIZER(LocalDOMWindow, Dispose);
 
  public:
+  // Size thresholds for network efficiency guardrails policy enforcement.
+  // These are const public for testing purpose.
+  static constexpr size_t kGuardrailsLargeDataThresholdBytes =
+      100 * 1024;  // 100kB
+  static constexpr size_t kGuardrailsLargeImageThresholdBytes =
+      200 * 1024;  // 200kB
+
   class CORE_EXPORT EventListenerObserver : public GarbageCollectedMixin {
    public:
     virtual void DidAddEventListener(LocalDOMWindow*, const AtomicString&) = 0;
@@ -215,6 +223,11 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
       const String& source_file = g_empty_string) const final;
   void SetIsInBackForwardCache(bool) final;
   net::StorageAccessApiStatus GetStorageAccessApiStatus() const final;
+  std::optional<mojom::blink::PolicyDisposition> GetGuardrailsPolicyState()
+      const final;
+  bool CheckGuardrailsPolicyForAssetSize(GuardrailPolicyAssetType asset_type,
+                                         size_t bytes,
+                                         const KURL& url) const final;
 
   void AddConsoleMessageImpl(ConsoleMessage*, bool discard_duplicates) final;
 
@@ -336,15 +349,15 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
 
   // FIXME: ScrollBehaviorSmooth is currently unsupported in VisualViewport.
   // crbug.com/434497
-  ScriptPromise<IDLUndefined> scrollBy(ScriptState* script_state,
+  ScriptPromise<ScrollResult> scrollBy(ScriptState* script_state,
                                        double x,
                                        double y) const;
-  ScriptPromise<IDLUndefined> scrollBy(ScriptState* script_state,
+  ScriptPromise<ScrollResult> scrollBy(ScriptState* script_state,
                                        const ScrollToOptions*) const;
-  ScriptPromise<IDLUndefined> scrollTo(ScriptState* script_state,
+  ScriptPromise<ScrollResult> scrollTo(ScriptState* script_state,
                                        double x,
                                        double y) const;
-  ScriptPromise<IDLUndefined> scrollTo(ScriptState* script_state,
+  ScriptPromise<ScrollResult> scrollTo(ScriptState* script_state,
                                        const ScrollToOptions*) const;
 
   void scrollByForTesting(double x, double y) const;
@@ -441,10 +454,12 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   void EnqueueWindowEvent(Event&, TaskType);
   void EnqueueDocumentEvent(Event&, TaskType);
   void EnqueueNonPersistedPageshowEvent();
-  void EnqueueHashchangeEvent(const String& old_url, const String& new_url);
+  void EnqueueHashchangeEvent(const String& old_url,
+                              const String& new_url,
+                              UserNavigationInvolvement involvement);
   void DispatchPopstateEvent(scoped_refptr<SerializedScriptValue>,
-                             scheduler::TaskAttributionInfo* task_state,
-                             bool has_ua_visual_transition);
+                             bool has_ua_visual_transition,
+                             UserNavigationInvolvement involvement);
   void DispatchWindowLoadEvent();
   void DocumentWasClosed();
 
@@ -524,7 +539,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
 
   Fence* fence();
 
-  CrashReportStorage* crashReport();
+  CrashReportContext* crashReport();
 
   CloseWatcher::WatcherStack* closewatcher_stack() {
     return closewatcher_stack_.Get();
@@ -688,7 +703,7 @@ class CORE_EXPORT LocalDOMWindow final : public DOMWindow,
   // https://github.com/shivanigithub/fenced-frame/issues/14
   Member<Fence> fence_;
 
-  Member<CrashReportStorage> crash_report_storage_;
+  Member<CrashReportContext> crash_report_storage_;
 
   Member<CloseWatcher::WatcherStack> closewatcher_stack_;
 

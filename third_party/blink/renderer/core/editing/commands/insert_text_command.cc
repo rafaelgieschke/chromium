@@ -41,11 +41,14 @@
 
 namespace blink {
 
-InsertTextCommand::InsertTextCommand(Document& document,
-                                     const String& text,
-                                     RebalanceType rebalance_type)
+InsertTextCommand::InsertTextCommand(
+    Document& document,
+    const String& text,
+    PasswordEchoBehavior password_echo_behavior,
+    RebalanceType rebalance_type)
     : CompositeEditCommand(document),
       text_(text),
+      password_echo_behavior_(password_echo_behavior),
       rebalance_type_(rebalance_type) {}
 
 String InsertTextCommand::TextDataForInputEvent() const {
@@ -102,8 +105,9 @@ bool InsertTextCommand::PerformTrivialReplace(const String& text) {
   if (!EndingSelection().IsRange())
     return false;
 
-  if (text.Contains('\t') || text.Contains(' ') || text.Contains('\n'))
+  if (text.contains('\t') || text.contains(' ') || text.contains('\n')) {
     return false;
+  }
 
   // Also if the text is surrounded by a hyperlink and all the contents of the
   // link are selected, then we shouldn't be retaining the link with just one
@@ -124,7 +128,8 @@ bool InsertTextCommand::PerformTrivialReplace(const String& text) {
 
   RelocatablePosition* relocatable_start =
       MakeGarbageCollected<RelocatablePosition>(start);
-  Position end_position = ReplaceSelectedTextInNode(text);
+  Position end_position =
+      ReplaceSelectedTextInNode(text, password_echo_behavior_);
   if (end_position.IsNull())
     return false;
 
@@ -138,7 +143,7 @@ bool InsertTextCommand::PerformTrivialReplace(const String& text) {
 }
 
 void InsertTextCommand::DoApply(EditingState* editing_state) {
-  DCHECK_EQ(text_.find('\n'), kNotFound);
+  DCHECK(!text_.contains('\n'));
 
   // TODO(editing-dev): We shouldn't construct an InsertTextCommand with none or
   // invalid selection.
@@ -240,7 +245,7 @@ void InsertTextCommand::DoApply(EditingState* editing_state) {
     auto* text_node = To<Text>(start_position.ComputeContainerNode());
     const unsigned offset = start_position.OffsetInContainerNode();
 
-    InsertTextIntoNode(text_node, offset, text_);
+    InsertTextIntoNode(text_node, offset, text_, password_echo_behavior_);
     end_position = Position(text_node, offset + text_.length());
 
     if (rebalance_type_ == kRebalanceLeadingAndTrailingWhitespaces) {
@@ -301,7 +306,8 @@ Position InsertTextCommand::InsertTab(const Position& pos,
 
   // keep tabs coalesced in tab span
   if (IsTabHTMLSpanElementTextNode(node)) {
-    InsertTextIntoNode(text_node, offset, "\t");
+    InsertTextIntoNode(text_node, offset, "\t",
+                       PasswordEchoBehavior::kDoNotEcho);
     return Position(text_node, offset + 1);
   }
 

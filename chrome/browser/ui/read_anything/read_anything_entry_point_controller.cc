@@ -6,26 +6,53 @@
 
 #include <type_traits>
 
+#include "base/command_line.h"
+#include "base/metrics/histogram_functions.h"
+#include "chrome/browser/dom_distiller/tab_utils.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/read_anything/read_anything_controller.h"
 #include "chrome/browser/ui/read_anything/read_anything_enums.h"
 #include "chrome/browser/ui/read_anything/read_anything_prefs.h"
 #include "chrome/browser/ui/read_anything/read_anything_side_panel_controller_utils.h"
+#include "chrome/browser/ui/side_panel/side_panel_action_callback.h"
+#include "chrome/browser/ui/side_panel/side_panel_entry_id.h"
+#include "chrome/browser/ui/side_panel/side_panel_enums.h"
+#include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/tabs/public/tab_features.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #include "chrome/browser/ui/views/page_action/page_action_controller.h"
 #include "chrome/browser/ui/views/page_action/page_action_triggers.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_action_callback.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_entry_id.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_enums.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
+#include "components/feature_engagement/public/feature_constants.h"
 #include "components/prefs/pref_filter.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/common/content_switches.h"
+#include "pdf/buildflags.h"
 #include "ui/accessibility/accessibility_features.h"
+
+#if BUILDFLAG(ENABLE_PDF)
+#include "base/strings/string_util.h"
+#include "components/pdf/browser/pdf_document_helper.h"
+#endif  // BUILDFLAG(ENABLE_PDF)
 
 namespace {
 
-static const int kMaxChipIgnoredCount = 5;
+constexpr int kMaxChipIgnoredCount = 5;
+constexpr const char* kDenyList[] = {
+    "mail.google.com",
+    "whatsapp.com",
+    "chatgpt.com",
+    "docs.google.com",
+    "docs.sandbox.google.com",
+    "calendar.google.com",
+    "drive.google.com",
+    "meet.google.com",
+    "instagram.com",
+    "tiktok.com",
+    "youtube.com",
+    "photos.google.com",
+};
 
 int GetOmniboxChipIgnoredCount(PrefService* prefs) {
   return prefs->GetInteger(
@@ -45,9 +72,45 @@ bool IsTriggeredByOmnibox(const actions::ActionInvocationContext& context) {
          base::FeatureList::IsEnabled(features::kPageActionsMigration);
 }
 
+#if BUILDFLAG(ENABLE_PDF)
+size_t g_min_pdf_text_length_for_omnibox = 1100;
+constexpr float kMaxNonAlphaFraction = 0.33;
+
+bool IsMostlyAlphaChars(const std::u16string& text) {
+  size_t non_alpha_chars =
+      std::ranges::count_if(text, [](char16_t c) {
+        // Check specifically for certain non-alphabetic characters rather than
+        // for alphabetic characters. IsAsciiAlpha is only true for certain
+        // scripts, so this avoids excluding other languages.
+        return base::IsAsciiPunctuation(c) || base::IsAsciiDigit(c) ||
+               base::IsWhitespace(c) || base::IsUnicodeControl(c);
+      });
+
+  return (static_cast<float>(non_alpha_chars) / text.size()) <
+         kMaxNonAlphaFraction;
+}
+
+void OnPdfTextReceived(base::OnceCallback<void(bool)> result_callback,
+                       const std::u16string& text) {
+  // Show the omnibox on PDFs above a certain length, with a high percentage of
+  // alphabetic characters. In this case, it is likely going to distill well in
+  // Reading mode.
+  std::move(result_callback)
+      .Run((text.size() > g_min_pdf_text_length_for_omnibox) &&
+           IsMostlyAlphaChars(text));
+}
+#endif
+
+static int check_count_;
+
 }  // namespace
 
 namespace read_anything {
+
+base::AutoReset<size_t>
+ReadAnythingEntryPointController::SetMinPdfTextLengthForTesting(size_t length) {
+  return {&g_min_pdf_text_length_for_omnibox, length};
+}
 
 // static
 void ReadAnythingEntryPointController::InvokePageAction(
@@ -86,6 +149,10 @@ void ReadAnythingEntryPointController::ShowUI(
   if (!bwi) {
     return;
   }
+  if (!IsUIShowing(bwi)) {
+    base::UmaHistogramEnumeration("Accessibility.ReadAnything.ShowTriggered",
+                                  open_trigger);
+  }
 
   if (features::IsImmersiveReadAnythingEnabled()) {
     // TODO(crbug.com/471001915): Once IRM flag is enabled by default, change
@@ -99,7 +166,7 @@ void ReadAnythingEntryPointController::ShowUI(
     }
   } else {
     SidePanelOpenTrigger side_panel_open_trigger =
-        read_anything::ReadAnythingToSidePanelOpenTrigger(open_trigger);
+        ReadAnythingToSidePanelOpenTrigger(open_trigger);
 
     bwi->GetFeatures().side_panel_ui()->Show(
         SidePanelEntryKey(SidePanelEntryId::kReadAnything),
@@ -115,20 +182,40 @@ void ReadAnythingEntryPointController::ToggleUI(
     return;
   }
 
+  if (!IsUIShowing(bwi)) {
+    base::UmaHistogramEnumeration("Accessibility.ReadAnything.ShowTriggered",
+                                  open_trigger);
+  }
+
   if (features::IsImmersiveReadAnythingEnabled()) {
     if (tabs::TabInterface* tab = bwi->GetActiveTabInterface()) {
       auto* controller = ReadAnythingController::From(tab);
       CHECK(controller);
-      controller->ToggleImmersiveUI(open_trigger);
+      controller->ToggleUI(open_trigger);
     }
   } else {
     SidePanelOpenTrigger side_panel_open_trigger =
-        read_anything::ReadAnythingToSidePanelOpenTrigger(open_trigger);
+        ReadAnythingToSidePanelOpenTrigger(open_trigger);
 
     bwi->GetFeatures().side_panel_ui()->Toggle(
         SidePanelEntryKey(SidePanelEntryId::kReadAnything),
         side_panel_open_trigger);
   }
+}
+
+// static
+bool ReadAnythingEntryPointController::IsUIShowing(
+    BrowserWindowInterface* bwi) {
+  if (!features::IsImmersiveReadAnythingEnabled() || !bwi) {
+    return IsReadAnythingEntryShowing(bwi);
+  }
+
+  auto* controller = ReadAnythingController::From(bwi->GetActiveTabInterface());
+  CHECK(controller);
+  auto state = controller->GetPresentationState();
+  return state ==
+             ReadAnythingController::PresentationState::kInImmersiveOverlay ||
+         state == ReadAnythingController::PresentationState::kInSidePanel;
 }
 
 // static
@@ -138,7 +225,7 @@ void ReadAnythingEntryPointController::UpdatePageActionVisibility(
     base::OnceCallback<void(user_education::FeaturePromoResult promo_result)>
         show_promo_callback) {
   if (!base::FeatureList::IsEnabled(features::kPageActionsMigration) ||
-      !features::IsReadAnythingOmniboxChipEnabled()) {
+      !features::IsReadAnythingOmniboxChipEnabled() || !bwi) {
     return;
   }
 
@@ -146,8 +233,7 @@ void ReadAnythingEntryPointController::UpdatePageActionVisibility(
       bwi->GetActiveTabInterface()->GetTabFeatures()->page_action_controller();
   auto* const user_ed = BrowserUserEducationInterface::From(bwi);
   // No need to show the button if reading mode is already open.
-  // TODO(crbug.com/447418049): Check for immersive reading mode here too.
-  if (should_show_page_action && !IsReadAnythingEntryShowing(bwi)) {
+  if (should_show_page_action && !IsUIShowing(bwi)) {
     page_action_controller->Show(kActionSidePanelShowReadAnything);
     if (ShouldShowOmniboxChip(bwi)) {
       page_action_controller->ShowSuggestionChip(
@@ -167,10 +253,87 @@ void ReadAnythingEntryPointController::UpdatePageActionVisibility(
 }
 
 // static
+bool ReadAnythingEntryPointController::CheckIfShouldSuggestReadingModeNaive(
+    BrowserWindowInterface* bwi) {
+  if (!features::IsReadAnythingOmniboxChipEnabled() || !bwi) {
+    return false;
+  }
+
+  // Disable the omnibox on app windows, as these windows don't usually have
+  // omnibox support.
+  Browser* browser = bwi->GetBrowserForMigrationOnly();
+  if (browser && (browser->is_type_app() || browser->is_type_app_popup())) {
+    return false;
+  }
+
+  // Don't show the omnibox entrypoint for non-HTTP(S) URLs. These URLs are
+  // not supported by Readability, which is used to check whether the current
+  // page is a good candidate for distillation.
+  content::WebContents* contents = bwi->GetActiveTabInterface()->GetContents();
+  const GURL& url = contents->GetLastCommittedURL();
+  if (!url.SchemeIsHTTPOrHTTPS()) {
+    return false;
+  }
+
+  // Don't show the omnibox entrypoint for sites we know don't distill well.
+  for (const char* domain : kDenyList) {
+    if (url.DomainIs(domain)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+// static
+void ReadAnythingEntryPointController::CheckIfShouldSuggestReadingMode(
+    BrowserWindowInterface* bwi,
+    base::OnceCallback<void(bool)> result_callback) {
+  check_count_++;
+  if (!features::IsReadAnythingOmniboxChipEnabled() || !bwi) {
+    std::move(result_callback).Run(false);
+    return;
+  }
+  // Don't show the omnibox entrypoint if automation is enabled, such as
+  // during automated testing.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableAutomation)) {
+    std::move(result_callback).Run(false);
+    return;
+  }
+
+  if (!CheckIfShouldSuggestReadingModeNaive(bwi)) {
+    std::move(result_callback).Run(false);
+    return;
+  }
+
+  content::WebContents* contents = bwi->GetActiveTabInterface()->GetContents();
+
+#if BUILDFLAG(ENABLE_PDF)
+  // If this contents is a PDF, then Readability will always return false. But
+  // since PDFs are distilled via Screen2x, use our own heuristic to determine
+  // if the PDF will distill well with RM.
+  auto* pdf_helper = pdf::PDFDocumentHelper::MaybeGetForWebContents(contents);
+  if (pdf_helper) {
+    // Use the text on the first page of the document to estimate if this could
+    // be a distillable PDF.
+    pdf_helper->GetPageText(
+        /*page_index=*/0,
+        base::BindOnce(&OnPdfTextReceived, std::move(result_callback)));
+    return;
+  }
+#endif  // BUILDFLAG(ENABLE_PDF)
+
+  // Readability will callback with whether or not the current contents are a
+  // good candidate for distillation.
+  RunReadabilityHeuristicsOnWebContents(contents, std::move(result_callback));
+}
+
+// static
 void ReadAnythingEntryPointController::OnPageActionIgnored(
     BrowserWindowInterface* bwi) {
   if (!base::FeatureList::IsEnabled(features::kPageActionsMigration) ||
-      !features::IsReadAnythingOmniboxChipEnabled()) {
+      !features::IsReadAnythingOmniboxChipEnabled() || !bwi) {
     return;
   }
 
@@ -185,6 +348,16 @@ void ReadAnythingEntryPointController::OnPageActionIgnored(
     page_action_controller->HideSuggestionChip(
         kActionSidePanelShowReadAnything);
   }
+}
+
+// static
+int ReadAnythingEntryPointController::CheckCountForTesting() {
+  return check_count_;
+}
+
+// static
+void ReadAnythingEntryPointController::ResetCheckCountForTesting() {
+  check_count_ = 0;
 }
 
 }  // namespace read_anything

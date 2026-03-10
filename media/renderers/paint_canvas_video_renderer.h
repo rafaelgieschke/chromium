@@ -116,7 +116,7 @@ class MEDIA_EXPORT PaintCanvasVideoRenderer {
   // |rgb_pixels|.
   static void ConvertVideoFrameToRGBPixels(
       const media::VideoFrame* video_frame,
-      void* rgb_pixels,
+      base::span<uint8_t> rgb_pixels,
       size_t row_bytes,
       SkColorType dst_color_type = kN32_SkColorType,
       bool premultiply_alpha = true,
@@ -125,6 +125,12 @@ class MEDIA_EXPORT PaintCanvasVideoRenderer {
 
   // The output format that ConvertVideoFrameToRGBPixels will write.
   static viz::SharedImageFormat GetRGBPixelsOutputFormat();
+
+  // Return true only if the shared image and texture formats for R and RG
+  // planes for `channel_format` are supported by `raster_context_provider`.
+  static bool MultiPlaneChannelFormatSupported(
+      viz::RasterContextProvider* raster_context_provider,
+      viz::SharedImageFormat::ChannelFormat channel_format);
 
   // Copy the contents of |video_frame| to |texture| of |destination_gl|.
   //
@@ -205,12 +211,16 @@ class MEDIA_EXPORT PaintCanvasVideoRenderer {
   // Copies VideoFrame contents to the `destination` shared image. if
   // `use_visible_rect` is set to true, only `VideoFrame::visible_rect()`
   // portion is copied, otherwise copies all underlying buffer.
+  // If `video_frame` holds pixels and `yuv_shared_image_cache` is provided, the
+  // intermediate YUV SharedImage to which the pixels are uploaded will be
+  // obtained from and stored in the cache.
   [[nodiscard]] gpu::SyncToken CopyVideoFrameToSharedImage(
       viz::RasterContextProvider* raster_context_provider,
       scoped_refptr<VideoFrame> video_frame,
       scoped_refptr<gpu::ClientSharedImage> dest_shared_image,
       const gpu::SyncToken& dest_sync_token,
-      bool use_visible_rect);
+      bool use_visible_rect,
+      VideoFrameSharedImageCache* yuv_shared_image_cache = nullptr);
 
   // Check whether video frame can be uploaded through
   // CopyVideoFrameToSharedImage(). The limitation comes from

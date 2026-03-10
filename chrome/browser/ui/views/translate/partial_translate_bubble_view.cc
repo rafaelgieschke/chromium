@@ -30,7 +30,6 @@
 #include "chrome/browser/ui/translate/partial_translate_bubble_model.h"
 #include "chrome/browser/ui/translate/partial_translate_bubble_ui_action_logger.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
-#include "chrome/browser/ui/views/translate/translate_icon_view.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
@@ -351,11 +350,11 @@ void PartialTranslateBubbleView::SetViewState(
 }
 
 PartialTranslateBubbleView::PartialTranslateBubbleView(
-    views::View* anchor_view,
+    views::BubbleAnchor anchor,
     std::unique_ptr<PartialTranslateBubbleModel> model,
     content::WebContents* web_contents,
     base::OnceClosure on_closing)
-    : LocationBarBubbleDelegateView(anchor_view,
+    : LocationBarBubbleDelegateView(anchor,
                                     web_contents,
                                     /*autosize=*/true),
       model_(std::move(model)),

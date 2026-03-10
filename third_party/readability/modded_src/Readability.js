@@ -566,6 +566,26 @@ Readability.prototype = {
   },
 
   /**
+   * Get the document title.
+   *
+   * @return string
+   **/
+  _getDocTitle() {
+    var doc = this._doc;
+    var docTitle = "";
+
+    try {
+      docTitle = typeof doc.title === "string" ?
+          doc.title.trim() :
+          this._getInnerText(doc.getElementsByTagName("title")[0]);
+    } catch (e) {
+      /* ignore exceptions setting the title. */
+    }
+
+    return docTitle;
+  },
+
+  /**
    * Get the article title as an H1.
    *
    * @return string
@@ -575,18 +595,7 @@ Readability.prototype = {
     var curTitle = "";
     var origTitle = "";
 
-    try {
-      curTitle = origTitle = doc.title.trim();
-
-      // If they had an element with id "title" in their HTML
-      if (typeof curTitle !== "string") {
-        curTitle = origTitle = this._getInnerText(
-          doc.getElementsByTagName("title")[0]
-        );
-      }
-    } catch (e) {
-      /* ignore exceptions setting the title. */
-    }
+    curTitle = origTitle = this._getDocTitle();
 
     var titleHadHierarchicalSeparators = false;
     function wordCount(str) {
@@ -834,6 +843,7 @@ Readability.prototype = {
     this._cleanConditionally(articleContent, "table");
     this._cleanConditionally(articleContent, "ul");
     this._cleanConditionally(articleContent, "div");
+    this._cleanConditionally(articleContent, "label");
 
     // replace H1 with H2 as H1 should be only title that is displayed separately
     this._replaceNodeTags(
@@ -1740,20 +1750,35 @@ Readability.prototype = {
             typeof parsed.headline === "string" &&
             parsed.name !== parsed.headline
           ) {
-            // we have both name and headline element in the JSON-LD. They should both be the same but some websites like aktualne.cz
-            // put their own name into "name" and the article title to "headline" which confuses Readability. So we try to check if either
-            // "name" or "headline" closely matches the html title, and if so, use that one. If not, then we use "name" by default.
+            // Both "name" and "headline" element exist in the JSON-LD. Usually
+            // they're the same, but sometimes a website (e.g., aktualne.cz)
+            // would assign something else (e.g., website name) to "name", and
+            // this confuses Readability. Therefore we compare both against the
+            // HTML title. If a clear winner exists, use the winner. Otherwise
+            // take the longer of the two.
 
-            var title = this._getArticleTitle();
-            var nameMatches = this._textSimilarity(parsed.name, title) > 0.75;
-            var headlineMatches =
-              this._textSimilarity(parsed.headline, title) > 0.75;
+            const TITLE_SIMILARITY_THRESHOLD = 0.75;
+            const title = this._getArticleTitle();
+            let nameMatches =
+                this._textSimilarity(parsed.name, title) >
+                    TITLE_SIMILARITY_THRESHOLD;
+            let headlineMatches =
+                this._textSimilarity(parsed.headline, title) >
+                    TITLE_SIMILARITY_THRESHOLD;
 
-            if (headlineMatches && !nameMatches) {
-              metadata.title = parsed.headline;
-            } else {
-              metadata.title = parsed.name;
+            if (!nameMatches && !headlineMatches) {
+              let docTitle = this._getDocTitle();
+              if (docTitle) {
+                const docTitleLower = docTitle.toLowerCase();
+                nameMatches = docTitleLower.includes(parsed.name.toLowerCase());
+                headlineMatches =
+                    docTitleLower.includes(parsed.headline.toLowerCase());
+              }
             }
+
+            const useName = (nameMatches !== headlineMatches) ? nameMatches :
+                (parsed.name.length >= parsed.headline.length);
+            metadata.title = useName ? parsed.name : parsed.headline;
           } else if (typeof parsed.name === "string") {
             metadata.title = parsed.name.trim();
           } else if (typeof parsed.headline === "string") {
@@ -1996,7 +2021,7 @@ Readability.prototype = {
     // Penalize element that has a lot of text.
     const textContent = el.textContent.trim();
     if (textContent.length > 300) {
-      score -= 50;
+      score -= 0.25 * (textContent.length - 300);
     }
     return {score, bestImg};
   },
@@ -2047,15 +2072,15 @@ Readability.prototype = {
    *     contain this data, or null if no suitable lead image is found.
    */
   _getLeadImageData(topCandidate) {
-    const NUM_SIBLINGS_TO_SCAN = 4;
-    const MIN_LEAD_IMAGE_SCORE = 40;
+    const PREVIOUS_SCAN_COUNT = 10;
+    const MIN_LEAD_IMAGE_SCORE = 30;
     const leadCandidates =
-        this._getPreviousElements(topCandidate, NUM_SIBLINGS_TO_SCAN);
+        this._getPreviousElements(topCandidate, PREVIOUS_SCAN_COUNT);
     if (leadCandidates.length === 0) {
       return null;
     }
 
-    // First pass: Find the best image.
+    // First pass: Find the best lead image.
     const imageRatings = leadCandidates.map((el) => this._rateLeadImageIn(el));
     const [bestImageRating, bestImageRatingIndex] =
         this._argmax(imageRatings, (rating) => rating?.score ?? -1);
@@ -2704,6 +2729,14 @@ Readability.prototype = {
       // Handle <img> buried inside nested <div> layers in <figure>.
       if (tag === "div" && this._hasAncestorTag(node, "figure") && this._isSingleImage(node)) {
         return false;
+      }
+
+      // Handle <label for="id-of-removed-input">.
+      if (tag === 'label') {
+        const forId = node.getAttribute('for');
+        if (forId && !e.querySelector('#' + CSS.escape(forId))) {
+          return true;
+        }
       }
 
       var weight = this._getClassWeight(node);

@@ -59,7 +59,7 @@ FFmpegAudioDecoder::FFmpegAudioDecoder(
       media_log_(media_log),
       mode_(mode),
       pool_(base::MakeRefCounted<AudioBufferMemoryPool>(
-          kFFmpegBufferAddressAlignment)) {
+          limits::kFFmpegBufferAddressAlignment)) {
   DETACH_FROM_SEQUENCE(sequence_checker_);
   CHECK(media_log_);
   if (mode_ == ExecutionMode::kAsynchronous) {
@@ -252,8 +252,8 @@ bool FFmpegAudioDecoder::OnNewFrame(const DecoderBuffer& buffer,
 
   // Translate unsupported into discrete layouts for discrete configurations;
   // ffmpeg does not have a labeled discrete configuration internally.
-  ChannelLayout channel_layout = ChannelLayoutToChromeChannelLayout(
-      codec_context_->ch_layout.u.mask, codec_context_->ch_layout.nb_channels);
+  ChannelLayout channel_layout =
+      ChannelLayoutToChromeChannelLayout(codec_context_->ch_layout);
   if (channel_layout == CHANNEL_LAYOUT_UNSUPPORTED &&
       config_.channel_layout() == CHANNEL_LAYOUT_DISCRETE) {
     channel_layout = CHANNEL_LAYOUT_DISCRETE;
@@ -286,17 +286,10 @@ bool FFmpegAudioDecoder::OnNewFrame(const DecoderBuffer& buffer,
         << config_.samples_per_second() << ", ChannelLayout: " << channel_layout
         << " vs " << config_.channel_layout() << ", Channels: " << channels
         << " vs " << config_.channels();
-    config_.Initialize(config_.codec(), config_.sample_format(), channel_layout,
-                       frame->sample_rate, config_.extra_data(),
-                       config_.encryption_scheme(), config_.seek_preroll(),
-                       config_.codec_delay());
-
-    // If the channel layout is discrete, then the decoder config is not
-    // capable of deriving the channel count from the layout and the channel
-    // count must be set manually.
-    if (channel_layout == CHANNEL_LAYOUT_DISCRETE) {
-      config_.SetChannelsForDiscrete(channels);
-    }
+    config_.Initialize(config_.codec(), config_.sample_format(),
+                       {channel_layout, channels}, frame->sample_rate,
+                       config_.extra_data(), config_.encryption_scheme(),
+                       config_.seek_preroll(), config_.codec_delay());
 
     if (is_sample_rate_change)
       ResetTimestampState(config_);
@@ -461,8 +454,7 @@ int FFmpegAudioDecoder::GetAudioBuffer(struct AVCodecContext* s,
   ChannelLayout channel_layout =
       config_.channel_layout() == CHANNEL_LAYOUT_DISCRETE
           ? CHANNEL_LAYOUT_DISCRETE
-          : ChannelLayoutToChromeChannelLayout(s->ch_layout.u.mask,
-                                               s->ch_layout.nb_channels);
+          : ChannelLayoutToChromeChannelLayout(s->ch_layout);
 
   if (channel_layout == CHANNEL_LAYOUT_UNSUPPORTED) {
     DLOG(ERROR) << "Unsupported channel layout.";

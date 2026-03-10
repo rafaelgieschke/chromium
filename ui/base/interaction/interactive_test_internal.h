@@ -18,7 +18,6 @@
 #include <variant>
 
 #include "base/callback_list.h"
-#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "base/memory/raw_ref.h"
 #include "base/memory/weak_ptr.h"
@@ -255,11 +254,14 @@ class InteractiveTestPrivate {
   gfx::NativeWindow GetNativeWindowFor(const ui::TrackedElement* el) const;
 
   // Possibly fails or skips a sequence based on the result of an action
-  // simulation.
+  // simulation. If `defer_failure` is true, then on a result of failure, the
+  // test will not fail immediately, but rather add a deferred failure (see
+  // `ReportDeferredFailure()` for more info).
   void HandleActionResult(InteractionSequence* seq,
                           const TrackedElement* el,
                           const std::string& operation_name,
-                          ActionResult result);
+                          ActionResult result,
+                          bool defer_failure = false);
 
   // Gets the pivot element for the specified context, which must exist.
   TrackedElement* GetPivotElement(ElementContext context) const;
@@ -268,14 +270,14 @@ class InteractiveTestPrivate {
   // `id` and context `context`. Must be unique in its context.
   // Returns true on success.
   template <typename Observer, typename V = Observer::ValueType>
-  bool AddStateObserver(ElementIdentifier id,
+  bool AddStateObserver(UntypedStateIdentifier id,
                         ElementContext context,
                         std::unique_ptr<Observer> state_observer);
 
   // Removes `StateObserver` with identifier `id` in `context`; if the context
   // is null, assumes there is exactly one matching observer in some context.
   // Returns true on success.
-  bool RemoveStateObserver(ElementIdentifier id, ElementContext context);
+  bool RemoveStateObserver(UntypedStateIdentifier id, ElementContext context);
 
   // Creates an additional context that will persist as long as copies of the
   // context exist.
@@ -297,6 +299,12 @@ class InteractiveTestPrivate {
   // in RunTestSequenceImpl().
   virtual void OnSequenceComplete();
   virtual void OnSequenceAborted(const InteractionSequence::AbortedData& data);
+
+  // Reports a deferred failure. The tree for `current_context` will be added
+  // to the message. If any deferred failures are reported, the test will fail
+  // at the end.
+  void ReportDeferredFailure(std::string_view error_message,
+                             ElementContext current_context);
 
   // Sets a callback that is called if the test sequence fails instead of
   // failing the current test. Should only be called in tests that are testing
@@ -328,6 +336,9 @@ class InteractiveTestPrivate {
     }
     return result;
   }
+
+  // Converts a state identifier to an element identifier.
+  static ElementIdentifier StateToElementId(UntypedStateIdentifier id);
 
  protected:
   // Dumps the entire tree of named elements. Default implementation organizes
@@ -383,6 +394,9 @@ class InteractiveTestPrivate {
   // Used to relay events to trigger follow-up steps.
   std::map<ElementContext, std::unique_ptr<TrackedElement>> pivot_elements_;
 
+  // Failures to report at the end of a test.
+  std::vector<std::string> deferred_failures_;
+
   // Overrides the default test failure behavior to test the API itself.
   InteractionSequence::AbortedCallback aborted_callback_for_testing_;
 
@@ -428,7 +442,7 @@ class StateObserverElementT : public StateObserverElement {
         current_value_(observer->GetStateObserverInitialState()),
         observer_(std::move(observer)) {
     auto& table = GetLookupTable();
-    CHECK(!base::Contains(table, std::make_pair(id, context)))
+    CHECK(!table.contains(std::make_pair(id, context)))
         << "Duplicate ID + context for StateObserver not allowed: " << id
         << ", " << context;
     table.emplace(std::make_pair(id, context), this);
@@ -500,7 +514,6 @@ class StateObserverElementT : public StateObserverElement {
     return *lookup_table;
   }
 
- private:
   // Since the context can be updated on observer shutdown and needs access to
   // the current value, it needs to be destructed last.
   TestContext test_context_;
@@ -535,20 +548,23 @@ bool MatchAndExplain(std::string_view test_name,
 
 template <typename Observer, typename V>
 bool InteractiveTestPrivate::AddStateObserver(
-    ElementIdentifier id,
+    UntypedStateIdentifier id,
     ElementContext context,
     std::unique_ptr<Observer> state_observer) {
   CHECK(id);
   CHECK(context);
+  const auto element_id = StateToElementId(id);
   for (const auto& existing : state_observer_elements_) {
-    if (existing->identifier() == id && existing->context() == context) {
+    if (existing->identifier() == element_id &&
+        existing->context() == context) {
       LOG(ERROR) << "AddStateObserver: Duplicate observer added for " << id;
       return false;
     }
   }
   state_observer_elements_.emplace_back(
-      std::make_unique<StateObserverElementT<V>>(
-          id, context, std::move(state_observer), CreateAdditionalContext()));
+      std::make_unique<StateObserverElementT<V>>(StateToElementId(id), context,
+                                                 std::move(state_observer),
+                                                 CreateAdditionalContext()));
   return true;
 }
 

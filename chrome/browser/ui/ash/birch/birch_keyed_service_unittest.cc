@@ -16,6 +16,7 @@
 #include "ash/system/focus_mode/focus_mode_util.h"
 #include "ash/system/focus_mode/sounds/focus_mode_sounds_controller.h"
 #include "ash/system/video_conference/fake_video_conference_tray_controller.h"
+#include "base/containers/flat_map.h"
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/strings/utf_string_conversions.h"
@@ -46,6 +47,7 @@
 #include "chrome/test/base/testing_profile_manager.h"
 #include "chromeos/crosapi/mojom/video_conference.mojom.h"
 #include "components/favicon/core/test/mock_favicon_service.h"
+#include "components/send_tab_to_self/page_context.h"
 #include "components/send_tab_to_self/send_tab_to_self_entry.h"
 #include "components/send_tab_to_self/send_tab_to_self_model.h"
 #include "components/send_tab_to_self/target_device_info.h"
@@ -190,6 +192,17 @@ class MockOpenTabsUIDelegate : public sync_sessions::OpenTabsUIDelegate {
     return !sessions->empty();
   }
 
+  base::flat_map<std::string, base::Time>
+  GetAllForeignSessionLastModifiedTimes() const override {
+    std::vector<std::pair<std::string, base::Time>> timestamps;
+    timestamps.reserve(foreign_sessions_.size());
+    for (const auto& session : foreign_sessions_) {
+      timestamps.emplace_back(session->GetSessionTag(),
+                              session->GetModifiedTime());
+    }
+    return base::flat_map<std::string, base::Time>(std::move(timestamps));
+  }
+
   MOCK_METHOD1(GetLocalSession,
                bool(const sync_sessions::SyncedSession** local_session));
 
@@ -248,10 +261,11 @@ class SendTabToSelfModelMock : public send_tab_to_self::TestSendTabToSelfModel {
   send_tab_to_self::SendTabToSelfEntry* AddEntry(
       const GURL& url,
       const std::string& title,
-      const std::string& target_device_cache_guid) override {
+      const std::string& target_device_cache_guid,
+      const send_tab_to_self::PageContext& context) override {
     auto entry = std::make_unique<send_tab_to_self::SendTabToSelfEntry>(
         kChromeSyncGuid, url, title, base::Time::Now(), kChromeSyncDeviceName,
-        target_device_cache_guid);
+        target_device_cache_guid, context);
 
     auto* result = entry.get();
 
@@ -496,7 +510,8 @@ class BirchKeyedServiceTest : public BrowserWithTestWindowTest {
     const GURL kUrl(kChromeSyncUrl);
     const std::string kTitle("Chrome Sync Title");
     const std::string kTargetDeviceSyncCacheGuid(kTargetDeviceCacheGuid);
-    send_tab_to_self_model_->AddEntry(kUrl, kTitle, kTargetDeviceSyncCacheGuid);
+    send_tab_to_self_model_->AddEntry(kUrl, kTitle, kTargetDeviceSyncCacheGuid,
+                                      send_tab_to_self::PageContext());
   }
 
   void SimulateMediaMetadataInit() {

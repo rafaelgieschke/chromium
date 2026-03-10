@@ -343,17 +343,13 @@ ImageBitmap::ImageBitmap(ImageElementBase* image,
 ImageBitmap::ImageBitmap(HTMLVideoElement* video,
                          std::optional<gfx::Rect> crop_rect,
                          const ImageBitmapOptions* options) {
-  // TODO(crbug.com/1181329): ImageBitmap resize test case failed when
-  // quality equals to "low" and "medium". Need further investigate to
-  // enable gpu backed imageBitmap with resize options.
-  const bool allow_accelerated_images =
-      !options->hasResizeWidth() && !options->hasResizeHeight();
   const bool reinterpret_as_srgb =
       (options->colorSpaceConversion() == V8ColorSpaceConversion::Enum::kNone);
-  auto input = video->CreateStaticBitmapImage(
-      allow_accelerated_images, /*size=*/std::nullopt, reinterpret_as_srgb);
-  if (!input)
+  auto input = video->CreateStaticBitmapImage(/*size=*/std::nullopt,
+                                              reinterpret_as_srgb);
+  if (!input) {
     return;
+  }
 
   ParsedOptions parsed_options = ParseOptions(options, crop_rect, input);
   if (DstBufferSizeHasOverflow(parsed_options)) {

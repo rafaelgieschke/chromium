@@ -25,10 +25,11 @@ import org.mockito.Mockito;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowLooper;
 
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.UserActionTester;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManagerImpl;
 import org.chromium.chrome.browser.compositor.overlays.strip.TestTabModel;
@@ -58,8 +59,8 @@ public class UndoRefocusHelperTest {
     @Captor ArgumentCaptor<LayoutStateObserver> mLayoutStateObserverCaptor;
 
     private static final String UNDO_CLOSE_TAB_USER_ACTION = "TabletTabStrip.UndoCloseTab";
-    private final ObservableSupplierImpl<LayoutManagerImpl> mLayoutManagerObservableSupplier =
-            new ObservableSupplierImpl<>();
+    private final SettableMonotonicObservableSupplier<LayoutManagerImpl>
+            mLayoutManagerObservableSupplier = ObservableSuppliers.createMonotonic();
     private TestTabModel mTabModel;
     private Tab mTab0;
     private Tab mTab1;
@@ -88,7 +89,7 @@ public class UndoRefocusHelperTest {
         mUndoRefocusHelper =
                 new UndoRefocusHelper(mTabModelSelector, mLayoutManagerObservableSupplier, true);
         verify(mTabModel).addObserver(mTabModelObserverCaptor.capture());
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mLayoutManagerImpl).addObserver(mLayoutStateObserverCaptor.capture());
 
         when(mLayoutManagerImpl.isLayoutVisible(LayoutType.TAB_SWITCHER)).thenReturn(false);

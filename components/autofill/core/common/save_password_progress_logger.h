@@ -8,6 +8,7 @@
 #include <stddef.h>
 
 #include <string>
+#include <string_view>
 
 #include "components/autofill/core/common/form_data.h"
 #include "url/gurl.h"
@@ -189,6 +190,7 @@ class SavePasswordProgressLogger {
     STRING_AUTOMATED_PASSWORD_CHANGE_PASSWORD_CHANGE_DECLINED,
     STRING_AUTOMATED_PASSWORD_CHANGE_STATE_CHANGED,
     STRING_AUTOMATED_PASSWORD_CHANGE_SUBMISSION_VERIFIED,
+    STRING_AUTOMATED_PASSWORD_CHANGE_USER_INTERVENTION_AFTER_SUBMISSION,
     STRING_AUTOMATED_PASSWORD_CHANGE_CROSS_ORIGIN_NAVIGATION,
     STRING_AUTOMATED_PASSWORD_CHANGE_PAGE_CONTENT_RECEIVED,
     STRING_AUTOMATED_PASSWORD_CHANGE_BUTTON_CLICK_ACTION_RESULT,
@@ -201,11 +203,11 @@ class SavePasswordProgressLogger {
     STRING_PASSWORD_CHANGE_MODEL_EXECUTION_NOT_ALLOWED,
     STRING_PASSWORD_CHANGE_SAVING_DISABLED,
     STRING_PASSWORD_CHANGE_DISABLED_BY_POLICY,
-    STRING_PASSWORD_CHANGE_FEATURE_ENABLED,
     STRING_PASSWORD_CHANGE_UNSUPPORTED_LANGUAGE,
     STRING_PASSWORD_CHANGE_UNSUPPORTED_COUNTRY,
     STRING_PASSWORD_CHANGE_URL_AVAILABLE,
     STRING_PASSWORD_CHANGE_USER_IS_NOT_ACTIVE,
+    STRING_PASSWORD_CHANGE_SIGNUP_FORM,
     STRING_LOGIN_STATE_CHECK_STARTED,
     STRING_LOGIN_STATE_CHECK_REQUEST_SENT,
     STRING_LOGIN_STATE_CHECK_RESPONSE_RECEIVED,
@@ -268,13 +270,14 @@ class SavePasswordProgressLogger {
   // will be still possible to match the scrubbed string to the original ID or
   // name in the HTML doc. That's good enough for the logging purposes, and
   // provides some security benefits.
-  static std::string ScrubElementID(const std::u16string& element_id);
+  static std::string ScrubElementID(std::u16string_view element_id);
 
   // The UTF-8 version of the function above.
   static std::string ScrubElementID(std::string element_id);
 
   // Translates the StringID values into the corresponding strings.
-  static std::string GetStringFromID(SavePasswordProgressLogger::StringID id);
+  static std::string_view GetStringFromID(
+      SavePasswordProgressLogger::StringID id);
 
  protected:
   // Sends `log` immediately for display.

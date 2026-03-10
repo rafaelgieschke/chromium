@@ -10,7 +10,7 @@
 #include "base/types/pass_key.h"
 #include "third_party/blink/public/mojom/ai/ai_language_model.mojom-blink.h"
 #include "third_party/blink/public/mojom/ai/ai_manager.mojom-blink.h"
-#include "third_party/blink/public/mojom/ai/model_streaming_responder.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/ai/model_streaming_responder.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_availability.h"
@@ -28,7 +28,6 @@
 #include "third_party/blink/renderer/modules/ai/language_model_params.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
-#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 
 namespace blink {
 
@@ -55,6 +54,7 @@ class LanguageModel final : public EventTarget, public ExecutionContextClient {
   ExecutionContext* GetExecutionContext() const override;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(quotaoverflow, kQuotaoverflow)
+  DEFINE_ATTRIBUTE_EVENT_LISTENER(contextoverflow, kContextoverflow)
 
   // language_model.idl implementation.
   static ScriptPromise<LanguageModel> create(
@@ -82,16 +82,22 @@ class LanguageModel final : public EventTarget, public ExecutionContextClient {
                                      const V8LanguageModelPrompt* input,
                                      const LanguageModelAppendOptions* options,
                                      ExceptionState& exception_state);
+  ScriptPromise<IDLDouble> measureContextUsage(
+      ScriptState* script_state,
+      const V8LanguageModelPrompt* input,
+      const LanguageModelPromptOptions* options,
+      ExceptionState& exception_state);
   ScriptPromise<IDLDouble> measureInputUsage(
       ScriptState* script_state,
       const V8LanguageModelPrompt* input,
       const LanguageModelPromptOptions* options,
       ExceptionState& exception_state);
-  double inputQuota() const { return input_quota_; }
-  double inputUsage() const { return input_usage_; }
-
-  uint32_t topK() const { return top_k_; }
-  float temperature() const { return temperature_; }
+  double contextUsage() const { return info_->input_usage; }
+  double contextWindow() const { return info_->input_quota; }
+  double inputQuota() const { return info_->input_quota; }
+  double inputUsage() const { return info_->input_usage; }
+  uint32_t topK() const { return info_->sampling_params->top_k; }
+  float temperature() const { return info_->sampling_params->temperature; }
 
   ScriptPromise<LanguageModel> clone(ScriptState* script_state,
                                      const LanguageModelCloneOptions* options,
@@ -112,9 +118,10 @@ class LanguageModel final : public EventTarget, public ExecutionContextClient {
       ScriptPromiseResolver<V8LanguageModelPromptResult>* resolver,
       const String& response,
       mojom::blink::ModelExecutionContextInfoPtr context_info);
+  void HandleToolCalls(Vector<mojom::blink::ToolCallPtr> tool_calls);
   void OnResponseComplete(
       mojom::blink::ModelExecutionContextInfoPtr context_info);
-  void OnQuotaOverflow();
+  void OnContextOverflow();
 
   using ResolverOrStream =
       std::variant<ScriptPromiseResolverBase*, ReadableStream*>;
@@ -143,15 +150,12 @@ class LanguageModel final : public EventTarget, public ExecutionContextClient {
                                 const LanguageModelPromptOptions* options,
                                 ExceptionState& exception_state);
 
-  uint64_t input_usage_;
-  uint64_t input_quota_ = 0;
-  uint32_t top_k_ = 0;
-  float temperature_ = 0.0;
-  // Prompt types supported by the language model in this session.
-  HashSet<mojom::blink::AILanguageModelPromptType> input_types_;
-
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   HeapMojoRemote<mojom::blink::AILanguageModel> language_model_remote_;
+  // Info about the language model's supported types and instance state.
+  blink::mojom::blink::AILanguageModelInstanceInfoPtr info_;
+  // Tool calls from the current response, populated by HandleToolCalls.
+  Vector<mojom::blink::ToolCallPtr> pending_tool_calls_;
 };
 
 }  // namespace blink

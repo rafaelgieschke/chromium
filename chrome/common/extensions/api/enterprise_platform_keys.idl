@@ -21,15 +21,11 @@ namespace enterprise.platformKeys {
     // interface. The cryptographic operations, including key generation, are
     // hardware-backed.
     // <p>Only non-extractable keys can be generated. The supported key types
-    // are RSASSA-PKCS1-V1_5 and RSA-OAEP (on Chrome versions 135+) with
-    // <code>modulusLength</code> up to 2048 and ECDSA with
-    // <code>namedCurve</code> P-256. Each RSASSA-PKCS1-V1_5 and ECDSA key can
-    // be used for signing data at most once, unless the extension is
-    // allowlisted through the
+    // are RSASSA-PKCS1-V1_5 with <code>modulusLength</code> up to 2048 and
+    // ECDSA with <code>namedCurve</code> P-256. Each key can be used for
+    // signing data at most once, unless the extension is allowlisted by the
     // <a href="https://chromeenterprise.google/policies/#KeyPermissions">KeyPermissions policy</a>,
-    // in which case the key can be used indefinitely. RSA-OAEP keys are
-    // supported since Chrome version 135 and can be used by extensions
-    // allowlisted through that same policy to unwrap other keys.</p>
+    // in which case the key can be used indefinitely.</p>
     // <p>Keys generated on a specific <code>Token</code> cannot be used with
     // any other Tokens, nor can they be used with
     // <code>window.crypto.subtle</code>. Equally, <code>Key</code> objects
@@ -43,15 +39,12 @@ namespace enterprise.platformKeys {
     // software-backed. Protection of the keys, and thus implementation of the
     // non-extractable property, is done in software, so the keys are less
     // protected than hardware-backed keys.
-    // <p>Only non-extractable keys can be generated. The supported key types
-    // are RSASSA-PKCS1-V1_5 and RSA-OAEP (on Chrome versions 135+) with
-    // <code>modulusLength</code> up to 2048. Each RSASSA-PKCS1-V1_5 key can be
-    // used for signing data at most once, unless the extension is allowlisted
-    // through the
+    // <p>Only non-extractable keys can be generated. The only supported key
+    // type is RSASSA-PKCS1-V1_5 with <code>modulusLength</code> up to 2048.
+    // Each key can be used for signing data at most once, unless the extension
+    // is allowlisted through the
     // <a href="https://chromeenterprise.google/policies/#KeyPermissions">KeyPermissions policy</a>,
-    // in which case the key can be used indefinitely. RSA-OAEP keys are
-    // supported since Chrome version 135 and can be used by extensions
-    // allowlisted through that same policy to unwrap other keys.</p>
+    // in which case the key can be used indefinitely.</p>
     // <p>Keys generated on a specific <code>Token</code> cannot be used with
     // any other Tokens, nor can they be used with
     // <code>window.crypto.subtle</code>. Equally, <code>Key</code> objects
@@ -115,7 +108,8 @@ namespace enterprise.platformKeys {
     // token. Can be used to check for the existence and expiration of client
     // certificates that are usable for a certain authentication.
     // |tokenId|: The id of a Token returned by <code>getTokens</code>.
-    // |callback|: Called back with the list of the available certificates.
+    // |callback|: Returns a Promise which resolves with the list of the
+    // available certificates.
     static void getCertificates(DOMString tokenId,
                                 GetCertificatesCallback callback);
 
@@ -126,7 +120,8 @@ namespace enterprise.platformKeys {
     // system and browser for authentication.
     // |tokenId|: The id of a Token returned by <code>getTokens</code>.
     // |certificate|: The DER encoding of a X.509 certificate.
-    // |callback|: Called back when this operation is finished.
+    // |callback|: Returns a Promise which resolves when this operation is
+    // finished.
     static void importCertificate(DOMString tokenId,
                                   ArrayBuffer certificate,
                                   optional DoneCallback callback);
@@ -137,7 +132,8 @@ namespace enterprise.platformKeys {
     // choice. Should be used to free storage in the certificate store.
     // |tokenId|: The id of a Token returned by <code>getTokens</code>.
     // |certificate|: The DER encoding of a X.509 certificate.
-    // |callback|: Called back when this operation is finished.
+    // |callback|: Returns a Promise which resolves when this operation is
+    // finished.
     static void removeCertificate(DOMString tokenId,
                                   ArrayBuffer certificate,
                                   optional DoneCallback callback);
@@ -167,7 +163,7 @@ namespace enterprise.platformKeys {
     // <code>"user"</code> token and is not accessible by any other API.
     // |options|: Object containing the fields defined in
     //            $(ref:ChallengeKeyOptions).
-    // |callback|: Called back with the challenge response.
+    // |callback|: Returns a Promise which resolves with the challenge response.
     static void challengeKey(ChallengeKeyOptions options,
                              ChallengeCallback callback);
 
@@ -199,7 +195,7 @@ namespace enterprise.platformKeys {
     //                signing key. This key is 2048-bit RSA. Subsequent calls
     //                to this function will then generate a new Enterprise
     //                Machine Key.
-    // |callback|: Called back with the challenge response.
+    // |callback|: Returns a Promise which resolves with the challenge response.
     [deprecated="Use $(ref:challengeKey) instead."]
     static void challengeMachineKey(ArrayBuffer challenge,
                                     optional boolean registerKey,
@@ -232,7 +228,7 @@ namespace enterprise.platformKeys {
     //                with a certificate and used like any other signing key.
     //                This key is 2048-bit RSA. Subsequent calls to this
     //                function will then generate a new Enterprise User Key.
-    // |callback|: Called back with the challenge response.
+    // |callback|: Returns a Promise which resolves with the challenge response.
     [deprecated="Use $(ref:challengeKey) instead."]
     static void challengeUserKey(ArrayBuffer challenge,
                                  boolean registerKey,

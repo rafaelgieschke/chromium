@@ -46,7 +46,8 @@ class SSLConfigServiceManager {
   // IDs.
   void UpdateTrustAnchorIDs(
       std::vector<std::vector<uint8_t>> trust_anchor_ids,
-      std::vector<std::vector<uint8_t>> mtc_trust_anchor_ids);
+      std::vector<std::vector<uint8_t>> mtc_trust_anchor_ids,
+      int64_t mtc_update_time_seconds);
 
   // Computes the SSL compliance policy settings based on the given prefs and
   // feature state, and writes those settings into the appropriate fields in
@@ -81,10 +82,6 @@ class SSLConfigServiceManager {
   StringPrefMember ssl_version_min_;
   StringPrefMember ssl_version_max_;
   StringListPrefMember h2_client_cert_coalescing_host_patterns_;
-  BooleanPrefMember post_quantum_enabled_;
-#if BUILDFLAG(IS_CHROMEOS)
-  BooleanPrefMember device_post_quantum_enabled_;
-#endif
   BooleanPrefMember ech_enabled_;
   StringPrefMember key_exchange_compliance_;
   StringPrefMember tls13_cipher_compliance_;
@@ -103,6 +100,10 @@ class SSLConfigServiceManager {
   // Like `trust_anchor_ids_` but for MTC signatureless certs. (This is not
   // a std::optional since there is no built-in list of MTC ids to override.)
   std::vector<std::vector<uint8_t>> mtc_trust_anchor_ids_;
+
+  // The time (in seconds since the unix epoch) that the MTC trust anchor IDs
+  // were generated.
+  int64_t mtc_update_time_seconds_ = 0;
 };
 
 #endif  // CHROME_BROWSER_SSL_SSL_CONFIG_SERVICE_MANAGER_H_

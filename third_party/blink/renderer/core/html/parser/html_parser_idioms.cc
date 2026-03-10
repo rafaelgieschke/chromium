@@ -70,6 +70,13 @@ String StripLeadingAndTrailingHTMLSpaces(const String& string) {
   });
 }
 
+StringView StripLeadingAndTrailingHtmlSpaces(const StringView& string) {
+  if (string.empty()) {
+    return string.IsNull() ? string : g_empty_atom;
+  }
+  return string.StripWhiteSpace(IsHTMLSpace);
+}
+
 // TODO(iclelland): Consider refactoring this into a general
 // String::Split(predicate) method
 Vector<String> SplitOnASCIIWhitespace(const String& input) {
@@ -161,12 +168,12 @@ double ParseToDoubleForNumberType(const String& string, double fallback_value) {
   if (first_character != '-' && first_character != '.' &&
       !IsASCIIDigit(first_character))
     return fallback_value;
-  if (string.EndsWith('.'))
+  if (string.ends_with('.')) {
     return fallback_value;
+  }
 
-  bool valid = false;
-  double value = string.ToDouble(&valid);
-  return CheckDoubleValue(value, valid, fallback_value);
+  auto value = StringToDouble(string);
+  return CheckDoubleValue(value.value_or(0), value.has_value(), fallback_value);
 }
 
 template <typename CharacterType>
@@ -335,7 +342,7 @@ String ExtractCharset(const String& value) {
   unsigned length = value.length();
 
   while (pos < length) {
-    pos = value.FindIgnoringASCIICase(kCharsetString, pos);
+    pos = value.FindIgnoringAsciiCase(kCharsetString, pos);
     if (pos == kNotFound)
       break;
 
@@ -395,8 +402,9 @@ TextEncoding EncodingFromMetaAttributes(const HTMLAttributeList& attributes) {
     const AtomicString& attribute_value = AtomicString(html_attribute.second);
 
     if (ThreadSafeMatch(attribute_name, html_names::kHttpEquivAttr)) {
-      if (EqualIgnoringASCIICase(attribute_value, "content-type"))
+      if (EqualIgnoringAsciiCase(attribute_value, "content-type")) {
         got_pragma = true;
+      }
     } else if (ThreadSafeMatch(attribute_name, html_names::kCharsetAttr)) {
       has_charset = true;
       charset = attribute_value;
@@ -411,7 +419,7 @@ TextEncoding EncodingFromMetaAttributes(const HTMLAttributeList& attributes) {
 
   if (mode == MetaAttribute::kCharset ||
       (mode == MetaAttribute::kPragma && got_pragma))
-    return TextEncoding(StripLeadingAndTrailingHTMLSpaces(charset));
+    return TextEncoding(StripLeadingAndTrailingHtmlSpaces(charset));
 
   return TextEncoding();
 }

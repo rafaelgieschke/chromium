@@ -21,8 +21,6 @@ using ::openscreen::cast::proto::DeviceAuthMessage;
 // Reserved message namespaces for internal messages.
 static constexpr char kAuthNamespace[] =
     "urn:x-cast:com.google.cast.tp.deviceauth";
-static constexpr char kHeartbeatNamespace[] =
-    "urn:x-cast:com.google.cast.tp.heartbeat";
 static constexpr char kConnectionNamespace[] =
     "urn:x-cast:com.google.cast.tp.connection";
 static constexpr char kReceiverNamespace[] =
@@ -42,10 +40,6 @@ static constexpr char kNotificationDisabledError[] =
 
 // Cast application protocol message types.
 enum class CastMessageType {
-  // Heartbeat messages.
-  kPing,
-  kPong,
-
   // RPC control/status messages used by Media Remoting. These occur at high
   // frequency, up to dozens per second at times, and should not be logged.
   kRpc,
@@ -176,7 +170,7 @@ bool IsCastReservedNamespace(std::string_view message_namespace);
 
 // Returns the value in the "type" field or |kOther| if the field is not found.
 // The result is only valid if |payload| is a Cast application protocol message.
-CastMessageType ParseMessageTypeFromPayload(const base::Value::Dict& payload);
+CastMessageType ParseMessageTypeFromPayload(const base::DictValue& payload);
 
 // Returns a human readable string for |message_type|.
 const char* ToString(CastMessageType message_type);
@@ -207,10 +201,6 @@ bool IsReceiverMessage(const CastMessage& message);
 
 // Returns whether |message| is destined for the platform sender.
 bool IsPlatformSenderMessage(const CastMessage& message);
-
-// Creates a keep-alive message of either type PING or PONG.
-CastMessage CreateKeepAlivePingMessage();
-CastMessage CreateKeepAlivePongMessage();
 
 enum VirtualConnectionType {
   kStrong = 0,
@@ -263,12 +253,12 @@ CastMessage CreateCastMessage(const std::string& message_namespace,
                               const std::string& source_id,
                               const std::string& destination_id);
 
-CastMessage CreateMediaRequest(const base::Value::Dict& body,
+CastMessage CreateMediaRequest(const base::DictValue& body,
                                int request_id,
                                const std::string& source_id,
                                const std::string& destination_id);
 
-CastMessage CreateSetVolumeRequest(const base::Value::Dict& body,
+CastMessage CreateSetVolumeRequest(const base::DictValue& body,
                                    int request_id,
                                    const std::string& source_id);
 
@@ -285,12 +275,12 @@ enum class GetAppAvailabilityResult {
 const char* ToString(GetAppAvailabilityResult result);
 
 // Extracts request ID from |payload| corresponding to a Cast message response.
-std::optional<int> GetRequestIdFromResponse(const base::Value::Dict& payload);
+std::optional<int> GetRequestIdFromResponse(const base::DictValue& payload);
 
 // Returns the GetAppAvailabilityResult corresponding to |app_id| in |payload|.
 // Returns kUnknown if result is not found.
 GetAppAvailabilityResult GetAppAvailabilityResultFromResponse(
-    const base::Value::Dict& payload,
+    const base::DictValue& payload,
     const std::string& app_id);
 
 // Result of a session launch.
@@ -321,7 +311,7 @@ struct LaunchSessionResponse {
 
   Result result = Result::kUnknown;
   // Populated if |result| is |kOk|.
-  std::optional<base::Value::Dict> receiver_status;
+  std::optional<base::DictValue> receiver_status;
   // Populated if |result| is |kError|.
   std::string error_msg;
 };
@@ -330,8 +320,7 @@ struct LaunchSessionResponse {
 // LaunchSessionResponse if |payload| is not a properly formatted launch
 // response. |payload| must be a dictionary from the string payload of a
 // CastMessage.
-LaunchSessionResponse GetLaunchSessionResponse(
-    const base::Value::Dict& payload);
+LaunchSessionResponse GetLaunchSessionResponse(const base::DictValue& payload);
 
 LaunchSessionResponse GetLaunchSessionResponseError(std::string error_msg);
 

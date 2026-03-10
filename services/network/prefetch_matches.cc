@@ -18,7 +18,6 @@
 
 #include "base/check.h"
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/containers/fixed_flat_map.h"
 #include "base/containers/fixed_flat_set.h"
 #include "base/containers/span.h"
@@ -91,6 +90,7 @@ namespace {
   DO_FIELD(do_not_prompt_for_login) __VA_ARGS__                    \
   DO_FIELD(is_outermost_main_frame) __VA_ARGS__                    \
   DO_FIELD(transition_type) __VA_ARGS__                            \
+  DO_FIELD(is_reload_navigation) __VA_ARGS__                       \
   DO_FIELD(previews_state) __VA_ARGS__                             \
   DO_FIELD(upgrade_if_insecure) __VA_ARGS__                        \
   DO_FIELD(is_revalidating) __VA_ARGS__                            \
@@ -176,6 +176,7 @@ enum class FieldsForUma {
   kRequiredIpAddressSpace = 20,
   kCredentialsMode = 21,
   kRedirectMode = 22,
+  // DEPRECATED: kAllowUnsafeRedirectSchemes = 67,
   kFetchIntegrity = 23,
   kDestination = 24,
   kOriginalDestination = 25,
@@ -220,7 +221,8 @@ enum class FieldsForUma {
   kExpectedPublicKeys = 64,
   kPermissionsPolicy = 65,
   kClientSideContentDecodingEnabled = 66,
-  kMaxValue = kClientSideContentDecodingEnabled,
+  kIsReloadNavigation = 68,
+  kMaxValue = kIsReloadNavigation,
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/network/enums.xml:PrefetchMatchesResourceRequestField)
 
@@ -266,6 +268,7 @@ constexpr auto kUmaEnumMap = base::MakeFixedFlatMap<Fields, FieldsForUma>({
     {Fields::kdo_not_prompt_for_login, FieldsForUma::kDoNotPromptForLogin},
     {Fields::kis_outermost_main_frame, FieldsForUma::kIsOutermostMainFrame},
     {Fields::ktransition_type, FieldsForUma::kTransitionType},
+    {Fields::kis_reload_navigation, FieldsForUma::kIsReloadNavigation},
     {Fields::kpreviews_state, FieldsForUma::kPreviewsState},
     {Fields::kupgrade_if_insecure, FieldsForUma::kUpgradeIfInsecure},
     {Fields::kis_revalidating, FieldsForUma::kIsRevalidating},
@@ -520,7 +523,7 @@ struct FieldMatcher {
 };
 
 template <Fields f>
-constexpr bool kFieldIsIgnored = base::Contains(kIgnoredFields, f);
+constexpr bool kFieldIsIgnored = std::ranges::contains(kIgnoredFields, f);
 
 // This is the implementation of FieldMatcher that completely ignores the
 // contents of the field. Fields which should use this implementation should be

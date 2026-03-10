@@ -14,12 +14,12 @@ OverscrollAreaTracker::OverscrollAreaTracker(Element* element)
     : container_(element) {}
 
 void OverscrollAreaTracker::AddOverscroll(Element* element) {
-  CHECK(!element->OverscrollContainer());
+  CHECK(!element->GetOverscrollContainer());
   DCHECK(element->isConnected());
   element->SetOverscrollContainer(container_);
   overscroll_members_.push_back(element);
+  container_->SetNeedsReattachLayoutTree();
   needs_dom_sort_ = overscroll_members_.size() > 1;
-  needs_layout_tree_rebuild_ = true;
 }
 
 const VectorOf<Element>& OverscrollAreaTracker::DOMSortedElements() {
@@ -40,15 +40,13 @@ void OverscrollAreaTracker::RemoveAllOverscroll() {
   }
   overscroll_members_.clear();
   needs_dom_sort_ = false;
-  needs_layout_tree_rebuild_ = true;
 }
 
 void OverscrollAreaTracker::RemoveOverscroll(Element* element) {
-  CHECK_EQ(element->OverscrollContainer(), container_);
+  CHECK_EQ(element->GetOverscrollContainer(), container_);
   element->ClearOverscrollContainer();
   Erase(overscroll_members_, element);
   needs_dom_sort_ = needs_dom_sort_ && overscroll_members_.size() > 1;
-  needs_layout_tree_rebuild_ = true;
 }
 
 void OverscrollAreaTracker::Trace(Visitor* visitor) const {

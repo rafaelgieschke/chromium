@@ -660,7 +660,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
       @"Syncing to AccountUserNameAccount@example.com";
   accountItemDetailWithError.accessoryType =
       UITableViewCellAccessoryDisclosureIndicator;
-  accountItemDetailWithError.shouldDisplayError = YES;
+  accountItemDetailWithError.detailImage = TableViewAccountDetailImage::kError;
   [model addItem:accountItemDetailWithError
       toSectionWithIdentifier:SectionIdentifierAccount];
 
@@ -773,7 +773,10 @@ typedef NS_ENUM(NSInteger, ItemType) {
           ^(FaviconAttributes* attributes, bool cached) {
             URLItem.faviconAttributes = attributes;
             if (!cached && attributes.faviconImage) {
-              [tableView reconfigureRowsAtIndexPaths:@[ indexPath ]];
+              LegacyTableViewCell* cell =
+                  base::apple::ObjCCastStrict<LegacyTableViewCell>(
+                      [self.tableView cellForRowAtIndexPath:indexPath]);
+              [URLItem configureCell:cell withStyler:self.styler];
             }
           });
     }

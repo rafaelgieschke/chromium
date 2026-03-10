@@ -82,7 +82,6 @@ class CORE_EXPORT DedicatedWorkerGlobalScope final : public WorkerGlobalScope {
       std::unique_ptr<Vector<mojom::blink::OriginTrialFeature>>
           inherited_trial_features,
       const BeginFrameProviderParams& begin_frame_provider_params,
-      bool parent_cross_origin_isolated_capability,
       bool direct_socket_isolated_capability,
       mojo::PendingRemote<mojom::blink::DedicatedWorkerHost>
           dedicated_worker_host,
@@ -114,6 +113,7 @@ class CORE_EXPORT DedicatedWorkerGlobalScope final : public WorkerGlobalScope {
       const KURL& response_url,
       network::mojom::ReferrerPolicy response_referrer_policy,
       Vector<network::mojom::blink::ContentSecurityPolicyPtr> response_csp,
+      DocumentPolicy::DocumentPolicyBundle response_document_policy,
       const Vector<String>* response_origin_trial_tokens) override;
   void FetchAndRunClassicScript(
       const KURL& script_url,
@@ -203,7 +203,6 @@ class CORE_EXPORT DedicatedWorkerGlobalScope final : public WorkerGlobalScope {
       std::unique_ptr<Vector<mojom::blink::OriginTrialFeature>>
           inherited_trial_features,
       const BeginFrameProviderParams& begin_frame_provider_params,
-      bool parent_cross_origin_isolated_capability,
       bool is_isolated_context,
       mojo::PendingRemote<mojom::blink::DedicatedWorkerHost>
           dedicated_worker_host,

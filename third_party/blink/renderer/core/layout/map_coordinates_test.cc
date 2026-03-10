@@ -98,6 +98,14 @@ gfx::QuadF MapCoordinatesTest::MapAncestorToLocal(
   return object->AncestorToLocalQuad(ancestor, quad, mode);
 }
 
+namespace {
+
+inline LayoutBox* ParentBoxOf(const LayoutObject* object) {
+  return To<LayoutBox>(object->Parent());
+}
+
+}  // namespace
+
 TEST_F(MapCoordinatesTest, SimpleText) {
   SetBodyInnerHTML("<div id='container'><br>text</div>");
 
@@ -157,7 +165,7 @@ TEST_F(MapCoordinatesTest, OverflowClip) {
   To<Element>(overflow->GetNode())
       ->GetLayoutBoxForScrolling()
       ->GetScrollableArea()
-      ->ScrollToAbsolutePosition(gfx::PointF(32, 54));
+      ->ScrollToAbsolutePositionForTest(gfx::PointF(32, 54));
 
   PhysicalOffset mapped_point =
       MapLocalToAncestor(target, To<LayoutBoxModelObject>(target->Parent()),
@@ -360,9 +368,9 @@ TEST_F(MapCoordinatesTest, FixedPos) {
   auto* target = GetLayoutBoxByElementId("target");
   auto* static_child = GetLayoutBoxByElementId("staticChild");
   auto* container = GetLayoutBoxByElementId("container");
-  LayoutBox* body = container->ParentBox();
-  LayoutBox* html = body->ParentBox();
-  LayoutBox* view = html->ParentBox();
+  LayoutBox* body = ParentBoxOf(container);
+  LayoutBox* html = ParentBoxOf(body);
+  LayoutBox* view = ParentBoxOf(html);
   ASSERT_TRUE(IsA<LayoutView>(view));
 
   PhysicalOffset mapped_point =
@@ -419,9 +427,9 @@ TEST_F(MapCoordinatesTest, FixedPosAuto) {
   auto* target = GetLayoutBoxByElementId("target");
   auto* static_child = GetLayoutBoxByElementId("staticChild");
   auto* container = GetLayoutBoxByElementId("container");
-  LayoutBox* body = container->ParentBox();
-  LayoutBox* html = body->ParentBox();
-  LayoutBox* view = html->ParentBox();
+  LayoutBox* body = ParentBoxOf(container);
+  LayoutBox* html = ParentBoxOf(body);
+  LayoutBox* view = ParentBoxOf(html);
   ASSERT_TRUE(IsA<LayoutView>(view));
 
   PhysicalOffset mapped_point =
@@ -483,9 +491,9 @@ TEST_F(MapCoordinatesTest, FixedPosInFixedPos) {
   auto* outer_fixed = GetLayoutBoxByElementId("outerFixed");
   auto* static_child = GetLayoutBoxByElementId("staticChild");
   auto* container = GetLayoutBoxByElementId("container");
-  LayoutBox* body = container->ParentBox();
-  LayoutBox* html = body->ParentBox();
-  LayoutBox* view = html->ParentBox();
+  LayoutBox* body = ParentBoxOf(container);
+  LayoutBox* html = ParentBoxOf(body);
+  LayoutBox* view = ParentBoxOf(html);
   ASSERT_TRUE(IsA<LayoutView>(view));
 
   PhysicalOffset mapped_point =
@@ -543,9 +551,9 @@ TEST_F(MapCoordinatesTest, FixedPosInFixedPosScrollView) {
 
   auto* target = GetLayoutBoxByElementId("target");
   auto* container = GetLayoutBoxByElementId("container");
-  LayoutBox* body = container->ParentBox();
-  LayoutBox* html = body->ParentBox();
-  LayoutBox* view = html->ParentBox();
+  LayoutBox* body = ParentBoxOf(container);
+  LayoutBox* html = ParentBoxOf(body);
+  LayoutBox* view = ParentBoxOf(html);
   ASSERT_TRUE(IsA<LayoutView>(view));
 
   GetDocument().View()->LayoutViewport()->SetScrollOffset(
@@ -578,9 +586,9 @@ TEST_F(MapCoordinatesTest, FixedPosInAbsolutePosScrollView) {
 
   auto* target = GetLayoutBoxByElementId("target");
   auto* container = GetLayoutBoxByElementId("container");
-  LayoutBox* body = container->ParentBox();
-  LayoutBox* html = body->ParentBox();
-  LayoutBox* view = html->ParentBox();
+  LayoutBox* body = ParentBoxOf(container);
+  LayoutBox* html = ParentBoxOf(body);
+  LayoutBox* view = ParentBoxOf(html);
   ASSERT_TRUE(IsA<LayoutView>(view));
 
   GetDocument().View()->LayoutViewport()->SetScrollOffset(
@@ -620,9 +628,9 @@ TEST_F(MapCoordinatesTest, FixedPosInTransform) {
 
   auto* target = GetLayoutBoxByElementId("target");
   auto* container = GetLayoutBoxByElementId("container");
-  LayoutBox* body = container->ParentBox();
-  LayoutBox* html = body->ParentBox();
-  LayoutBox* view = html->ParentBox();
+  LayoutBox* body = ParentBoxOf(container);
+  LayoutBox* html = ParentBoxOf(body);
+  LayoutBox* view = ParentBoxOf(html);
   ASSERT_TRUE(IsA<LayoutView>(view));
 
   PhysicalOffset mapped_point =
@@ -660,9 +668,9 @@ TEST_F(MapCoordinatesTest, FixedPosInContainPaint) {
 
   auto* target = GetLayoutBoxByElementId("target");
   auto* container = GetLayoutBoxByElementId("container");
-  LayoutBox* body = container->ParentBox();
-  LayoutBox* html = body->ParentBox();
-  LayoutBox* view = html->ParentBox();
+  LayoutBox* body = ParentBoxOf(container);
+  LayoutBox* html = ParentBoxOf(body);
+  LayoutBox* view = ParentBoxOf(html);
   ASSERT_TRUE(IsA<LayoutView>(view));
 
   PhysicalOffset mapped_point =
@@ -1212,7 +1220,7 @@ TEST_F(MapCoordinatesTest, Table) {
   EXPECT_EQ(PhysicalOffset(), mapped_point);
 
   // Walk each ancestor in the chain separately, to verify each step on the way.
-  LayoutBox* td = target->ParentBox();
+  LayoutBox* td = ParentBoxOf(target);
   ASSERT_TRUE(td->IsTableCell());
   mapped_point = MapLocalToAncestor(target, td, PhysicalOffset());
   // Cells are middle-aligned by default.
@@ -1220,21 +1228,21 @@ TEST_F(MapCoordinatesTest, Table) {
   mapped_point = MapAncestorToLocal(target, td, mapped_point);
   EXPECT_EQ(PhysicalOffset(), mapped_point);
 
-  LayoutBox* tr = td->ParentBox();
+  LayoutBox* tr = ParentBoxOf(td);
   ASSERT_TRUE(tr->IsTableRow());
   mapped_point = MapLocalToAncestor(td, tr, PhysicalOffset(2, 47));
   EXPECT_EQ(PhysicalOffset(116, 47), mapped_point);
   mapped_point = MapAncestorToLocal(td, tr, mapped_point);
   EXPECT_EQ(PhysicalOffset(2, 47), mapped_point);
 
-  LayoutBox* tbody = tr->ParentBox();
+  LayoutBox* tbody = ParentBoxOf(tr);
   ASSERT_TRUE(tbody->IsTableSection());
   mapped_point = MapLocalToAncestor(tr, tbody, PhysicalOffset(126, 47));
   EXPECT_EQ(PhysicalOffset(126, 161), mapped_point);
   mapped_point = MapAncestorToLocal(tr, tbody, mapped_point);
   EXPECT_EQ(PhysicalOffset(126, 47), mapped_point);
 
-  LayoutBox* table = tbody->ParentBox();
+  LayoutBox* table = ParentBoxOf(tbody);
   ASSERT_TRUE(table->IsTable());
   mapped_point = MapLocalToAncestor(tbody, table, PhysicalOffset(126, 161));
   EXPECT_EQ(PhysicalOffset(141, 290), mapped_point);
@@ -1673,7 +1681,7 @@ TEST_F(MapCoordinatesTest, IgnoreScrollOffset) {
   To<Element>(scroller->GetNode())
       ->GetLayoutBoxForScrolling()
       ->GetScrollableArea()
-      ->ScrollToAbsolutePosition(gfx::PointF(0, 50));
+      ->ScrollToAbsolutePositionForTest(gfx::PointF(0, 50));
 
   EXPECT_EQ(PhysicalOffset(0, -40),
             MapLocalToAncestor(box, scroller, PhysicalOffset()));
@@ -1712,7 +1720,7 @@ TEST_F(MapCoordinatesTest, IgnoreScrollOffsetForInline) {
   To<Element>(scroller->GetNode())
       ->GetLayoutBoxForScrolling()
       ->GetScrollableArea()
-      ->ScrollToAbsolutePosition(gfx::PointF(0, 50));
+      ->ScrollToAbsolutePositionForTest(gfx::PointF(0, 50));
 
   EXPECT_EQ(PhysicalOffset(0, 10),
             MapLocalToAncestor(box, scroller, PhysicalOffset()));
@@ -1749,7 +1757,7 @@ TEST_F(MapCoordinatesTest, IgnoreScrollOffsetWithWritingModes) {
 
   scroll_element->GetLayoutBoxForScrolling()
       ->GetScrollableArea()
-      ->ScrollToAbsolutePosition(gfx::PointF(0, 50));
+      ->ScrollToAbsolutePositionForTest(gfx::PointF(0, 50));
 
   EXPECT_EQ(PhysicalOffset(1990, -40),
             MapLocalToAncestor(box, scroller, PhysicalOffset()));
@@ -1759,7 +1767,7 @@ TEST_F(MapCoordinatesTest, IgnoreScrollOffsetWithWritingModes) {
 
   scroll_element->GetLayoutBoxForScrolling()
       ->GetScrollableArea()
-      ->ScrollToAbsolutePosition(gfx::PointF(1900, 50));
+      ->ScrollToAbsolutePositionForTest(gfx::PointF(1900, 50));
 
   EXPECT_EQ(PhysicalOffset(90, -40),
             MapLocalToAncestor(box, scroller, PhysicalOffset()));
@@ -1787,7 +1795,7 @@ TEST_F(MapCoordinatesTest, FixedPositionWithScrollOffset) {
 
   // Scroll offset doesn't affect MapLocalToAncestor(), regardless of
   // kIgnoreScrollOffset.
-  GetLayoutView().GetScrollableArea()->ScrollToAbsolutePosition(
+  GetLayoutView().GetScrollableArea()->ScrollToAbsolutePositionForTest(
       gfx::PointF(0, 400));
   EXPECT_EQ(expected, MapLocalToAncestor(target, nullptr, PhysicalOffset()));
   EXPECT_EQ(expected,
@@ -1819,7 +1827,7 @@ TEST_F(MapCoordinatesTest, FixedPositionWithScrollOffsetVerticalRL) {
 
   // Scroll offset doesn't affect MapLocalToAncestor(), regardless of
   // kIgnoreScrollOffset.
-  GetLayoutView().GetScrollableArea()->ScrollToAbsolutePosition(
+  GetLayoutView().GetScrollableArea()->ScrollToAbsolutePositionForTest(
       gfx::PointF(400, 0));
   EXPECT_EQ(expected, MapLocalToAncestor(target, nullptr, PhysicalOffset()));
   EXPECT_EQ(expected,
@@ -1853,7 +1861,7 @@ TEST_F(MapCoordinatesTest, FixedPositionUnderTransformWithScrollOffset) {
 
   // Fixed position under transform is treated like absolute position, so is
   // affected by scroll offset.
-  GetLayoutView().GetScrollableArea()->ScrollToAbsolutePosition(
+  GetLayoutView().GetScrollableArea()->ScrollToAbsolutePositionForTest(
       gfx::PointF(0, 400));
   PhysicalOffset expected_scrolled(100, -200);
   EXPECT_EQ(expected_scrolled,
@@ -1901,7 +1909,7 @@ TEST_F(MapCoordinatesTest,
   To<Element>(scroller->GetNode())
       ->GetLayoutBoxForScrolling()
       ->GetScrollableArea()
-      ->ScrollToAbsolutePosition(gfx::PointF(0, 0));
+      ->ScrollToAbsolutePositionForTest(gfx::PointF(0, 0));
 
   // The box is now on the right of the scrollbar therefore there is nothing
   // between the box and the right border of the content.

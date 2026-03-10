@@ -4,10 +4,10 @@
 
 #include "chrome/browser/sync/sessions/browser_list_router_helper.h"
 
+#include <algorithm>
 #include <memory>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/resource_coordinator/tab_manager.h"
 #include "chrome/browser/sync/sessions/sync_sessions_web_contents_router.h"
@@ -17,6 +17,7 @@
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "components/sync_sessions/synced_tab_delegate.h"
 
 namespace sync_sessions {
@@ -70,12 +71,12 @@ TEST_F(BrowserListRouterHelperTest, ObservationScopedToSingleProfile) {
   AddTab(browser_2.get(), gurl_2);
 
   std::vector<GURL>* handler_1_urls = handler_1.seen_urls();
-  EXPECT_TRUE(base::Contains(*handler_1_urls, gurl_1));
-  EXPECT_FALSE(base::Contains(*handler_1_urls, gurl_2));
+  EXPECT_TRUE(std::ranges::contains(*handler_1_urls, gurl_1));
+  EXPECT_FALSE(std::ranges::contains(*handler_1_urls, gurl_2));
 
   std::vector<GURL>* handler_2_urls = handler_2.seen_urls();
-  EXPECT_TRUE(base::Contains(*handler_2_urls, gurl_2));
-  EXPECT_FALSE(base::Contains(*handler_2_urls, gurl_1));
+  EXPECT_TRUE(std::ranges::contains(*handler_2_urls, gurl_2));
+  EXPECT_FALSE(std::ranges::contains(*handler_2_urls, gurl_1));
 
   // Add a browser for each profile.
   std::unique_ptr<Browser> new_browser_in_first_profile(
@@ -89,12 +90,12 @@ TEST_F(BrowserListRouterHelperTest, ObservationScopedToSingleProfile) {
   AddTab(new_browser_in_second_profile.get(), gurl_4);
 
   handler_1_urls = handler_1.seen_urls();
-  EXPECT_TRUE(base::Contains(*handler_1_urls, gurl_3));
-  EXPECT_FALSE(base::Contains(*handler_1_urls, gurl_4));
+  EXPECT_TRUE(std::ranges::contains(*handler_1_urls, gurl_3));
+  EXPECT_FALSE(std::ranges::contains(*handler_1_urls, gurl_4));
 
   handler_2_urls = handler_2.seen_urls();
-  EXPECT_TRUE(base::Contains(*handler_2_urls, gurl_4));
-  EXPECT_FALSE(base::Contains(*handler_2_urls, gurl_3));
+  EXPECT_TRUE(std::ranges::contains(*handler_2_urls, gurl_4));
+  EXPECT_FALSE(std::ranges::contains(*handler_2_urls, gurl_3));
 
   // Cleanup needed for manually created browsers so they don't complain about
   // having open tabs when destructing.
@@ -103,7 +104,8 @@ TEST_F(BrowserListRouterHelperTest, ObservationScopedToSingleProfile) {
   new_browser_in_second_profile->tab_strip_model()->CloseAllTabs();
 }
 
-// Added when fixing https://crbug.com/777745, ensure tab discards are observed.
+// Added when fixing https://crbug.com/40546261, ensure tab discards are
+// observed.
 TEST_F(BrowserListRouterHelperTest, NotifyOnDiscardTab) {
   TestingProfile* profile_1 = profile();
   TestingProfile* profile_2 =
@@ -123,7 +125,7 @@ TEST_F(BrowserListRouterHelperTest, NotifyOnDiscardTab) {
   AddTab(browser(), gurl_1);
 
   // Tab needs to have been active to be found when discarding.
-  BrowserList::GetInstance()->SetLastActive(browser());
+  ui_test_utils::DeprecatedFakeActivateBrowser(browser());
 
   EXPECT_EQ(gurl_1, *handler_1.seen_urls()->rbegin());
   SessionID old_id = *handler_1.seen_ids()->rbegin();

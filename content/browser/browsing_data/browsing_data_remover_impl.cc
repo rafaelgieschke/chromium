@@ -4,13 +4,13 @@
 
 #include "content/browser/browsing_data/browsing_data_remover_impl.h"
 
+#include <algorithm>
 #include <map>
 #include <optional>
 #include <set>
 #include <string>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -94,7 +94,8 @@ bool DoesStorageKeyMatchMask(
     const blink::StorageKey& storage_key,
     storage::SpecialStoragePolicy* policy) {
   const std::vector<std::string>& schemes = url::GetWebStorageSchemes();
-  bool is_web_scheme = base::Contains(schemes, storage_key.origin().scheme());
+  bool is_web_scheme =
+      std::ranges::contains(schemes, storage_key.origin().scheme());
 
   // If a websafe origin is unprotected, it matches iff UNPROTECTED_WEB.
   if ((origin_type_mask & BrowsingDataRemover::ORIGIN_TYPE_UNPROTECTED_WEB) &&
@@ -528,8 +529,7 @@ void BrowsingDataRemoverImpl::RemoveImpl(
         filter_builder->MatchesMostOriginsAndDomains();
 
     storage_partition->ClearData(
-        storage_partition_remove_mask,
-        StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL, filter_builder,
+        storage_partition_remove_mask, filter_builder,
         base::BindRepeating(&DoesStorageKeyMatchMask, origin_type_mask_,
                             std::move(embedder_matcher)),
         std::move(deletion_filter), perform_storage_cleanup, delete_begin_,

@@ -8,6 +8,7 @@
 
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/actor_internals/actor_internals_ui_handler.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/actor_internals_resources.h"
 #include "chrome/grit/actor_internals_resources_map.h"
@@ -16,6 +17,11 @@
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/web_ui_data_source.h"
 #include "ui/webui/webui_util.h"
+
+bool ActorInternalsUIConfig::IsWebUIEnabled(
+    content::BrowserContext* browser_context) {
+  return base::FeatureList::IsEnabled(features::kGlicActor);
+}
 
 ActorInternalsUI::ActorInternalsUI(content::WebUI* web_ui)
     : ui::MojoWebUIController(web_ui, true) {

@@ -71,7 +71,7 @@ public class ShareDelegateImpl implements ShareDelegate {
     private final @Nullable BottomSheetController mBottomSheetController;
     private final ActivityLifecycleDispatcher mLifecycleDispatcher;
     private final Supplier<@Nullable Tab> mTabProvider;
-    private final Supplier<TabModelSelector> mTabModelSelectorProvider;
+    private final Supplier<@Nullable TabModelSelector> mTabModelSelectorProvider;
     private final Supplier<@Nullable Profile> mProfileSupplier;
     private final ShareSheetDelegate mDelegate;
     private final boolean mIsCustomTab;
@@ -100,7 +100,7 @@ public class ShareDelegateImpl implements ShareDelegate {
             @Nullable BottomSheetController controller,
             ActivityLifecycleDispatcher lifecycleDispatcher,
             Supplier<@Nullable Tab> tabProvider,
-            Supplier<TabModelSelector> tabModelSelectorProvider,
+            Supplier<@Nullable TabModelSelector> tabModelSelectorProvider,
             Supplier<@Nullable Profile> profileSupplier,
             ShareSheetDelegate delegate,
             boolean isCustomTab,
@@ -265,11 +265,13 @@ public class ShareDelegateImpl implements ShareDelegate {
                             LinkToTextHelper.getExistingSelectorsAllFrames(
                                     currentTab,
                                     (selectors) -> {
-                                        GURL canonicalUrl =
-                                                new GURL(
-                                                        LinkToTextHelper.getUrlToShare(
-                                                                assumeNonNull(result).getSpec(),
-                                                                selectors));
+                                        GURL canonicalUrl = null;
+                                        if (result != null) {
+                                            canonicalUrl =
+                                                    new GURL(
+                                                            LinkToTextHelper.getUrlToShare(
+                                                                    result.getSpec(), selectors));
+                                        }
                                         logCanonicalUrlResult(visibleUrl, canonicalUrl);
                                         triggerShareWithCanonicalUrlResolved(
                                                 window,
@@ -380,7 +382,9 @@ public class ShareDelegateImpl implements ShareDelegate {
     private void printTab(Tab tab) {
         var tabProviderTab = assumeNonNull(mTabProvider.get());
         Activity activity = assumeNonNull(tabProviderTab.getWindowAndroid()).getActivity().get();
-        PrintingController printingController = PrintingControllerImpl.getInstance();
+        PrintingController printingController =
+                PrintingControllerImpl.getInstance(
+                        assumeNonNull(tabProviderTab.getWindowAndroid()));
         if (printingController != null && !printingController.isBusy()) {
             assert activity != null;
             printingController.startPrint(
@@ -410,7 +414,7 @@ public class ShareDelegateImpl implements ShareDelegate {
                 BottomSheetController controller,
                 ActivityLifecycleDispatcher lifecycleDispatcher,
                 Supplier<@Nullable Tab> tabProvider,
-                Supplier<TabModelSelector> tabModelSelectorSupplier,
+                Supplier<@Nullable TabModelSelector> tabModelSelectorSupplier,
                 Profile profile,
                 Callback<Tab> printCallback,
                 TabGroupSharingController tabGroupSharingController,

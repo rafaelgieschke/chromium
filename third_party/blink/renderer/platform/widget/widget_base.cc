@@ -12,7 +12,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/task/common/task_annotator.h"
-#include "base/task/single_thread_task_runner.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "cc/animation/animation_host.h"
 #include "cc/animation/animation_id_provider.h"
@@ -58,6 +58,7 @@
 #include "third_party/blink/renderer/platform/widget/input/main_thread_event_queue.h"
 #include "third_party/blink/renderer/platform/widget/input/widget_input_handler_manager.h"
 #include "third_party/blink/renderer/platform/widget/widget_base_client.h"
+#include "third_party/perfetto/include/perfetto/tracing/track_event_args.h"
 #include "ui/base/ime/mojom/text_input_state.mojom-blink.h"
 #include "ui/base/mojom/menu_source_type.mojom-blink-forward.h"
 #include "ui/display/display.h"
@@ -583,8 +584,8 @@ void WidgetBase::WasShown(bool was_evicted,
   // provisional) before changing visibility.
   DCHECK(!IsForProvisionalFrame());
 
-  TRACE_EVENT_WITH_FLOW0("renderer", "WidgetBase::WasShown", this,
-                         TRACE_EVENT_FLAG_FLOW_IN);
+  TRACE_EVENT("renderer", "WidgetBase::WasShown",
+              perfetto::TerminatingFlow::FromPointer(this));
 
   SetHidden(false);
 
@@ -688,6 +689,10 @@ void WidgetBase::OnDeferCommitsChanged(
 
 void WidgetBase::OnCommitRequested() {
   client_->OnCommitRequested();
+}
+
+void WidgetBase::WillBeginImplCommit() {
+  client_->WillBeginImplCommit();
 }
 
 void WidgetBase::DidBeginMainFrame() {
@@ -1504,7 +1509,8 @@ void WidgetBase::ImeSetComposition(
     const Vector<ui::ImeTextSpan>& ime_text_spans,
     const gfx::Range& replacement_range,
     int selection_start,
-    int selection_end) {
+    int selection_end,
+    mojom::blink::ImeState ime_state) {
   if (!ShouldHandleImeEvents())
     return;
 
@@ -1520,7 +1526,8 @@ void WidgetBase::ImeSetComposition(
 
   ImeEventGuard guard(weak_ptr_factory_.GetWeakPtr());
   if (!frame_widget->SetComposition(text, ime_text_spans, replacement_range,
-                                    selection_start, selection_end)) {
+                                    selection_start, selection_end,
+                                    ime_state)) {
     // If we failed to set the composition text, then we need to let the browser
     // process to cancel the input method's ongoing composition session, to make
     // sure we are in a consistent state.
@@ -1917,6 +1924,13 @@ bool WidgetBase::AreMainFramesPausedOrDeferred() const {
   cc::LayerTreeHost* host = LayerTreeHost();
   CHECK(host);
   return host->MainFrameUpdatesAreDeferred() || host->IsRenderingPaused();
+}
+
+void WidgetBase::RequestEfficientScheduling(
+    const bool prefer_efficient_scheduling) const {
+  if (LayerTreeHost()) [[likely]] {
+    LayerTreeHost()->RequestEfficientScheduling(prefer_efficient_scheduling);
+  }
 }
 
 }  // namespace blink

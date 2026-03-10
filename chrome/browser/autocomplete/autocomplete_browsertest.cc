@@ -18,7 +18,6 @@
 #include "chrome/browser/autocomplete/in_memory_url_index_factory.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -43,6 +42,7 @@
 #include "components/search_engines/template_url_service.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/browser/unpacked_installer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 
@@ -98,7 +98,8 @@ IN_PROC_BROWSER_TEST_F(AutocompleteBrowserTest, Basic) {
   // TODO(phajdan.jr): check state of IsSelectAll when it's consistent across
   // platforms.
 
-  location_bar->FocusLocation(true);
+  location_bar->FocusLocation(/*is_user_initiated=*/true,
+                              /*clear_focus_if_failed=*/false);
 
   EXPECT_FALSE(location_bar->navigation_params().destination_url.is_valid());
   EXPECT_EQ(url::kAboutBlankURL16, omnibox_view->GetText());

@@ -11,6 +11,7 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/gfx/geometry/rounded_corners_f.h"
 #include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/shadow_value.h"
 #include "ui/linux/linux_ui.h"
@@ -143,19 +144,6 @@ int BrowserFrameViewLinux::GetTranslucentTopAreaHeight() const {
   return 0;
 }
 
-void BrowserFrameViewLinux::LayoutWebAppWindowTitle(
-    const gfx::Rect& available_space,
-    views::Label& window_title_label) const {
-  constexpr int kIconTitleSpacing = 4;
-  constexpr int kCaptionSpacing = 5;
-
-  gfx::Rect bounds = available_space;
-  bounds.Inset(gfx::Insets::TLBR(0, kIconTitleSpacing, 0, kCaptionSpacing));
-  window_title_label.SetSubpixelRenderingEnabled(false);
-  window_title_label.SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  window_title_label.SetBoundsRect(bounds);
-}
-
 BrowserLayoutParams BrowserFrameViewLinux::GetBrowserLayoutParams() const {
   BrowserLayoutParams params;
   params.visual_client_area = GetBoundsForClientView();
@@ -216,6 +204,15 @@ bool BrowserFrameViewLinux::CaptionButtonsOnTrailingEdge() const {
 BrowserFrameViewLinux::BoundsAndMargins
 BrowserFrameViewLinux::GetCaptionButtonBounds() const {
   NOTREACHED() << "Linux uses a different computation for caption buttons.";
+}
+
+gfx::RoundedCornersF BrowserFrameViewLinux::GetWindowRoundedCorners() const {
+  if (auto* const widget = GetWidget();
+      widget && !widget->IsFullscreen() && !widget->IsMaximized()) {
+    const float radius_dip = GetRestoredCornerRadiusDip();
+    return gfx::RoundedCornersF(radius_dip, radius_dip, 0, 0);
+  }
+  return gfx::RoundedCornersF();
 }
 
 BEGIN_METADATA(BrowserFrameViewLinux)

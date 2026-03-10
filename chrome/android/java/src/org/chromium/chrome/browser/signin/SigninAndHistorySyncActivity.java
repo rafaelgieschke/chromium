@@ -41,6 +41,7 @@ import org.chromium.chrome.browser.ui.signin.BottomSheetSigninAndHistorySyncCoor
 import org.chromium.chrome.browser.ui.signin.DialogWhenLargeContentLayout;
 import org.chromium.chrome.browser.ui.signin.FullscreenSigninAndHistorySyncConfig;
 import org.chromium.chrome.browser.ui.signin.FullscreenSigninAndHistorySyncCoordinator;
+import org.chromium.chrome.browser.ui.signin.SigninAndHistorySyncBundleHelper;
 import org.chromium.chrome.browser.ui.signin.SigninAndHistorySyncCoordinator;
 import org.chromium.chrome.browser.ui.signin.SigninUtils;
 import org.chromium.chrome.browser.ui.system.StatusBarColorController;
@@ -58,8 +59,6 @@ import org.chromium.ui.UiUtils;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.modaldialog.ModalDialogManager.ModalDialogType;
-
-import java.util.function.Supplier;
 
 /**
  * The activity that host post-UNO sign-in flows. This activity is semi-transparent, and views for
@@ -174,7 +173,7 @@ public class SigninAndHistorySyncActivity extends FullscreenSigninAndHistorySync
                         DeviceLockActivityLauncherImpl.get(),
                         getProfileProviderSupplier(),
                         getBottomSheetController(containerView),
-                        (Supplier<@Nullable ModalDialogManager>) getModalDialogManagerSupplier(),
+                        getModalDialogManagerSupplier().asNonNull().get(),
                         config,
                         signinAccessPoint);
 
@@ -240,13 +239,19 @@ public class SigninAndHistorySyncActivity extends FullscreenSigninAndHistorySync
         overridePendingTransition(0, R.anim.fast_fade_out);
     }
 
-    /** Implements {@link BottomSheetSigninAndHistorySyncCoordinator.Delegate}. */
+    /** Implements {@link BottomSheetSigninAndHistorySyncCoordinator.Delegate} */
+    @Override
+    public void onSigninUndone() {
+        throw new IllegalStateException("Reversing sign-in is not supported in this flow.");
+    }
+
+    /** Implements {@link BottomSheetSigninAndHistorySyncCoordinator.ActivityDelegate}. */
     @Override
     public boolean isHistorySyncShownFullScreen() {
         return !isTablet();
     }
 
-    /** Implements {@link BottomSheetSigninAndHistorySyncCoordinator.Delegate}. */
+    /** Implements {@link BottomSheetSigninAndHistorySyncCoordinator.ActivityDelegate}. */
     @Override
     public void setStatusBarColor(int statusBarColor) {
         StatusBarColorController.setStatusBarColor(
@@ -329,7 +334,7 @@ public class SigninAndHistorySyncActivity extends FullscreenSigninAndHistorySync
 
     /**
      * Implements {@link FullscreenSigninAndHistorySyncCoordinator.Delegate} and {@link
-     * BottomSheetSigninAndHistorySyncCoordinator.Delegate}
+     * BottomSheetSigninAndHistorySyncCoordinator.ActivityDelegate}
      */
     @Override
     public void addAccount() {
@@ -400,7 +405,9 @@ public class SigninAndHistorySyncActivity extends FullscreenSigninAndHistorySync
         ScrimManager scrimManager =
                 new ScrimManager(
                         this, containerView, ScrimClient.SIGNIN_ACCOUNT_PICKER_COORDINATOR);
-        scrimManager.getStatusBarColorSupplier().addObserver(this::setStatusBarColor);
+        scrimManager
+                .getStatusBarColorSupplier()
+                .addSyncObserverAndPostIfNonNull(this::setStatusBarColor);
 
         BottomSheetController bottomSheetController =
                 BottomSheetControllerFactory.createBottomSheetController(

@@ -22,6 +22,7 @@
 #include "ui/base/ui_base_features.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/view_class_properties.h"
+#include "ui/views/widget/widget.h"
 
 PageInfoSecurityContentView::PageInfoSecurityContentView(
     PageInfo* presenter,
@@ -54,7 +55,7 @@ void PageInfoSecurityContentView::SetIdentityInfo(
       GetSecurityDescription(identity_info);
   security_description_type_ = security_description->type;
 
-  const int icon_size = GetLayoutConstant(PAGE_INFO_ICON_SIZE);
+  const int icon_size = GetLayoutConstant(LayoutConstant::kPageInfoIconSize);
   if (security_description->summary_style == SecuritySummaryColor::RED) {
     if (identity_info.safe_browsing_status ==
             PageInfo::SAFE_BROWSING_STATUS_MALWARE ||

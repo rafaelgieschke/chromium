@@ -118,21 +118,33 @@ class CORE_EXPORT DisplayLockContext final
     //     scroll-marker-group property.
     //   - This is an activatable for a11y lock and a11y is enabled.
     // TODO(400977357): Optimize layout for the scroll-marker-group cases.
-    return !is_locked_ || forced_info_.is_forced(ForcedPhase::kLayout) ||
-           (IsActivatable(DisplayLockActivationReason::kAny) &&
-            ActivatableDisplayLocksForced()) ||
-           (IsAuto() && HasScrollerWithScrollMarkerGroup()) ||
-           ShouldActivateForScreenReader();
+    bool should = !is_locked_ || forced_info_.is_forced(ForcedPhase::kLayout) ||
+                  (IsActivatable(DisplayLockActivationReason::kAny) &&
+                   ActivatableDisplayLocksForced()) ||
+                  (IsAuto() && HasScrollerWithScrollMarkerGroup()) ||
+                  ShouldActivateForScreenReader();
+    // Should only lay out if style recalc is allowed.
+    DCHECK(!should || ShouldStyleChildren());
+    return should;
   }
 
   bool ShouldActivateForScreenReader() const;
   void DidLayoutChildren();
   ALWAYS_INLINE bool ShouldPrePaintChildren() const {
-    return !is_locked_ || forced_info_.is_forced(ForcedPhase::kPrePaint) ||
-           (IsActivatable(DisplayLockActivationReason::kAny) &&
-            ActivatableDisplayLocksForced());
+    bool should = !is_locked_ ||
+                  forced_info_.is_forced(ForcedPhase::kPrePaint) ||
+                  (IsActivatable(DisplayLockActivationReason::kAny) &&
+                   ActivatableDisplayLocksForced());
+    // Should only pre-paint of layout is allowed.
+    DCHECK(!should || ShouldLayoutChildren());
+    return should;
   }
-  ALWAYS_INLINE bool ShouldPaintChildren() const { return !is_locked_; }
+  ALWAYS_INLINE bool ShouldPaintChildren() const {
+    bool should = !is_locked_;
+    // Should only paint if pre-paint is allowed.
+    DCHECK(!should || ShouldPrePaintChildren());
+    return should;
+  }
 
   // Returns true if the last style recalc traversal was blocked at this
   // element.
@@ -188,6 +200,10 @@ class CORE_EXPORT DisplayLockContext final
 
   void NotifyCompositingDescendantDependentFlagUpdateWasBlocked() {
     needs_compositing_dependent_flag_update_ = true;
+  }
+
+  void NotifyVisualOverflowRecalcWasBlocked() {
+    needs_visual_overflow_recalc_update_ = true;
   }
 
   // Notify this element will be disconnected.
@@ -336,6 +352,7 @@ class CORE_EXPORT DisplayLockContext final
   bool MarkNeedsRepaintAndPaintArtifactCompositorUpdate();
   bool MarkNeedsCullRectUpdate();
   bool MarkForCompositingUpdatesIfNeeded();
+  bool MarkForVisualOverflowRecalcIfNeeded();
 
   bool IsElementDirtyForStyleRecalc() const;
   bool IsElementDirtyForLayout() const;
@@ -502,6 +519,7 @@ class CORE_EXPORT DisplayLockContext final
   bool needs_soft_navigation_context_update_ = false;
   bool needs_prepaint_subtree_walk_ = false;
   bool needs_compositing_dependent_flag_update_ = false;
+  bool needs_visual_overflow_recalc_update_ = false;
 
   // Will be true if child traversal was blocked on a previous layout run on the
   // locked element. We need to keep track of this to ensure that on the next

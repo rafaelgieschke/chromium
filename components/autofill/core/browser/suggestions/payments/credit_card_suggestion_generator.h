@@ -13,10 +13,12 @@
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/foundations/autofill_client.h"
 #include "components/autofill/core/browser/logging/log_manager.h"
+#include "components/autofill/core/browser/metrics/form_events/credit_card_form_event_logger.h"
 #include "components/autofill/core/browser/metrics/payments/card_metadata_metrics.h"
 #include "components/autofill/core/browser/metrics/suggestions_list_metrics.h"
 #include "components/autofill/core/browser/payments/payments_autofill_client.h"
 #include "components/autofill/core/browser/payments/save_and_fill_manager.h"
+#include "components/autofill/core/browser/suggestions/payments/payments_suggestion_generator_util.h"
 #include "components/autofill/core/browser/suggestions/suggestion.h"
 #include "components/autofill/core/browser/suggestions/suggestion_generator.h"
 #include "components/autofill/core/common/form_data.h"
@@ -25,6 +27,25 @@
 #include "ui/base/l10n/l10n_util.h"
 
 namespace autofill {
+// Generates suggestions for all available credit cards based on the
+// `trigger_field_type`, `trigger_field` and `four_digit_combinations_in_dom`.
+// `summary` contains metadata about the returned suggestions.
+// This function is a thin wrapper calling both FetchSuggestionData() and
+// GenerateSuggestions() from the same instance of type
+// CreditCardSuggestionGenerator. Additional logic should not be added
+// to this function but to either of the other two.
+// TODO(crbug.com/448688721): Consolidate the input parameters.
+std::vector<Suggestion> GetSuggestionsForCreditCards(
+    const FormData& form,
+    const FormStructure& form_structure,
+    const FormFieldData& trigger_field,
+    const AutofillField& autofill_trigger_field,
+    AutofillClient& client,
+    const std::vector<std::string>& four_digit_combinations_in_dom,
+    const payments::AmountExtractionStatus& amount_extraction_status,
+    autofill_metrics::CreditCardFormEventLogger& credit_card_form_event_logger,
+    const AutofillMetrics::PaymentsSigninState signin_state_for_metrics,
+    bool exclude_virtual_cards);
 
 // A `SuggestionGenerator` for `FillingProduct::kCreditCard`.
 //
@@ -33,7 +54,13 @@ namespace autofill {
 // are still shared in payments_suggestion_generator.h file.
 class CreditCardSuggestionGenerator : public SuggestionGenerator {
  public:
-  explicit CreditCardSuggestionGenerator();
+  explicit CreditCardSuggestionGenerator(
+      const std::vector<std::string>& four_digit_combinations_in_dom,
+      const payments::AmountExtractionStatus& amount_extraction_status,
+      autofill_metrics::CreditCardFormEventLogger*
+          credit_card_form_event_logger,
+      const AutofillMetrics::PaymentsSigninState signin_state_for_metrics,
+      bool exclude_virtual_cards);
   ~CreditCardSuggestionGenerator() override;
 
   void FetchSuggestionData(
@@ -83,6 +110,13 @@ class CreditCardSuggestionGenerator : public SuggestionGenerator {
       base::FunctionRef<void(ReturnedSuggestions)> callback);
 
  private:
+  raw_ref<const std::vector<std::string>> four_digit_combinations_in_dom_;
+  CreditCardSuggestionSummary summary_;
+  raw_ref<const payments::AmountExtractionStatus> amount_extraction_status_;
+  raw_ptr<autofill_metrics::CreditCardFormEventLogger>
+      credit_card_form_event_logger_;
+  AutofillMetrics::PaymentsSigninState signin_state_for_metrics_;
+  bool exclude_virtual_cards_ = false;
   base::WeakPtrFactory<CreditCardSuggestionGenerator> weak_ptr_factory_{this};
 };
 

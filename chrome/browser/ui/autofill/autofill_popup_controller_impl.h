@@ -15,6 +15,7 @@
 #include "base/timer/timer.h"
 #include "chrome/browser/ui/autofill/autofill_popup_controller.h"
 #include "chrome/browser/ui/autofill/autofill_popup_hide_helper.h"
+#include "chrome/browser/ui/autofill/autofill_popup_view.h"
 #include "chrome/browser/ui/autofill/next_idle_barrier.h"
 #include "chrome/browser/ui/autofill/popup_controller_common.h"
 #include "components/autofill/core/browser/suggestions/suggestion.h"
@@ -88,7 +89,8 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
   void Show(UiSessionId ui_session_id,
             std::vector<Suggestion> suggestions,
             AutofillSuggestionTriggerSource trigger_source,
-            AutoselectFirstSuggestion autoselect_first_suggestion) override;
+            AutoselectFirstSuggestion autoselect_first_suggestion,
+            AutofillSuggestionsIgnoreFocusLoss ignore_focus_loss) override;
   std::optional<UiSessionId> GetUiSessionId() const override;
   void SetKeepPopupOpenForTesting(bool keep_popup_open_for_testing) override;
   void UpdateDataListValues(base::span<const SelectOption> options) override;
@@ -173,9 +175,14 @@ class AutofillPopupControllerImpl : public AutofillPopupController,
   // the first preferred when recalculating the popup position.
   void OnSuggestionsChanged(bool prefer_prev_arrow_side);
 
+  // Returns the search bar configuration for the given `trigger_source`.
+  std::optional<AutofillPopupView::SearchBarConfig> GetSearchBarConfig(
+      AutofillSuggestionTriggerSource trigger_source) const;
+
   void UpdateFilteredSuggestions();
 
   UiSessionId ui_session_id_;
+  AutofillSuggestionsIgnoreFocusLoss ignore_focus_loss_{false};
   base::WeakPtr<content::WebContents> web_contents_;
   PopupControllerCommon controller_common_;
   base::WeakPtr<AutofillPopupView> view_;

@@ -9,6 +9,7 @@
 #include "ash/constants/ash_features.h"
 #include "ash/constants/ash_pref_names.h"
 #include "ash/constants/ash_switches.h"
+#include "ash/constants/chrome_webui_url_constants.h"
 #include "base/check.h"
 #include "base/check_is_test.h"
 #include "base/check_op.h"
@@ -28,7 +29,6 @@
 #include "chrome/browser/ui/webui/ash/settings/pref_names.h"
 #include "chrome/browser/unified_consent/unified_consent_service_factory.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/webui_url_constants.h"
 #include "chromeos/ash/components/osauth/public/auth_session_storage.h"
 #include "chromeos/ash/components/settings/cros_settings_names.h"
 #include "components/consent_auditor/consent_auditor.h"
@@ -59,7 +59,7 @@ constexpr char kOsWifiConfigurations[] = "osWifiConfigurations";
 constexpr char kOsWallpaper[] = "osWallpaper";
 
 // This helper function to convert user selected items to UserSelectableOsType.
-void GetUserSelectedSyncOsType(const base::Value::Dict& os_sync_items,
+void GetUserSelectedSyncOsType(const base::DictValue& os_sync_items,
                                syncer::UserSelectableOsTypeSet& os_sync_set) {
   if (os_sync_items.FindBool(kOsApps).value()) {
     os_sync_set.Put(syncer::UserSelectableOsType::kOsApps);
@@ -155,8 +155,8 @@ void SyncConsentScreen::MaybeLaunchSyncConsentSettings(Profile* profile) {
             [](Profile* profile) {
               profile->GetPrefs()->ClearPref(
                   ::prefs::kShowSyncSettingsOnSessionStart);
-              chrome::ShowSettingsSubPageForProfile(profile,
-                                                    chrome::kSyncSetupSubPage);
+              chrome::ShowSettingsSubPageForProfile(
+                  profile, ash::chrome_urls::kSyncSetupSubPage);
             },
             base::Unretained(profile)),
         kSyncConsentSettingsShowDelay);
@@ -329,7 +329,7 @@ SyncConsentScreen::SyncScreenBehavior SyncConsentScreen::GetSyncScreenBehavior(
   }
 
   // Skip if the sync consent screen is disabled by policy, for example, in
-  // education scenarios. https://crbug.com/841156
+  // education scenarios. https://crbug.com/41387934
   if (!profile_->GetPrefs()->GetBoolean(::prefs::kEnableSyncConsent))
     return SyncScreenBehavior::kSkipAndEnableScreenPolicy;
 
@@ -460,7 +460,7 @@ void SyncConsentScreen::SetProfileSyncEngineInitializedForTesting(bool value) {
 void SyncConsentScreen::OnAshContinue(
     const bool opted_in,
     const bool review_sync,
-    const base::Value::List& consent_description_list,
+    const base::ListValue& consent_description_list,
     const std::string& consent_confirmation) {
   if (!view_ || is_hidden()) {
     return;
@@ -480,7 +480,7 @@ void SyncConsentScreen::OnAshContinue(
 
 void SyncConsentScreen::RecordAllConsents(
     const bool opted_in,
-    const base::Value::List& consent_description_list,
+    const base::ListValue& consent_description_list,
     const std::string& consent_confirmation) {
   auto consent_description =
       ::login::ConvertToStringList(consent_description_list);
@@ -503,19 +503,19 @@ void SyncConsentScreen::RecordAllConsents(
 }
 
 void SyncConsentScreen::OnLacrosContinue(
-    const base::Value::List& consent_description_list,
+    const base::ListValue& consent_description_list,
     const std::string& consent_confirmation) {
   RecordAllConsents(/*opted_in=*/true, consent_description_list,
                     consent_confirmation);
 }
 
-void SyncConsentScreen::OnUserAction(const base::Value::List& args) {
+void SyncConsentScreen::OnUserAction(const base::ListValue& args) {
   const std::string& action_id = args[0].GetString();
   if (action_id == kUserActionContinue) {
     CHECK_EQ(args.size(), 5u);
     const bool opted_in = args[1].GetBool();
     const bool review_sync = args[2].GetBool();
-    const base::Value::List& consent_description_list = args[3].GetList();
+    const base::ListValue& consent_description_list = args[3].GetList();
     const std::string& consent_confirmation = args[4].GetString();
     OnAshContinue(opted_in, review_sync, consent_description_list,
                   consent_confirmation);
@@ -524,7 +524,7 @@ void SyncConsentScreen::OnUserAction(const base::Value::List& args) {
   if (action_id == kUserActionLacrosSync) {
     CHECK_EQ(args.size(), 3u);
 
-    const base::Value::List& consent_description_list = args[1].GetList();
+    const base::ListValue& consent_description_list = args[1].GetList();
     const std::string& consent_confirmation = args[2].GetString();
 
     OnLacrosContinue(consent_description_list, consent_confirmation);
@@ -559,10 +559,10 @@ void SyncConsentScreen::OnUserAction(const base::Value::List& args) {
   }
   if (action_id == kUserActionLacrosCustom) {
     CHECK_EQ(args.size(), 4u);
-    const base::Value::Dict& osSyncItemsStatus = args[1].GetDict();
+    const base::DictValue& osSyncItemsStatus = args[1].GetDict();
     syncer::UserSelectableOsTypeSet os_sync_set;
 
-    const base::Value::List& consent_description_list = args[2].GetList();
+    const base::ListValue& consent_description_list = args[2].GetList();
     const std::string& consent_confirmation = args[3].GetString();
 
     OnLacrosContinue(consent_description_list, consent_confirmation);

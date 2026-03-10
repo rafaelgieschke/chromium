@@ -20,6 +20,7 @@
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
+#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/hash_traits.h"
 
 namespace blink {
@@ -27,6 +28,10 @@ class Document;
 class LayoutIFrame;
 class LayoutObject;
 class LocalFrame;
+class Node;
+#if DCHECK_IS_ON()
+class AutoBuildHelper;
+#endif
 
 // AIPageContent is responsible for handling requests for inner-text. It calls
 // to InnerTextBuilder to handle building of the text.
@@ -36,6 +41,13 @@ class MODULES_EXPORT AIPageContentAgent final
       public Supplement<Document>,
       public LocalFrameView::LifecycleNotificationObserver {
  public:
+  enum class CustomPasswordSource {
+    // Non-standard CSS masking via `-webkit-text-security`.
+    kCSS,
+    // JS sets a value that is mostly mask characters.
+    kJavaScript,
+  };
+
   static const char kSupplementName[];
   static AIPageContentAgent* From(Document&);
   static void BindReceiver(
@@ -69,17 +81,28 @@ class MODULES_EXPORT AIPageContentAgent final
   String DumpContentNodeTreeForTest();
   String DumpContentNodeForTest(Node* node);
 
+#if DCHECK_IS_ON()
+  // Called by the DOMContentLoaded listener to kick off auto-build; this is
+  // only used by tests to ensure we run cleanly without triggering crashes or
+  // checks/dchecks.
+  void RunAutoBuildAfterDOMContentLoadedForTesting();
+#endif
+
  private:
   void GetAIPageContentSync(mojom::blink::AIPageContentOptionsPtr options,
                             GetAIPageContentCallback callback,
                             base::TimeTicks start_time) const;
+
+  std::optional<CustomPasswordSource> ExistingCustomPasswordReason(
+      const LayoutObject& object) const;
 
   // Synchronously services a single request.
   class ContentBuilder {
     STACK_ALLOCATED();
 
    public:
-    explicit ContentBuilder(const mojom::blink::AIPageContentOptions& options);
+    ContentBuilder(const mojom::blink::AIPageContentOptions& options,
+                   const AIPageContentAgent& agent);
     ~ContentBuilder();
 
     mojom::blink::AIPageContentPtr Build(LocalFrame& frame);
@@ -94,6 +117,7 @@ class MODULES_EXPORT AIPageContentAgent final
       bool is_aria_disabled = false;
       const ComputedStyle& document_style;
       int stack_depth = 0;
+      DOMNodeId accessibility_focused_node_id = kInvalidDOMNodeId;
     };
 
     bool actionable_mode() const {
@@ -121,8 +145,6 @@ class MODULES_EXPORT AIPageContentAgent final
             frame_interaction_info);
     void MaybeAddPopupData(LocalFrame& frame,
                            mojom::blink::AIPageContentFrameData& frame_data);
-    void AddAriaRole(const LayoutObject& object,
-                     mojom::blink::AIPageContentAttributes& attributes);
     void AddNodeInteractionInfo(
         const LayoutObject& object,
         mojom::blink::AIPageContentAttributes& attributes,
@@ -134,7 +156,8 @@ class MODULES_EXPORT AIPageContentAgent final
         const LocalFrame& frame,
         Vector<mojom::blink::AIPageContentMetaPtr>& meta_data) const;
     void AddNodeGeometry(const LayoutObject& object,
-                         mojom::blink::AIPageContentAttributes& attributes);
+                         mojom::blink::AIPageContentAttributes& attributes,
+                         DOMNodeId accessibility_focused_node_id);
     void AddAnnotatedRoles(const LayoutObject& object,
                            Vector<mojom::blink::AIPageContentAnnotatedRole>&
                                annotated_roles) const;
@@ -144,13 +167,34 @@ class MODULES_EXPORT AIPageContentAgent final
     // control. This includes both explicit association using for, or
     // implicit association when the input node is a descendant of the label
     // node.
-    void AddForDomNodeId(
+    void PopulateLabelForDomNodeId(
         const LayoutObject& object,
-        mojom::blink::AIPageContentAttributes& attributes) const;
+        mojom::blink::AIPageContentAttributes& attributes);
+    // Returns whether `attributes.dom_node_id` should be emitted in APC output.
+    //
+    // If `node_id_allowlist` is unset, emit all ids.
+    //
+    // Otherwise, emit ids for:
+    // 1. Actionable targets (`node_interaction_info` in actionable mode).
+    // 2. Metadata-linked nodes tracked in `interactive_dom_node_ids_` (focused
+    //    element, accessibility focus, selection endpoints, label-for targets,
+    //    popup openers).
+    // 3. Attribute types listed in `node_id_allowlist`.
+    // This method must not allocate a new DomNodeIds entry for nodes that are
+    // ultimately suppressed by policy. Callers should only mint new ids after
+    // this returns true.
+    bool ShouldEmitNodeIdForOutput(
+        const LayoutObject& object,
+        const mojom::blink::AIPageContentAttributes& attributes) const;
+    // Returns true when the caller policy allowlists this `attribute_type` for
+    // id emission.
+    bool IsNodeIdAttributeTypeAllowlisted(
+        mojom::blink::AIPageContentAttributeType attribute_type) const;
     bool IsGenericContainer(
         const LayoutObject& object,
         const mojom::blink::AIPageContentAttributes& attributes) const;
 
+    DOMNodeId AddInteractiveNode(Node& node);
     void AddInteractiveNode(DOMNodeId dom_node_id);
     void ComputeHitTestableNodesInViewport(const LocalFrame& frame);
 
@@ -161,20 +205,29 @@ class MODULES_EXPORT AIPageContentAgent final
         mojom::blink::AIPageContentAttributes& attributes,
         std::optional<gfx::Rect> visible_bounding_box = std::nullopt);
 
+    // Applies custom password-like heuristics for text fields. This covers
+    // author-defined password controls which do not use <input type=password>.
+    void ApplyCustomPasswordRedactionHeuristicsIfNeeded(
+        const LayoutObject& object,
+        mojom::blink::AIPageContentAttributes& attributes) const;
+
+    bool ShouldAddNodeGeometry(
+        const LayoutObject& object,
+        const mojom::blink::AIPageContentAttributes& attributes,
+        DOMNodeId accessibility_focused_node_id) const;
+
     Vector<gfx::Rect> visible_bounding_box_for_passwords_;
 
-    // The set of nodes which are involved in a user interaction and must
-    // produce a ContentNode.
-    base::flat_set<DOMNodeId> interactive_dom_node_ids_;
-
-    // If present, the node which is accessibility focused. This is used to
-    // determine which node to add geometry for in non-actionable mode.
-    DOMNodeId accessibility_focused_node_id_ = kInvalidDOMNodeId;
+    // The set of node ids that must always be emitted in APC output for
+    // round-trippable metadata and interaction flows.
+    HashSet<DOMNodeId, IntWithZeroKeyHashTraits<DOMNodeId>>
+        interactive_dom_node_ids_;
 
     const raw_ref<const mojom::blink::AIPageContentOptions> options_;
+    const AIPageContentAgent& agent_;
 
-    HashMap<DOMNodeId, int32_t, IntWithZeroKeyHashTraits<DOMNodeId>>
-        dom_node_to_z_order_;
+    // Keyed by Node identity within a single extraction pass.
+    HeapHashMap<Member<const Node>, int32_t> dom_node_to_z_order_;
 
     // Whether the stack depth has exceeded the max tree depth.
     bool stack_depth_exceeded_ = false;
@@ -194,10 +247,20 @@ class MODULES_EXPORT AIPageContentAgent final
   Vector<base::OnceClosure> async_extraction_tasks_;
 
 #if DCHECK_IS_ON()
-  void MaybeRunAutomaticActionableExtraction();
-  // Should content extraction tree be built automatically on page load.
-  bool is_auto_actionable_extraction_pending_ = false;
+  void ListenForDOMContentLoadedForAutoBuild();
+  AutoBuildHelper* GetOrCreateAutoBuildHelper();
+  Member<AutoBuildHelper> auto_build_helper_;
+  friend class AutoBuildHelper;
 #endif
+
+  // Persistent set of DOM node IDs determined to be password-like via heuristic
+  // redaction (e.g. `-webkit-text-security` or JS masking patterns).
+  //
+  // This is mutable so it can be updated by const extraction calls.
+  mutable HashMap<DOMNodeId,
+                  CustomPasswordSource,
+                  IntWithZeroKeyHashTraits<DOMNodeId>>
+      custom_password_decision_;
 };
 
 }  // namespace blink

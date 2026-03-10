@@ -105,18 +105,18 @@ ServiceWorkerControlleeRequestHandler::ServiceWorkerControlleeRequestHandler(
       force_update_started_(false),
       service_worker_accessed_callback_(
           std::move(service_worker_accessed_callback)) {
-  TRACE_EVENT_WITH_FLOW0("ServiceWorker",
-                         "ServiceWorkerControlleeRequestHandler::"
-                         "ServiceWorkerControlleeRequestHandler",
-                         TRACE_ID_LOCAL(this), TRACE_EVENT_FLAG_FLOW_OUT);
+  TRACE_EVENT("ServiceWorker",
+              "ServiceWorkerControlleeRequestHandler::"
+              "ServiceWorkerControlleeRequestHandler",
+              perfetto::Flow::FromPointer(this));
 }
 
 ServiceWorkerControlleeRequestHandler::
     ~ServiceWorkerControlleeRequestHandler() {
-  TRACE_EVENT_WITH_FLOW0("ServiceWorker",
-                         "ServiceWorkerControlleeRequestHandler::"
-                         "~ServiceWorkerControlleeRequestHandler",
-                         TRACE_ID_LOCAL(this), TRACE_EVENT_FLAG_FLOW_IN);
+  TRACE_EVENT("ServiceWorker",
+              "ServiceWorkerControlleeRequestHandler::"
+              "~ServiceWorkerControlleeRequestHandler",
+              perfetto::TerminatingFlow::FromPointer(this));
   MaybeScheduleUpdate();
 }
 
@@ -175,7 +175,8 @@ void ServiceWorkerControlleeRequestHandler::MaybeCreateLoader(
   // `ServiceWorkerMainResourceLoaderInterceptor::MaybeCreateLoader()` to use
   // `skip_service_worker` flag.
   if (service_worker_loader_helpers::IsEligibleForSyntheticResponse(
-          browser_context, tentative_resource_request.url)) {
+          browser_context, context_->wrapper()->storage_partition(),
+          tentative_resource_request.url)) {
     const int kReloadFlags = net::LOAD_VALIDATE_CACHE | net::LOAD_BYPASS_CACHE;
     // If the navigation is from reloading, do not inject the service worker
     // registration.
@@ -214,12 +215,10 @@ void ServiceWorkerControlleeRequestHandler::MaybeCreateLoader(
   // TODO(bashi): Consider using a global navigation ID instead of using |this|.
   // Using a global ID gives us a convenient way to analyze event flows across
   // classes.
-  TRACE_EVENT_WITH_FLOW1(
-      "ServiceWorker",
-      "ServiceWorkerControlleeRequestHandler::MaybeCreateLoader",
-      TRACE_ID_LOCAL(this),
-      TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "URL",
-      tentative_resource_request.url.spec());
+  TRACE_EVENT("ServiceWorker",
+              "ServiceWorkerControlleeRequestHandler::MaybeCreateLoader",
+              perfetto::Flow::FromPointer(this), "URL",
+              tentative_resource_request.url.spec());
 
   // Look up a registration.
   context_->registry().FindRegistrationForClientUrl(
@@ -255,11 +254,10 @@ void ServiceWorkerControlleeRequestHandler::ContinueWithRegistration(
   }
 
   if (status != blink::ServiceWorkerStatusCode::kOk) {
-    TRACE_EVENT_WITH_FLOW1(
+    TRACE_EVENT(
         "ServiceWorker",
         "ServiceWorkerControlleeRequestHandler::ContinueWithRegistration",
-        TRACE_ID_LOCAL(this),
-        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Status",
+        perfetto::Flow::FromPointer(this), "Status",
         blink::ServiceWorkerStatusToString(status));
     CompleteWithoutLoader();
     return;
@@ -267,24 +265,20 @@ void ServiceWorkerControlleeRequestHandler::ContinueWithRegistration(
   DCHECK(registration);
 
   if (!service_worker_client_) {
-    TRACE_EVENT_WITH_FLOW1(
+    TRACE_EVENT(
         "ServiceWorker",
         "ServiceWorkerControlleeRequestHandler::ContinueWithRegistration",
-        TRACE_ID_LOCAL(this),
-        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
-        "No container");
+        perfetto::Flow::FromPointer(this), "Info", "No container");
     CompleteWithoutLoader();
     return;
   }
   service_worker_client_->AddMatchingRegistration(registration.get());
 
   if (!context_) {
-    TRACE_EVENT_WITH_FLOW1(
+    TRACE_EVENT(
         "ServiceWorker",
         "ServiceWorkerControlleeRequestHandler::ContinueWithRegistration",
-        TRACE_ID_LOCAL(this),
-        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
-        "No Context");
+        perfetto::Flow::FromPointer(this), "Info", "No Context");
     CompleteWithoutLoader();
     return;
   }
@@ -302,12 +296,10 @@ void ServiceWorkerControlleeRequestHandler::ContinueWithRegistration(
                                         allow_service_worker);
 
   if (!allow_service_worker) {
-    TRACE_EVENT_WITH_FLOW1(
+    TRACE_EVENT(
         "ServiceWorker",
         "ServiceWorkerControlleeRequestHandler::ContinueWithRegistration",
-        TRACE_ID_LOCAL(this),
-        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
-        "ServiceWorker is blocked");
+        perfetto::Flow::FromPointer(this), "Info", "ServiceWorker is blocked");
     CompleteWithoutLoader();
     return;
   }
@@ -315,12 +307,10 @@ void ServiceWorkerControlleeRequestHandler::ContinueWithRegistration(
   if (!service_worker_client_->IsEligibleForServiceWorkerController()) {
     // TODO(falken): Figure out a way to surface in the page's DevTools
     // console that the service worker was blocked for security.
-    TRACE_EVENT_WITH_FLOW1(
+    TRACE_EVENT(
         "ServiceWorker",
         "ServiceWorkerControlleeRequestHandler::ContinueWithRegistration",
-        TRACE_ID_LOCAL(this),
-        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
-        "Insecure context");
+        perfetto::Flow::FromPointer(this), "Info", "Insecure context");
     CompleteWithoutLoader();
     return;
   }
@@ -334,23 +324,25 @@ void ServiceWorkerControlleeRequestHandler::ContinueWithRegistration(
   const bool need_to_update = !force_update_started_ &&
                               context_->force_update_on_page_load() &&
                               can_update;
+  // Passing an empty outside fetch client settings object as there is no
+  // associated execution context.
+  auto fetch_client_settings_object =
+      blink::mojom::FetchClientSettingsObject::New();
+  fetch_client_settings_object->policy_container_policies =
+      blink::mojom::PolicyContainerPolicies::New();
   if (need_to_update) {
     force_update_started_ = true;
     context_->UpdateServiceWorker(
         registration.get(), true /* force_bypass_cache */,
         true /* skip_script_comparison */,
-        // Passing an empty outside fetch client settings object as there is no
-        // associated execution context.
-        blink::mojom::FetchClientSettingsObject::New(),
+        std::move(fetch_client_settings_object),
         base::BindOnce(
             &ServiceWorkerControlleeRequestHandler::DidUpdateRegistration,
             weak_factory_.GetWeakPtr(), registration));
-    TRACE_EVENT_WITH_FLOW1(
+    TRACE_EVENT(
         "ServiceWorker",
         "ServiceWorkerControlleeRequestHandler::ContinueWithRegistration",
-        TRACE_ID_LOCAL(this),
-        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
-        "Need to update");
+        perfetto::Flow::FromPointer(this), "Info", "Need to update");
     return;
   }
 
@@ -364,12 +356,10 @@ void ServiceWorkerControlleeRequestHandler::ContinueWithRegistration(
   scoped_refptr<ServiceWorkerVersion> active_version =
       registration->active_version();
   if (!active_version) {
-    TRACE_EVENT_WITH_FLOW1(
+    TRACE_EVENT(
         "ServiceWorker",
         "ServiceWorkerControlleeRequestHandler::ContinueWithRegistration",
-        TRACE_ID_LOCAL(this),
-        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
-        "No active version, so falling back to network");
+        perfetto::Flow::FromPointer(this), "Info", "ServiceWorker is blocked");
     CompleteWithoutLoader();
     return;
   }
@@ -383,20 +373,17 @@ void ServiceWorkerControlleeRequestHandler::ContinueWithRegistration(
         &ServiceWorkerControlleeRequestHandler::ContinueWithActivatedVersion,
         weak_factory_.GetWeakPtr(), registration, active_version,
         std::move(find_registration_start_time)));
-    TRACE_EVENT_WITH_FLOW1(
+    TRACE_EVENT(
         "ServiceWorker",
         "ServiceWorkerControlleeRequestHandler::ContinueWithRegistration",
-        TRACE_ID_LOCAL(this),
-        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
+        perfetto::Flow::FromPointer(this), "Info",
         "Wait until finished SW activation");
     return;
   }
 
-  TRACE_EVENT_WITH_FLOW0(
-      "ServiceWorker",
-      "ServiceWorkerControlleeRequestHandler::ContinueWithRegistration",
-      TRACE_ID_LOCAL(this),
-      TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT);
+  TRACE_EVENT("ServiceWorker",
+              "ServiceWorkerControlleeRequestHandler::ContinueWithRegistration",
+              perfetto::Flow::FromPointer(this));
 
   ContinueWithActivatedVersion(std::move(registration),
                                std::move(active_version),
@@ -408,11 +395,10 @@ void ServiceWorkerControlleeRequestHandler::ContinueWithActivatedVersion(
     scoped_refptr<ServiceWorkerVersion> active_version,
     base::TimeTicks find_registration_start_time) {
   if (!context_ || !service_worker_client_) {
-    TRACE_EVENT_WITH_FLOW1(
+    TRACE_EVENT(
         "ServiceWorker",
         "ServiceWorkerControlleeRequestHandler::ContinueWithActivatedVersion",
-        TRACE_ID_LOCAL(this),
-        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
+        perfetto::Flow::FromPointer(this), "Info",
         "The context or container host is gone, so falling back to network");
     CompleteWithoutLoader();
     return;
@@ -437,11 +423,10 @@ void ServiceWorkerControlleeRequestHandler::ContinueWithActivatedVersion(
     //      retries.
     //   3) If the container host does not have an active version, just fail the
     //      load.
-    TRACE_EVENT_WITH_FLOW2(
+    TRACE_EVENT(
         "ServiceWorker",
         "ServiceWorkerControlleeRequestHandler::ContinueWithActivatedVersion",
-        TRACE_ID_LOCAL(this),
-        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
+        perfetto::Flow::FromPointer(this), "Info",
         "The expected active version is not ACTIVATED, so falling back to "
         "network",
         "Status",
@@ -477,22 +462,20 @@ void ServiceWorkerControlleeRequestHandler::ContinueWithActivatedVersion(
   switch (active_version->fetch_handler_type()) {
     case ServiceWorkerVersion::FetchHandlerType::kNoHandler: {
       RecordSkipReason(FetchHandlerSkipReason::kNoFetchHandler);
-      TRACE_EVENT_WITH_FLOW1(
+      TRACE_EVENT(
           "ServiceWorker",
           "ServiceWorkerControlleeRequestHandler::ContinueWithActivatedVersion",
-          TRACE_ID_LOCAL(this),
-          TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
+          perfetto::Flow::FromPointer(this), "Info",
           "Skipping the ServiceWorker which has no fetch handler");
       CompleteWithoutLoader();
       return;
     }
     case ServiceWorkerVersion::FetchHandlerType::kEmptyFetchHandler: {
       RecordSkipReason(FetchHandlerSkipReason::kSkippedForEmptyFetchHandler);
-      TRACE_EVENT_WITH_FLOW2(
+      TRACE_EVENT(
           "ServiceWorker",
           "ServiceWorkerControlleeRequestHandler::ContinueWithActivatedVersion",
-          TRACE_ID_LOCAL(this),
-          TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
+          perfetto::Flow::FromPointer(this), "Info",
           "The fetch handler is skippable. Falling back to network",
           "FetchHandlerType",
           FetchHandlerTypeToString(active_version->fetch_handler_type()));
@@ -513,11 +496,10 @@ void ServiceWorkerControlleeRequestHandler::ContinueWithActivatedVersion(
     case ServiceWorkerVersion::FetchHandlerType::kNotSkippable: {
       // Otherwise, record the skip reason as kNotSkipped.
       RecordSkipReason(FetchHandlerSkipReason::kNotSkipped);
-      TRACE_EVENT_WITH_FLOW1(
+      TRACE_EVENT(
           "ServiceWorker",
           "ServiceWorkerControlleeRequestHandler::ContinueWithActivatedVersion",
-          TRACE_ID_LOCAL(this),
-          TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
+          perfetto::Flow::FromPointer(this), "Info",
           "Forwarding to the ServiceWorker");
       break;
     }
@@ -545,11 +527,10 @@ void ServiceWorkerControlleeRequestHandler::CreateLoaderAndStartRequest(
 void ServiceWorkerControlleeRequestHandler::DidStartWorker(
     uintptr_t trace_id,
     blink::ServiceWorkerStatusCode status) {
-  TRACE_EVENT_WITH_FLOW1(
-      "ServiceWorker", "ServiceWorkerControlleeRequestHandler::DidStartWorker",
-      TRACE_ID_LOCAL(trace_id),
-      TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Status",
-      blink::ServiceWorkerStatusToString(status));
+  TRACE_EVENT("ServiceWorker",
+              "ServiceWorkerControlleeRequestHandler::DidStartWorker",
+              perfetto::Flow::ProcessScoped(trace_id), "Status",
+              blink::ServiceWorkerStatusToString(status));
 }
 
 void ServiceWorkerControlleeRequestHandler::DidUpdateRegistration(
@@ -560,12 +541,10 @@ void ServiceWorkerControlleeRequestHandler::DidUpdateRegistration(
   DCHECK(force_update_started_);
 
   if (!context_ || !service_worker_client_) {
-    TRACE_EVENT_WITH_FLOW1(
-        "ServiceWorker",
-        "ServiceWorkerControlleeRequestHandler::DidUpdateRegistration",
-        TRACE_ID_LOCAL(this),
-        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
-        "The context is gone in DidUpdateRegistration");
+    TRACE_EVENT("ServiceWorker",
+                "ServiceWorkerControlleeRequestHandler::DidUpdateRegistration",
+                perfetto::Flow::FromPointer(this), "Info",
+                "The context is gone in DidUpdateRegistration");
     CompleteWithoutLoader();
     return;
   }
@@ -580,20 +559,16 @@ void ServiceWorkerControlleeRequestHandler::DidUpdateRegistration(
             &ServiceWorkerControlleeRequestHandler::ContinueWithRegistration,
             weak_factory_.GetWeakPtr(),
             /*is_for_navigation=*/false, base::TimeTicks()));
-    TRACE_EVENT_WITH_FLOW1(
-        "ServiceWorker",
-        "ServiceWorkerControlleeRequestHandler::DidUpdateRegistration",
-        TRACE_ID_LOCAL(this),
-        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
-        "Update failed, look up the registration again");
+    TRACE_EVENT("ServiceWorker",
+                "ServiceWorkerControlleeRequestHandler::DidUpdateRegistration",
+                perfetto::Flow::FromPointer(this), "Info",
+                "Update failed, look up the registration again");
     return;
   }
 
-  TRACE_EVENT_WITH_FLOW0(
-      "ServiceWorker",
-      "ServiceWorkerControlleeRequestHandler::DidUpdateRegistration",
-      TRACE_ID_LOCAL(this),
-      TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT);
+  TRACE_EVENT("ServiceWorker",
+              "ServiceWorkerControlleeRequestHandler::DidUpdateRegistration",
+              perfetto::Flow::FromPointer(this));
 
   DCHECK_EQ(original_registration->id(), registration_id);
   ServiceWorkerVersion* new_version =
@@ -610,21 +585,19 @@ void ServiceWorkerControlleeRequestHandler::OnUpdatedVersionStatusChanged(
     scoped_refptr<ServiceWorkerRegistration> registration,
     scoped_refptr<ServiceWorkerVersion> version) {
   if (!context_ || !service_worker_client_) {
-    TRACE_EVENT_WITH_FLOW1(
+    TRACE_EVENT(
         "ServiceWorker",
         "ServiceWorkerControlleeRequestHandler::OnUpdatedVersionStatusChanged",
-        TRACE_ID_LOCAL(this),
-        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "Info",
+        perfetto::Flow::FromPointer(this), "Info",
         "The context is gone in OnUpdatedVersionStatusChanged");
     CompleteWithoutLoader();
     return;
   }
 
-  TRACE_EVENT_WITH_FLOW0(
+  TRACE_EVENT(
       "ServiceWorker",
       "ServiceWorkerControlleeRequestHandler::OnUpdatedVersionStatusChanged",
-      TRACE_ID_LOCAL(this),
-      TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT);
+      perfetto::Flow::FromPointer(this));
 
   if (version->status() == ServiceWorkerVersion::ACTIVATED ||
       version->status() == ServiceWorkerVersion::REDUNDANT) {

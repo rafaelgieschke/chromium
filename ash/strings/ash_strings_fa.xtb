@@ -9,7 +9,6 @@
 <translation id="101823271612280837">ضبط متوقف شد. در حالت رایانه لوحی نمی‌توان از «داشبورد بازی‌ها» استفاده کرد.</translation>
 <translation id="1024364763893396229">ذخیره کردن <ph name="NAME" /></translation>
 <translation id="1032891413405719768">شارژ باتری قلم کم است</translation>
-<translation id="1036073649888683237">برای مدیریت اعلان‌ها، به «تنظیمات» بروید</translation>
 <translation id="1036348656032585052">خاموش کردن</translation>
 <translation id="1037492556044956303"><ph name="DEVICE_NAME" /> اضافه شد</translation>
 <translation id="1038106730571050514">نمایش پیشنهادها</translation>
@@ -58,7 +57,7 @@
 <translation id="1184126796192815024">این شبکه از جاری‌سازی برنامه‌ها از تلفنتان پشتیبانی نمی‌کند. از نقطه اتصال تلفنتان استفاده کنید. <ph name="LEARN_MORE" /></translation>
 <translation id="118437560755358292">برای ایمنی بیشتر، گذرواژه یا پین را وارد کنید</translation>
 <translation id="118532027333893379">برای ضبط تمام صفحه، روی هرجایی که می‌خواهید تک‌ضرب بزنید</translation>
-<translation id="1190609913194133056">مرکز اعلان</translation>
+<translation id="1190609913194133056">مرکز اعلان‌ها</translation>
 <translation id="1195412055398077112">بزرگ‌تر از صفحه</translation>
 <translation id="1195667586424773550">کشیدن پیوند به نوار نشانی برگه</translation>
 <translation id="119944043368869598">پاک کردن همه</translation>
@@ -192,7 +191,7 @@
 <translation id="1607312127821884567">بستن راه‌اندازی مشاهده برنامه‌های تلفن</translation>
 <translation id="1610778689852195798">«واگرد»</translation>
 <translation id="1611993646327628135">روشن</translation>
-<translation id="1612679292338846734">‏وقتی این ویژگی‌ها را روشن می‌کنید، ممکن است نوشتار ورودی، محتوای سند، و نشانی صفحه وب برای سرورهای هوش مصنوعی Google ارسال شود. از این اطلاعات برای تولید پیشنهاد نوشتاری، تولید خلاصه، پاسخ به سؤالات، و بهبود محصول منوط به <ph name="LINK_TO_SERVICE_TERMS" /> استفاده می‌شود. اطلاعات شخصی، حساس، یا محرمانه را وارد نکنید.</translation>
+<translation id="1612679292338846734">‏وقتی این ویژگی‌ها را روشن می‌کنید، ممکن است نوشتار ورودی، محتوای سند، و نشانی صفحه وب برای سرورهای «هوشواره Google» ارسال شود. از این اطلاعات برای تولید پیشنهاد نوشتاری، تولید خلاصه، پاسخ به سؤالات، و بهبود محصول منوط به <ph name="LINK_TO_SERVICE_TERMS" /> استفاده می‌شود. اطلاعات شخصی، حساس، یا محرمانه را وارد نکنید.</translation>
 <translation id="1620510694547887537">دوربین</translation>
 <translation id="1623768535032616219">‏جمع کردن Google Classroom</translation>
 <translation id="163032029566320584"><ph name="UNAVAILABLE_DLC" /> دردسترس نیست.</translation>
@@ -237,7 +236,7 @@
 <translation id="1751335846119670066">کمک گرفتن در خواندن</translation>
 <translation id="1755408179247123630">«انتخاب برای شنیدن» روشن شود؟</translation>
 <translation id="1755556344721611131">برنامه عیب‌یابی</translation>
-<translation id="1756833229520115364">الگو ذخیره نشد. تعداد پنجره‌ها یا برگه‌ها خیلی زیاد است.</translation>
+<translation id="1756833229520115364">الگو ذخیره نشد. تعداد پنجره‌ها یا زبانه‌ها خیلی زیاد است.</translation>
 <translation id="1757857692711134412">خاموش تا غروب آفتاب</translation>
 <translation id="1763084151787818322">کنش‌های دیگر</translation>
 <translation id="1768138163688567246">بستن جستجو در صفحه‌نمایش</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">عکس اخیر <ph name="INDEX" /> از <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">‏جمع کردن Google Tasks</translation>
 <translation id="2208323208084708176">حالت میز کار یکپارچه</translation>
-<translation id="2210311543574621570">‏وقتی‌که Ctrl و V را فشار دهید و نگه دارید، بریده‌دان را خواهید دید. برای خاموش کردن این میان‌بر می‌توانید «پرچم‌گذاری» ‎#clipboard-history-longpress را در chrome://flags غیرفعال کنید.</translation>
 <translation id="2215920961700443347">به اینترنت متصل نیستید. به اینترنت متصل شوید و دوباره امتحان کنید.</translation>
 <translation id="2222841058024245321">میز کار ۷</translation>
 <translation id="2223384056430485343">در صفحهٔ دونیمه</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">نصب برنامه</translation>
 <translation id="2482878487686419369">اعلان‌ها</translation>
 <translation id="2484513351006226581">برای تغییر جانمایی صفحه‌کلید، <ph name="KEYBOARD_SHORTCUT" /> را فشار دهید.</translation>
+<translation id="2485422356828889247">حذف نصب</translation>
 <translation id="2486214324139475545">پیش‌نمایش <ph name="DESK_NAME" />. میز کار فعال.</translation>
 <translation id="2486405091093637109">‫«<ph name="DISPLAY_NAME" />» به وضوح <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> هرتز) تغییر کرد. بدون تأیید کردن، تنظیمات قبلی <ph name="TIMEOUT_SECONDS" /> دیگر بازیابی خواهد شد.</translation>
 <translation id="2487915095798731898">پیوستن</translation>
@@ -862,7 +861,7 @@
 <translation id="3943857333388298514">جاگذاری</translation>
 <translation id="394485226368336402">تنظیمات صوتی</translation>
 <translation id="3945319193631853098">برای تمام کردن راه‌اندازی، تک‌ضرب بزنید</translation>
-<translation id="3945867833895287237">درحال اتصال به نقطه اتصال…</translation>
+<translation id="3945867833895287237">درحال متصل شدن به نقطه اتصال…</translation>
 <translation id="3950272133184491871">همین حالا از سیستم خارج می‌شوید؟</translation>
 <translation id="3950820424414687140">ورود به سیستم</translation>
 <translation id="3953130726459169782">هنوز تکلیفی انجام نشده است.</translation>
@@ -974,7 +973,7 @@
 <translation id="4280601795273309128">به‌روزرسانی‌های امنیتی به‌پایان رسیده است. دستگاهتان را ارتقا دهید.</translation>
 <translation id="4283888303416325161">برای ایمنی بیشتر، گذرواژه را وارد کنید</translation>
 <translation id="4285498937028063278">برداشتن سنجاق</translation>
-<translation id="428715201724021596">درحال اتصال به نمایه. ممکن است چند دقیقه طول بکشد.</translation>
+<translation id="428715201724021596">درحال متصل شدن به نمایه. ممکن است چند دقیقه طول بکشد.</translation>
 <translation id="4287250812980588583">‏پنجره Chrome</translation>
 <translation id="4291322857434980285">{NUM_APPS,plural, =1{میزان صدای میکروفون را <ph name="APP_NAME" /> کنترل می‌کند}one{میزان صدای میکروفون را # برنامه کنترل می‌کند}other{میزان صدای میکروفون را # برنامه کنترل می‌کند}}</translation>
 <translation id="4296136865091727875">پاک کردن همه <ph name="COUNT" /> اعلان</translation>
@@ -1397,7 +1396,7 @@
 <translation id="5620979661744857819">با این کار، دسترسی برای <ph name="APP_NAME" /> و همه برنامه‌ها و وب‌سایت‌های دارای اجازه دوربین و میکروفون مجاز می‌شود. ممکن است لازم باشد صفحه وب را بازآوری کنید یا برنامه را دوباره راه‌اندازی کنید.</translation>
 <translation id="5625955975703555628">LTE+‎</translation>
 <translation id="5627392655516693966">گذرواژه‌تان تأیید نشد. دوباره امتحان کنید.</translation>
-<translation id="5632485077360054581">نمایش روش انجام کار</translation>
+<translation id="5632485077360054581">نشان دادن روش کار</translation>
 <translation id="5648021990716966815">فیش میکروفون</translation>
 <translation id="5652575806481723716"><ph name="FOCUSED_APP_NAME" /> به توجه شما نیاز دارد.</translation>
 <translation id="5662075790140998213">میز کار ۱۰</translation>
@@ -1540,7 +1539,7 @@
 <translation id="6068258534237496331">کنترل‌های تماس تصویری</translation>
 <translation id="6073451960410192870">توقف ضبط</translation>
 <translation id="6074087755403037157">کانال بتا</translation>
-<translation id="6075098173600599596">تغییر دادن بزرگ و کوچک بودن حروف</translation>
+<translation id="6075098173600599596">تغییر دادن بزرگ‌نویسی</translation>
 <translation id="6091929401758362855">فهرست پخش: <ph name="PLAYLIST_TITLE" /></translation>
 <translation id="6093867385179428431">توسط سرپرست غیرفعال شده است</translation>
 <translation id="6095008505822982596">سرعت گفتار</translation>
@@ -1601,7 +1600,7 @@
 <translation id="6260038345397266744"><ph name="TITLE" />. <ph name="DESCRIPTION" /></translation>
 <translation id="6267036997247669271"><ph name="NAME" />: در حال فعال‌سازی…</translation>
 <translation id="6274202259872570803">ضبط ویدیویی از صفحه</translation>
-<translation id="6274422179279280249">‏پیوند، اموجی، و موارد دیگر درج کنید. همچنین می‌توانید از «هوش مصنوعی Google» برای نوشتن کمک بگیرید. <ph name="LINK_TO_LEARN_MORE" /></translation>
+<translation id="6274422179279280249">‏پیوند، اموجی، و موارد دیگر درج کنید. همچنین می‌توانید از «هوشواره Google» برای نوشتن کمک بگیرید. <ph name="LINK_TO_LEARN_MORE" /></translation>
 <translation id="6276708887952587684">مشاهده منبع صفحه</translation>
 <translation id="6285871695023807425">افزودن به «تقویم»</translation>
 <translation id="6288235558961782912">بعداً می‌توانید <ph name="USER_EMAIL_ADDRESS" /> را با اجازه ولی دوباره اضافه کنید.</translation>
@@ -1744,12 +1743,12 @@
 <translation id="6732087373923685049">دوربین</translation>
 <translation id="6732800389263199929">بیش‌از <ph name="COUNT" /></translation>
 <translation id="6737983188036277605">دوربین و میکروفون درحال استفاده هستند</translation>
-<translation id="6739144137573853180">رفتن به تنظیمات</translation>
+<translation id="6739144137573853180">رفتن به «تنظیمات»</translation>
 <translation id="6747985245839783873">شارژ باتری <ph name="PERCENTAGE" /> درصد است. «بهینه‌سازی باتری» روشن است.</translation>
 <translation id="6751052314767925245">به‌اجبار اجراشده توسط سرپرست</translation>
 <translation id="6751826523481687655">ردیابی عملکرد روشن است</translation>
 <translation id="6752912906630585008">میز <ph name="REMOVED_DESK" /> برداشته شد و با میز <ph name="RECEIVE_DESK" /> ادغام شد</translation>
-<translation id="6753390234084146956">برگه‌ها</translation>
+<translation id="6753390234084146956">زبانه‌ها</translation>
 <translation id="6754918760968695779">درج سریع</translation>
 <translation id="6757237461819837179">هیچ رسانه‌ای درحال پخش نیست</translation>
 <translation id="6760438044935091345">داشبورد بازی‌ها</translation>
@@ -1770,7 +1769,7 @@
 <translation id="6802687695197837794">با این کار، دسترسی برای <ph name="APP1_NAME" />، <ph name="APP2_NAME" />، و همه برنامه‌ها و وب‌سایت‌های دارای اجازه دوربین و میکروفون مجاز می‌شود</translation>
 <translation id="6803622936009808957">نمایش یک تصویر واحد در چند صفحه نمایش ممکن نیست زیرا وضوح تصویر پشتیبانی شده‌ای وجود ندارد. بجای آن حالت نمایش دسک‌تاپ چند بخشی استفاده می‌شود.</translation>
 <translation id="6809556495807506746">کنترل‌ها دردسترس نیست</translation>
-<translation id="6812232930908427253">میز کار ذخیره نشد. تعداد پنجره‌ها یا برگه‌ها خیلی زیاد است.</translation>
+<translation id="6812232930908427253">میز کار ذخیره نشد. تعداد پنجره‌ها یا زبانه‌ها خیلی زیاد است.</translation>
 <translation id="6818242057446442178">عقب رفتن کلمه‌به‌کلمه</translation>
 <translation id="6819327813400217281">دوربین به گوشه پایین سمت چپ چسبید</translation>
 <translation id="6820676911989879663">استراحت کنید!</translation>
@@ -2139,7 +2138,7 @@
 <translation id="8051716679295756675">الگویی با نام <ph name="DESK_TEMPLATE_NAME" /> ازقبل وجود دارد</translation>
 <translation id="8052898407431791827">در بریده‌دان کپی شد</translation>
 <translation id="8054466585765276473">درحال محاسبه زمان شارژ باتری.</translation>
-<translation id="8076492880354921740">برگه‌ها</translation>
+<translation id="8076492880354921740">زبانه‌ها</translation>
 <translation id="8079538659226626406">هم‌رسانی صفحه‌نمایش</translation>
 <translation id="8083540854303889870">ذخیره‌شده برای بعد</translation>
 <translation id="8085765914647468715">YouTube Music</translation>
@@ -2195,7 +2194,6 @@
 <translation id="8241650983304689286">افزودن زبانه به «نمای دونیمه» جدید</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />، قدرت سیگنال <ph name="SIGNAL_STRENGTH" />، باتری تلفن<ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">‏نشان دادن کل محتوای Google Drive</translation>
-<translation id="8257510091797044096">راه‌اندازی دستگاه</translation>
 <translation id="8261506727792406068">حذف</translation>
 <translation id="8262312463845990408">فعال/ غیرفعال کردن بازپخش</translation>
 <translation id="8268302343625273732">‏دیدن همه تکالیف در Google Classroom</translation>
@@ -2439,11 +2437,11 @@
 <translation id="9129245940793250979">دکمه پشت</translation>
 <translation id="9133335900048457298">نمی‌توان محتوای محافظت‌شده را ضبط کرد</translation>
 <translation id="9139720510312328767">حذف حرف بعدی</translation>
-<translation id="9148058034647219655">خروج</translation>
+<translation id="9148058034647219655">خارج شدن</translation>
 <translation id="9151906066336345901">پایان</translation>
 <translation id="9159421884295554245">در «بریده‌دان» جستجو کنید</translation>
 <translation id="9161053988251441839">برنامه‌های پیشنهادشده</translation>
-<translation id="9168436347345867845">بعداً انجام شود</translation>
+<translation id="9168436347345867845">بعداً انجام دادن</translation>
 <translation id="9178475906033259337">نمایش ۱ نتیجه برای <ph name="QUERY" /></translation>
 <translation id="9179259655489829027">این ویژگی امکان می‌دهد بدون نیاز به گذرواژه، به هر کاربری که به سیستم واردشده به‌سرعت دسترسی داشته باشید. تنها برای حساب‌های مورد اعتمادتان از این ویژگی استفاده کنید.</translation>
 <translation id="9183302530794969518">‏سندنگار Google</translation>

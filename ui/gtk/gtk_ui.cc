@@ -19,7 +19,6 @@
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
 #include "base/debug/leak_annotations.h"
 #include "base/environment.h"
@@ -91,13 +90,13 @@
 #include "ui/shell_dialogs/select_file_policy.h"
 #include "ui/views/window/window_button_order_provider.h"
 
-#if BUILDFLAG(IS_OZONE_WAYLAND)
+#if BUILDFLAG(SUPPORTS_OZONE_WAYLAND)
 #include "ui/gtk/wayland/gtk_ui_platform_wayland.h"
-#endif  // BUILDFLAG(IS_OZONE_WAYLAND)
+#endif  // BUILDFLAG(SUPPORTS_OZONE_WAYLAND)
 
-#if BUILDFLAG(IS_OZONE_X11)
+#if BUILDFLAG(SUPPORTS_OZONE_X11)
 #include "ui/gtk/x/gtk_ui_platform_x11.h"
-#endif  // BUILDFLAG(IS_OZONE_X11)
+#endif  // BUILDFLAG(SUPPORTS_OZONE_X11)
 
 namespace gtk {
 
@@ -162,14 +161,14 @@ std::unique_ptr<GtkUiPlatform> CreateGtkUiPlatform(ui::LinuxUiBackend backend) {
   switch (backend) {
     case ui::LinuxUiBackend::kStub:
       return std::make_unique<GtkUiPlatformStub>();
-#if BUILDFLAG(IS_OZONE_X11)
+#if BUILDFLAG(SUPPORTS_OZONE_X11)
     case ui::LinuxUiBackend::kX11:
       return std::make_unique<GtkUiPlatformX11>();
-#endif  // BUILDFLAG(IS_OZONE_X11)
-#if BUILDFLAG(IS_OZONE_WAYLAND)
+#endif  // BUILDFLAG(SUPPORTS_OZONE_X11)
+#if BUILDFLAG(SUPPORTS_OZONE_WAYLAND)
     case ui::LinuxUiBackend::kWayland:
       return std::make_unique<GtkUiPlatformWayland>();
-#endif  // BUILDFLAG(IS_OZONE_WAYLAND)
+#endif  // BUILDFLAG(SUPPORTS_OZONE_WAYLAND)
     default:
       NOTREACHED();
   }
@@ -889,13 +888,13 @@ void GtkUi::OnMonitorsChanged(GListModel* list,
   std::unordered_set<GdkMonitor*> monitors;
   for (size_t i = 0; i < n_monitors; ++i) {
     auto* monitor = static_cast<GdkMonitor*>(g_list_model_get_item(list, i));
-    if (!base::Contains(monitor_signals_, monitor)) {
+    if (!monitor_signals_.contains(monitor)) {
       TrackMonitor(monitor);
     }
     monitors.insert(monitor);
   }
   std::erase_if(monitor_signals_, [&](const auto& pair) {
-    return !base::Contains(monitors, pair.first);
+    return !monitors.contains(pair.first);
   });
   UpdateDeviceScaleFactor();
 }

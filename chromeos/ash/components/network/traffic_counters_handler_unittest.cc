@@ -59,8 +59,8 @@ class TrafficCountersHandlerTest : public ::testing::Test {
     NetworkHandler::Get()->managed_network_configuration_handler()->SetPolicy(
         ::onc::ONC_SOURCE_DEVICE_POLICY,
         /*userhash=*/std::string(),
-        /*network_configs_onc=*/base::Value::List(),
-        /*global_network_config=*/base::Value::Dict());
+        /*network_configs_onc=*/base::ListValue(),
+        /*global_network_config=*/base::DictValue());
 
     task_environment_.RunUntilIdle();
 
@@ -87,8 +87,6 @@ class TrafficCountersHandlerTest : public ::testing::Test {
     scoped_user_manager_.reset();
     LoginState::Shutdown();
   }
-
-  base::Time GetTime() { return task_environment_.GetMockClock()->Now(); }
 
  protected:
   base::Time SetLastResetTimeAndRun(const std::string& time_str) {

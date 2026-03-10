@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
@@ -53,7 +52,6 @@
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/identity_test_environment_profile_adaptor.h"
 #include "chrome/browser/sync/sync_service_factory.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/identity.h"
 #include "chrome/common/pref_names.h"
@@ -176,7 +174,7 @@ class AsyncFunctionRunner {
     response_delegate_ =
         std::make_unique<api_test_utils::SendResponseHelper>(function);
     function->preserve_results_for_testing();
-    base::Value::List parsed_args = base::test::ParseJsonList(args);
+    base::ListValue parsed_args = base::test::ParseJsonList(args);
     function->SetArgs(std::move(parsed_args));
 
     if (!function->extension()) {
@@ -480,7 +478,7 @@ class FakeGetAuthTokenFunction : public IdentityGetAuthTokenFunction {
         identity_manager->GetAccountsMutator()->AddOrUpdateAccount(
             account_info.gaia, account_info.email, "token",
             account_info.is_under_advanced_protection,
-            signin_metrics::AccessPoint::kUnknown,
+            signin_metrics::AccessPoint::kStartPage,
             signin_metrics::SourceForRefreshTokenOperation::kUnknown);
         fixed_auth_error = true;
       }
@@ -661,7 +659,7 @@ class IdentityGetAccountsFunctionTest : public IdentityTestWithSignin {
       return GenerateFailureResult(gaia_ids, nullptr)
              << "getAccounts did not return a result.";
     }
-    const base::Value::List* callback_arguments_list =
+    const base::ListValue* callback_arguments_list =
         func->GetResultListForTest();
     if (!callback_arguments_list) {
       return GenerateFailureResult(gaia_ids, nullptr) << "NULL result";
@@ -676,7 +674,7 @@ class IdentityGetAccountsFunctionTest : public IdentityTestWithSignin {
     if (!(*callback_arguments_list)[0].is_list()) {
       GenerateFailureResult(gaia_ids, nullptr) << "Result was not an array";
     }
-    const base::Value::List& results = (*callback_arguments_list)[0].GetList();
+    const base::ListValue& results = (*callback_arguments_list)[0].GetList();
 
     std::vector<std::string> result_ids;
     for (const base::Value& item : results) {
@@ -698,7 +696,7 @@ class IdentityGetAccountsFunctionTest : public IdentityTestWithSignin {
 
   testing::AssertionResult GenerateFailureResult(
       const ::std::vector<std::string>& gaia_ids,
-      const base::Value::List* results) {
+      const base::ListValue* results) {
     testing::Message msg("Expected: ");
     for (const std::string& gaia_id : gaia_ids) {
       msg << gaia_id << " ";
@@ -1982,11 +1980,11 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
 #endif
 
 #if !BUILDFLAG(IS_MAC)
-// Test was originally written for http://crbug.com/753014 and subsequently
+// Test was originally written for http://crbug.com/41338040 and subsequently
 // modified to use the remote consent flow.
 //
 // On macOS, closing all browsers does not shut down the browser process.
-// TODO(http://crbug.com/756462): Figure out how to shut down the browser
+// TODO(http://crbug.com/41339839): Figure out how to shut down the browser
 // process on macOS and enable this test on macOS as well.
 IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
                        InteractiveSigninFailedDuringBrowserProcessShutDown) {
@@ -3056,8 +3054,8 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest, ScopesDefault) {
   const ExtensionTokenKey* token_key = func->GetExtensionTokenKeyForTest();
   EXPECT_EQ(token_key->scopes, granted_scopes);
   EXPECT_EQ(2ul, token_key->scopes.size());
-  EXPECT_TRUE(base::Contains(token_key->scopes, "scope1"));
-  EXPECT_TRUE(base::Contains(token_key->scopes, "scope2"));
+  EXPECT_TRUE(token_key->scopes.contains("scope1"));
+  EXPECT_TRUE(token_key->scopes.contains("scope2"));
   histogram_tester()->ExpectUniqueSample(
       kGetAuthTokenResultHistogramName, IdentityGetAuthTokenError::State::kNone,
       1);
@@ -3237,10 +3235,10 @@ class GetAuthTokenFunctionDeviceLocalAccountTest
 
   scoped_refptr<const Extension> CreateTestExtension(const std::string& id) {
     return ExtensionBuilder("Test")
-        .SetManifestKey(
-            "oauth2", base::Value::Dict()
-                          .Set("client_id", "clientId")
-                          .Set("scopes", base::Value::List().Append("scope1")))
+        .SetManifestKey("oauth2",
+                        base::DictValue()
+                            .Set("client_id", "clientId")
+                            .Set("scopes", base::ListValue().Append("scope1")))
         .SetID(id)
         .Build();
   }
@@ -4027,8 +4025,8 @@ IN_PROC_BROWSER_TEST_F(LaunchWebAuthFlowFunctionTestWithBrowserTab,
 
   profile()->GetPrefs()->SetDict(
       extensions::pref_names::kOAuthRedirectUrls,
-      base::Value::Dict().Set(function->extension()->id(),
-                              base::Value::List().Append(final_url.spec())));
+      base::DictValue().Set(function->extension()->id(),
+                            base::ListValue().Append(final_url.spec())));
   RunFunctionAndWaitForNavigation(function.get(), auth_url, args);
 
   SimulateCustomUrlRedirect(
@@ -4286,7 +4284,7 @@ class OnSignInChangedEventTest : public IdentityTestWithSignin {
   // been added. This is because the order of multiple events firing due to the
   // same underlying state change is undefined in the
   // chrome.identity.onSignInEventChanged() API.
-  void AddExpectedEvent(base::Value::List args) {
+  void AddExpectedEvent(base::ListValue args) {
     expected_events_.insert(
         std::make_unique<Event>(events::IDENTITY_ON_SIGN_IN_CHANGED,
                                 api::identity::OnSignInChanged::kEventName,

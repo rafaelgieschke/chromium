@@ -57,6 +57,7 @@
 #include "extensions/common/manifest.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
+#include "ash/constants/ash_pref_names.h"
 #include "chrome/browser/ash/input_method/input_method_manager_impl.h"
 #include "chromeos/ash/components/network/managed_network_configuration_handler.h"
 #include "chromeos/ash/components/network/network_state_handler.h"
@@ -251,7 +252,7 @@ void ProfileResetter::ResetDefaultSearchEngine() {
     DCHECK(prefs);
     TemplateURLPrepopulateData::ClearPrepopulatedEnginesInPrefs(
         profile_->GetPrefs());
-    std::optional<base::Value::List> search_engines(
+    std::optional<base::ListValue> search_engines(
         master_settings_->GetSearchProviderOverrides());
     if (search_engines.has_value()) {
       // This Chrome distribution channel provides a custom search engine. We
@@ -370,7 +371,7 @@ void ProfileResetter::ResetStartupPages() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   PrefService* prefs = profile_->GetPrefs();
   DCHECK(prefs);
-  std::optional<base::Value::List> url_list(
+  std::optional<base::ListValue> url_list(
       master_settings_->GetUrlsToRestoreOnStartup());
   if (url_list.has_value()) {
     prefs->SetList(prefs::kURLsToRestoreOnStartup, std::move(url_list).value());
@@ -548,15 +549,15 @@ void ProfileResetter::ResetKeyboardInputSettings() {
     manager->GetInputMethodUtil()->GetInputMethodIdsFromLanguageCode(
         locale, ash::input_method::kAllInputMethods, &input_method_ids);
     // Save the input method in the user's preference kLanguagePreloadEngines.
-    prefs->SetString(prefs::kLanguagePreloadEngines, input_method_ids.empty()
-                                                         ? std::string()
-                                                         : input_method_ids[0]);
+    prefs->SetString(
+        ash::prefs::kLanguagePreloadEngines,
+        input_method_ids.empty() ? std::string() : input_method_ids[0]);
   }
 
   // 2. Call to reset spell check languages, matching the default language and
   // clearing the other options.
   prefs->SetList(spellcheck::prefs::kSpellCheckDictionaries,
-                 base::Value::List().Append(
+                 base::ListValue().Append(
                      prefs->GetString(language::prefs::kPreferredLanguages)));
 
   MarkAsDone(KEYBOARD_SETTINGS);

@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "base/functional/bind.h"
+#include "base/functional/callback_helpers.h"
 #include "base/time/time.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/passwords/bubble_controllers/manage_passwords_bubble_controller.h"
@@ -54,12 +55,12 @@ ManagePasswordsView::ManagePasswordsView(content::WebContents* web_contents,
 
   // Title insets assume there is content (and thus have no bottom padding). Use
   // dialog insets to get the bottom margin back.
-  set_title_margins(
-      ChromeLayoutProvider::Get()->GetInsetsMetric(views::INSETS_DIALOG));
   // Set the right and left margins to 0 such that the `page_container_` fills
   // the whole page bubble width. Top margin is handled by the title above, and
   // remove bottom margin such that `page_container_` can assign it if needed.
-  set_margins(gfx::Insets());
+  set_frame_margins({.contents = gfx::Insets(),
+                     .title = ChromeLayoutProvider::Get()->GetInsetsMetric(
+                         views::INSETS_DIALOG)});
 
   page_container_ = AddChildView(
       std::make_unique<PageSwitcherView>(std::make_unique<views::View>()));
@@ -170,7 +171,7 @@ ManagePasswordsView::CreatePasswordListView() {
                         kManagePasswordsButtonClicked);
           },
           base::Unretained(this)),
-      controller_.IsAccountStorageEnabled());
+      controller_.IsAccountStorageActive());
 }
 
 std::unique_ptr<ManagePasswordsDetailsView>
@@ -321,7 +322,7 @@ void ManagePasswordsView::RecreateLayout() {
         CreatePasswordDetailsView();
     password_details_view_ = details_view.get();
     page_container_->SwitchToPage(std::move(details_view));
-    if (controller_.IsAccountStorageEnabled() &&
+    if (controller_.IsAccountStorageActive() &&
         !controller_.get_details_bubble_credential()
              .value()
              .IsUsingAccountStore()) {
@@ -401,9 +402,7 @@ void ManagePasswordsView::AuthenticateUserAndDisplayDetailsOf(
             // remains open till the OS closes the authentication dialog and
             // reactivates the bubble.
             base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
-                FROM_HERE,
-                base::BindOnce([](std::unique_ptr<CloseOnDeactivatePin> pin) {},
-                               std::move(pin)),
+                FROM_HERE, base::DoNothingWithBoundArgs(std::move(pin)),
                 base::Seconds(1));
           },
           base::Unretained(this), std::move(pin)));

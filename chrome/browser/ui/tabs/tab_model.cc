@@ -22,8 +22,8 @@
 #include "chrome/browser/ui/ui_features.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/sessions/content/session_tab_helper.h"
+#include "components/split_tabs/split_tab_id.h"
 #include "components/tabs/public/split_tab_collection.h"
-#include "components/tabs/public/split_tab_id.h"
 #include "components/tabs/public/tab_collection.h"
 #include "components/tabs/public/tab_group_tab_collection.h"
 #include "components/web_modal/modal_dialog_host.h"
@@ -44,30 +44,6 @@ namespace {
 
 bool g_disable_tab_feature_initialization = false;
 
-// This class exists to allow consumers to look up a TabInterface from an
-// instance of WebContents. This is necessary while transitioning features to
-// use TabInterface and TabModel instead of WebContents.
-class TabLookupFromWebContents
-    : public content::WebContentsUserData<TabLookupFromWebContents> {
- public:
-  ~TabLookupFromWebContents() override = default;
-
-  TabModel* model() { return model_; }
-  const TabModel* model() const { return model_; }
-
- private:
-  friend WebContentsUserData;
-  TabLookupFromWebContents(content::WebContents* contents, TabModel* model)
-      : content::WebContentsUserData<TabLookupFromWebContents>(*contents),
-        model_(model) {}
-
-  // Semantically owns this class.
-  raw_ptr<TabModel> model_;
-  WEB_CONTENTS_USER_DATA_KEY_DECL();
-};
-
-WEB_CONTENTS_USER_DATA_KEY_IMPL(TabLookupFromWebContents);
-
 }  // namespace
 
 TabModel::TabModel(std::unique_ptr<content::WebContents> contents,
@@ -75,7 +51,7 @@ TabModel::TabModel(std::unique_ptr<content::WebContents> contents,
     : contents_owned_(std::move(contents)),
       contents_(contents_owned_.get()),
       soon_to_be_owning_model_(soon_to_be_owning_model) {
-  TabLookupFromWebContents::CreateForWebContents(contents_, this);
+  tabs::TabLookupFromWebContents::CreateForWebContents(contents_, this);
 
   // TODO(https://crbug.com/362038317): Tab-helpers should be created in exactly
   // one place, which is here.
@@ -94,7 +70,7 @@ TabModel::TabModel(std::unique_ptr<content::WebContents> contents,
 }
 
 TabModel::~TabModel() {
-  contents_->RemoveUserData(TabLookupFromWebContents::UserDataKey());
+  contents_->RemoveUserData(tabs::TabLookupFromWebContents::UserDataKey());
 }
 
 void TabModel::OnAddedToModel(TabStripModel* owning_model) {
@@ -126,7 +102,7 @@ void TabModel::OnRemovedFromModel() {
   will_be_detaching_ = false;
 
   // Opener stuff doesn't make sense to transfer between browsers.
-  opener_ = nullptr;
+  opener_handle_ = tabs::TabHandle::Null();
   reset_opener_on_active_tab_change_ = false;
 
   // Blocked state is preserved, at
@@ -137,6 +113,14 @@ void TabModel::OnRemovedFromModel() {
 
   // Remove visibility observers.
   WebContentsObserver::Observe(nullptr);
+}
+
+tabs::TabInterface* TabModel::opener() const {
+  return opener_handle_.Get();
+}
+
+void TabModel::set_opener(tabs::TabInterface* opener) {
+  opener_handle_ = opener ? opener->GetHandle() : tabs::TabHandle::Null();
 }
 
 TabCollection* TabModel::GetParentCollection(
@@ -180,6 +164,15 @@ void TabModel::SetGroup(std::optional<tab_groups::TabGroupId> group) {
 
   group_ = group;
   group_changed_callback_list_.Notify(this, group_);
+}
+
+void TabModel::SetBlocked(bool blocked) {
+  if (blocked_ == blocked) {
+    return;
+  }
+
+  blocked_ = blocked;
+  blocked_state_changed_callback_list_.Notify(this, blocked_);
 }
 
 void TabModel::WillBecomeHidden(base::PassKey<TabStripModel>) {
@@ -269,6 +262,11 @@ base::CallbackListSubscription TabModel::RegisterGroupChanged(
   return group_changed_callback_list_.Add(std::move(callback));
 }
 
+base::CallbackListSubscription TabModel::RegisterBlockedStateChanged(
+    TabInterface::BlockedStateChangedCallback callback) {
+  return blocked_state_changed_callback_list_.Add(std::move(callback));
+}
+
 bool TabModel::CanShowModalUI() const {
   return !showing_modal_ui_;
 }
@@ -287,7 +285,10 @@ bool TabModel::IsInNormalWindow() const {
 }
 
 BrowserWindowInterface* TabModel::GetBrowserWindowInterface() {
-  return GetModelForTabInterface()->delegate()->GetBrowserWindowInterface();
+  if (soon_to_be_owning_model_ || owning_model_) {
+    return GetModelForTabInterface()->delegate()->GetBrowserWindowInterface();
+  }
+  return nullptr;
 }
 
 const BrowserWindowInterface* TabModel::GetBrowserWindowInterface() const {
@@ -435,7 +436,7 @@ void TabModel::WriteIntoTrace(perfetto::TracedValue context) const {
 std::unique_ptr<content::WebContents> TabModel::DiscardContents(
     std::unique_ptr<content::WebContents> contents) {
   will_discard_contents_callback_list_.Notify(this, contents_, contents.get());
-  contents_->RemoveUserData(TabLookupFromWebContents::UserDataKey());
+  contents_->RemoveUserData(tabs::TabLookupFromWebContents::UserDataKey());
   std::unique_ptr<content::WebContents> old_contents =
       std::move(contents_owned_);
   contents_owned_ = std::move(contents);
@@ -445,7 +446,7 @@ std::unique_ptr<content::WebContents> TabModel::DiscardContents(
   CHECK(session_id.is_valid());
   SetSessionId(session_id.id());
 
-  TabLookupFromWebContents::CreateForWebContents(contents_, this);
+  tabs::TabLookupFromWebContents::CreateForWebContents(contents_, this);
   return old_contents;
 }
 
@@ -459,29 +460,6 @@ std::unique_ptr<content::WebContents> TabModel::DestroyAndTakeWebContents(
 
 void TabModel::DestroyTabFeatures() {
   tab_features_.reset();
-}
-
-// static
-TabInterface* TabInterface::GetFromContents(
-    content::WebContents* web_contents) {
-  return TabLookupFromWebContents::FromWebContents(web_contents)->model();
-}
-
-// static
-const TabInterface* TabInterface::GetFromContents(
-    const content::WebContents* web_contents) {
-  return TabLookupFromWebContents::FromWebContents(web_contents)->model();
-}
-
-// static
-TabInterface* TabInterface::MaybeGetFromContents(
-    content::WebContents* web_contents) {
-  TabLookupFromWebContents* lookup =
-      TabLookupFromWebContents::FromWebContents(web_contents);
-  if (!lookup) {
-    return nullptr;
-  }
-  return lookup->model();
 }
 
 }  // namespace tabs

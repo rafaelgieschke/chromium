@@ -68,6 +68,9 @@ class WebAppFrameToolbarTestHelper {
       Profile* profile,
       web_app::BundledIsolatedWebApp* iwa);
 
+  void LaunchWebAppBrowserAndWait(Profile* profile,
+                                  const webapps::AppId& app_id);
+
   GURL LoadTestPageWithDataAndGetURL(
       net::test_server::EmbeddedTestServer* embedded_test_server,
       base::ScopedTempDir* temp_dir,
@@ -83,7 +86,7 @@ class WebAppFrameToolbarTestHelper {
       base::ScopedTempDir* temp_dir);
 
   // WebContents is used to run JS to parse rectangle values into a list value.
-  static base::Value::List GetXYWidthHeightListValue(
+  static base::ListValue GetXYWidthHeightListValue(
       content::WebContents* web_contents,
       const std::string& rect_value_list,
       const std::string& rect_var_name);

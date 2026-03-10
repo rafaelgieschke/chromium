@@ -16,7 +16,6 @@
 #include "chrome/browser/usb/usb_chooser_context_factory.h"
 #include "chrome/browser/usb/usb_connection_tracker.h"
 #include "chrome/browser/usb/usb_connection_tracker_factory.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile_manager.h"
@@ -180,13 +179,13 @@ class ChromeUsbTestHelper {
   // Creates a fake extension with the specified `extension_id` so that it can
   // exercise behaviors that are only enabled for privileged extensions.
   std::optional<GURL> CreateExtensionWithId(std::string_view extension_id) {
-    auto manifest = base::Value::Dict()
+    auto manifest = base::DictValue()
                         .Set("name", "Fake extension")
                         .Set("description", "For testing.")
                         .Set("version", "0.1")
                         .Set("manifest_version", 2)
                         .Set("web_accessible_resources",
-                             base::Value::List().Append("index.html"));
+                             base::ListValue().Append("index.html"));
     scoped_refptr<const extensions::Extension> extension =
         extensions::ExtensionBuilder()
             .SetManifest(std::move(manifest))

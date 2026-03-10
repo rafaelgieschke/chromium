@@ -46,17 +46,27 @@ class PasswordChangeSubmissionVerifier {
     kPageError = 6,
     kNoResponse = 7,
     kCouldNotParse = 8,
-    kMaxValue = kCouldNotParse,
+    kUserInterventionNeeded = 9,
+    kMaxValue = kUserInterventionNeeded,
   };
   // LINT.ThenChange(//tools/metrics/histograms/metadata/password/enums.xml:SubmissionOutcome)
 
-  using FormSubmissionResultCallback = base::OnceCallback<void(bool)>;
+  // Represents the final result of the verification process passed to the
+  // callback.
+  enum class SubmissionVerificationResult {
+    kSuccess,
+    kFailure,
+    kUserInterventionNeeded,
+  };
 
-  PasswordChangeSubmissionVerifier(content::WebContents* web_contents,
-                                   ModelQualityLogsUploader* logs_uploader);
+  using FormSubmissionVerificationResultCallback =
+      base::OnceCallback<void(SubmissionVerificationResult)>;
+
+  PasswordChangeSubmissionVerifier(
+      content::WebContents* web_contents,
+      ModelQualityLogsUploader* logs_uploader,
+      FormSubmissionVerificationResultCallback callback);
   ~PasswordChangeSubmissionVerifier();
-
-  void CheckSubmissionOutcome(FormSubmissionResultCallback callback);
 
 #if defined(UNIT_TEST)
   AnnotatedPageContentCapturer* capturer() { return capturer_.get(); }
@@ -76,8 +86,8 @@ class PasswordChangeSubmissionVerifier {
   const base::Time creation_time_;
   const raw_ptr<content::WebContents> web_contents_;
   std::unique_ptr<AnnotatedPageContentCapturer> capturer_;
-  FormSubmissionResultCallback callback_;
-  raw_ptr<ModelQualityLogsUploader> logs_uploader_;
+  raw_ptr<ModelQualityLogsUploader> logs_uploader_ = nullptr;
+  FormSubmissionVerificationResultCallback callback_;
 
   base::WeakPtrFactory<PasswordChangeSubmissionVerifier> weak_ptr_factory_{
       this};

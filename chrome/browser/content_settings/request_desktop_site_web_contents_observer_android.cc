@@ -4,12 +4,14 @@
 
 #include "chrome/browser/content_settings/request_desktop_site_web_contents_observer_android.h"
 
+#include <algorithm>
+
 #include "base/android/android_info.h"
 #include "base/android/device_info.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -90,6 +92,12 @@ void RequestDesktopSiteWebContentsObserverAndroid::DidStartNavigation(
   // RDS External Display support.
   bool should_allow_on_external_display =
       ShouldAllowOnExternalDisplay(is_global_setting);
+  if (navigation_handle->IsRendererInitiated() &&
+      should_allow_on_external_display) {
+    base::UmaHistogramBoolean(
+        "Android.Navigation.Renderer.UAOverrideUpdated.ExternalDisplay",
+        !desktop_mode);
+  }
   desktop_mode |= should_allow_on_external_display;
 
   // Override UA for renderer initiated navigation only. UA override for browser
@@ -166,7 +174,7 @@ bool RequestDesktopSiteWebContentsObserverAndroid::ShouldAllowOnExternalDisplay(
       std::string manufacturer = base::android::android_info::manufacturer();
       base::ToLowerASCII(manufacturer);
       s_is_oem_allowlisted_for_external_display_desktop_ua =
-          base::Contains(allowlist, manufacturer);
+          std::ranges::contains(allowlist, manufacturer);
     }
   }
   return s_is_oem_allowlisted_for_external_display_desktop_ua.value();

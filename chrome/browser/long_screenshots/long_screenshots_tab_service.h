@@ -12,6 +12,7 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/files/file_path.h"
 #include "base/functional/callback_forward.h"
+#include "base/memory/memory_pressure_listener.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
@@ -32,8 +33,8 @@ namespace long_screenshots {
 // TODO(tgupta): Handle the deletion of old files when the long screenshots
 // feature ends or when Chrome starts up (to handle when Chrome is killed in the
 // background and there was no opportunity to clean the files).
-class LongScreenshotsTabService
-    : public paint_preview::PaintPreviewBaseService {
+class LongScreenshotsTabService : public paint_preview::PaintPreviewBaseService,
+                                  public base::MemoryPressureListener {
  public:
   LongScreenshotsTabService(
       std::unique_ptr<paint_preview::PaintPreviewFileMixin> file_mixin,
@@ -90,19 +91,25 @@ class LongScreenshotsTabService
 
   // JNI wrapped versions of the above methods
   void CaptureTabAndroid(JNIEnv* env,
-                         jint j_tab_id,
+                         int32_t j_tab_id,
                          const base::android::JavaRef<jobject>& j_gurl,
                          const base::android::JavaRef<jobject>& j_web_contents,
-                         jint clip_x,
-                         jint clip_y,
-                         jint clip_width,
-                         jint clip_height,
-                         jboolean in_memory,
-                         jint override_x_coordinate,
-                         jint override_y_coordinate);
+                         int32_t clip_x,
+                         int32_t clip_y,
+                         int32_t clip_width,
+                         int32_t clip_height,
+                         bool in_memory,
+                         int32_t override_x_coordinate,
+                         int32_t override_y_coordinate);
   void LongScreenshotsClosedAndroid(JNIEnv* env);
 
   base::android::ScopedJavaGlobalRef<jobject> GetJavaRef() { return java_ref_; }
+
+  // base::MemoryPressureListener:
+  // Note: This class only cares about querying the current level, so no need
+  // to actually react on memory pressure level change.
+  void OnMemoryPressure(
+      base::MemoryPressureLevel memory_pressure_level) override {}
 
  private:
   friend class LongScreenshotsTabServiceTest;
@@ -137,6 +144,10 @@ class LongScreenshotsTabService
 
   base::ScopedClosureRunner capture_handle_;
   base::android::ScopedJavaGlobalRef<jobject> java_ref_;
+
+  base::MemoryPressureListenerRegistration
+      memory_pressure_listener_registration_;
+
   base::WeakPtrFactory<LongScreenshotsTabService> weak_ptr_factory_{this};
 };
 

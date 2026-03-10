@@ -35,6 +35,7 @@
 #include "base/test/test_timeouts.h"
 #include "base/time/time.h"
 #include "base/version.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/updater/activity.h"
@@ -411,7 +412,7 @@ base::CommandLine MakeElevated(base::CommandLine command_line) {
   return command_line;
 }
 
-void SetPlatformPolicies(const base::Value::Dict& values) {
+void SetPlatformPolicies(const base::DictValue& values) {
   const CFStringRef domain = CFSTR(LEGACY_GOOGLE_UPDATE_APPID);
 
   // Synchronize just to be safe. Ignore spurious errors if the domain

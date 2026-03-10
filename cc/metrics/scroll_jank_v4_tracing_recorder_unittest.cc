@@ -5,6 +5,8 @@
 #include "cc/metrics/scroll_jank_v4_tracing_recorder.h"
 
 #include <optional>
+#include <string>
+#include <vector>
 
 #include "base/test/test_trace_processor.h"
 #include "base/time/time.h"
@@ -35,9 +37,27 @@ constexpr base::TimeTicks MillisSinceEpoch(int64_t millis) {
   return base::TimeTicks() + base::Milliseconds(millis);
 }
 
-constexpr const char kSlicesQuery[] = R"(
-  SELECT name, ts, dur
+constexpr const char kScrollJankV4SliceQuery[] = R"(
+  SELECT
+    id,
+    name,
+    ts,
+    dur,
+    extract_arg(arg_set_id, 'scroll_jank_v4.result_id') AS result_id
   FROM slices
+  WHERE name = 'ScrollJankV4'
+  ORDER BY ts ASC, dur DESC
+  )";
+
+constexpr const char kSubSlicesQuery[] = R"(
+  SELECT
+    id,
+    name,
+    ts,
+    dur,
+    extract_arg(arg_set_id, 'scroll_jank_v4.result_id') AS result_id
+  FROM slices
+  WHERE name != 'ScrollJankV4'
   ORDER BY ts ASC, dur DESC
   )";
 
@@ -49,6 +69,60 @@ constexpr const char kScrollJankV4ArgsQuery[] = R"(
       AND key LIKE 'scroll_jank_v4.%'
     ORDER BY key ASC
     )";
+
+constexpr const char kScrollJankV4ResultsQuery[] = R"(
+    INCLUDE PERFETTO MODULE chrome.scroll_jank_v4;
+
+    SELECT
+      id,
+      name,
+      ts,
+      dur,
+      is_janky,
+      vsyncs_since_previous_frame,
+      running_delivery_cutoff,
+      adjusted_delivery_cutoff,
+      current_delivery_cutoff,
+      real_first_event_latency_id,
+      real_first_input_generation_ts,
+      real_last_input_generation_ts,
+      real_abs_total_raw_delta_pixels,
+      real_max_abs_inertial_raw_delta_pixels,
+      synthetic_first_event_latency_id,
+      synthetic_first_extrapolated_input_generation_ts,
+      synthetic_first_original_begin_frame_ts,
+      first_scroll_update_type,
+      first_event_latency_id,
+      damage_type,
+      vsync_interval,
+      begin_frame_ts,
+      presentation_ts
+    FROM chrome_scroll_jank_v4_results
+    ORDER BY ts ASC
+    )";
+
+constexpr const char kScrollJankV4ReasonsQuery[] = R"(
+    INCLUDE PERFETTO MODULE chrome.scroll_jank_v4;
+
+    SELECT
+      id,
+      jank_reason,
+      missed_vsyncs
+    FROM chrome_scroll_jank_v4_reasons
+    ORDER BY id ASC, jank_reason ASC
+    )";
+
+const ::testing::Matcher<std::string> kSliceIdMatcher =
+    ::testing::MatchesRegex("\\d+");
+
+::testing::Matcher<QueryResult> QueryResultIs(
+    std::initializer_list<std::vector<::testing::Matcher<std::string>>> rows) {
+  std::vector<testing::Matcher<std::vector<std::string>>> row_matchers;
+  for (const auto& row : rows) {
+    row_matchers.push_back(ElementsAreArray(row));
+  }
+  return ElementsAreArray(row_matchers);
+}
 
 class ScrollJankV4RecorderTest : public testing::Test {
  protected:
@@ -71,7 +145,7 @@ class ScrollJankV4RecorderTest : public testing::Test {
         SELECT COUNT(DISTINCT track_id) AS track_count
         FROM slices
         )");
-    EXPECT_THAT(result, ElementsAreArray(QueryResult{{"track_count"}, {"1"}}));
+    EXPECT_THAT(result, QueryResultIs({{"track_count"}, {"1"}}));
   }
 
   void ExpectThatAllSubEventsAreDescendantsOfMainTraceEvent() {
@@ -86,8 +160,8 @@ class ScrollJankV4RecorderTest : public testing::Test {
         WHERE name != 'ScrollJankV4'
         GROUP BY 1
         )");
-    EXPECT_THAT(result, ElementsAreArray(QueryResult{
-                            {"is_descendant_of_main_trace_event"}, {"1"}}));
+    EXPECT_THAT(result,
+                QueryResultIs({{"is_descendant_of_main_trace_event"}, {"1"}}));
   }
 };
 
@@ -104,7 +178,8 @@ TEST_F(ScrollJankV4RecorderTest, IrrelevantTracingCategory) {
                     /* synthetic= */ std::nullopt),
       DamagingFrame{.presentation_ts = MillisSinceEpoch(60)},
       BeginFrameArgsForScrollJank{.frame_time = MillisSinceEpoch(50),
-                                  .interval = base::Milliseconds(16)},
+                                  .interval = base::Milliseconds(16),
+                                  .result_id = 123},
       ScrollJankV4Result{
           .missed_vsyncs_per_reason = {7, 8, 0, 0},
           .vsyncs_since_previous_frame = 9,
@@ -122,9 +197,41 @@ TEST_F(ScrollJankV4RecorderTest, IrrelevantTracingCategory) {
   absl::Status status = trace_processor_.StopAndParseTrace();
   ASSERT_TRUE(status.ok()) << status.message();
 
-  EXPECT_THAT(QueryTraceProcessor(kSlicesQuery), ElementsAreArray(QueryResult{
-                                                     {"name", "ts", "dur"},
-                                                 }));
+  EXPECT_THAT(QueryTraceProcessor(kScrollJankV4SliceQuery),
+              QueryResultIs({
+                  {"id", "name", "ts", "dur", "result_id"},
+              }));
+  EXPECT_THAT(QueryTraceProcessor(kSubSlicesQuery),
+              QueryResultIs({
+                  {"id", "name", "ts", "dur", "result_id"},
+              }));
+  EXPECT_THAT(
+      QueryTraceProcessor(kScrollJankV4ResultsQuery),
+      QueryResultIs({{"id",
+                      "name",
+                      "ts",
+                      "dur",
+                      "is_janky",
+                      "vsyncs_since_previous_frame",
+                      "running_delivery_cutoff",
+                      "adjusted_delivery_cutoff",
+                      "current_delivery_cutoff",
+                      "real_first_event_latency_id",
+                      "real_first_input_generation_ts",
+                      "real_last_input_generation_ts",
+                      "real_abs_total_raw_delta_pixels",
+                      "real_max_abs_inertial_raw_delta_pixels",
+                      "synthetic_first_event_latency_id",
+                      "synthetic_first_extrapolated_input_generation_ts",
+                      "synthetic_first_original_begin_frame_ts",
+                      "first_scroll_update_type",
+                      "first_event_latency_id",
+                      "damage_type",
+                      "vsync_interval",
+                      "begin_frame_ts",
+                      "presentation_ts"}}));
+  EXPECT_THAT(QueryTraceProcessor(kScrollJankV4ReasonsQuery),
+              QueryResultIs({{"id", "jank_reason", "missed_vsyncs"}}));
 }
 
 TEST_F(ScrollJankV4RecorderTest, RealDamagingFrame) {
@@ -140,7 +247,8 @@ TEST_F(ScrollJankV4RecorderTest, RealDamagingFrame) {
                     /* synthetic= */ std::nullopt),
       DamagingFrame{.presentation_ts = MillisSinceEpoch(60)},
       BeginFrameArgsForScrollJank{.frame_time = MillisSinceEpoch(50),
-                                  .interval = base::Milliseconds(16)},
+                                  .interval = base::Milliseconds(16),
+                                  .result_id = 123},
       ScrollJankV4Result{
           .missed_vsyncs_per_reason = {7, 8, 0, 0},
           .vsyncs_since_previous_frame = 9,
@@ -158,18 +266,27 @@ TEST_F(ScrollJankV4RecorderTest, RealDamagingFrame) {
   absl::Status status = trace_processor_.StopAndParseTrace();
   ASSERT_TRUE(status.ok()) << status.message();
 
+  QueryResult scroll_jank_v4_slice_result =
+      QueryTraceProcessor(kScrollJankV4SliceQuery);
   EXPECT_THAT(
-      QueryTraceProcessor(kSlicesQuery),
-      ElementsAreArray(QueryResult{
-          {"name", "ts", "dur"},
-          {"ScrollJankV4", "20000000", "40000000"},
-          {"Real scroll update input generation", "20000000", "10000000"},
-          {"Begin frame", "50000000", "0"},
-          {"Presentation", "60000000", "0"},
+      scroll_jank_v4_slice_result,
+      QueryResultIs({
+          {"id", "name", "ts", "dur", "result_id"},
+          {kSliceIdMatcher, "ScrollJankV4", "20000000", "40001000", "123"},
       }));
+  std::string scroll_jank_v4_slice_id = scroll_jank_v4_slice_result[1][0];
+  QueryResult sub_slices_result = QueryTraceProcessor(kSubSlicesQuery);
+  EXPECT_THAT(sub_slices_result,
+              QueryResultIs({
+                  {"id", "name", "ts", "dur", "result_id"},
+                  {kSliceIdMatcher, "Real scroll update input generation",
+                   "20000000", "10000000", "123"},
+                  {kSliceIdMatcher, "Begin frame", "50000000", "0", "123"},
+                  {kSliceIdMatcher, "Presentation", "60000000", "0", "123"},
+              }));
   EXPECT_THAT(
       QueryTraceProcessor(kScrollJankV4ArgsQuery),
-      ElementsAreArray(QueryResult{
+      QueryResultIs({
           {"key", "display_value"},
           {"scroll_jank_v4.adjusted_delivery_cutoff_us", "12000000"},
           {"scroll_jank_v4.current_delivery_cutoff_us", "13000000"},
@@ -183,6 +300,7 @@ TEST_F(ScrollJankV4RecorderTest, RealDamagingFrame) {
            "MISSED_VSYNC_DURING_FAST_SCROLL"},
           {"scroll_jank_v4.missed_vsyncs_per_jank_reason[1].missed_vsyncs",
            "8"},
+          {"scroll_jank_v4.result_id", "123"},
           {"scroll_jank_v4.running_delivery_cutoff_us", "11000000"},
           {"scroll_jank_v4.updates.first_scroll_update_type", "REAL"},
           {"scroll_jank_v4.updates.real.abs_total_raw_delta_pixels", "5.0"},
@@ -192,6 +310,61 @@ TEST_F(ScrollJankV4RecorderTest, RealDamagingFrame) {
           {"scroll_jank_v4.vsync_interval_us", "16000000"},
           {"scroll_jank_v4.vsyncs_since_previous_frame", "9"},
       }));
+  EXPECT_THAT(
+      QueryTraceProcessor(kScrollJankV4ResultsQuery),
+      QueryResultIs({{"id",
+                      "name",
+                      "ts",
+                      "dur",
+                      "is_janky",
+                      "vsyncs_since_previous_frame",
+                      "running_delivery_cutoff",
+                      "adjusted_delivery_cutoff",
+                      "current_delivery_cutoff",
+                      "real_first_event_latency_id",
+                      "real_first_input_generation_ts",
+                      "real_last_input_generation_ts",
+                      "real_abs_total_raw_delta_pixels",
+                      "real_max_abs_inertial_raw_delta_pixels",
+                      "synthetic_first_event_latency_id",
+                      "synthetic_first_extrapolated_input_generation_ts",
+                      "synthetic_first_original_begin_frame_ts",
+                      "first_scroll_update_type",
+                      "first_event_latency_id",
+                      "damage_type",
+                      "vsync_interval",
+                      "begin_frame_ts",
+                      "presentation_ts"},
+                     {scroll_jank_v4_slice_id,
+                      "ScrollJankV4",
+                      "20000000",
+                      "40001000",
+                      "1",
+                      "9",
+                      "11000000",
+                      "12000000",
+                      "13000000",
+                      "99",
+                      "20000000",
+                      "30000000",
+                      "5",
+                      "4",
+                      "[NULL]",
+                      "[NULL]",
+                      "[NULL]",
+                      "REAL",
+                      "99",
+                      "DAMAGING",
+                      "16000000",
+                      "50000000",
+                      "60000000"}}));
+  EXPECT_THAT(
+      QueryTraceProcessor(kScrollJankV4ReasonsQuery),
+      QueryResultIs(
+          {{"id", "jank_reason", "missed_vsyncs"},
+           {scroll_jank_v4_slice_id,
+            "MISSED_VSYNC_DUE_TO_DECELERATING_INPUT_FRAME_DELIVERY", "7"},
+           {scroll_jank_v4_slice_id, "MISSED_VSYNC_DURING_FAST_SCROLL", "8"}}));
   ExpectThatAllTraceEventsAreOnTheSameTrack();
   ExpectThatAllSubEventsAreDescendantsOfMainTraceEvent();
 }
@@ -210,7 +383,8 @@ TEST_F(ScrollJankV4RecorderTest,
                     /* synthetic= */ std::nullopt),
       NonDamagingFrame{},
       BeginFrameArgsForScrollJank{.frame_time = MillisSinceEpoch(50),
-                                  .interval = base::Milliseconds(16)},
+                                  .interval = base::Milliseconds(16),
+                                  .result_id = 123},
       ScrollJankV4Result{
           .missed_vsyncs_per_reason = {0, 0, 7, 8},
           .vsyncs_since_previous_frame = 9,
@@ -228,18 +402,28 @@ TEST_F(ScrollJankV4RecorderTest,
   absl::Status status = trace_processor_.StopAndParseTrace();
   ASSERT_TRUE(status.ok()) << status.message();
 
+  QueryResult scroll_jank_v4_slice_result =
+      QueryTraceProcessor(kScrollJankV4SliceQuery);
   EXPECT_THAT(
-      QueryTraceProcessor(kSlicesQuery),
-      ElementsAreArray(QueryResult{
-          {"name", "ts", "dur"},
-          {"ScrollJankV4", "20000000", "40000000"},
-          {"Real scroll update input generation", "20000000", "10000000"},
-          {"Begin frame", "50000000", "0"},
-          {"Extrapolated presentation", "60000000", "0"},
+      scroll_jank_v4_slice_result,
+      QueryResultIs({
+          {"id", "name", "ts", "dur", "result_id"},
+          {kSliceIdMatcher, "ScrollJankV4", "20000000", "40001000", "123"},
       }));
+  std::string scroll_jank_v4_slice_id = scroll_jank_v4_slice_result[1][0];
+  QueryResult sub_slices_result = QueryTraceProcessor(kSubSlicesQuery);
+  EXPECT_THAT(sub_slices_result,
+              QueryResultIs({
+                  {"id", "name", "ts", "dur", "result_id"},
+                  {kSliceIdMatcher, "Real scroll update input generation",
+                   "20000000", "10000000", "123"},
+                  {kSliceIdMatcher, "Begin frame", "50000000", "0", "123"},
+                  {kSliceIdMatcher, "Extrapolated presentation", "60000000",
+                   "0", "123"},
+              }));
   EXPECT_THAT(
       QueryTraceProcessor(kScrollJankV4ArgsQuery),
-      ElementsAreArray(QueryResult{
+      QueryResultIs({
           {"key", "display_value"},
           {"scroll_jank_v4.adjusted_delivery_cutoff_us", "12000000"},
           {"scroll_jank_v4.current_delivery_cutoff_us", "13000000"},
@@ -254,6 +438,7 @@ TEST_F(ScrollJankV4RecorderTest,
            "MISSED_VSYNC_DURING_FLING"},
           {"scroll_jank_v4.missed_vsyncs_per_jank_reason[1].missed_vsyncs",
            "8"},
+          {"scroll_jank_v4.result_id", "123"},
           {"scroll_jank_v4.running_delivery_cutoff_us", "11000000"},
           {"scroll_jank_v4.updates.first_scroll_update_type", "REAL"},
           {"scroll_jank_v4.updates.real.abs_total_raw_delta_pixels", "5.0"},
@@ -263,6 +448,60 @@ TEST_F(ScrollJankV4RecorderTest,
           {"scroll_jank_v4.vsync_interval_us", "16000000"},
           {"scroll_jank_v4.vsyncs_since_previous_frame", "9"},
       }));
+  EXPECT_THAT(
+      QueryTraceProcessor(kScrollJankV4ResultsQuery),
+      QueryResultIs({{"id",
+                      "name",
+                      "ts",
+                      "dur",
+                      "is_janky",
+                      "vsyncs_since_previous_frame",
+                      "running_delivery_cutoff",
+                      "adjusted_delivery_cutoff",
+                      "current_delivery_cutoff",
+                      "real_first_event_latency_id",
+                      "real_first_input_generation_ts",
+                      "real_last_input_generation_ts",
+                      "real_abs_total_raw_delta_pixels",
+                      "real_max_abs_inertial_raw_delta_pixels",
+                      "synthetic_first_event_latency_id",
+                      "synthetic_first_extrapolated_input_generation_ts",
+                      "synthetic_first_original_begin_frame_ts",
+                      "first_scroll_update_type",
+                      "first_event_latency_id",
+                      "damage_type",
+                      "vsync_interval",
+                      "begin_frame_ts",
+                      "presentation_ts"},
+                     {scroll_jank_v4_slice_id,
+                      "ScrollJankV4",
+                      "20000000",
+                      "40001000",
+                      "1",
+                      "9",
+                      "11000000",
+                      "12000000",
+                      "13000000",
+                      "99",
+                      "20000000",
+                      "30000000",
+                      "5",
+                      "4",
+                      "[NULL]",
+                      "[NULL]",
+                      "[NULL]",
+                      "REAL",
+                      "99",
+                      "NON_DAMAGING_WITH_EXTRAPOLATED_PRESENTATION_TIMESTAMP",
+                      "16000000",
+                      "50000000",
+                      "60000000"}}));
+  EXPECT_THAT(
+      QueryTraceProcessor(kScrollJankV4ReasonsQuery),
+      QueryResultIs(
+          {{"id", "jank_reason", "missed_vsyncs"},
+           {scroll_jank_v4_slice_id, "MISSED_VSYNC_AT_START_OF_FLING", "7"},
+           {scroll_jank_v4_slice_id, "MISSED_VSYNC_DURING_FLING", "8"}}));
   ExpectThatAllTraceEventsAreOnTheSameTrack();
   ExpectThatAllSubEventsAreDescendantsOfMainTraceEvent();
 }
@@ -278,7 +517,8 @@ TEST_F(ScrollJankV4RecorderTest,
                     .first_input_trace_id = TraceId(99)}),
       DamagingFrame{.presentation_ts = MillisSinceEpoch(60)},
       BeginFrameArgsForScrollJank{.frame_time = MillisSinceEpoch(50),
-                                  .interval = base::Milliseconds(16)},
+                                  .interval = base::Milliseconds(16),
+                                  .result_id = 123},
       ScrollJankV4Result{
           .missed_vsyncs_per_reason = {0, 7, 0, 8},
           .vsyncs_since_previous_frame = 9,
@@ -296,21 +536,32 @@ TEST_F(ScrollJankV4RecorderTest,
   absl::Status status = trace_processor_.StopAndParseTrace();
   ASSERT_TRUE(status.ok()) << status.message();
 
+  QueryResult scroll_jank_v4_slice_result =
+      QueryTraceProcessor(kScrollJankV4SliceQuery);
   EXPECT_THAT(
-      QueryTraceProcessor(kSlicesQuery),
-      ElementsAreArray(QueryResult{
-          {"name", "ts", "dur"},
-          {"ScrollJankV4", "20000000", "40000000"},
-          {"Extrapolated first synthetic scroll update input generation",
-           "20000000", "0"},
-          {"First synthetic scroll update original begin frame", "30000000",
-           "0"},
-          {"Begin frame", "50000000", "0"},
-          {"Presentation", "60000000", "0"},
+      scroll_jank_v4_slice_result,
+      QueryResultIs({
+          {"id", "name", "ts", "dur", "result_id"},
+          {kSliceIdMatcher, "ScrollJankV4", "20000000", "40001000", "123"},
+      }));
+  std::string scroll_jank_v4_slice_id = scroll_jank_v4_slice_result[1][0];
+  QueryResult sub_slices_result = QueryTraceProcessor(kSubSlicesQuery);
+  EXPECT_THAT(
+      sub_slices_result,
+      QueryResultIs({
+          {"id", "name", "ts", "dur", "result_id"},
+          {kSliceIdMatcher,
+           "Extrapolated first synthetic scroll update input generation",
+           "20000000", "0", "123"},
+          {kSliceIdMatcher,
+           "First synthetic scroll update original begin frame", "30000000",
+           "0", "123"},
+          {kSliceIdMatcher, "Begin frame", "50000000", "0", "123"},
+          {kSliceIdMatcher, "Presentation", "60000000", "0", "123"},
       }));
   EXPECT_THAT(
       QueryTraceProcessor(kScrollJankV4ArgsQuery),
-      ElementsAreArray(QueryResult{
+      QueryResultIs({
           {"key", "display_value"},
           {"scroll_jank_v4.adjusted_delivery_cutoff_us", "12000000"},
           {"scroll_jank_v4.current_delivery_cutoff_us", "13000000"},
@@ -324,6 +575,7 @@ TEST_F(ScrollJankV4RecorderTest,
            "MISSED_VSYNC_DURING_FLING"},
           {"scroll_jank_v4.missed_vsyncs_per_jank_reason[1].missed_vsyncs",
            "8"},
+          {"scroll_jank_v4.result_id", "123"},
           {"scroll_jank_v4.running_delivery_cutoff_us", "11000000"},
           {"scroll_jank_v4.updates.first_scroll_update_type",
            "SYNTHETIC_WITH_EXTRAPOLATED_INPUT_GENERATION_TIMESTAMP"},
@@ -331,6 +583,60 @@ TEST_F(ScrollJankV4RecorderTest,
           {"scroll_jank_v4.vsync_interval_us", "16000000"},
           {"scroll_jank_v4.vsyncs_since_previous_frame", "9"},
       }));
+  EXPECT_THAT(
+      QueryTraceProcessor(kScrollJankV4ResultsQuery),
+      QueryResultIs({{"id",
+                      "name",
+                      "ts",
+                      "dur",
+                      "is_janky",
+                      "vsyncs_since_previous_frame",
+                      "running_delivery_cutoff",
+                      "adjusted_delivery_cutoff",
+                      "current_delivery_cutoff",
+                      "real_first_event_latency_id",
+                      "real_first_input_generation_ts",
+                      "real_last_input_generation_ts",
+                      "real_abs_total_raw_delta_pixels",
+                      "real_max_abs_inertial_raw_delta_pixels",
+                      "synthetic_first_event_latency_id",
+                      "synthetic_first_extrapolated_input_generation_ts",
+                      "synthetic_first_original_begin_frame_ts",
+                      "first_scroll_update_type",
+                      "first_event_latency_id",
+                      "damage_type",
+                      "vsync_interval",
+                      "begin_frame_ts",
+                      "presentation_ts"},
+                     {scroll_jank_v4_slice_id,
+                      "ScrollJankV4",
+                      "20000000",
+                      "40001000",
+                      "1",
+                      "9",
+                      "11000000",
+                      "12000000",
+                      "13000000",
+                      "[NULL]",
+                      "[NULL]",
+                      "[NULL]",
+                      "[NULL]",
+                      "[NULL]",
+                      "99",
+                      "20000000",
+                      "30000000",
+                      "SYNTHETIC_WITH_EXTRAPOLATED_INPUT_GENERATION_TIMESTAMP",
+                      "99",
+                      "DAMAGING",
+                      "16000000",
+                      "50000000",
+                      "60000000"}}));
+  EXPECT_THAT(
+      QueryTraceProcessor(kScrollJankV4ReasonsQuery),
+      QueryResultIs(
+          {{"id", "jank_reason", "missed_vsyncs"},
+           {scroll_jank_v4_slice_id, "MISSED_VSYNC_DURING_FAST_SCROLL", "7"},
+           {scroll_jank_v4_slice_id, "MISSED_VSYNC_DURING_FLING", "8"}}));
   ExpectThatAllTraceEventsAreOnTheSameTrack();
   ExpectThatAllSubEventsAreDescendantsOfMainTraceEvent();
 }
@@ -346,7 +652,8 @@ TEST_F(ScrollJankV4RecorderTest,
           Synthetic{.first_input_begin_frame_ts = MillisSinceEpoch(20)}),
       NonDamagingFrame{},
       BeginFrameArgsForScrollJank{.frame_time = MillisSinceEpoch(30),
-                                  .interval = base::Milliseconds(16)},
+                                  .interval = base::Milliseconds(16),
+                                  .result_id = 123},
       ScrollJankV4Result{
           .first_scroll_update =
               ScrollJankV4Result::SyntheticFirstScrollUpdate{
@@ -359,27 +666,131 @@ TEST_F(ScrollJankV4RecorderTest,
   absl::Status status = trace_processor_.StopAndParseTrace();
   ASSERT_TRUE(status.ok()) << status.message();
 
-  EXPECT_THAT(QueryTraceProcessor(kSlicesQuery),
-              ElementsAreArray(QueryResult{
-                  {"name", "ts", "dur"},
-                  {"ScrollJankV4", "20000000", "10000000"},
-                  {"First synthetic scroll update original begin frame",
-                   "20000000", "0"},
-                  {"Begin frame", "30000000", "0"},
+  QueryResult scroll_jank_v4_slices_result =
+      QueryTraceProcessor(kScrollJankV4SliceQuery);
+  EXPECT_THAT(
+      scroll_jank_v4_slices_result,
+      QueryResultIs({
+          {"id", "name", "ts", "dur", "result_id"},
+          {kSliceIdMatcher, "ScrollJankV4", "20000000", "10001000", "123"},
+      }));
+  std::string scroll_jank_v4_slice_id = scroll_jank_v4_slices_result[1][0];
+  QueryResult sub_slices_result = QueryTraceProcessor(kSubSlicesQuery);
+  EXPECT_THAT(sub_slices_result,
+              QueryResultIs({
+                  {"id", "name", "ts", "dur", "result_id"},
+                  {kSliceIdMatcher,
+                   "First synthetic scroll update original begin frame",
+                   "20000000", "0", "123"},
+                  {kSliceIdMatcher, "Begin frame", "30000000", "0", "123"},
               }));
   EXPECT_THAT(QueryTraceProcessor(kScrollJankV4ArgsQuery),
-              ElementsAreArray(QueryResult{
+              QueryResultIs({
                   {"key", "display_value"},
                   {"scroll_jank_v4.damage_type",
                    "NON_DAMAGING_WITHOUT_EXTRAPOLATED_PRESENTATION_TIMESTAMP"},
                   {"scroll_jank_v4.is_janky", "false"},
+                  {"scroll_jank_v4.result_id", "123"},
                   {"scroll_jank_v4.updates.first_scroll_update_type",
                    "SYNTHETIC_WITHOUT_EXTRAPOLATED_INPUT_GENERATION_TIMESTAMP"},
                   {"scroll_jank_v4.updates.synthetic", "[NULL]"},
                   {"scroll_jank_v4.vsync_interval_us", "16000000"},
               }));
+  EXPECT_THAT(QueryTraceProcessor(kScrollJankV4ResultsQuery),
+              QueryResultIs(
+                  {{"id",
+                    "name",
+                    "ts",
+                    "dur",
+                    "is_janky",
+                    "vsyncs_since_previous_frame",
+                    "running_delivery_cutoff",
+                    "adjusted_delivery_cutoff",
+                    "current_delivery_cutoff",
+                    "real_first_event_latency_id",
+                    "real_first_input_generation_ts",
+                    "real_last_input_generation_ts",
+                    "real_abs_total_raw_delta_pixels",
+                    "real_max_abs_inertial_raw_delta_pixels",
+                    "synthetic_first_event_latency_id",
+                    "synthetic_first_extrapolated_input_generation_ts",
+                    "synthetic_first_original_begin_frame_ts",
+                    "first_scroll_update_type",
+                    "first_event_latency_id",
+                    "damage_type",
+                    "vsync_interval",
+                    "begin_frame_ts",
+                    "presentation_ts"},
+                   {kSliceIdMatcher,
+                    "ScrollJankV4",
+                    "20000000",
+                    "10001000",
+                    "0",
+                    "[NULL]",
+                    "[NULL]",
+                    "[NULL]",
+                    "[NULL]",
+                    "[NULL]",
+                    "[NULL]",
+                    "[NULL]",
+                    "[NULL]",
+                    "[NULL]",
+                    "[NULL]",
+                    "[NULL]",
+                    "20000000",
+                    "SYNTHETIC_WITHOUT_EXTRAPOLATED_INPUT_GENERATION_TIMESTAMP",
+                    "[NULL]",
+                    "NON_DAMAGING_WITHOUT_EXTRAPOLATED_PRESENTATION_TIMESTAMP",
+                    "16000000",
+                    "30000000",
+                    "[NULL]"}}));
+  EXPECT_THAT(QueryTraceProcessor(kScrollJankV4ReasonsQuery),
+              QueryResultIs({{"id", "jank_reason", "missed_vsyncs"}}));
   ExpectThatAllTraceEventsAreOnTheSameTrack();
   ExpectThatAllSubEventsAreDescendantsOfMainTraceEvent();
+}
+
+TEST_F(ScrollJankV4RecorderTest, RealNonDamagingFrameWithInputAfterBeginFrame) {
+  trace_processor_.StartTrace("input");
+
+  // Input generation typically happens before the begin frame, but here we test
+  // the edge case where the input generation (55 ms) happens AFTER the begin
+  // frame (50 ms).
+  ScrollJankV4TracingRecorder::RecordTraceEvents(
+      ScrollUpdates(Real{.first_input_generation_ts = MillisSinceEpoch(55),
+                         .last_input_generation_ts = MillisSinceEpoch(60),
+                         .has_inertial_input = false,
+                         .abs_total_raw_delta_pixels = 5.0f,
+                         .max_abs_inertial_raw_delta_pixels = 0.0f,
+                         .first_input_trace_id = TraceId(99)},
+                    /* synthetic= */ std::nullopt),
+      NonDamagingFrame{},
+      BeginFrameArgsForScrollJank{.frame_time = MillisSinceEpoch(50),
+                                  .interval = base::Milliseconds(16),
+                                  .result_id = 123},
+      ScrollJankV4Result{
+          .first_scroll_update =
+              ScrollJankV4Result::RealFirstScrollUpdate{
+                  .actual_input_generation_ts = MillisSinceEpoch(55)},
+          .presentation =
+              ScrollJankV4Result::NonDamagingPresentation{
+                  .extrapolated_presentation_ts = std::nullopt},
+      });
+
+  absl::Status status = trace_processor_.StopAndParseTrace();
+  ASSERT_TRUE(status.ok()) << status.message();
+
+  QueryResult scroll_jank_v4_slices_result =
+      QueryTraceProcessor(kScrollJankV4SliceQuery);
+  // The recorder should handle this edge case correctly by starting the slice
+  // at the begin frame timestamp and ending it after the last input generation
+  // timestamp.
+  EXPECT_THAT(
+      scroll_jank_v4_slices_result,
+      QueryResultIs({
+          {"id", "name", "ts", "dur", "result_id"},
+          {kSliceIdMatcher, "ScrollJankV4", "50000000", "10001000", "123"},
+      }));
 }
 
 }  // namespace

@@ -9,7 +9,6 @@
 <translation id="101823271612280837">ჩაწერა შეწყდა. ტაბლეტის რეჟიმში თამაშების დაფის გამოყენება ვერ მოხერხდება.</translation>
 <translation id="1024364763893396229">შეინახეთ თქვენი <ph name="NAME" /></translation>
 <translation id="1032891413405719768">სტილუსის ბატარეა იცლება</translation>
-<translation id="1036073649888683237">შეტყობინებების სამართავად გადადით პარამეტრებზე</translation>
 <translation id="1036348656032585052">გამორთვა</translation>
 <translation id="1037492556044956303"><ph name="DEVICE_NAME" /> დამატებულია</translation>
 <translation id="1038106730571050514">შეთავაზებების ჩვენება</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">ბოლოდროინდელი ფოტო <ph name="INDEX" /> / <ph name="TOTAL_COUNT" />-დან.</translation>
 <translation id="2201687081523799384">Google Tasks-ის ჩაკეცვა</translation>
 <translation id="2208323208084708176">ერთიანი დესკტოპის რეჟიმი</translation>
-<translation id="2210311543574621570">კლავიშთა კომბინაციაზე Ctrl + V ხანგრძლივად დაჭერისას გაცვლის ბუფერს იხილავთ. ამ მალსახმობის გამორთვა შეგიძლიათ #clipboard-history-longpress ალმის გათიშვით მისამართზე chrome://flags.</translation>
 <translation id="2215920961700443347">ინტერნეტთან კავშირი არ არის. დაუკავშირდით ინტერნეტს და ცადეთ ხელახლა.</translation>
 <translation id="2222841058024245321">სამუშაო მაგიდა 7</translation>
 <translation id="2223384056430485343">გაყოფილ ეკრანზე</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">დააინსტალირეთ პროგრამა</translation>
 <translation id="2482878487686419369">შეტყობინებები</translation>
 <translation id="2484513351006226581">კლავიატურის განლაგების გადასართველად გამოიყენეთ კლავიშთა კომბინაცია: <ph name="KEYBOARD_SHORTCUT" />.</translation>
+<translation id="2485422356828889247">დეინსტალაცია</translation>
 <translation id="2486214324139475545"><ph name="DESK_NAME" />-ის გადასახედი ვერსია. აქტიური სამუშაო მაგიდა.</translation>
 <translation id="2486405091093637109">„<ph name="DISPLAY_NAME" />“-ის გარჩევადობა შეიცვალა <ph name="RESOLUTION" />-ით (<ph name="REFRESH_RATE" /> ჰც). თუ არ დაადასტურებთ, დაბრუნდება წინა პარამეტრები. დარჩენილია <ph name="TIMEOUT_SECONDS" />.</translation>
 <translation id="2487915095798731898">გაწევრიანება</translation>
@@ -2195,7 +2194,6 @@
 <translation id="8241650983304689286">დაამატეთ ჩანართი გაყოფის ახალ ხედში</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, სიგნალის სიძლიერე: <ph name="SIGNAL_STRENGTH" />, ტელეფონის ბატარეა: <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Google Drive-ის ყველა კონტენტის ჩვენება</translation>
-<translation id="8257510091797044096">თქვენი მოწყობილობის დაყენება</translation>
 <translation id="8261506727792406068">წაშლა</translation>
 <translation id="8262312463845990408">დაკვრის გადართვა</translation>
 <translation id="8268302343625273732">ყველა დავალების Google Classroom-ში ნახვა</translation>

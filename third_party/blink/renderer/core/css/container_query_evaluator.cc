@@ -19,6 +19,7 @@
 #include "third_party/blink/renderer/core/css/style_recalc_context.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
+#include "third_party/blink/renderer/core/dom/node-inl.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 
@@ -53,29 +54,7 @@ bool NameMatches(const ComputedStyle& style,
         container_name->GetNames();
     for (const auto& scoped_name : names) {
       if (scoped_name->GetName() == name) {
-        const TreeScope* name_tree_scope = scoped_name->GetTreeScope();
-        if (!name_tree_scope || !selector_tree_scope) {
-          // Either the container-name or @container have a UA or User origin.
-          // In that case always match the name regardless of the other one's
-          // origin.
-          return true;
-        }
-        // Match a tree-scoped container name if the container-name
-        // declaration's tree scope is an inclusive ancestor of the @container
-        // rule's tree scope.
-        for (const TreeScope* match_scope = selector_tree_scope; match_scope;
-             match_scope = match_scope->ParentTreeScope()) {
-          if (match_scope == name_tree_scope) {
-            return true;
-          }
-        }
-        // Keeping the TreeScope matching above to be able to count when this
-        // is a behavioral change.
-        selector_tree_scope->GetDocument().CountUse(
-            WebFeature::kContainerNameQueryFailedTreeScope);
-        if (RuntimeEnabledFeatures::CSSContainerNameNotTreeScopedEnabled()) {
-          return true;
-        }
+        return true;
       }
     }
   }
@@ -86,7 +65,7 @@ bool TypeMatches(const ComputedStyle& style,
                  const ContainerSelector& container_selector) {
   DCHECK(!container_selector.HasUnknownFeature());
   unsigned type = container_selector.Type(style.GetWritingMode());
-  return !type || ((style.ContainerType() & type) == type);
+  return type == kContainerTypeNormal || (style.ContainerType() & type) == type;
 }
 
 bool Matches(const ComputedStyle& style,
@@ -211,6 +190,10 @@ bool ContainerQueryEvaluator::EvalAndAdd(
   if (Element* container = CachedContainer(starting_element, selector,
                                            match_result.CurrentTreeScope(),
                                            container_selector_cache)) {
+    if (!query.Query()) {
+      // Querying name only, which is already matched in FindContainer.
+      return true;
+    }
     Change change = starting_element == container
                         ? Change::kNearestContainer
                         : Change::kDescendantContainers;
@@ -1023,6 +1006,7 @@ StyleRecalcChange ContainerQueryEvaluator::ApplyScrollStateAndStyleChanges(
   }
   if (old_style.InheritedVariables() != new_style.InheritedVariables() ||
       old_style.NonInheritedVariables() != new_style.NonInheritedVariables() ||
+      old_style.InitialData() != new_style.InitialData() ||
       DependsOnTreeCounting()) {
     switch (StyleContainerChanged()) {
       case ContainerQueryEvaluator::Change::kNone:

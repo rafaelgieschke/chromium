@@ -8,7 +8,6 @@
 #include "base/test/metrics/user_action_tester.h"
 #include "base/test/test_future.h"
 #include "chrome/browser/actor/actor_keyed_service.h"
-#include "chrome/browser/actor/actor_policy_checker.h"
 #include "chrome/browser/actor/actor_test_util.h"
 #include "chrome/browser/actor/execution_engine.h"
 #include "chrome/browser/actor/ui/actor_ui_state_manager_interface.h"
@@ -23,9 +22,8 @@
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
-#include "chrome/browser/ui/views/tabs/alert_indicator_button.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
-#include "chrome/common/actor.mojom-forward.h"
+#include "chrome/browser/ui/views/tabs/tab/alert_indicator_button.h"
 #include "chrome/common/actor.mojom.h"
 #include "chrome/common/actor/task_id.h"
 #include "chrome/common/chrome_features.h"
@@ -66,6 +64,10 @@ class FutureTabStripModelObserver : public TabStripModelObserver {
 };
 
 class BaseActorUiTabControllerTest : public InProcessBrowserTest {
+ public:
+  BaseActorUiTabControllerTest() = default;
+  ~BaseActorUiTabControllerTest() override = default;
+
  protected:
   views::AnimatedImageView* GetSpinner() {
     TabStripRegionView* tab_strip_view =
@@ -79,11 +81,6 @@ class BaseActorUiTabControllerTest : public InProcessBrowserTest {
     return spinner;
   }
 
-  void SetUpOnMainThread() override {
-    InProcessBrowserTest::SetUpOnMainThread();
-    actor_keyed_service()->GetPolicyChecker().set_act_on_web_for_testing(true);
-  }
-
   ActorKeyedService* actor_keyed_service() {
     return ActorKeyedService::Get(browser()->profile());
   }
@@ -93,17 +90,16 @@ class BaseActorUiTabControllerTest : public InProcessBrowserTest {
 
 class ActorUiTabControllerTest : public BaseActorUiTabControllerTest {
  public:
-  void SetUp() override {
+  ActorUiTabControllerTest() {
     feature_list_.InitWithFeaturesAndParameters(
         {{features::kGlicActorUi,
           {{features::kGlicActorUiTabIndicator.name, "true"}}},
          {features::kGlicActorUiTabIndicatorSpinnerIgnoreReducedMotion, {}}},
         {});
-    InProcessBrowserTest::SetUp();
   }
+  ~ActorUiTabControllerTest() override = default;
 };
 
-#if BUILDFLAG(ENABLE_GLIC)
 IN_PROC_BROWSER_TEST_F(ActorUiTabControllerTest,
                        TabIndicatorVisibleDuringActuation) {
   Profile* const profile = browser()->profile();
@@ -137,10 +133,6 @@ IN_PROC_BROWSER_TEST_F(ActorUiTabControllerTest,
   EXPECT_EQ(GetSpinner()->state(), views::AnimatedImageView::State::kPlaying);
   EXPECT_TRUE(GetSpinner()->GetVisible());
   EXPECT_FALSE(GetSpinner()->bounds().IsEmpty());
-  EXPECT_TRUE(GetSpinner()
-                  ->animated_image()
-                  ->GetPlaybackConfig()
-                  ->ignore_reduced_motion);
 
   // Stop acting on the tab.
   state_manager->OnUiEvent(StoppedActingOnTab(tab->GetHandle()));
@@ -155,8 +147,8 @@ IN_PROC_BROWSER_TEST_F(ActorUiTabControllerTest,
                        TabSpinnerNotVisibleWhenWaitingOnUser) {
   // Start task on tab.
   auto* actor_service = actor::ActorKeyedService::Get(browser()->GetProfile());
-  actor_service->GetPolicyChecker().set_act_on_web_for_testing(true);
-  actor::TaskId task_id = actor_service->CreateTask();
+  actor::TaskId task_id =
+      actor_service->CreateTask(NoEnterprisePolicyChecker());
   actor::ActorTask* task = actor_service->GetTask(task_id);
   actor::ui::StartTask start_task_event(task_id);
   actor_service->GetActorUiStateManager()->OnUiEvent(start_task_event);
@@ -186,10 +178,6 @@ IN_PROC_BROWSER_TEST_F(ActorUiTabControllerTest,
   EXPECT_EQ(GetSpinner()->state(), views::AnimatedImageView::State::kPlaying);
   EXPECT_TRUE(GetSpinner()->GetVisible());
   EXPECT_FALSE(GetSpinner()->bounds().IsEmpty());
-  EXPECT_TRUE(GetSpinner()
-                  ->animated_image()
-                  ->GetPlaybackConfig()
-                  ->ignore_reduced_motion);
 
   // Wait for user event.
   actor_service->GetActorUiStateManager()->OnUiEvent(
@@ -221,7 +209,8 @@ IN_PROC_BROWSER_TEST_F(ActorUiTabControllerTest,
 
 IN_PROC_BROWSER_TEST_F(ActorUiTabControllerTest,
                        RecordsUserActionOnActiveStatusChange) {
-  TaskId task_id = actor_keyed_service()->CreateTask();
+  TaskId task_id =
+      actor_keyed_service()->CreateTask(NoEnterprisePolicyChecker());
 
   ASSERT_TRUE(AddTabAtIndex(0, GURL("about:blank?1"),
                             ::ui::PageTransition::PAGE_TRANSITION_TYPED));
@@ -265,40 +254,6 @@ IN_PROC_BROWSER_TEST_F(ActorUiTabControllerTest,
                    "Actor.Ui.ActuatingTabWebContentsAttached"));
 }
 
-#else   // !BUILDFLAG(ENABLE_GLIC)
-IN_PROC_BROWSER_TEST_F(ActorUiTabControllerTest,
-                       TabIndicatorNotVisibleWhenGlicIsDisabled) {
-  Profile* const profile = browser()->profile();
-  ActorUiStateManagerInterface* state_manager =
-      actor::ActorKeyedService::Get(profile)->GetActorUiStateManager();
-  ASSERT_NE(state_manager, nullptr);
-  tabs::TabInterface* tab = browser()->tab_strip_model()->GetActiveTab();
-  ASSERT_NE(tab, nullptr);
-  ActorUiTabControllerInterface* controller = ActorUiTabController::From(tab);
-  ASSERT_NE(controller, nullptr);
-
-  // Initially, the indicator should not be visible.
-  tabs::TabAlertController* const tab_alert_controller =
-      tabs::TabAlertController::From(tab);
-  EXPECT_FALSE(
-      tab_alert_controller->IsAlertActive(tabs::TabAlert::kActorAccessing));
-  EXPECT_EQ(GetSpinner(), nullptr);
-
-  // Start acting on the tab.
-  TestFuture<ActionResultPtr> result;
-  state_manager->OnUiEvent(
-      StartingToActOnTab(tab->GetHandle(), actor::TaskId(1)),
-      result.GetCallback());
-  actor::ExpectOkResult(result);
-
-  // The indicator should still not be visible.
-  EXPECT_FALSE(
-      tab_alert_controller->IsAlertActive(tabs::TabAlert::kActorAccessing));
-  EXPECT_EQ(GetSpinner(), nullptr);
-}
-#endif  // BUILDFLAG(ENABLE_GLIC)
-
-#if BUILDFLAG(ENABLE_GLIC)
 IN_PROC_BROWSER_TEST_F(ActorUiTabControllerTest,
                        TabStripModelNotifiedOnUpdate) {
   Profile* const profile = browser()->profile();
@@ -328,16 +283,15 @@ IN_PROC_BROWSER_TEST_F(ActorUiTabControllerTest,
 
   tab_strip_model->RemoveObserver(&observer);
 }
-#endif  // BUILDFLAG(ENABLE_GLIC)
 
 class ActorUiTabControllerDisabledTest : public BaseActorUiTabControllerTest {
  public:
-  void SetUp() override {
+  ActorUiTabControllerDisabledTest() {
     feature_list_.InitAndEnableFeatureWithParameters(
         features::kGlicActorUi,
         {{features::kGlicActorUiTabIndicator.name, "false"}});
-    InProcessBrowserTest::SetUp();
   }
+  ~ActorUiTabControllerDisabledTest() override = default;
 };
 
 IN_PROC_BROWSER_TEST_F(ActorUiTabControllerDisabledTest,
@@ -373,16 +327,15 @@ IN_PROC_BROWSER_TEST_F(ActorUiTabControllerDisabledTest,
 class ActorUiTabIndicatorSpinnerIgnoreReducedMotionDisabled
     : public BaseActorUiTabControllerTest {
  public:
-  void SetUp() override {
+  ActorUiTabIndicatorSpinnerIgnoreReducedMotionDisabled() {
     feature_list_.InitWithFeaturesAndParameters(
         {{features::kGlicActorUi,
           {{features::kGlicActorUiTabIndicator.name, "true"}}}},
         {features::kGlicActorUiTabIndicatorSpinnerIgnoreReducedMotion});
-    InProcessBrowserTest::SetUp();
   }
+  ~ActorUiTabIndicatorSpinnerIgnoreReducedMotionDisabled() override = default;
 };
 
-#if BUILDFLAG(ENABLE_GLIC)
 IN_PROC_BROWSER_TEST_F(ActorUiTabIndicatorSpinnerIgnoreReducedMotionDisabled,
                        TabIndicatorVisibleDuringActuation) {
   Profile* const profile = browser()->profile();
@@ -429,7 +382,6 @@ IN_PROC_BROWSER_TEST_F(ActorUiTabIndicatorSpinnerIgnoreReducedMotionDisabled,
       tab_alert_controller->IsAlertActive(tabs::TabAlert::kActorAccessing));
   EXPECT_EQ(GetSpinner()->state(), views::AnimatedImageView::State::kStopped);
 }
-#endif  // BUILDFLAG(ENABLE_GLIC)
 
 }  // namespace
 }  // namespace actor::ui

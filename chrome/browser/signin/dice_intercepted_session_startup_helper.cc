@@ -4,9 +4,9 @@
 
 #include "chrome/browser/signin/dice_intercepted_session_startup_helper.h"
 
+#include <algorithm>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/task/single_thread_task_runner.h"
@@ -34,7 +34,7 @@ bool CookieInfoContains(const signin::AccountsInCookieJarInfo& cookie_info,
                         const CoreAccountId& account_id) {
   const std::vector<gaia::ListedAccount>& accounts =
       cookie_info.GetPotentiallyInvalidSignedInAccounts();
-  return base::Contains(accounts, account_id, &gaia::ListedAccount::id);
+  return std::ranges::contains(accounts, account_id, &gaia::ListedAccount::id);
 }
 
 }  // namespace
@@ -74,7 +74,7 @@ void DiceInterceptedSessionStartupHelper::Startup(base::OnceClosure callback) {
         &DiceInterceptedSessionStartupHelper::MoveTab, base::Unretained(this)));
     // Adding accounts to the cookies can be an expensive operation. In
     // particular the ExternalCCResult fetch may time out after multiple seconds
-    // (see kExternalCCResultTimeoutSeconds and https://crbug.com/750316#c37).
+    // (see kExternalCCResultTimeoutSeconds and https://crbug.com/40532442#c37).
     base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
         FROM_HERE, on_cookie_update_timeout_.callback(), base::Seconds(12));
 

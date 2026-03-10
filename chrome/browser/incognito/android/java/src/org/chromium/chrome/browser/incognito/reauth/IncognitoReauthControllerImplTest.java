@@ -28,11 +28,12 @@ import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
-import org.robolectric.annotation.LooperMode;
 
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.OneshotSupplierImpl;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.chrome.browser.layouts.LayoutStateProvider;
 import org.chromium.chrome.browser.layouts.LayoutType;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
@@ -49,7 +50,6 @@ import org.chromium.components.user_prefs.UserPrefsJni;
 
 /** Unit tests for {@link IncognitoReauthControllerImpl}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@LooperMode(LooperMode.Mode.LEGACY)
 public class IncognitoReauthControllerImplTest {
     public static final int TASK_ID = 123;
 
@@ -77,7 +77,7 @@ public class IncognitoReauthControllerImplTest {
     private OneshotSupplierImpl<TabSwitcherCustomViewManager>
             mTabSwitcherCustomViewManagerOneshotSupplier;
     private boolean mCustomViewManagerHasValue;
-    private ObservableSupplierImpl<Profile> mProfileObservableSupplier;
+    private SettableMonotonicObservableSupplier<Profile> mProfileObservableSupplier;
 
     private boolean mIsIncognitoReauthPendingOnRestore;
 
@@ -135,7 +135,7 @@ public class IncognitoReauthControllerImplTest {
         mLayoutStateProviderOneshotSupplier = new OneshotSupplierImpl<>();
         mLayoutStateProviderOneshotSupplier.set(mLayoutStateProviderMock);
 
-        mProfileObservableSupplier = new ObservableSupplierImpl<>();
+        mProfileObservableSupplier = ObservableSuppliers.createMonotonic();
 
         mIncognitoReauthController =
                 new IncognitoReauthControllerImpl(
@@ -147,6 +147,7 @@ public class IncognitoReauthControllerImplTest {
                         () -> mIsIncognitoReauthPendingOnRestore,
                         TASK_ID);
         mProfileObservableSupplier.set(mProfileMock);
+        RobolectricUtil.runAllBackgroundAndUi();
 
         verify(mLayoutStateProviderMock, times(1))
                 .addObserver(mLayoutStateObserverArgumentCaptor.capture());
@@ -283,6 +284,7 @@ public class IncognitoReauthControllerImplTest {
         mIncognitoReauthController.onTaskVisibilityChanged(TASK_ID, false);
 
         mTabSwitcherCustomViewManagerOneshotSupplier.set(mTabSwitcherCustomViewManager);
+        RobolectricUtil.runAllBackgroundAndUi();
         assertTrue(
                 "IncognitoReauthCoordinator should be created for tab switcher custom view manager",
                 mIncognitoReauthController.isReauthPageShowing());

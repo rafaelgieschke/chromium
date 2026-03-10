@@ -4,11 +4,12 @@
 
 """A template for generating hash decoding code."""
 
-import codegen
+import setup_modules
 
-HEADER = codegen.Template(
-basename="ukm_decode.h",
-file_template="""
+import chromium_src.tools.metrics.ukm.codegen as codegen
+
+HEADER = codegen.Template(basename="ukm_decode.h",
+                          file_template="""
 // Generated from gen_builders.py.  DO NOT EDIT!
 // source: ukm.xml
 
@@ -16,30 +17,31 @@ file_template="""
 #define {file.guard_path}
 
 #include <cstdint>
-#include <map>
+
+#include "base/containers/flat_map.h"
+#include "base/no_destructor.h"
 
 namespace ukm {{
 namespace builders {{
 
-typedef std::map<uint64_t, const char*> MetricDecodeMap;
+typedef base::flat_map<uint64_t, const char*> MetricDecodeMap;
 struct EntryDecoder {{
   const char* name;
-  const MetricDecodeMap metric_map;
+  MetricDecodeMap metric_map;
 }};
-typedef std::map<uint64_t, EntryDecoder> DecodeMap;
-DecodeMap CreateDecodeMap();
+typedef base::flat_map<uint64_t, EntryDecoder> DecodeMap;
+const DecodeMap& GetDecodeMap();
 
 }}  // namespace builders
 }}  // namespace ukm
 
 #endif  // {file.guard_path}
 """,
-event_template="",
-metric_template="")
+                          event_template="",
+                          metric_template="")
 
-IMPL = codegen.Template(
-basename="ukm_decode.cc",
-file_template="""
+IMPL = codegen.Template(basename="ukm_decode.cc",
+                        file_template="""
 // Generated from gen_builders.py.  DO NOT EDIT!
 // source: ukm.xml
 
@@ -49,16 +51,17 @@ file_template="""
 namespace ukm {{
 namespace builders {{
 
-std::map<uint64_t, EntryDecoder> CreateDecodeMap() {{
-  return {{
+const DecodeMap& GetDecodeMap() {{
+  static const base::NoDestructor<DecodeMap> decode_map({{
     {event_code}
-  }};
+  }});
+  return *decode_map;
 }}
 
 }}  // namespace builders
 }}  // namespace ukm
 """,
-event_template="""
+                        event_template="""
     {{
       UINT64_C({event.hash}),
       {{
@@ -69,7 +72,7 @@ event_template="""
       }}
     }},
 """,
-metric_template="""
+                        metric_template="""
     {{{event.name}::k{metric.name}NameHash, {event.name}::k{metric.name}Name}},
 """)
 

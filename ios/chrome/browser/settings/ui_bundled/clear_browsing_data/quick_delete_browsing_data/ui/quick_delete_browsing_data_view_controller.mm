@@ -10,6 +10,7 @@
 #import "components/browsing_data/core/browsing_data_utils.h"
 #import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/net/model/crurl.h"
+#import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/public/features.h"
 #import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/public/quick_delete_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/quick_delete_browsing_data/ui/quick_delete_browsing_data_view_controller_delegate.h"
 #import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/ui/quick_delete_mutator.h"
@@ -40,7 +41,8 @@ const char kDBDSignOutOfChromeURL[] = "settings://DBDSignOutOfChrome";
 // Section identifiers in the browsing data page table view.
 typedef NS_ENUM(NSInteger, SectionIdentifier) {
   SectionIdentifierBrowsingData = kSectionIdentifierEnumZero,
-  SectionIdentifierFooter,
+  SectionIdentifierBrowsingDataFooter,
+  SectionIdentifierManageOtherData,
 };
 
 // Item identifiers in the browsing data page table view.
@@ -49,9 +51,29 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
   ItemIdentifierTabs,
   ItemIdentifierSiteData,
   ItemIdentifierCache,
+  // TODO(crbug.com/463402932): Remove once
+  // `kPasswordRemovalFromDeleteBrowsingData` is enabled by default.
   ItemIdentifierPasswords,
   ItemIdentifierAutofill,
+  ItemIdentifierManageOtherData,
 };
+
+// Returns the array of item identifiers for the Browsing Data section.
+NSArray<NSNumber*>* BrowsingDataItemIdentifiers() {
+  NSMutableArray<NSNumber*>* items = [NSMutableArray array];
+  [items addObject:@(ItemIdentifierHistory)];
+  [items addObject:@(ItemIdentifierTabs)];
+  [items addObject:@(ItemIdentifierSiteData)];
+  [items addObject:@(ItemIdentifierCache)];
+
+  // Conditionally add the Passwords item.
+  if (!IsPasswordRemovalFromDeleteBrowsingDataEnabled()) {
+    [items addObject:@(ItemIdentifierPasswords)];
+  }
+
+  [items addObject:@(ItemIdentifierAutofill)];
+  return items;
+}
 
 }  // namespace
 
@@ -59,15 +81,23 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
     TableViewLinkHeaderFooterItemDelegate> {
   UITableViewDiffableDataSource<NSNumber*, NSNumber*>* _dataSource;
 
+  // The title for the "Manage other data" cell.
+  NSString* _manageOtherDataTitle;
+  // The subtitle for the "Manage other data" cell.
+  NSString* _manageOtherDataSubtitle;
   NSString* _historySummary;
   NSString* _tabsSummary;
   NSString* _cacheSummary;
+  // TODO(crbug.com/463402932): Remove once
+  // `kPasswordRemovalFromDeleteBrowsingData` is enabled by default.
   NSString* _passwordsSummary;
   NSString* _autofillSummary;
   BOOL _historySelected;
   BOOL _tabsSelected;
   BOOL _siteDataSelected;
   BOOL _cacheSelected;
+  // TODO(crbug.com/463402932): Remove once
+  // `kPasswordRemovalFromDeleteBrowsingData` is enabled by default.
   BOOL _passwordsSelected;
   BOOL _autofillSelected;
   BOOL _shouldShowFooter;
@@ -116,30 +146,46 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
   NSDiffableDataSourceSnapshot* snapshot =
       [[NSDiffableDataSourceSnapshot alloc] init];
   [snapshot appendSectionsWithIdentifiers:@[
-    @(SectionIdentifierBrowsingData), @(SectionIdentifierFooter)
+    @(SectionIdentifierBrowsingData), @(SectionIdentifierBrowsingDataFooter)
   ]];
-  [snapshot appendItemsWithIdentifiers:@[
-    @(ItemIdentifierHistory), @(ItemIdentifierTabs), @(ItemIdentifierSiteData),
-    @(ItemIdentifierCache), @(ItemIdentifierPasswords),
-    @(ItemIdentifierAutofill)
-  ]
+  [snapshot appendItemsWithIdentifiers:BrowsingDataItemIdentifiers()
              intoSectionWithIdentifier:@(SectionIdentifierBrowsingData)];
+
+  if (IsPasswordRemovalFromDeleteBrowsingDataEnabled()) {
+    [snapshot
+        appendSectionsWithIdentifiers:@[ @(SectionIdentifierManageOtherData) ]];
+    [snapshot appendItemsWithIdentifiers:@[ @(ItemIdentifierManageOtherData) ]
+               intoSectionWithIdentifier:@(SectionIdentifierManageOtherData)];
+  }
 
   [_dataSource applySnapshot:snapshot animatingDifferences:NO];
 }
 
 #pragma mark - UITableViewDelegate
+
 - (void)tableView:(UITableView*)tableView
     didSelectRowAtIndexPath:(NSIndexPath*)indexPath {
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
   ItemIdentifier itemIdentifier = static_cast<ItemIdentifier>(
       [_dataSource itemIdentifierForIndexPath:indexPath].integerValue);
 
-  // Update selection value for the corresponding cell with `itemIdentifier`.
-  [self toggleSelectionForItemIdentifier:itemIdentifier];
-
-  // Update the snapshot for the selected cell.
-  [self updateSnapshotForItemIdentifier:itemIdentifier];
+  switch (itemIdentifier) {
+    case ItemIdentifierManageOtherData: {
+      [_delegate showOtherDataPage];
+      return;
+    }
+    case ItemIdentifierHistory:
+    case ItemIdentifierTabs:
+    case ItemIdentifierSiteData:
+    case ItemIdentifierCache:
+    case ItemIdentifierPasswords:
+    case ItemIdentifierAutofill:
+      // Update selection value for the corresponding cell with
+      // `itemIdentifier`.
+      [self toggleSelectionForItemIdentifier:itemIdentifier];
+      // Update the snapshot for the selected cell.
+      [self updateSnapshotForItemIdentifier:itemIdentifier];
+  }
 }
 
 - (UIView*)tableView:(UITableView*)tableView
@@ -147,7 +193,7 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
   SectionIdentifier sectionIdentifier = static_cast<SectionIdentifier>(
       [_dataSource sectionIdentifierForIndex:section].integerValue);
   switch (sectionIdentifier) {
-    case SectionIdentifierFooter: {
+    case SectionIdentifierBrowsingDataFooter: {
       if (!_shouldShowFooter) {
         return nil;
       }
@@ -163,9 +209,9 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
             withColor:[UIColor colorNamed:kTextSecondaryColor]];
       return footer;
     }
-    case SectionIdentifierBrowsingData: {
+    case SectionIdentifierBrowsingData:
+    case SectionIdentifierManageOtherData:
       return nil;
-    }
   }
   NOTREACHED();
 }
@@ -174,7 +220,8 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
     heightForFooterInSection:(NSInteger)section {
   SectionIdentifier sectionIdentifier = static_cast<SectionIdentifier>(
       [_dataSource sectionIdentifierForIndex:section].integerValue);
-  if (sectionIdentifier == SectionIdentifierFooter && _shouldShowFooter) {
+  if (sectionIdentifier == SectionIdentifierBrowsingDataFooter &&
+      _shouldShowFooter) {
     return UITableViewAutomaticDimension;
   }
   return kSectionFooterHeight;
@@ -201,6 +248,22 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
   // No-op: This ViewController doesn't show the overall browsing data summary.
 }
 
+- (void)setManageOtherDataTitle:(NSString*)manageOtherDataTitle {
+  CHECK(IsPasswordRemovalFromDeleteBrowsingDataEnabled());
+  _manageOtherDataTitle = manageOtherDataTitle;
+
+  // Reloads the "Manage other data" cell.
+  [self updateSnapshotForItemIdentifier:ItemIdentifierManageOtherData];
+}
+
+- (void)setManageOtherDataSubtitle:(NSString*)manageOtherDataSubtitle {
+  CHECK(IsPasswordRemovalFromDeleteBrowsingDataEnabled());
+  _manageOtherDataSubtitle = manageOtherDataSubtitle;
+
+  // Reloads the "Manage other data" cell.
+  [self updateSnapshotForItemIdentifier:ItemIdentifierManageOtherData];
+}
+
 - (void)setShouldShowFooter:(BOOL)shouldShowFooter {
   if (_shouldShowFooter == shouldShowFooter) {
     return;
@@ -211,7 +274,9 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
   // Reload the footer section.
   NSDiffableDataSourceSnapshot<NSNumber*, NSNumber*>* snapshot =
       [_dataSource snapshot];
-  [snapshot reloadSectionsWithIdentifiers:@[ @(SectionIdentifierFooter) ]];
+  [snapshot reloadSectionsWithIdentifiers:@[
+    @(SectionIdentifierBrowsingDataFooter)
+  ]];
   [_dataSource applySnapshot:snapshot animatingDifferences:YES];
 }
 
@@ -231,6 +296,7 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
 }
 
 - (void)setPasswordsSummary:(NSString*)passwordsSummary {
+  CHECK(!IsPasswordRemovalFromDeleteBrowsingDataEnabled());
   _passwordsSummary = passwordsSummary;
   [self updateSnapshotForItemIdentifier:ItemIdentifierPasswords];
 }
@@ -261,6 +327,7 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
 }
 
 - (void)setPasswordsSelection:(BOOL)selected {
+  CHECK(!IsPasswordRemovalFromDeleteBrowsingDataEnabled());
   _passwordsSelected = selected;
   [self updateSnapshotForItemIdentifier:ItemIdentifierPasswords];
 }
@@ -297,15 +364,29 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
   return cancelButton;
 }
 
-// Returns the confirm button on the navigation bar.
+// TODO(crbug.com/487269108): Modify comments and method names from `Confirm`
+// button to the `Done` button in this file once the feature flag
+// `kPasswordRemovalFromDeleteBrowsingData` is enabled. Returns the confirm
+// button on the navigation bar.
 - (UIBarButtonItem*)confirmButton {
-  UIBarButtonItem* confirmButton = [[UIBarButtonItem alloc]
-      initWithTitle:l10n_util::GetNSString(IDS_IOS_DELETE_BROWSING_DATA_CONFIRM)
-              style:UIBarButtonItemStyleDone
-             target:self
-             action:@selector(onConfirm:)];
-  confirmButton.accessibilityIdentifier =
-      kQuickDeleteBrowsingDataConfirmButtonIdentifier;
+  UIBarButtonItem* confirmButton;
+  if (IsPasswordRemovalFromDeleteBrowsingDataEnabled()) {
+    confirmButton = [[UIBarButtonItem alloc]
+        initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                             target:self
+                             action:@selector(onConfirm:)];
+    confirmButton.accessibilityIdentifier =
+        kQuickDeleteBrowsingDataDoneButtonIdentifier;
+  } else {
+    confirmButton = [[UIBarButtonItem alloc]
+        initWithTitle:l10n_util::GetNSString(
+                          IDS_IOS_DELETE_BROWSING_DATA_CONFIRM)
+                style:UIBarButtonItemStyleDone
+               target:self
+               action:@selector(onConfirm:)];
+    confirmButton.accessibilityIdentifier =
+        kQuickDeleteBrowsingDataConfirmButtonIdentifier;
+  }
   return confirmButton;
 }
 
@@ -327,7 +408,9 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
   [_mutator updateTabsSelection:_tabsSelected];
   [_mutator updateSiteDataSelection:_siteDataSelected];
   [_mutator updateCacheSelection:_cacheSelected];
-  [_mutator updatePasswordsSelection:_passwordsSelected];
+  if (!IsPasswordRemovalFromDeleteBrowsingDataEnabled()) {
+    [_mutator updatePasswordsSelection:_passwordsSelected];
+  }
   [_mutator updateAutofillSelection:_autofillSelected];
   [_delegate dismissBrowsingDataPage];
 }
@@ -358,6 +441,26 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
                                 : UITableViewCellAccessoryNone;
   cell.accessibilityIdentifier = accessibilityIdentifier;
   cell.accessibilityTraits |= UIAccessibilityTraitButton;
+  return cell;
+}
+
+// Creates the "Manage other data" cell.
+- (UITableViewCell*)createManageOtherDataCell {
+  TableViewCellContentConfiguration* configuration =
+      [[TableViewCellContentConfiguration alloc] init];
+
+  configuration.title = _manageOtherDataTitle;
+  configuration.subtitle = _manageOtherDataSubtitle;
+
+  UITableViewCell* cell =
+      [TableViewCellContentConfiguration dequeueTableViewCell:self.tableView];
+
+  cell.contentConfiguration = configuration;
+  cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+
+  cell.accessibilityIdentifier = kQuickDeleteManageOtherDataCellIdentifier;
+  cell.accessibilityTraits |= UIAccessibilityTraitButton;
+
   return cell;
 }
 
@@ -403,6 +506,7 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
           accessibilityIdentifier:kQuickDeleteBrowsingDataCacheIdentifier];
     }
     case ItemIdentifierPasswords: {
+      CHECK(!IsPasswordRemovalFromDeleteBrowsingDataEnabled());
       return [self
               createCellWithTitle:l10n_util::GetNSString(
                                       IDS_IOS_CLEAR_SAVED_PASSWORDS)
@@ -419,6 +523,9 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
                          selected:_autofillSelected
           accessibilityIdentifier:kQuickDeleteBrowsingDataAutofillIdentifier];
     }
+    case ItemIdentifierManageOtherData: {
+      return [self createManageOtherDataCell];
+    }
   }
 }
 
@@ -429,7 +536,21 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
   [snapshot reloadItemsWithIdentifiers:@[ @(itemIdentifier) ]];
   [_dataSource applySnapshot:snapshot animatingDifferences:YES];
 
-  [self updateConfirmButtonEnabledStatus];
+  switch (itemIdentifier) {
+    case ItemIdentifierHistory:
+    case ItemIdentifierTabs:
+    case ItemIdentifierSiteData:
+    case ItemIdentifierCache:
+    case ItemIdentifierPasswords:
+    case ItemIdentifierAutofill:
+      [self updateConfirmButtonEnabledStatus];
+      break;
+    case ItemIdentifierManageOtherData:
+      // Unlike the data type selection cells above, this cell is for
+      // navigation. Tapping it doesn't change the enabled state of the confirm
+      // button.
+      break;
+  }
 }
 
 // Toggles the selection for the given `itemIdentifier`.
@@ -452,12 +573,17 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
       break;
     }
     case ItemIdentifierPasswords: {
+      CHECK(!IsPasswordRemovalFromDeleteBrowsingDataEnabled());
       _passwordsSelected = !_passwordsSelected;
       break;
     }
     case ItemIdentifierAutofill: {
       _autofillSelected = !_autofillSelected;
       break;
+    }
+    case ItemIdentifierManageOtherData: {
+      // This item can't be selected.
+      NOTREACHED();
     }
   }
   [self updateConfirmButtonEnabledStatus];
@@ -489,6 +615,10 @@ typedef NS_ENUM(NSInteger, ItemIdentifier) {
     case ItemIdentifierAutofill: {
       return DefaultSymbolTemplateWithPointSize(kAutofillDataSymbol,
                                                 kDefaultSymbolSize);
+    }
+    case ItemIdentifierManageOtherData: {
+      // This item doesn't have an icon.
+      NOTREACHED();
     }
   }
 }

@@ -24,12 +24,14 @@
 #include "base/test/task_environment.h"
 #include "base/test/test_future.h"
 #include "base/types/expected.h"
+#include "build/build_config.h"
 #include "chrome/browser/ai/ai_test_utils.h"
-#include "chrome/browser/ai/ai_utils.h"
 #include "chrome/browser/ai/features.h"
 #include "chrome/browser/component_updater/optimization_guide_on_device_model_installer.h"
+#include "components/on_device_ai/ai_utils.h"
 #include "components/optimization_guide/core/model_execution/multimodal_message.h"
 #include "components/optimization_guide/core/model_execution/on_device_capability.h"
+#include "components/optimization_guide/core/model_execution/test/mock_download_progress_observer.h"
 #include "components/optimization_guide/core/model_execution/test/mock_on_device_capability.h"
 #include "components/optimization_guide/core/optimization_guide_features.h"
 #include "components/optimization_guide/core/optimization_guide_proto_util.h"
@@ -38,7 +40,7 @@
 #include "components/optimization_guide/proto/features/prompt_api.pb.h"
 #include "components/optimization_guide/proto/on_device_model_execution_config.pb.h"
 #include "components/optimization_guide/proto/string_value.pb.h"
-#include "components/optimization_guide/public/mojom/model_broker.mojom-data-view.h"
+#include "components/optimization_guide/public/mojom/model_broker.mojom-shared.h"
 #include "components/update_client/update_client.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "services/on_device_model/public/cpp/capabilities.h"
@@ -50,7 +52,6 @@
 #include "third_party/blink/public/mojom/ai/ai_common.mojom.h"
 #include "third_party/blink/public/mojom/ai/ai_language_model.mojom.h"
 #include "third_party/blink/public/mojom/ai/ai_manager.mojom-shared.h"
-#include "third_party/blink/public/mojom/ai/model_download_progress_observer.mojom-forward.h"
 #include "third_party/blink/public/mojom/ai/model_streaming_responder.mojom-shared.h"
 
 namespace {
@@ -59,6 +60,7 @@ using ::base::test::TestFuture;
 using ::on_device_model::mojom::PerformanceClass;
 using ::optimization_guide::FieldSubstitution;
 using ::optimization_guide::ForbidUnsafe;
+using ::optimization_guide::MockDownloadProgressObserver;
 using ::optimization_guide::StringValueField;
 using ::testing::_;
 using ::testing::ElementsAre;
@@ -72,7 +74,6 @@ constexpr float kTestDefaultTemperature = 0.0f;
 constexpr uint32_t kTestMaxTopK = 5u;
 constexpr float kTestMaxTemperature = 1.5;
 constexpr uint32_t kTestMaxTokens = 100u;
-constexpr uint64_t kTestModelDownloadSize = 572u;
 static_assert(kTestDefaultTopK <= kTestMaxTopK);
 static_assert(kTestDefaultTemperature <= kTestMaxTemperature);
 
@@ -271,7 +272,9 @@ class AILanguageModelTest : public AITestUtils::AITestBase {
         {{blink::features::kAIPromptAPIMultimodalInput, {}},
          {features::kAILanguageModelOverrideConfiguration,
           {{"ai_language_model_output_buffer", "100"}}},
-         {optimization_guide::features::kOptimizationGuideOnDeviceModel, {}}},
+         {optimization_guide::features::kOptimizationGuideOnDeviceModel, {}},
+         {optimization_guide::features::kAIModelUnloadableProgress,
+          {{"ai_model_unloadable_progress_bytes", "0"}}}},
         {});
   }
 
@@ -665,7 +668,7 @@ TEST_F(AILanguageModelTest, QuotaOverflowOnPromptInput) {
   std::string long_prompt(kTestMaxTokens / 3, 'a');
   AITestUtils::TestStreamingResponder responder;
   session->Prompt(MakeInput(long_prompt), nullptr, responder.BindRemote());
-  responder.WaitForQuotaOverflow();
+  responder.WaitForContextOverflow();
   EXPECT_TRUE(responder.WaitForCompletion());
   // Response should include input/output of previous prompt with the original
   // long prompt not present.
@@ -684,7 +687,7 @@ TEST_F(AILanguageModelTest, QuotaOverflowOnAppend) {
   std::string long_prompt(kTestMaxTokens / 3, 'a');
   AITestUtils::TestStreamingResponder responder;
   session->Append(MakeInput(long_prompt), responder.BindRemote());
-  responder.WaitForQuotaOverflow();
+  responder.WaitForContextOverflow();
   EXPECT_TRUE(responder.WaitForCompletion());
 
   EXPECT_THAT(Prompt(*session, MakeInput("foo")),
@@ -710,7 +713,7 @@ TEST_F(AILanguageModelTest, QuotaOverflowOnOutput) {
 
   AITestUtils::TestStreamingResponder responder;
   session->Prompt(MakeInput("foo"), nullptr, responder.BindRemote());
-  responder.WaitForQuotaOverflow();
+  responder.WaitForContextOverflow();
   EXPECT_TRUE(responder.WaitForCompletion());
   EXPECT_THAT(responder.responses(), ElementsAre(long_response));
 
@@ -868,8 +871,8 @@ INSTANTIATE_TEST_SUITE_P(
     AILanguageModelTestWithLanguageParams,
     ::testing::Values(LanguageParams{"en,es,ja", {"en"}, false},
                       LanguageParams{"*", {"en"}, false},
-                      LanguageParams{"*", {"fr"}, true},
-                      LanguageParams{"", {"en"}, true},
+                      LanguageParams{"*", {"fr"}, false},
+                      LanguageParams{"", {"en"}, false},
                       LanguageParams{"", {"fr"}, true},
                       LanguageParams{"es,ja", {"es"}, false},
                       LanguageParams{"en,es,ja", {"ja"}, false},
@@ -1017,42 +1020,39 @@ TEST_F(AILanguageModelTest, MultimodalInput) {
               ElementsAreArray(FormatResponses({"UfooEU<image>EU<audio>EM"})));
 }
 
+// TODO: crbug.com/474999857 Enable on Android when download progress is
+// supported.
+#if !BUILDFLAG(IS_ANDROID)
 TEST_F(AILanguageModelTest, ModelDownload) {
-  // This is the component id of the on device model. The `AIManager` sends
-  // updates for it to the `CreateMonitor`s.
-  std::string model_component_id =
-      component_updater::OptimizationGuideOnDeviceModelInstallerPolicy::
-          GetOnDeviceModelExtensionId();
-  AITestUtils::FakeComponent model_component(model_component_id,
-                                             kTestModelDownloadSize);
+  MockDownloadProgressObserver observer;
+  GetAIManagerInterface()->AddModelDownloadProgressObserver(
+      observer.BindNewPipeAndPassRemote());
+  fake_broker_->component_state().WaitForDownloadObserver();
 
-  EXPECT_EQ(GetAIManagerDownloadProgressObserversSize(), 0u);
-  AITestUtils::FakeMonitor mock_monitor;
+  // Receives the zero update.
+  uint64_t total_bytes =
+      fake_broker_->component_state().component().total_bytes();
+  fake_broker_->component_state().UpdateDownloadProgress(0);
+  observer.ExpectReceivedNormalizedUpdate(0, total_bytes);
 
-  EXPECT_CALL(component_update_service_, GetComponentDetails(_, _))
-      .WillOnce(
-          [&](const std::string& id, component_updater::CrxUpdateItem* item) {
-            *item = model_component.CreateUpdateItem(
-                update_client::ComponentState::kNew, 0);
-            return true;
-          });
-  GetAIManagerRemote()->AddModelDownloadProgressObserver(
-      mock_monitor.BindNewPipeAndPassRemote());
+  // Receives an update for normalized to the total bytes.
+  task_environment()->FastForwardBy(base::Milliseconds(51));
+  uint64_t downloaded_bytes = total_bytes / 2;
+  fake_broker_->component_state().UpdateDownloadProgress(downloaded_bytes);
+  observer.ExpectReceivedNormalizedUpdate(downloaded_bytes, total_bytes);
 
-  ASSERT_TRUE(base::test::RunUntil(
-      [this] { return GetAIManagerDownloadProgressObserversSize() == 1u; }));
-
-  component_update_service_.SendUpdate(model_component.CreateUpdateItem(
-      update_client::ComponentState::kDownloading, kTestModelDownloadSize));
-
-  mock_monitor.ExpectReceivedNormalizedUpdate(0, kTestModelDownloadSize);
+  // Receives the final one update.
+  task_environment()->FastForwardBy(base::Milliseconds(51));
+  fake_broker_->component_state().UpdateDownloadProgress(total_bytes);
+  observer.ExpectReceivedNormalizedUpdate(total_bytes, total_bytes);
 }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 TEST_F(AILanguageModelTest, MeasureInputUsage) {
   auto session = CreateSession();
   base::test::TestFuture<std::optional<uint32_t>> measure_future;
   session->MeasureInputUsage(MakeInput("foo"), measure_future.GetCallback());
-  EXPECT_EQ(measure_future.Get(), std::string("UfooEM").size());
+  EXPECT_EQ(measure_future.Get(), std::string("UfooE").size());
 }
 
 TEST_F(AILanguageModelTest, TextSafetyInitialPrompts) {
@@ -1252,7 +1252,7 @@ TEST_F(AILanguageModelTest, CrashRecoveryMeasureInputUsage) {
 
   base::test::TestFuture<std::optional<uint32_t>> measure_future;
   session->MeasureInputUsage(MakeInput("foo"), measure_future.GetCallback());
-  EXPECT_EQ(measure_future.Get(), std::string("UfooEM").size());
+  EXPECT_EQ(measure_future.Get(), std::string("UfooE").size());
 }
 
 TEST_F(AILanguageModelTest, CanCreate_WaitsForEligibility) {
@@ -1269,6 +1269,7 @@ TEST_F(AILanguageModelTest, CanCreate_WaitsForEligibility) {
       result_future;
   GetAIManagerInterface()->CanCreateLanguageModel({},
                                                   result_future.GetCallback());
+
   // Session should not be ready until eligibility callback has run.
   EXPECT_FALSE(result_future.IsReady());
   eligibility_future.Take().Run(

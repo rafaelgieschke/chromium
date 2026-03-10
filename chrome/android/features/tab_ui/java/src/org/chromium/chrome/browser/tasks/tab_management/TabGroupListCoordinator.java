@@ -16,7 +16,7 @@ import android.view.ViewGroup;
 import androidx.annotation.IntDef;
 import androidx.core.util.Consumer;
 
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.collaboration.CollaborationServiceFactory;
@@ -92,7 +92,7 @@ public class TabGroupListCoordinator {
             TabGroupUiActionHandler tabGroupUiActionHandler,
             ModalDialogManager modalDialogManager,
             Consumer<Boolean> onIsScrolledChanged,
-            ObservableSupplier<EdgeToEdgeController> edgeToEdgeSupplier,
+            MonotonicObservableSupplier<EdgeToEdgeController> edgeToEdgeSupplier,
             DataSharingTabManager dataSharingTabManager) {
         ModelList modelList = new ModelList();
         mSimpleRecyclerViewAdapter =
@@ -218,7 +218,6 @@ public class TabGroupListCoordinator {
     }
 
     private static boolean enableContainment() {
-        return ChromeFeatureList.sGridTabSwitcherUpdate.isEnabled()
-                && ChromeFeatureList.sTabGroupListContainment.getValue();
+        return ChromeFeatureList.sTabGroupListContainment.getValue();
     }
 }

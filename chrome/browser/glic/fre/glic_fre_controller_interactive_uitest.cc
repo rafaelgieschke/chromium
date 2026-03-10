@@ -3,11 +3,11 @@
 // found in the LICENSE file.
 
 #include "base/strings/strcat.h"
-#include "base/test/metrics/histogram_tester.h"
 #include "base/test/metrics/user_action_tester.h"
 #include "chrome/browser/glic/fre/glic_fre_controller.h"
 #include "chrome/browser/glic/fre/glic_fre_dialog_view.h"
 #include "chrome/browser/glic/glic_pref_names.h"
+#include "chrome/browser/glic/test_support/glic_histogram_tester.h"
 #include "chrome/browser/glic/test_support/glic_test_environment.h"
 #include "chrome/browser/glic/test_support/interactive_glic_test.h"
 #include "chrome/browser/glic/test_support/interactive_test_util.h"
@@ -129,28 +129,21 @@ class GlicFreControllerUiTestBase : public test::InteractiveGlicTest {
   net::EmbeddedTestServer& fre_server() { return fre_server_; }
   const GURL& fre_url() { return fre_url_; }
 
-  base::HistogramTester& histogram_tester() { return histogram_tester_; }
+  GlicHistogramTester& histogram_tester() { return histogram_tester_; }
   base::UserActionTester& user_action_tester() { return user_action_tester_; }
 
  protected:
   base::test::ScopedFeatureList features_;
   net::EmbeddedTestServer fre_server_;
   GURL fre_url_;
-  base::HistogramTester histogram_tester_;
+  GlicHistogramTester histogram_tester_;
   base::UserActionTester user_action_tester_;
 };
 
 class GlicFreControllerUiTest : public GlicFreControllerUiTestBase {
  public:
   void SetUp() override {
-    // TODO(b/399666689): Warming chrome://glic/ seems to allow that page to
-    // interfere with chrome://glic-fre/'s <webview>, too, depending which loads
-    // first. It's also unclear whether it ought to happen at all before FRE
-    // completion. Disable that feature until that can be sorted out.
-    features_.InitWithFeatures(
-        /*enabled_features=*/{},
-        /*disabled_features=*/{features::kGlicWarming,
-                               features::kGlicFreWarming});
+    InitializeFeatures();
 
     fre_server_.AddDefaultHandlers();
     fre_server_.ServeFilesFromDirectory(
@@ -162,6 +155,21 @@ class GlicFreControllerUiTest : public GlicFreControllerUiTestBase {
     SetGlicFreUrlOverride(fre_url_);
 
     GlicFreControllerUiTestBase::SetUp();
+  }
+
+ protected:
+  virtual void InitializeFeatures() {
+    // TODO(b/399666689): Warming chrome://glic/ seems to allow that page to
+    // interfere with chrome://glic-fre/'s <webview>, too, depending which loads
+    // first. It's also unclear whether it ought to happen at all before FRE
+    // completion. Disable that feature until that can be sorted out.
+    features_.InitWithFeatures(
+        /*enabled_features=*/{},
+        /*disabled_features=*/{
+            features::kGlicWarming,
+            features::kGlicTrustFirstOnboarding,
+            features::kGlicUnifiedFreScreen,
+        });
   }
 
   auto ForceInvalidateAccount() {
@@ -409,13 +417,42 @@ IN_PROC_BROWSER_TEST_F(GlicFreControllerUiTest,
       })));
 }
 
+class GlicFreControllerUiUnifiedTest : public GlicFreControllerUiTest {
+ protected:
+  void InitializeFeatures() override {
+    features_.InitWithFeatures(
+        /*enabled_features=*/{features::kGlicUnifiedFreScreen},
+        /*disabled_features=*/{features::kGlicWarming});
+  }
+};
+
+// TODO(crbug.com/427261741#comment11) Test is flaky on all platforms.
+IN_PROC_BROWSER_TEST_F(GlicFreControllerUiUnifiedTest, DISABLED_CloseWithEsc) {
+  auto server_running = fre_server().StartAcceptingConnectionsAndReturnHandle();
+
+  RunTestSequence(
+      ObserveState(kFreWebUiState, std::ref(GetFreController())),
+      PressButton(kGlicButtonElementId),
+      InstrumentNonTabWebView(test::kGlicFreHostElementId, kGlicViewElementId),
+      InstrumentInnerWebContents(test::kGlicFreContentsElementId,
+                                 test::kGlicFreHostElementId, 0),
+      WaitForWebContentsReady(test::kGlicFreContentsElementId),
+      WaitForState(kFreWebUiState, mojom::FreWebUiState::kReady),
+      SendKeyPress(kGlicViewElementId, ui::VKEY_ESCAPE, ui::EF_NONE),
+      WaitForHide(kGlicViewElementId), InAnyContext(Do([&]() {
+        EXPECT_EQ(user_action_tester().GetActionCount("Glic.Fre.CloseWithEsc"),
+                  1);
+      })));
+}
+
 class GlicFreControllerUiHttpErrorTest : public GlicFreControllerUiTestBase {
  public:
   void SetUp() override {
     features_.InitWithFeatures(
         /*enabled_features=*/{},
         /*disabled_features=*/{features::kGlicWarming,
-                               features::kGlicFreWarming});
+                               features::kGlicTrustFirstOnboarding,
+                               features::kGlicUnifiedFreScreen});
 
     fre_server_.AddDefaultHandlers();
     // Register a handler that will return a 502 error.
@@ -480,7 +517,8 @@ class GlicFreControllerUiTimeoutTest : public GlicFreControllerUiTestBase {
     features_.InitWithFeaturesAndParameters(
         enabled_features,
         /*disabled_features=*/{features::kGlicWarming,
-                               features::kGlicFreWarming});
+                               features::kGlicTrustFirstOnboarding,
+                               features::kGlicUnifiedFreScreen});
 
     fre_server_.AddDefaultHandlers();
     fre_server_.ServeFilesFromDirectory(
@@ -526,8 +564,11 @@ class GlicFreControllerRedirectTest : public GlicFreControllerUiTestBase,
         {features::kGlicCaaGuestError,
          {{"glic-caa-link-url", destination_url_.spec()}}}};
 
-    features_.InitWithFeaturesAndParameters(enabled_features,
-                                            /*disabled_features=*/{});
+    features_.InitWithFeaturesAndParameters(
+        enabled_features,
+        /*disabled_features=*/{features::kGlicTrustFirstOnboarding,
+                               features::kGlicWarming,
+                               features::kGlicUnifiedFreScreen});
     GlicFreControllerUiTestBase::SetUp();
   }
 

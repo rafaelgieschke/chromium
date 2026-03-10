@@ -13,6 +13,7 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/enterprise/browser_management/management_identity.h"
 #include "chrome/browser/enterprise/profile_management/profile_management_features.h"
 #include "chrome/browser/enterprise/util/managed_browser_utils.h"
 #include "chrome/browser/profiles/profile.h"
@@ -199,6 +200,9 @@ ManagedUserProfileNoticeUI::ManagedUserProfileNoticeUI(content::WebUI* web_ui)
   source->AddBoolean("enforcedByPolicy", false);
   source->AddInteger("initialState",
                      ManagedUserProfileNoticeHandler::State::kDisclosure);
+  source->AddBoolean("usePrimaryAndTonalButtonsForPromos",
+                     base::FeatureList::IsEnabled(
+                         switches::kUsePrimaryAndTonalButtonsForPromos));
 }
 
 ManagedUserProfileNoticeUI::~ManagedUserProfileNoticeUI() = default;
@@ -212,7 +216,7 @@ void ManagedUserProfileNoticeUI::Initialize(
   bool is_school_account =
       create_param->account_info.capabilities.can_use_edu_features() ==
       signin::Tribool::kTrue;
-  base::Value::Dict update_data;
+  base::DictValue update_data;
   std::string domain =
       enterprise_util::GetDomainFromEmail(create_param->account_info.email);
   if (type ==
@@ -430,7 +434,7 @@ void ManagedUserProfileNoticeUI::UpdateBrowsingDataStringWithCounts(
   }
   string_replacements.push_back(std::move(domain));
 
-  base::Value::Dict update_data;
+  base::DictValue update_data;
   std::u16string browsing_data_string;
   if (string_replacements.size() == 2) {
     update_data.Set(

@@ -4,13 +4,16 @@
 
 package org.chromium.chrome.browser.settings;
 
+import static org.chromium.build.NullUtil.assumeNonNull;
+
+import android.app.Activity;
 import android.content.Context;
 import android.os.Bundle;
 
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
 
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
@@ -19,6 +22,7 @@ import org.chromium.chrome.browser.autofill.options.AutofillOptionsCoordinator;
 import org.chromium.chrome.browser.autofill.options.AutofillOptionsFragment;
 import org.chromium.chrome.browser.autofill.settings.AutofillCreditCardEditor;
 import org.chromium.chrome.browser.autofill.settings.AutofillLocalIbanEditor;
+import org.chromium.chrome.browser.device_lock.DeviceLockActivityLauncherImpl;
 import org.chromium.chrome.browser.image_descriptions.ImageDescriptionsController;
 import org.chromium.chrome.browser.image_descriptions.ImageDescriptionsSettings;
 import org.chromium.chrome.browser.language.settings.LanguageSettings;
@@ -39,6 +43,7 @@ import org.chromium.chrome.browser.safety_hub.SafetyHubBaseFragment;
 import org.chromium.chrome.browser.safety_hub.SafetyHubFragment;
 import org.chromium.chrome.browser.safety_hub.SafetyHubModuleDelegateImpl;
 import org.chromium.chrome.browser.search_engines.settings.SearchEngineSettings;
+import org.chromium.chrome.browser.settings.search.SettingsSearchCoordinator;
 import org.chromium.chrome.browser.signin.SigninAndHistorySyncActivityLauncherImpl;
 import org.chromium.chrome.browser.site_settings.ChromeSiteSettingsDelegate;
 import org.chromium.chrome.browser.sync.SyncServiceFactory;
@@ -49,9 +54,12 @@ import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.components.browser_ui.accessibility.AccessibilitySettings;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.settings.FragmentSettingsNavigation;
+import org.chromium.components.browser_ui.settings.SearchViewProvider;
 import org.chromium.components.browser_ui.settings.SettingsCustomTabLauncher;
 import org.chromium.components.browser_ui.site_settings.BaseSiteSettingsFragment;
 import org.chromium.components.browser_ui.site_settings.SiteSettingsCategory;
+import org.chromium.ui.base.ActivityResultTracker;
+import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.modaldialog.ModalDialogManager;
 
 import java.util.function.Supplier;
@@ -59,27 +67,39 @@ import java.util.function.Supplier;
 /** Provides dependencies to fragments in the settings activity. */
 @NullMarked
 public class FragmentDependencyProvider extends FragmentManager.FragmentLifecycleCallbacks {
-    private final Context mContext;
+    // TODO(crbug.com/475144764): Use Context instead of Activity once sign-in launcher is
+    // refactored.
+    private final Activity mActivity;
     private final Profile mProfile;
+    private final MonotonicObservableSupplier<WindowAndroid> mWindowAndroidSupplier;
+    private final ActivityResultTracker mActivityResultTracker;
 
     // Here are UI dependencies, i.e. objects referencing UI objects (e.g. Views). They are
     // fundamentally circular dependencies because they are needed to construct UI objects.
     // Therefore we use suppliers to provide them once they become available.
     private final OneshotSupplier<SnackbarManager> mSnackbarManagerSupplier;
     private final OneshotSupplier<BottomSheetController> mBottomSheetControllerSupplier;
-    private final ObservableSupplier<ModalDialogManager> mModalDialogManagerSupplier;
+    // TODO(crbug.com/469772349): Simplify to Supplier<@Nullable ModalDialogManagerSupplier>
+    private final MonotonicObservableSupplier<ModalDialogManager> mModalDialogManagerSupplier;
+    private final Supplier<@Nullable SettingsSearchCoordinator> mSearchCoordinatorSupplier;
 
     public FragmentDependencyProvider(
-            Context context,
+            Activity activity,
             Profile profile,
+            MonotonicObservableSupplier<WindowAndroid> windowAndroidSupplier,
+            ActivityResultTracker activityResultTracker,
             OneshotSupplier<SnackbarManager> snackbarManagerSupplier,
             OneshotSupplier<BottomSheetController> bottomSheetControllerSupplier,
-            ObservableSupplier<ModalDialogManager> modalDialogManagerSupplier) {
-        mContext = context;
+            MonotonicObservableSupplier<ModalDialogManager> modalDialogManagerSupplier,
+            Supplier<@Nullable SettingsSearchCoordinator> searchCoordinatorSupplier) {
+        mActivity = activity;
         mProfile = profile;
+        mWindowAndroidSupplier = windowAndroidSupplier;
+        mActivityResultTracker = activityResultTracker;
         mSnackbarManagerSupplier = snackbarManagerSupplier;
         mBottomSheetControllerSupplier = bottomSheetControllerSupplier;
         mModalDialogManagerSupplier = modalDialogManagerSupplier;
+        mSearchCoordinatorSupplier = searchCoordinatorSupplier;
     }
 
     @Override
@@ -100,6 +120,15 @@ public class FragmentDependencyProvider extends FragmentManager.FragmentLifecycl
                     .setCustomTabLauncher(new SettingsCustomTabLauncherImpl());
         }
 
+        if (fragment instanceof SearchViewProvider f) {
+            f.setSearchViewObserver(
+                    (open) -> {
+                        if (mSearchCoordinatorSupplier.get() != null) {
+                            mSearchCoordinatorSupplier.get().showSearchBar(!open);
+                        }
+                    });
+        }
+
         // Settings screen specific attachments.
         if (fragment instanceof MainSettings) {
             ((MainSettings) fragment).setModalDialogManagerSupplier(mModalDialogManagerSupplier);
@@ -108,7 +137,7 @@ public class FragmentDependencyProvider extends FragmentManager.FragmentLifecycl
             BaseSiteSettingsFragment baseSiteSettingsFragment =
                     ((BaseSiteSettingsFragment) fragment);
             ChromeSiteSettingsDelegate delegate =
-                    new ChromeSiteSettingsDelegate(mContext, mProfile);
+                    new ChromeSiteSettingsDelegate(mActivity, mProfile);
             delegate.setSnackbarManagerSupplier(mSnackbarManagerSupplier);
             baseSiteSettingsFragment.setSiteSettingsDelegate(delegate);
         }
@@ -149,7 +178,9 @@ public class FragmentDependencyProvider extends FragmentManager.FragmentLifecycl
             sandboxFragment.setCookieSettingsIntentHelper(
                     (Context context) -> {
                         SiteSettingsHelper.showCategorySettings(
-                                context, SiteSettingsCategory.Type.THIRD_PARTY_COOKIES);
+                                context,
+                                SiteSettingsCategory.Type.THIRD_PARTY_COOKIES,
+                                /* addToBackStack= */ true);
                     });
         }
         if (fragment instanceof LanguageSettings) {
@@ -170,28 +201,31 @@ public class FragmentDependencyProvider extends FragmentManager.FragmentLifecycl
         if (fragment instanceof AutofillOptionsFragment) {
             AutofillOptionsCoordinator.createFor(
                     (AutofillOptionsFragment) fragment,
-                    (Supplier<@Nullable ModalDialogManager>) mModalDialogManagerSupplier,
+                    mModalDialogManagerSupplier,
                     () -> ApplicationLifetime.terminate(true));
         }
         if (fragment instanceof AutofillCreditCardEditor) {
             ((AutofillCreditCardEditor) fragment)
-                    .setModalDialogManagerSupplier(
-                            (Supplier<@Nullable ModalDialogManager>) mModalDialogManagerSupplier);
+                    .setModalDialogManagerSupplier(mModalDialogManagerSupplier);
         }
         if (fragment instanceof TopicsManageFragment) {
             ((TopicsManageFragment) fragment)
-                    .setModalDialogManagerSupplier(
-                            (Supplier<@Nullable ModalDialogManager>) mModalDialogManagerSupplier);
+                    .setModalDialogManagerSupplier(mModalDialogManagerSupplier);
         }
         if (fragment instanceof AutofillLocalIbanEditor) {
             ((AutofillLocalIbanEditor) fragment)
-                    .setModalDialogManagerSupplier(
-                            (Supplier<@Nullable ModalDialogManager>) mModalDialogManagerSupplier);
+                    .setModalDialogManagerSupplier(mModalDialogManagerSupplier);
         }
         if (fragment instanceof SafetyHubFragment safetyHubFragment) {
             safetyHubFragment.setDelegate(
                     new SafetyHubModuleDelegateImpl(
+                            assumeNonNull(mWindowAndroidSupplier.get()),
+                            mActivity,
+                            mActivityResultTracker,
+                            DeviceLockActivityLauncherImpl.get(),
                             mProfile,
+                            assumeNonNull(mSnackbarManagerSupplier.get()),
+                            mBottomSheetControllerSupplier,
                             mModalDialogManagerSupplier.asNonNull(),
                             SigninAndHistorySyncActivityLauncherImpl.get(),
                             new SettingsCustomTabLauncherImpl()));

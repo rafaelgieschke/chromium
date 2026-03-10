@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/content_settings/generated_javascript_optimizer_pref.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -11,15 +14,27 @@
 #include "chrome/browser/safe_browsing/test_safe_browsing_service.h"
 #include "chrome/browser/site_protection/site_familiarity_fetcher.h"
 #include "chrome/browser/site_protection/site_familiarity_utils.h"
+#include "chrome/browser/ui/views/infobars/confirm_infobar.h"
+#include "chrome/browser/ui/views/js_optimization/js_optimizations_infobar_delegate.h"
+#include "chrome/grit/generated_resources.h"
+#include "components/policy/core/browser/browser_policy_connector.h"
+#include "components/policy/core/common/mock_configuration_policy_provider.h"
+#include "components/policy/policy_constants.h"
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "base/test/bind.h"
+#include "chrome/browser/ui/browser_actions.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/toolbar_button_provider.h"
+#include "chrome/browser/ui/views/js_optimization/js_optimizations_page_action_controller.h"
 #include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
 #include "chrome/browser/ui/views/page_action/action_ids.h"
 #include "chrome/browser/ui/views/page_action/test_support/page_action_interactive_test_mixin.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
+#include "ui/actions/actions.h"
+#include "ui/base/interaction/element_tracker.h"
+#include "ui/views/bubble/bubble_dialog_model_host.h"
 #endif  // !BUILDFLAG(IS_ANDROID)
 
 #include "chrome/common/chrome_features.h"
@@ -49,20 +64,23 @@
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/interaction/element_tracker.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "url/origin.h"
 
 typedef site_protection::SiteFamiliarityFetcher::Verdict FamiliarityVerdict;
 
-class JavascriptOptimizerBrowserTest : public PlatformBrowserTest {
+template <typename T>
+class JavascriptOptimizerBrowserTestMixin : public T {
  public:
   void SetUpOnMainThread() override {
-    PlatformBrowserTest::SetUpOnMainThread();
-    host_resolver()->AddRule("*", "127.0.0.1");
-    content::SetupCrossSiteRedirector(&embedded_https_test_server());
+    T::SetUpOnMainThread();
+    this->host_resolver()->AddRule("*", "127.0.0.1");
+    content::SetupCrossSiteRedirector(&this->embedded_https_test_server());
 
-    embedded_https_test_server().SetCertHostnames(
+    this->embedded_https_test_server().SetCertHostnames(
         {"a.com", "*.a.com", "b.com", "*.b.com", "unrelated.com"});
-    ASSERT_TRUE(embedded_https_test_server().Start());
+    ASSERT_TRUE(this->embedded_https_test_server().Start());
   }
 
   content::WebContents* web_contents() {
@@ -75,11 +93,18 @@ class JavascriptOptimizerBrowserTest : public PlatformBrowserTest {
     return rfh->GetProcess()->AreV8OptimizationsDisabled();
   }
 
-  bool AreV8OptimizationsDisabledOnActiveWebContents() {
+  bool AreV8OptimizationsDisabled(content::WebContents* web_contents) {
     return AreV8OptimizationsDisabledForRenderFrame(
-        web_contents()->GetPrimaryMainFrame());
+        web_contents->GetPrimaryMainFrame());
+  }
+
+  bool AreV8OptimizationsDisabledOnActiveWebContents() {
+    return AreV8OptimizationsDisabled(web_contents());
   }
 };
+
+class JavascriptOptimizerBrowserTest
+    : public JavascriptOptimizerBrowserTestMixin<PlatformBrowserTest> {};
 
 class JavascriptOptimizerBrowserTest_NoOriginKeyedProcessesByDefault
     : public JavascriptOptimizerBrowserTest {
@@ -357,8 +382,8 @@ IN_PROC_BROWSER_TEST_F(
 IN_PROC_BROWSER_TEST_F(
     JavascriptOptimizerBrowserTest_OriginKeyedProcessesByDefault,
     ExceptionForSiteDoesNotApplyToSubSite) {
-  if (!content::SiteIsolationPolicy::
-          AreOriginKeyedProcessesEnabledByDefault()) {
+  if (!content::SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault(
+          profile())) {
     GTEST_SKIP()
         << "skipping: OriginKeyedProcessesEnabledByDefault needs to be true";
   }
@@ -417,8 +442,8 @@ IN_PROC_BROWSER_TEST_F(JavascriptOptimizerBrowserTest,
           USER_TRIGGERED));
 
   if (content::AreStrictSiteInstancesEnabled() &&
-      !content::SiteIsolationPolicy::
-          AreOriginKeyedProcessesEnabledByDefault()) {
+      !content::SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault(
+          profile())) {
     // if a.com is isolated already (as is the case with full site isolation)
     // or if DefaultSiteInstanceGroups are enabled, and origin isolation is not
     // used, the navigation to sub.a.com will be made in a SiteInstance with a
@@ -450,7 +475,8 @@ IN_PROC_BROWSER_TEST_F(JavascriptOptimizerBrowserTest,
   ASSERT_TRUE(content::NavigateToURL(
       web_contents(),
       embedded_https_test_server().GetURL("sub.a.com", "/simple.html")));
-  if (content::SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault()) {
+  if (content::SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault(
+          profile())) {
     // Under origin isolation, the rule won't match sub.a.com, so optimizers
     // remain enabled.
     EXPECT_FALSE(AreV8OptimizationsDisabledOnActiveWebContents());
@@ -643,11 +669,15 @@ IN_PROC_BROWSER_TEST_F(
   GURL url = embedded_https_test_server().GetURL("a.com", "/simple.html");
   NavigateChangeV8OptPriorToWindowOpen(web_contents(), url, url);
 
-  std::vector<content::WebContents*> all_web_contents =
-      content::GetAllWebContents();
-  ASSERT_EQ(2u, all_web_contents.size());
-  content::RenderFrameHost* frame0 = all_web_contents[0]->GetPrimaryMainFrame();
-  content::RenderFrameHost* frame1 = all_web_contents[1]->GetPrimaryMainFrame();
+  std::vector<content::WebContents*> matched_tabs;
+  for (content::WebContents* wc : content::GetAllWebContents()) {
+    if (wc->GetLastCommittedURL() == url) {
+      matched_tabs.push_back(wc);
+    }
+  }
+  ASSERT_EQ(2u, matched_tabs.size());
+  content::RenderFrameHost* frame0 = matched_tabs[0]->GetPrimaryMainFrame();
+  content::RenderFrameHost* frame1 = matched_tabs[1]->GetPrimaryMainFrame();
   EXPECT_EQ(frame0->GetProcess(), frame1->GetProcess());
   EXPECT_EQ(frame0->GetSiteInstance(), frame1->GetSiteInstance());
 }
@@ -663,11 +693,16 @@ IN_PROC_BROWSER_TEST_F(
       embedded_https_test_server().GetURL("foo.a.com", "/simple.html");
   NavigateChangeV8OptPriorToWindowOpen(web_contents(), url, same_site_url);
 
-  std::vector<content::WebContents*> all_web_contents =
-      content::GetAllWebContents();
-  ASSERT_EQ(2u, all_web_contents.size());
-  content::RenderFrameHost* frame0 = all_web_contents[0]->GetPrimaryMainFrame();
-  content::RenderFrameHost* frame1 = all_web_contents[1]->GetPrimaryMainFrame();
+  std::vector<content::WebContents*> matched_tabs;
+  for (content::WebContents* wc : content::GetAllWebContents()) {
+    if (wc->GetLastCommittedURL() == url ||
+        wc->GetLastCommittedURL() == same_site_url) {
+      matched_tabs.push_back(wc);
+    }
+  }
+  ASSERT_EQ(2u, matched_tabs.size());
+  content::RenderFrameHost* frame0 = matched_tabs[0]->GetPrimaryMainFrame();
+  content::RenderFrameHost* frame1 = matched_tabs[1]->GetPrimaryMainFrame();
   EXPECT_EQ(frame0->GetProcess(), frame1->GetProcess());
   EXPECT_EQ(frame0->GetSiteInstance(), frame1->GetSiteInstance());
 }
@@ -864,13 +899,20 @@ class JavascriptOptimizerBrowserTest_UseSiteFamiliarityBase
     EXPECT_EQ(expected_verdict, verdict);
   }
 
-  void CheckUnfamiliarSite(bool expect_v8_optimizations_enabled) {
+  void NavigateToUnfamiliarSite(bool expect_v8_optimizations_enabled) {
     const GURL kTestUrl =
         embedded_https_test_server().GetURL("a.com", "/simple.html");
-    ASSERT_TRUE(content::NavigateToURL(web_contents(), kTestUrl));
+    NavigateToUnfamiliarUrl(web_contents(), kTestUrl,
+                            expect_v8_optimizations_enabled);
+  }
+
+  void NavigateToUnfamiliarUrl(content::WebContents* web_contents,
+                               const GURL& url,
+                               bool expect_v8_optimizations_enabled) {
+    ASSERT_TRUE(content::NavigateToURL(web_contents, url));
     EXPECT_EQ(!expect_v8_optimizations_enabled,
-              AreV8OptimizationsDisabledOnActiveWebContents());
-    CheckSiteFamiliarity(kTestUrl, FamiliarityVerdict::kUnfamiliar);
+              AreV8OptimizationsDisabled(web_contents));
+    CheckSiteFamiliarity(url, FamiliarityVerdict::kUnfamiliar);
   }
 
   void MarkAsFamiliar(const GURL& url) {
@@ -905,6 +947,27 @@ class JavascriptOptimizerBrowserTest_UseSiteFamiliarity
   bool ShouldEnableSiteFamiliarityFeature() override { return true; }
 };
 
+class JavascriptOptimizerParamBrowserTest
+    : public JavascriptOptimizerBrowserTest_UseSiteFamiliarity,
+      public testing::WithParamInterface<bool> {
+ public:
+  JavascriptOptimizerParamBrowserTest() = default;
+  ~JavascriptOptimizerParamBrowserTest() override = default;
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    JavascriptOptimizerBrowserTest_UseSiteFamiliarity::SetUpCommandLine(
+        command_line);
+    if (GetParam()) {
+      feature_list_.InitAndEnableFeature(features::kStrictOriginIsolation);
+    } else {
+      feature_list_.InitAndDisableFeature(features::kStrictOriginIsolation);
+    }
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
 IN_PROC_BROWSER_TEST_F(JavascriptOptimizerBrowserTest_UseSiteFamiliarity,
                        ExpectOptimizationEnabledFamiliarSite) {
   const GURL kTestUrl =
@@ -916,11 +979,33 @@ IN_PROC_BROWSER_TEST_F(JavascriptOptimizerBrowserTest_UseSiteFamiliarity,
 
 IN_PROC_BROWSER_TEST_F(JavascriptOptimizerBrowserTest_UseSiteFamiliarity,
                        ExpectOptimizationDisabledForUnfamiliarSite) {
-  const GURL kTestUrl =
-      embedded_https_test_server().GetURL("a.com", "/simple.html");
-  ASSERT_TRUE(content::NavigateToURL(web_contents(), kTestUrl));
-  CheckUnfamiliarSite(/*expect_v8_optimizations_enabled=*/false);
+  NavigateToUnfamiliarSite(/*expect_v8_optimizations_enabled=*/false);
 }
+
+IN_PROC_BROWSER_TEST_P(JavascriptOptimizerParamBrowserTest,
+                       ExpectOptimizationCanBeEnabledForUnfamiliarOrigin) {
+  const GURL kTestUrl =
+      embedded_https_test_server().GetURL("www.a.com", "/simple.html");
+
+  NavigateToUnfamiliarUrl(web_contents(), kTestUrl,
+                          /*expect_v8_optimizations_enabled=*/false);
+  site_protection::EnableV8Optimizations(web_contents());
+
+  // The content-setting-exception takes effect in a new browsing instance.
+  std::unique_ptr<content::WebContents> new_web_contents =
+      content::WebContents::Create(
+          content::WebContents::CreateParams(profile()));
+  NavigateToUnfamiliarUrl(new_web_contents.get(), kTestUrl,
+                          /*expect_v8_optimizations_enabled=*/true);
+}
+
+INSTANTIATE_TEST_SUITE_P(All,
+                         JavascriptOptimizerParamBrowserTest,
+                         ::testing::Bool(),
+                         [](const testing::TestParamInfo<bool>& info) {
+                           return info.param ? "WithStrictOriginIsolation"
+                                             : "WithoutStrictOriginIsolation";
+                         });
 
 // Test that if there is a content-setting-exception to enable v8-optimizers
 // for a specific site but the site is unfamiliar due to the heuristic that
@@ -967,8 +1052,16 @@ IN_PROC_BROWSER_TEST_F(
                    ->AreV8OptimizationsDisabled());
 }
 
+// TODO(crbug.com/461777786): Flaky on Linux and CrOS.
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+#define MAYBE_ExpectOptimizationsEnabledInSpareRenderer \
+  DISABLED_ExpectOptimizationsEnabledInSpareRenderer
+#else
+#define MAYBE_ExpectOptimizationsEnabledInSpareRenderer \
+  ExpectOptimizationsEnabledInSpareRenderer
+#endif
 IN_PROC_BROWSER_TEST_F(JavascriptOptimizerBrowserTest_UseSiteFamiliarity,
-                       ExpectOptimizationsEnabledInSpareRenderer) {
+                       MAYBE_ExpectOptimizationsEnabledInSpareRenderer) {
   // TODO(crbug.com/452689705): Consider creating both: (1) spare renderer
   // processes with v8-optimizer enabled and (2) spare renderer processes with
   // v8-optimizer disabled.
@@ -1082,10 +1175,7 @@ class JavascriptOptimizerBrowserTest_UseSiteFamiliarity_DisableSiteIsolation
 IN_PROC_BROWSER_TEST_F(
     JavascriptOptimizerBrowserTest_UseSiteFamiliarity_DisableSiteIsolation,
     ExpectIgnoreFamiliarityWhenSiteIsolationDisabled) {
-  const GURL kTestUrl =
-      embedded_https_test_server().GetURL("a.com", "/simple.html");
-  ASSERT_TRUE(content::NavigateToURL(web_contents(), kTestUrl));
-  CheckUnfamiliarSite(/*expect_v8_optimizations_enabled=*/true);
+  NavigateToUnfamiliarSite(/*expect_v8_optimizations_enabled=*/true);
   EXPECT_FALSE(AreV8OptimizationsDisabledOnActiveWebContents());
 }
 
@@ -1106,7 +1196,7 @@ IN_PROC_BROWSER_TEST_F(JavascriptOptimizerBrowserTest_DoNotUseSiteFamiliarity,
   auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
   map->SetDefaultContentSetting(ContentSettingsType::JAVASCRIPT_OPTIMIZER,
                                 ContentSetting::CONTENT_SETTING_ALLOW);
-  CheckUnfamiliarSite(/*expect_v8_optimizations_enabled=*/true);
+  NavigateToUnfamiliarSite(/*expect_v8_optimizations_enabled=*/true);
 }
 
 IN_PROC_BROWSER_TEST_F(JavascriptOptimizerBrowserTest_DoNotUseSiteFamiliarity,
@@ -1114,44 +1204,92 @@ IN_PROC_BROWSER_TEST_F(JavascriptOptimizerBrowserTest_DoNotUseSiteFamiliarity,
   auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
   map->SetDefaultContentSetting(ContentSettingsType::JAVASCRIPT_OPTIMIZER,
                                 ContentSetting::CONTENT_SETTING_BLOCK);
-  CheckUnfamiliarSite(/*expect_v8_optimizations_enabled=*/false);
+  NavigateToUnfamiliarSite(/*expect_v8_optimizations_enabled=*/false);
 }
 
 #if !BUILDFLAG(IS_ANDROID)
-class JavascriptOptimizerOmnibarIconBrowserTest
-    : public PageActionInteractiveTestMixin<InteractiveBrowserTest> {
+
+constexpr char kSkipPixelTestsReason[] = "Should only run in pixel_tests.";
+// Baseline Gerrit CL number of the most recent CL that modified the UI.
+constexpr char kScreenshotBaselineCL[] = "7516391";
+
+class JavascriptOptimizerUiBaseBrowserTest
+    : public JavascriptOptimizerBrowserTestMixin<InteractiveBrowserTest> {
  public:
+  void SetUpInProcessBrowserTestFixture() override {
+    policy_provider_.SetDefaultReturns(
+        /*is_initialization_complete_return=*/true,
+        /*is_first_policy_load_complete_return=*/true);
+    policy::BrowserPolicyConnector::SetPolicyProviderForTesting(
+        &policy_provider_);
+  }
+
   void SetUpOnMainThread() override {
-    InteractiveBrowserTest::SetUpOnMainThread();
-    host_resolver()->AddRule("*", "127.0.0.1");
-    content::SetupCrossSiteRedirector(&embedded_https_test_server());
+    JavascriptOptimizerBrowserTestMixin<
+        InteractiveBrowserTest>::SetUpOnMainThread();
 
-    embedded_https_test_server().SetCertHostnames(
-        {"a.com", "*.a.com", "b.com", "*.b.com", "unrelated.com"});
-    ASSERT_TRUE(embedded_https_test_server().Start());
+    JsOptimizationsPageActionController::SetBubbleCreatedCallbackForTesting(
+        base::BindRepeating([](views::BubbleDialogModelHost* bubble) {
+          bubble->set_close_on_deactivate(false);
+        }));
   }
 
-  content::WebContents* web_contents() {
-    return browser()->tab_strip_model()->GetActiveWebContents();
+  void TearDownOnMainThread() override {
+    JsOptimizationsPageActionController::SetBubbleCreatedCallbackForTesting(
+        base::NullCallback());
+    JavascriptOptimizerBrowserTestMixin<
+        InteractiveBrowserTest>::TearDownOnMainThread();
   }
 
-  Profile* profile() { return browser()->profile(); }
-
-  bool AreV8OptimizationsDisabledForRenderFrame(content::RenderFrameHost* rfh) {
-    return rfh->GetProcess()->AreV8OptimizationsDisabled();
+ protected:
+  void EnableEnterprisePolicy() {
+    policy::PolicyMap policies;
+    policies.Set(policy::key::kDefaultJavaScriptOptimizerSetting,
+                 policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
+                 policy::POLICY_SOURCE_ENTERPRISE_DEFAULT,
+                 base::Value(CONTENT_SETTING_BLOCK),
+                 /*external_data_fetcher=*/nullptr);
+    policy_provider_.UpdateChromePolicy(policies);
   }
 
-  bool AreV8OptimizationsDisabledOnActiveWebContents() {
-    return AreV8OptimizationsDisabledForRenderFrame(
-        web_contents()->GetPrimaryMainFrame());
-  }
+ private:
+  testing::NiceMock<policy::MockConfigurationPolicyProvider> policy_provider_;
+};
 
+class JavascriptOptimizerOmnibarIconBrowserTest
+    : public PageActionInteractiveTestMixin<
+          JavascriptOptimizerUiBaseBrowserTest> {
+ public:
   // Returns true iff the JS Optimizations omnibar icon is visible.
   bool IsOmnibarIconVisible() {
     const auto* view = BrowserView::GetBrowserViewForBrowser(browser())
                            ->toolbar_button_provider()
                            ->GetPageActionView(kActionShowJsOptimizationsIcon);
     return view && view->GetVisible();
+  }
+
+  // Returns true iff the JS Optimizations bubble is visible.
+  bool IsBubbleVisible() {
+    if (ui::ElementTracker::GetElementTracker()->GetUniqueElement(
+            JsOptimizationsPageActionController::kBubbleBodyElementId,
+            browser()->GetBrowserView().GetElementContext()) == nullptr) {
+      return false;
+    }
+
+    actions::ActionItem* action_item = actions::ActionManager::Get().FindAction(
+        kActionShowJsOptimizationsIcon,
+        browser()->browser_actions()->root_action_item());
+    return action_item && action_item->GetIsShowingBubble();
+  }
+
+  // Returns true iff the JS Optimizations bubble button is visible.
+  bool IsBubbleButtonVisible() {
+    if (!IsBubbleVisible()) {
+      return false;
+    }
+    return ui::ElementTracker::GetElementTracker()->GetUniqueElement(
+               JsOptimizationsPageActionController::kBubbleButtonElementId,
+               browser()->GetBrowserView().GetElementContext()) != nullptr;
   }
 
   using PageActionInteractiveTestMixin::WaitForPageActionButtonVisible;
@@ -1261,7 +1399,16 @@ IN_PROC_BROWSER_TEST_F(
 }
 
 class JavascriptOptimizerOmnibarIconBrowserTest_WithoutFlag
-    : public JavascriptOptimizerOmnibarIconBrowserTest {};
+    : public JavascriptOptimizerOmnibarIconBrowserTest {
+ public:
+  JavascriptOptimizerOmnibarIconBrowserTest_WithoutFlag() {
+    feature_list_.InitAndDisableFeature(
+        content_settings::features::kBlockV8OptimizerOnUnfamiliarSitesSetting);
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
 
 IN_PROC_BROWSER_TEST_F(JavascriptOptimizerOmnibarIconBrowserTest_WithoutFlag,
                        IconDoesNotShowWhenFlagNotEnabled) {
@@ -1293,11 +1440,7 @@ class JavascriptOptimizerBubbleBrowserTest
   base::test::ScopedFeatureList feature_list_;
 };
 
-// JS optimizations disabled by enterprise policy.
-class JavascriptOptimizerBubbleBrowserTest_EnterprisePolicy
-    : public JavascriptOptimizerBubbleBrowserTest {};
-
-IN_PROC_BROWSER_TEST_F(JavascriptOptimizerBubbleBrowserTest_EnterprisePolicy,
+IN_PROC_BROWSER_TEST_F(JavascriptOptimizerBubbleBrowserTest,
                        BubbleShowsOnClick) {
   auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
   map->SetDefaultContentSetting(ContentSettingsType::JAVASCRIPT_OPTIMIZER,
@@ -1308,54 +1451,174 @@ IN_PROC_BROWSER_TEST_F(JavascriptOptimizerBubbleBrowserTest_EnterprisePolicy,
   ASSERT_TRUE(AreV8OptimizationsDisabledOnActiveWebContents());
   ASSERT_TRUE(IsOmnibarIconVisible());
 
-  // TODO(crbug.com/462425975): Complete implementation of this test.
   // Click on icon.
+  RunTestSequence(PressButton(kJsOptimizationsIconElementId));
   // Assert that bubble is visible.
-  // Assert that button is not visible.
+  RunTestSequence(
+      WaitForShow(JsOptimizationsPageActionController::kBubbleBodyElementId));
+  EXPECT_TRUE(IsBubbleVisible());
+  // Assert that button is visible.
+  RunTestSequence(
+      WaitForShow(JsOptimizationsPageActionController::kBubbleButtonElementId));
+  EXPECT_TRUE(IsBubbleButtonVisible());
 }
 
-// JS optimizations disabled not by enterprise policy.
-class JavascriptOptimizerBubbleBrowserTest_NotFromEnterprisePolicy
+IN_PROC_BROWSER_TEST_F(JavascriptOptimizerBubbleBrowserTest,
+                       AfterEnablingOptimizationsIconIsHidden) {
+  auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
+  map->SetDefaultContentSetting(ContentSettingsType::JAVASCRIPT_OPTIMIZER,
+                                ContentSetting::CONTENT_SETTING_BLOCK);
+
+  ASSERT_TRUE(content::NavigateToURL(
+      web_contents(), embedded_https_test_server().GetURL("/simple.html")));
+  ASSERT_TRUE(AreV8OptimizationsDisabledOnActiveWebContents());
+  ASSERT_TRUE(IsOmnibarIconVisible());
+
+  // Click on icon.
+  RunTestSequence(PressButton(kJsOptimizationsIconElementId));
+  // Assert that bubble is visible.
+  RunTestSequence(
+      WaitForShow(JsOptimizationsPageActionController::kBubbleBodyElementId));
+  EXPECT_TRUE(IsBubbleVisible());
+  // Assert that button is visible.
+  RunTestSequence(
+      WaitForShow(JsOptimizationsPageActionController::kBubbleButtonElementId));
+  EXPECT_TRUE(IsBubbleButtonVisible());
+  // Click on button.
+  RunTestSequence(
+      PressButton(JsOptimizationsPageActionController::kBubbleButtonElementId));
+  // Open new tab and go to the same site.
+  ASSERT_TRUE(ui_test_utils::NavigateToURLWithDisposition(
+      browser(), embedded_https_test_server().GetURL("/simple.html"),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_LOAD_STOP));
+  // TODO: crbug.com/457420369 - Use reload functionality to check settings
+  // application instead of opening a new tab
+  // RunTestSequence(WaitForShow(ConfirmInfoBar::kInfoBarElementId),
+  //                 PressButton(ConfirmInfoBar::kOkButtonElementId),
+  //                 WaitForHide(ConfirmInfoBar::kInfoBarElementId));
+  // Assert that the icon is not visible.
+  ASSERT_FALSE(AreV8OptimizationsDisabledOnActiveWebContents());
+  ASSERT_FALSE(IsOmnibarIconVisible());
+}
+
+// JS optimizations disabled by enterprise policy.
+class JavascriptOptimizerBubbleBrowserTest_WithPolicy
     : public JavascriptOptimizerBubbleBrowserTest {};
 
-IN_PROC_BROWSER_TEST_F(
-    JavascriptOptimizerBubbleBrowserTest_NotFromEnterprisePolicy,
-    BubbleShowsOnClick) {
-  auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
-  map->SetDefaultContentSetting(ContentSettingsType::JAVASCRIPT_OPTIMIZER,
-                                ContentSetting::CONTENT_SETTING_BLOCK);
+IN_PROC_BROWSER_TEST_F(JavascriptOptimizerBubbleBrowserTest_WithPolicy,
+                       BubbleShowsOnClick) {
+  EnableEnterprisePolicy();
 
   ASSERT_TRUE(content::NavigateToURL(
       web_contents(), embedded_https_test_server().GetURL("/simple.html")));
   ASSERT_TRUE(AreV8OptimizationsDisabledOnActiveWebContents());
   ASSERT_TRUE(IsOmnibarIconVisible());
 
-  // TODO(crbug.com/462425975): Complete implementation of this test.
   // Click on icon.
+  RunTestSequence(PressButton(kJsOptimizationsIconElementId));
   // Assert that bubble is visible.
-  // Assert that button is visible.
+  RunTestSequence(
+      WaitForShow(JsOptimizationsPageActionController::kBubbleBodyElementId));
+  EXPECT_TRUE(IsBubbleVisible());
+  // Assert that button is not visible.
+  RunTestSequence(
+      WaitForHide(JsOptimizationsPageActionController::kBubbleButtonElementId));
+  EXPECT_FALSE(IsBubbleButtonVisible());
 }
 
-IN_PROC_BROWSER_TEST_F(
-    JavascriptOptimizerBubbleBrowserTest_NotFromEnterprisePolicy,
-    AfterEnablingOptimizationsIconIsHidden) {
+class JavascriptOptimizerUiTest : public JavascriptOptimizerUiBaseBrowserTest {
+ public:
+  JavascriptOptimizerUiTest() {
+    feature_list_.InitWithFeatures(
+        {content_settings::features::kBlockV8OptimizerOnUnfamiliarSitesSetting},
+        {});
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(JavascriptOptimizerUiTest, OmniboxIconPixelTest) {
+  auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
+  map->SetDefaultContentSetting(ContentSettingsType::JAVASCRIPT_OPTIMIZER,
+                                ContentSetting::CONTENT_SETTING_BLOCK);
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  auto* screenshot_name = "js_no_opt_omnibox_icon_chrome_branding";
+#else
+  auto* screenshot_name = "js_no_opt_omnibox_icon_non_chrome_branding";
+#endif
+
+  ASSERT_TRUE(content::NavigateToURL(
+      web_contents(), embedded_https_test_server().GetURL("/simple.html")));
+  RunTestSequence(SetOnIncompatibleAction(OnIncompatibleAction::kSkipTest,
+                                          kSkipPixelTestsReason),
+                  // Get screenshot of the icon
+                  Screenshot(kJsOptimizationsIconElementId,
+                             /*screenshot_name=*/screenshot_name,
+                             /*baseline_cl=*/kScreenshotBaselineCL));
+}
+
+IN_PROC_BROWSER_TEST_F(JavascriptOptimizerUiTest, BubblePixelTest) {
   auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
   map->SetDefaultContentSetting(ContentSettingsType::JAVASCRIPT_OPTIMIZER,
                                 ContentSetting::CONTENT_SETTING_BLOCK);
 
   ASSERT_TRUE(content::NavigateToURL(
       web_contents(), embedded_https_test_server().GetURL("/simple.html")));
-  ASSERT_TRUE(AreV8OptimizationsDisabledOnActiveWebContents());
-  ASSERT_TRUE(IsOmnibarIconVisible());
+  RunTestSequence(
+      SetOnIncompatibleAction(OnIncompatibleAction::kSkipTest,
+                              kSkipPixelTestsReason),
+      // Click on icon
+      PressButton(kJsOptimizationsIconElementId),
+      // Wait for bubble to show
+      WaitForShow(JsOptimizationsPageActionController::kBubbleBodyElementId),
+      // Grab screenshot of bubble with OK button
+      ScreenshotSurface(
+          JsOptimizationsPageActionController::kBubbleBodyElementId,
+          /*screenshot_name=*/"js_no_opt_bubble_dialog",
+          /*baseline_cl=*/kScreenshotBaselineCL));
+}
 
-  // TODO(crbug.com/462425975): Complete implementation of this test.
-  // Click on icon.
-  // Assert that bubble is visible.
-  // Assert that button is visible.
-  // Click on button.
-  // Open new tab and go to the same site.
-  // ASSERT_FALSE(AreV8OptimizationsDisabledOnActiveWebContents());
-  // ASSERT_FALSE(IsOmnibarIconVisible());
+IN_PROC_BROWSER_TEST_F(JavascriptOptimizerUiTest, BubbleWithPolicyPixelTest) {
+  EnableEnterprisePolicy();
+
+  ASSERT_TRUE(content::NavigateToURL(
+      web_contents(), embedded_https_test_server().GetURL("/simple.html")));
+  RunTestSequence(
+      SetOnIncompatibleAction(OnIncompatibleAction::kSkipTest,
+                              kSkipPixelTestsReason),
+      // Click on icon
+      PressButton(kJsOptimizationsIconElementId),
+      // Wait for bubble to show
+      WaitForShow(JsOptimizationsPageActionController::kBubbleBodyElementId),
+      // Grab screenshot of bubble without button
+      ScreenshotSurface(
+          JsOptimizationsPageActionController::kBubbleBodyElementId,
+          /*screenshot_name=*/"js_no_opt_bubble_dialog_with_policy",
+          /*baseline_cl=*/kScreenshotBaselineCL));
+}
+
+IN_PROC_BROWSER_TEST_F(JavascriptOptimizerUiTest, ReloadInfoBarPixelTest) {
+  auto* map = HostContentSettingsMapFactory::GetForProfile(profile());
+  map->SetDefaultContentSetting(ContentSettingsType::JAVASCRIPT_OPTIMIZER,
+                                ContentSetting::CONTENT_SETTING_BLOCK);
+
+  ASSERT_TRUE(content::NavigateToURL(
+      web_contents(), embedded_https_test_server().GetURL("/simple.html")));
+  RunTestSequence(
+      SetOnIncompatibleAction(OnIncompatibleAction::kSkipTest,
+                              kSkipPixelTestsReason),
+      // Click on icon
+      PressButton(kJsOptimizationsIconElementId),
+      // Click on button
+      PressButton(JsOptimizationsPageActionController::kBubbleButtonElementId),
+      // Wait for reload infobar to show
+      WaitForShow(ConfirmInfoBar::kInfoBarElementId),
+      // Grab screenshot of reload infobar
+      Screenshot(ConfirmInfoBar::kInfoBarElementId,
+                 /*screenshot_name=*/"js_no_opt_reload_infobar",
+                 /*baseline_cl=*/kScreenshotBaselineCL));
 }
 
 #endif  // !BUILDFLAG(IS_ANDROID)

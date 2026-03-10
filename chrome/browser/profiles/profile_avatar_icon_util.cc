@@ -39,6 +39,7 @@
 #include "components/signin/public/base/signin_switches.h"
 #include "components/vector_icons/vector_icons.h"
 #include "skia/ext/image_operations.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkPath.h"
@@ -886,12 +887,12 @@ bool IsDefaultAvatarIconUrl(std::string_view url, size_t* icon_index) {
   return false;
 }
 
-base::Value::Dict GetAvatarIconAndLabelDict(const std::string& url,
-                                            const std::u16string& label,
-                                            size_t index,
-                                            bool selected,
-                                            bool is_gaia_avatar) {
-  base::Value::Dict avatar_info;
+base::DictValue GetAvatarIconAndLabelDict(const std::string& url,
+                                          const std::u16string& label,
+                                          size_t index,
+                                          bool selected,
+                                          bool is_gaia_avatar) {
+  base::DictValue avatar_info;
   avatar_info.Set("url", url);
   avatar_info.Set("label", label);
   avatar_info.Set("index", static_cast<int>(index));
@@ -900,9 +901,9 @@ base::Value::Dict GetAvatarIconAndLabelDict(const std::string& url,
   return avatar_info;
 }
 
-base::Value::Dict GetDefaultProfileAvatarIconAndLabel(SkColor fill_color,
-                                                      SkColor stroke_color,
-                                                      bool selected) {
+base::DictValue GetDefaultProfileAvatarIconAndLabel(SkColor fill_color,
+                                                    SkColor stroke_color,
+                                                    bool selected) {
   gfx::Image icon = profiles::GetPlaceholderAvatarIconWithColors(
       fill_color, stroke_color, kAvatarIconSize);
   size_t index = profiles::GetPlaceholderAvatarIndex();
@@ -913,9 +914,9 @@ base::Value::Dict GetDefaultProfileAvatarIconAndLabel(SkColor fill_color,
       index, selected, /*is_gaia_avatar=*/false);
 }
 
-base::Value::List GetCustomProfileAvatarIconsAndLabels(
+base::ListValue GetCustomProfileAvatarIconsAndLabels(
     size_t selected_avatar_idx) {
-  base::Value::List avatars;
+  base::ListValue avatars;
 
   for (size_t i = GetModernAvatarIconStartIndex();
        i < GetDefaultAvatarIconCount(); ++i) {
@@ -929,24 +930,25 @@ base::Value::List GetCustomProfileAvatarIconsAndLabels(
 }
 
 size_t GetRandomAvatarIconIndex(
-    const std::unordered_set<size_t>& used_icon_indices) {
+    const absl::flat_hash_set<size_t>& used_icon_indices) {
   size_t interval_begin = GetModernAvatarIconStartIndex();
   size_t interval_end = GetDefaultAvatarIconCount();
   size_t interval_length = interval_end - interval_begin;
 
-  size_t random_offset = base::RandInt(0, interval_length - 1);
+  size_t random_offset = base::RandIntInclusive(0, interval_length - 1);
   // Find the next unused index.
   for (size_t i = 0; i < interval_length; ++i) {
     size_t icon_index = interval_begin + (random_offset + i) % interval_length;
-    if (used_icon_indices.count(icon_index) == 0u)
+    if (!used_icon_indices.contains(icon_index)) {
       return icon_index;
+    }
   }
   // All indices are used, so return a random one.
   return interval_begin + random_offset;
 }
 
 #if !BUILDFLAG(IS_ANDROID)
-base::Value::List GetIconsAndLabelsForProfileAvatarSelector(
+base::ListValue GetIconsAndLabelsForProfileAvatarSelector(
     const base::FilePath& profile_path) {
   ProfileAttributesEntry* entry =
       g_browser_process->profile_manager()
@@ -959,7 +961,7 @@ base::Value::List GetIconsAndLabelsForProfileAvatarSelector(
       using_gaia ? SIZE_MAX : entry->GetAvatarIconIndex();
 
   // Obtain a list of the modern avatar icons.
-  base::Value::List avatars(
+  base::ListValue avatars(
       GetCustomProfileAvatarIconsAndLabels(selected_avatar_idx));
 
   if (entry->GetSigninState() == SigninState::kNotSignedIn) {

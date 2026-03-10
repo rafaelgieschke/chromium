@@ -9,6 +9,7 @@
 
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/time/time.h"
 #include "chrome/browser/page_content_annotations/multi_source_page_context_fetcher.h"
 
 namespace actor {
@@ -23,6 +24,7 @@ BASE_DECLARE_FEATURE(kGlicActionUseOptimizationGuide);
 BASE_DECLARE_FEATURE(kActorBypassTOUValidationForGuestView);
 
 BASE_DECLARE_FEATURE(kGlicExternalProtocolActionResultCode);
+BASE_DECLARE_FEATURE(kGlicGranularBlockingActionResultCodes);
 
 BASE_DECLARE_FEATURE(kGlicBlockNavigationToDangerousContentTypes);
 
@@ -47,6 +49,12 @@ BASE_DECLARE_FEATURE_PARAM(bool, kGlicNavigationGatingUseSiteNotOrigin);
 // Controls whether a hardcoded block list is enabled for the static block list.
 // TODO(crbug.com/453660392): Remove flag once Component Updater rollout starts.
 BASE_DECLARE_FEATURE_PARAM(bool, kGlicIncludeHardcodedBlockListEntries);
+// Controls whether tool requests can implicitly allow new origins.
+BASE_DECLARE_FEATURE_PARAM(bool, kGlicAllowImplicitToolOriginGrants);
+
+// Controls whether chrome records UMA metrics for navigations by sending the
+// `NavigationConfirmationRequest` and recording the response.
+BASE_DECLARE_FEATURE(kGlicRecordNavigationConfirmationRequestMetrics);
 
 // When enabled, `beforeunload` dialog will not be displayed and the callback
 // indicating the dialog outcome will be called with `true`.
@@ -76,6 +84,11 @@ BASE_DECLARE_FEATURE(kGlicNavigateWithoutUserGesture);
 
 BASE_DECLARE_FEATURE(kGlicPerformActionsReturnsBeforeStateChange);
 
+BASE_DECLARE_FEATURE(kGlicDeferActUntilUninterrupted);
+
+// Kill switch for adding tabs to an ActorTask earlier during action handling.
+BASE_DECLARE_FEATURE(kGlicEarlyAddTaskTabs);
+
 // Enables a full page screenshot to be taken rather than only the viewport.
 extern const base::FeatureParam<bool> kFullPageScreenshot;
 
@@ -96,6 +109,10 @@ BASE_DECLARE_FEATURE(kActorRestartObservationDelayControllerOnNavigate);
 // Kill switch to disable sending a browser signal (which is used for user
 // interaction) before sending action to renderer.
 BASE_DECLARE_FEATURE(kActorSendBrowserSignalForAction);
+
+BASE_DECLARE_FEATURE(kGlicActorLoadAndExtractContentTool);
+extern const base::FeatureParam<base::TimeDelta>
+    kGlicActorLoadAndExtractContentToolTimeout;
 
 }  // namespace actor
 

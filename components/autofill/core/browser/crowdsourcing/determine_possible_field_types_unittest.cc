@@ -12,6 +12,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/task_environment.h"
 #include "base/types/zip.h"
+#include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/autofill_field_test_api.h"
 #include "components/autofill/core/browser/data_model/addresses/autofill_i18n_api.h"
 #include "components/autofill/core/browser/data_model/addresses/autofill_profile.h"
@@ -21,7 +22,9 @@
 #include "components/autofill/core/browser/foundations/test_autofill_client.h"
 #include "components/autofill/core/browser/geo/alternative_state_name_map_test_utils.h"
 #include "components/autofill/core/browser/proto/server.pb.h"
+#include "components/autofill/core/browser/test_utils/autofill_form_test_utils.h"
 #include "components/autofill/core/browser/test_utils/autofill_test_utils.h"
+#include "components/autofill/core/browser/test_utils/entity_data_test_utils.h"
 #include "components/autofill/core/browser/test_utils/valuables_data_test_utils.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_test_utils.h"
@@ -124,9 +127,9 @@ Matcher<const PossibleTypes&> HasFlightNumberFormats(Ts&&... formats) {
 std::unique_ptr<FormStructure> ConstructFormStructureFromFormData(
     const FormData& form) {
   auto form_structure = std::make_unique<FormStructure>(form);
-  const RegexPredictions regex_predictions =
-      DetermineRegexTypes(GeoIpCountryCode(""), LanguageCode(""),
-                          form_structure->ToFormData(), nullptr);
+  const RegexPredictions regex_predictions = DetermineRegexTypes(
+      GeoIpCountryCode(""), LanguageCode(""), form_structure->ToFormData(),
+      nullptr, /*ignore_small_forms=*/true);
   regex_predictions.ApplyTo(form_structure->fields());
   form_structure->RationalizeAndAssignSections(GeoIpCountryCode(""),
                                                LanguageCode(""), nullptr);
@@ -151,69 +154,26 @@ void CheckThatOnlyFieldByIndexHasThisPossibleType(
   }
 }
 
-struct TestAddressFillData {
-  TestAddressFillData(const char* first,
-                      const char* middle,
-                      const char* last,
-                      const char* address1,
-                      const char* address2,
-                      const char* city,
-                      const char* state,
-                      const char* postal_code,
-                      const char* country,
-                      const char* country_short,
-                      const char* phone,
-                      const char* email,
-                      const char* company)
-      : first(first),
-        middle(middle),
-        last(last),
-        address1(address1),
-        address2(address2),
-        city(city),
-        state(state),
-        postal_code(postal_code),
-        country(country),
-        country_short(country_short),
-        phone(phone),
-        email(email),
-        company(company) {}
-
-  const char* first;
-  const char* middle;
-  const char* last;
-  const char* address1;
-  const char* address2;
-  const char* city;
-  const char* state;
-  const char* postal_code;
-  const char* country;
-  const char* country_short;
-  const char* phone;
-  const char* email;
-  const char* company;
-};
-
-TestAddressFillData GetElvisAddressFillData() {
-  return {"Elvis",        "Aaron",   "Presley",    "3734 Elvis Presley Blvd.",
-          "Apt. 10",      "Memphis", "Tennessee",  "38116",
-          "South Africa", "ZA",      "2345678901", "theking@gmail.com",
-          "RCA"};
-}
-
-AutofillProfile FillDataToAutofillProfile(const TestAddressFillData& data) {
-  AutofillProfile profile(i18n_model_definition::kLegacyHierarchyCountryCode);
-  test::SetProfileInfo(&profile, data.first, data.middle, data.last, data.email,
-                       data.company, data.address1, data.address2, data.city,
-                       data.state, data.postal_code, data.country_short,
-                       data.phone);
-  return profile;
-}
-
 // Creates a GUID for testing. For example,
 // MakeGuid(123) = "00000000-0000-0000-0000-000000000123";
 std::string MakeGuid(size_t last_digit) {
   return base::StringPrintf("00000000-0000-0000-0000-%012zu", last_digit);
+}
+
+test::SetProfileInfoOptionsBuilder GetElvisOptionsBuilder() {
+  return test::SetProfileInfoOptionsBuilder()
+      .with_first_name("Elvis")
+      .with_middle_name("Aaron")
+      .with_last_name("Presley")
+      .with_email("theking@gmail.com")
+      .with_company("RCA")
+      .with_address1("3734 Elvis Presley Blvd.")
+      .with_address2("Apt. 10")
+      .with_city("Memphis")
+      .with_state("Tennessee")
+      .with_zipcode("38116")
+      .with_country("ZA")
+      .with_phone("2345678901");
 }
 
 struct ProfileMatchingTypesTestCase {
@@ -228,8 +188,7 @@ class ProfileMatchingTypesTest
   ProfileMatchingTypesTest() {
     features_.InitWithFeatures(
         {features::kAutofillUseNegativePatternForAllAttributes,
-         features::kAutofillSupportLastNamePrefix,
-         features::kAutofillSupportSplitZipCode},
+         features::kAutofillSupportLastNamePrefix},
         {});
   }
 
@@ -341,11 +300,6 @@ const ProfileMatchingTypesTestCase kProfileMatchingTypesTestCases[] = {
     {"van Gogh", {NAME_LAST}},
     {"van", {NAME_LAST_PREFIX}},
     {"Gogh", {NAME_LAST_CORE, NAME_LAST_SECOND}},
-
-    // Make sure that zip prefix and suffix are handled correctly.
-    {"79401-4321", {ADDRESS_HOME_ZIP}},
-    {"79401", {ADDRESS_HOME_ZIP}},
-    {"4321", {ADDRESS_HOME_ZIP_SUFFIX}},
 };
 
 // Tests that DeterminePossibleFieldTypesForUpload finds accurate possible
@@ -356,8 +310,8 @@ TEST_P(ProfileMatchingTypesTest, DeterminePossibleFieldTypesForUpload) {
 
   SCOPED_TRACE(base::StringPrintf(
       "Test: input_value='%s', field_type=%s, structured_names=%s ",
-      test_case.input_value,
-      FieldTypeToString(*test_case.field_types.begin()).c_str(), "true"));
+      test_case.input_value, FieldTypeToString(*test_case.field_types.begin()),
+      "true"));
 
   // Take the field types depending on the state of the structured names
   // feature.
@@ -367,24 +321,47 @@ TEST_P(ProfileMatchingTypesTest, DeterminePossibleFieldTypesForUpload) {
   std::vector<AutofillProfile> profiles(
       4, AutofillProfile(i18n_model_definition::kLegacyHierarchyCountryCode));
 
-  TestAddressFillData profile_info_data = GetElvisAddressFillData();
-  profile_info_data.phone = "+1 (234) 567-8901";
-  profiles[0] = FillDataToAutofillProfile(profile_info_data);
+  test::SetProfileInfo(
+      &profiles[0],
+      GetElvisOptionsBuilder().with_phone("+1 (234) 567-8901").Build());
 
   profiles[0].set_guid(MakeGuid(1));
 
-  test::SetProfileInfo(&profiles[1], "Charles", "", "Holley", "buddy@gmail.com",
-                       "Decca", "123 Apple St.", "unit 6", "Lubbock", "TX",
-                       "79401-4321", "US", "5142821292");
+  test::SetProfileInfo(&profiles[1], test::SetProfileInfoOptionsBuilder()
+                                         .with_first_name("Charles")
+                                         .with_last_name("Holley")
+                                         .with_email("buddy@gmail.com")
+                                         .with_company("Decca")
+                                         .with_address1("123 Apple St.")
+                                         .with_address2("unit 6")
+                                         .with_city("Lubbock")
+                                         .with_state("TX")
+                                         .with_zipcode("79401-4321")
+                                         .with_country("US")
+                                         .with_phone("5142821292")
+                                         .Build());
   profiles[1].set_guid(MakeGuid(2));
 
-  test::SetProfileInfo(&profiles[2], "Charles", "", "Baudelaire",
-                       "lesfleursdumal@gmail.com", "", "108 Rue Saint-Lazare",
-                       "Apt. 11", "Paris", "Île de France", "75008", "FR",
-                       "+33 2 49 19 70 70");
+  test::SetProfileInfo(&profiles[2], test::SetProfileInfoOptionsBuilder()
+                                         .with_first_name("Charles")
+                                         .with_last_name("Baudelaire")
+                                         .with_email("lesfleursdumal@gmail.com")
+                                         .with_address1("108 Rue Saint-Lazare")
+                                         .with_address2("Apt. 11")
+                                         .with_city("Paris")
+                                         .with_state("Île de France")
+                                         .with_zipcode("75008")
+                                         .with_country("FR")
+                                         .with_phone("+33 2 49 19 70 70")
+                                         .Build());
   profiles[2].set_guid(MakeGuid(1));
 
-  test::SetProfileInfo(&profiles[3], "Vincent", "Wilhelm", "van Gogh", "NL");
+  test::SetProfileInfo(&profiles[3], test::SetProfileInfoOptionsBuilder()
+                                         .with_first_name("Vincent")
+                                         .with_middle_name("Wilhelm")
+                                         .with_last_name("van Gogh")
+                                         .with_country("NL")
+                                         .Build());
   profiles[3].set_guid(MakeGuid(4));
 
   CreditCard credit_card;
@@ -424,7 +401,6 @@ class DeterminePossibleFieldTypesForUploadTest : public ::testing::Test {
   DeterminePossibleFieldTypesForUploadTest() {
     scoped_feature_list_.InitWithFeatures(
         {features::kAutofillAiWithDataSchema,
-         features::kAutofillAiVoteForFormatStringsForAffixes,
          features::kAutofillAiVoteForFormatStringsForFlightNumbers,
          features::kAutofillEnableLoyaltyCardsFilling},
         {});
@@ -721,9 +697,11 @@ TEST_F(DeterminePossibleFieldTypesForUploadTest,
   loyalty_card.set_loyalty_card_number(loyalty_card_number_as_email);
 
   AutofillProfile profile(i18n_model_definition::kLegacyHierarchyCountryCode);
-  test::SetProfileInfo(&profile, "John", "", "Doe",
-                       loyalty_card_number_as_email, "", "", "", "", "", "", "",
-                       "");
+  test::SetProfileInfo(&profile, test::SetProfileInfoOptionsBuilder()
+                                     .with_first_name("John")
+                                     .with_last_name("Doe")
+                                     .with_email(loyalty_card_number_as_email)
+                                     .Build());
 
   std::vector<PossibleTypes> possible_types =
       DeterminePossibleFieldTypesForUpload(
@@ -968,8 +946,10 @@ class PreProcessStateMatchingTypesTest : public testing::Test {
     testing::Test::SetUp();
     test::ClearAlternativeStateNameMapForTesting();
     test::PopulateAlternativeStateNameMapForTesting();
-    test::SetProfileInfo(&profile_, "", "", "", "", "", "", "", "", "Bavaria",
-                         "", "DE", "");
+    test::SetProfileInfo(&profile_, test::SetProfileInfoOptionsBuilder()
+                                        .with_state("Bavaria")
+                                        .with_country("DE")
+                                        .Build());
   }
 
   void TearDown() override { testing::Test::TearDown(); }
@@ -1035,8 +1015,10 @@ TEST_F(PreProcessStateMatchingTypesTest, PreProcessStateMatchingTypes) {
         .abbreviations = {"CA"},
         .alternative_names = {}}});
 
-  test::SetProfileInfo(&profile(), "", "", "", "", "", "", "", "", "California",
-                       "", "US", "");
+  test::SetProfileInfo(&profile(), test::SetProfileInfoOptionsBuilder()
+                                       .with_state("California")
+                                       .with_country("US")
+                                       .Build());
 
   FormData form;
   form.set_fields({CreateTestFormField("Name", "Name", /*value=*/"",
@@ -1101,7 +1083,7 @@ class FindDatesAndSetFormatStringsTest : public testing::Test {
       FormControlType form_control_type = FormControlType::kInputText) {
     auto field = std::make_unique<AutofillField>(CreateTestFormField(
         /*label=*/"", /*name=*/"", /*value=*/value, form_control_type));
-    field->set_is_user_edited(true);
+    field->AddFieldModifier(FieldModifier::kUser);
     return field;
   }
 
@@ -1111,7 +1093,7 @@ class FindDatesAndSetFormatStringsTest : public testing::Test {
     auto field = std::make_unique<AutofillField>(CreateTestSelectField(
         /*label=*/"", /*name=*/"", /*value=*/value, /*values=*/values,
         /*contents=*/values));
-    field->set_is_user_edited(true);
+    field->AddFieldModifier(FieldModifier::kUser);
     return field;
   }
 
@@ -1376,6 +1358,125 @@ TEST_F(DetermineAvailableFieldTypesTest, LoyaltyCards) {
       /*recent_otps=*/{},
       /*app_locale=*/"");
   EXPECT_TRUE(available_types.contains(LOYALTY_MEMBERSHIP_ID));
+}
+
+struct ZipTypesMatchingTestCase {
+  struct Field {
+    std::string name;
+    std::string value;
+    FieldTypeSet expected_types;
+  };
+  std::string description;
+  std::vector<Field> fields;
+};
+
+class ZipTypesMatchingTest
+    : public ::testing::Test,
+      public ::testing::WithParamInterface<ZipTypesMatchingTestCase> {
+ private:
+  base::test::ScopedFeatureList features_{
+      features::kAutofillSupportSplitZipCode};
+  test::AutofillUnitTestEnvironment autofill_test_environment_;
+};
+
+// Tests that DeterminePossibleFieldTypesForUpload finds accurate possible
+// zip code types for various forms.
+TEST_P(ZipTypesMatchingTest, DeterminePossibleFieldTypesForUpload) {
+  const auto& test_case = GetParam();
+  SCOPED_TRACE(test_case.description);
+
+  // Set up the test profiles.
+  AutofillProfile profile(i18n_model_definition::kLegacyHierarchyCountryCode);
+  test::SetProfileInfo(
+      &profile, GetElvisOptionsBuilder().with_zipcode("79401-4321").Build());
+  std::vector<AutofillProfile> profiles = {profile};
+
+  // Create custom form.
+  FormData form;
+
+  for (const auto& f : test_case.fields) {
+    test_api(form).Append(test::CreateTestFormField(
+        f.name, f.name, f.value, FormControlType::kInputText));
+  }
+
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromFormData(form);
+
+  std::vector<PossibleTypes> possible_types =
+      DeterminePossibleFieldTypesForUpload(
+          profiles, /*credit_cards=*/{}, /*entities=*/{},
+          /*loyalty_cards=*/{}, /*fields_that_match_state=*/{},
+          /*last_unlocked_credit_card_cvc=*/u"", /*recent_otps=*/{}, "en-us",
+          form_structure->fields());
+
+  ASSERT_EQ(form_structure->field_count(), possible_types.size());
+  for (size_t i = 0; i < test_case.fields.size(); ++i) {
+    EXPECT_THAT(possible_types[i].types,
+                UnorderedElementsAreArray(test_case.fields[i].expected_types))
+        << "Field: " << test_case.fields[i].name
+        << " in test case: " << test_case.description;
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    DeterminePossibleFieldTypesForUploadTest,
+    ZipTypesMatchingTest,
+    testing::ValuesIn(std::vector<ZipTypesMatchingTestCase>{
+        {
+            .description = "Single full zip field",
+            .fields = {{"zip", "79401-4321", {ADDRESS_HOME_ZIP}}},
+        },
+        {
+            .description = "Single zip prefix field",
+            .fields = {{"zip", "79401", {ADDRESS_HOME_ZIP}}},
+        },
+        {
+            .description = "Single zip suffix field",
+            .fields = {{"zip2", "4321", {UNKNOWN_TYPE}}},
+        },
+        {
+            .description = "Two zip fields (prefix and suffix)",
+            .fields = {{"zip1", "79401", {ADDRESS_HOME_ZIP}},
+                       {"zip2", "4321", {ADDRESS_HOME_ZIP_SUFFIX}}},
+        }}));
+
+// Tests that phone country code select fields do not get assigned
+// ADDRESS_HOME_COUNTRY as votes, even if the label contains the country name.
+TEST_F(DeterminePossibleFieldTypesForUploadTest,
+       NoAddressCountryVotesOnPhoneCountrySelectFields) {
+  AutofillProfile profile = test::GetFullProfile();
+
+  FormData form = test::GetFormData({
+      .fields = {{.role = NAME_FULL, .autocomplete_attribute = "name"},
+                 {.role = PHONE_HOME_COUNTRY_CODE,
+                  .autocomplete_attribute = "tel-country-code",
+                  .form_control_type = FormControlType::kSelectOne,
+                  .select_options =
+                      {
+                          {.value = u"US", .text = u"United States (+1)"},
+                          {.value = u"CA", .text = u"Canada (+1)"},
+                          {.value = u"FR", .text = u"France (+33)"},
+                          {.value = u"DE", .text = u"Germany (+49)"},
+                          {.value = u"LB", .text = u"Lebanon (+961)"},
+                      }},
+                 {.role = PHONE_HOME_CITY_AND_NUMBER_WITHOUT_TRUNK_PREFIX}},
+  });
+  test_api(form).field(1).set_value(u"US");
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromFormData(form);
+
+  std::vector<PossibleTypes> possible_types =
+      DeterminePossibleFieldTypesForUpload(
+          {profile}, /*credit_cards=*/{}, /*entities=*/{},
+          /*loyalty_cards=*/{},
+          /*fields_that_match_state=*/{},
+          /*last_unlocked_credit_card_cvc=*/u"", /*recent_otps=*/{}, "en-us",
+          form_structure->fields());
+
+  ASSERT_EQ(possible_types.size(), 3u);
+  EXPECT_TRUE(possible_types[1].types.contains(PHONE_HOME_COUNTRY_CODE));
+  EXPECT_FALSE(possible_types[1].types.contains(ADDRESS_HOME_COUNTRY));
+  EXPECT_EQ(possible_types[1].types.size(), 1u);
 }
 
 }  // namespace

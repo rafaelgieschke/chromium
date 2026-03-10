@@ -19,10 +19,6 @@
 #include "ui/views/controls/webview/webview.h"
 #include "ui/views/widget/unique_widget_ptr.h"
 
-namespace gfx {
-class Rect;
-}  // namespace gfx
-
 class Profile;
 
 namespace glic {
@@ -49,6 +45,9 @@ class GlicView : public views::WebView {
   void RunFileChooser(content::RenderFrameHost* render_frame_host,
                       scoped_refptr<content::FileSelectListener> listener,
                       const blink::mojom::FileChooserParams& params) override;
+  bool CanDragEnter(content::WebContents* source,
+                    const content::DropData& data,
+                    blink::DragOperationsMask operations_allowed) override;
 
   // views::WebView:
   void SetWebContents(content::WebContents* web_contents) override;
@@ -56,9 +55,7 @@ class GlicView : public views::WebView {
       const std::vector<blink::mojom::DraggableRegionPtr>& regions,
       content::WebContents* contents) override;
 
-  void SetDraggableAreas(const std::vector<gfx::Rect>& draggable_areas);
-
-  bool IsPointWithinDraggableArea(const gfx::Point& point);
+  bool IsPointWithinDraggableRegion(const gfx::Point& point);
 
   // Try to get the background color from the web UI and use it as this view's
   // background color. Only call after the client is initialized.
@@ -68,8 +65,6 @@ class GlicView : public views::WebView {
   const gfx::RoundedCornersF& background_rounded_corners() const {
     return background_radii_;
   }
-
-  void UpdatePrimaryDraggableAreaOnResize();
 
   bool AcceleratorPressed(const ui::Accelerator& accelerator) override;
 
@@ -86,10 +81,7 @@ class GlicView : public views::WebView {
   raw_ptr<views::WebView> web_view_;
   gfx::RoundedCornersF background_radii_;
 
-  // Defines the areas of the view from which it can be dragged. These areas can
-  // be updated by the glic web client.
-  std::vector<gfx::Rect> draggable_areas_;
-
+  // Defines the region of the view from which it can be dragged.
   SkRegion draggable_region_;
 
   views::UnhandledKeyboardEventHandler unhandled_keyboard_event_handler_;

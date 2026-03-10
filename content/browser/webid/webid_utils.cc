@@ -119,7 +119,6 @@ bool IsEndpointSameOrigin(const GURL& identity_provider_config_url,
 }
 
 bool ShouldFailAccountsEndpointRequestBecauseNotSignedInWithIdp(
-    RenderFrameHost& host,
     const GURL& identity_provider_config_url,
     FederatedIdentityPermissionContextDelegate* permission_delegate) {
   const url::Origin idp_origin =
@@ -130,7 +129,6 @@ bool ShouldFailAccountsEndpointRequestBecauseNotSignedInWithIdp(
 }
 
 void UpdateIdpSigninStatusForAccountsEndpointResponse(
-    RenderFrameHost& host,
     const GURL& identity_provider_config_url,
     FetchStatus fetch_status,
     bool does_idp_have_failing_signin_status,
@@ -220,20 +218,6 @@ std::string GetConsoleErrorMessageFromResult(
       return "Provider's FedCM config file content type must be a JSON content "
              "type.";
     }
-    case FederatedAuthRequestResult::kClientMetadataHttpNotFound: {
-      return "The provider's client metadata endpoint cannot be found.";
-    }
-    case FederatedAuthRequestResult::kClientMetadataNoResponse: {
-      return "The provider's client metadata fetch resulted in an error "
-             "response code.";
-    }
-    case FederatedAuthRequestResult::kClientMetadataInvalidResponse: {
-      return "Provider's client metadata is invalid.";
-    }
-    case FederatedAuthRequestResult::kClientMetadataInvalidContentType: {
-      return "Provider's client metadata content type must be a JSON content "
-             "type.";
-    }
     case FederatedAuthRequestResult::kAccountsHttpNotFound: {
       return "The provider's accounts list endpoint cannot be found.";
     }
@@ -286,13 +270,6 @@ std::string GetConsoleErrorMessageFromResult(
       return "Silent mediation was requested, but the conditions to achieve it "
              "were not met.";
     }
-    case FederatedAuthRequestResult::kThirdPartyCookiesBlocked: {
-      return "Third party cookies are blocked. Right now the Chromium "
-             "implementation of FedCM API requires third party cookies and "
-             "this restriction will be removed soon. In the interim, to test "
-             "FedCM without third-party cookies, enable the "
-             "#fedcm-without-third-party-cookies flag.";
-    }
     case FederatedAuthRequestResult::kMissingTransientUserActivation: {
       return "FedCM active mode requires transient user activation.";
     }
@@ -301,9 +278,6 @@ std::string GetConsoleErrorMessageFromResult(
     }
     case FederatedAuthRequestResult::kNotSignedInWithIdp: {
       return "Not signed in with the identity provider.";
-    }
-    case FederatedAuthRequestResult::kInvalidFieldsSpecified: {
-      return "Invalid 'fields' were specified in the FedCM call.";
     }
     case FederatedAuthRequestResult::kRelyingPartyOriginIsOpaque: {
       return "FedCM is not supported on an opaque origin.";
@@ -403,7 +377,7 @@ std::string GetDisconnectConsoleErrorMessage(
   }
 }
 
-std::string FormatUrlForDisplay(const GURL& url) {
+std::string FormatUrlToSite(const GURL& url) {
   // We do not use url_formatter::FormatUrlForSecurityDisplay() directly because
   // our UI intentionally shows only the eTLD+1, as it makes for a shorter text
   // that is also clearer to users. The identity provider's well-known file is
@@ -472,9 +446,12 @@ void MaybeAddResponseCodeToConsole(RenderFrameHost& render_frame_host,
 }
 
 bool DidNavigationHandleHaveActivation(NavigationHandle* handle) {
-  return handle->GetNavigationInitiatorActivationAndAdStatus() !=
-         blink::mojom::NavigationInitiatorActivationAndAdStatus::
-             kDidNotStartWithTransientActivation;
+  return handle != nullptr;
+  // TODO(crbug.com/477971553): re-enable the waiving of the user activation
+  // requirement outside of agentic mode. The following criteria [1] isn't
+  // working as we expected, specifically when redirects are happening inside
+  // of pop-up windows.
+  // [1] handle->StartedWithTransientActivation()
 }
 
 perfetto::NamedTrack CreatePerfettoTrackForFedCM(void* class_pointer) {

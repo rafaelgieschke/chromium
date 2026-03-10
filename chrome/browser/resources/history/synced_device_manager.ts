@@ -47,9 +47,9 @@ declare global {
 
 export interface HistorySyncedDeviceManagerElement {
   $: {
-    'menu': CrLazyRenderLitElement<CrActionMenuElement>,
-    'no-synced-tabs': HTMLElement,
-    'sign-in-guide': HTMLElement,
+    menu: CrLazyRenderLitElement<CrActionMenuElement>,
+    noSyncedTabs: HTMLElement,
+    signInGuide: HTMLElement,
   };
 }
 
@@ -120,32 +120,7 @@ export class HistorySyncedDeviceManagerElement extends
     historySync: SyncState.TURNED_OFF,
   };
   accessor searchTerm: string = '';
-  accessor sessionList: ForeignSession[] = [];
-
-  override firstUpdated() {
-    this.addEventListener('synced-device-card-open-menu', this.onOpenMenu_);
-    this.addEventListener('update-focus-grid', this.updateFocusGrid_);
-  }
-
-  override willUpdate(changedProperties: PropertyValues<this>) {
-    super.willUpdate(changedProperties);
-
-    const changedPrivateProperties =
-        changedProperties as Map<PropertyKey, unknown>;
-
-    if (changedProperties.has('sessionList')) {
-      this.updateSyncedDevices_();
-    }
-    if (changedProperties.has('searchTerm')) {
-      this.searchTermChanged_();
-    }
-    if (changedPrivateProperties.has('historyIdentityState_')) {
-      this.onIdentityStateChanged_(
-          (changedPrivateProperties.get('historyIdentityState_') || null) as
-              HistoryIdentityState |
-          null);
-    }
-  }
+  accessor sessionList: ForeignSession[]|null = null;
 
   override connectedCallback() {
     super.connectedCallback();
@@ -190,6 +165,31 @@ export class HistorySyncedDeviceManagerElement extends
     // </if>
   }
 
+  override willUpdate(changedProperties: PropertyValues<this>) {
+    super.willUpdate(changedProperties);
+
+    const changedPrivateProperties =
+        changedProperties as Map<PropertyKey, unknown>;
+
+    if (changedProperties.has('sessionList')) {
+      this.updateSyncedDevices_();
+    }
+    if (changedProperties.has('searchTerm')) {
+      this.searchTermChanged_();
+    }
+    if (changedPrivateProperties.has('historyIdentityState_')) {
+      this.onIdentityStateChanged_(
+          (changedPrivateProperties.get('historyIdentityState_') || null) as
+              HistoryIdentityState |
+          null);
+    }
+  }
+
+  override firstUpdated() {
+    this.addEventListener('synced-device-card-open-menu', this.onOpenMenu_);
+    this.addEventListener('update-focus-grid', this.updateFocusGrid_);
+  }
+
   configureSignInForTest(data: {
     signInAllowed: boolean,
     guestSession: boolean,
@@ -203,8 +203,8 @@ export class HistorySyncedDeviceManagerElement extends
     let tabs: ForeignSessionTab[] = [];
     const separatorIndexes = [];
     for (let i = 0; i < session.windows.length; i++) {
-      const windowId = session.windows[i].sessionId;
-      const newTabs = session.windows[i].tabs;
+      const windowId = session.windows[i]!.sessionId;
+      const newTabs = session.windows[i]!.tabs;
       if (newTabs.length === 0) {
         continue;
       }
@@ -221,7 +221,7 @@ export class HistorySyncedDeviceManagerElement extends
       } else {
         const searchText = this.searchTerm.toLowerCase();
         for (let j = 0; j < newTabs.length; j++) {
-          const tab = newTabs[j];
+          const tab = newTabs[j]!;
           if (tab.title.toLowerCase().indexOf(searchText) !== -1) {
             tabs.push(tab);
             windowAdded = true;
@@ -392,11 +392,13 @@ export class HistorySyncedDeviceManagerElement extends
    * this approach seems to have acceptable performance.
    */
   private updateSyncedDevices_() {
-    this.fetchingSyncedTabs_ = false;
-
-    if (!this.sessionList) {
+    // If the session list is null, the fetching is not done yet (otherwise it
+    // would be an empty array)
+    if (this.sessionList === null) {
       return;
     }
+
+    this.fetchingSyncedTabs_ = false;
 
     if (this.sessionList.length > 0 && !this.hasSeenForeignData_) {
       this.hasSeenForeignData_ = true;
@@ -428,8 +430,7 @@ export class HistorySyncedDeviceManagerElement extends
       return;
     }
 
-    this.dispatchEvent(new CustomEvent(
-        'history-view-changed', {bubbles: true, composed: true}));
+    this.fire('history-view-changed');
 
     if (this.replaceSyncPromosWithSignInPromos_) {
       // User signed out, syncing without tabs, or disabled sync in general =>
@@ -437,17 +438,21 @@ export class HistorySyncedDeviceManagerElement extends
       if (this.isSignInState_(HistorySignInState.SIGNED_OUT) ||
           this.isTabsSyncDisabled_()) {
         this.clearDisplayedSyncedDevices_();
+        this.sessionList = null;
         return;
       }
     } else if (this.isSignInState_(HistorySignInState.SIGNED_OUT)) {
       // User signed out, clear synced device list and show the sign in promo.
       this.clearDisplayedSyncedDevices_();
+      this.sessionList = null;
       return;
     }
+    // If the session list is null, the fetching is not done yet. Set
+    // fetchingSyncedTabs_ to true to show the loading message when querying.
+    if (this.sessionList === null) {
+      this.fetchingSyncedTabs_ = true;
+    }
     this.updateSyncedDevices_();
-    // User signed in, show the loading message when querying for synced
-    // devices.
-    this.fetchingSyncedTabs_ = true;
   }
 
   private maybeRecordSigninPendingOffered_() {
@@ -478,7 +483,7 @@ export class HistorySyncedDeviceManagerElement extends
   protected onCardOpenedChanged_(e: CustomEvent<{value: boolean}>) {
     const currentTarget = e.currentTarget as HTMLElement;
     const index = Number(currentTarget.dataset['index']);
-    const device = this.syncedDevices_[index];
+    const device = this.syncedDevices_[index]!;
     device.opened = e.detail.value;
     this.requestUpdate();
   }

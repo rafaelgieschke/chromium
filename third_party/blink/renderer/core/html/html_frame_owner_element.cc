@@ -59,11 +59,13 @@
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
+#include "third_party/blink/renderer/core/loader/resource_initiator_helper.h"
 #include "third_party/blink/renderer/core/loader/url_matcher.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/scrolling/root_scroller_controller.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
+#include "third_party/blink/renderer/core/timing/resource_timing_context.h"
 #include "third_party/blink/renderer/core/timing/window_performance.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
@@ -73,7 +75,10 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_timing_utils.h"
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/scheduler/public/task_attribution_info.h"
+#include "third_party/blink/renderer/platform/scheduler/public/task_attribution_tracker.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
+#include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
@@ -109,8 +114,9 @@ bool IsFrameLazyLoadable(ExecutionContext* context,
   // Only http:// or https:// URLs are eligible for lazy loading, excluding
   // URLs like invalid or empty URLs, "about:blank", local file URLs, etc.
   // that it doesn't make sense to lazily load.
-  if (!url.ProtocolIsInHTTPFamily())
+  if (!url.ProtocolIsInHttpFamily()) {
     return false;
+  }
 
   // Do not lazyload frames when JavaScript is disabled, regardless of the
   // `loading` attribute.
@@ -386,6 +392,12 @@ bool HTMLFrameOwnerElement::IsKeyboardFocusableSlow(
          HTMLElement::IsKeyboardFocusableSlow(update_behavior);
 }
 
+FocusgroupFlags HTMLFrameOwnerElement::NativeArrowKeyAxes() const {
+  // Frames (iframe/frame) and object/embed elements host content that
+  // typically has its own arrow key handling.
+  return FocusgroupFlags::kInline | FocusgroupFlags::kBlock;
+}
+
 void HTMLFrameOwnerElement::DisposePluginSoon(WebPluginContainerImpl* plugin) {
   if (PluginDisposeSuspendScope::suspend_count_) {
     PluginsPendingDispose().insert(plugin);
@@ -515,6 +527,8 @@ void HTMLFrameOwnerElement::AddResourceTiming(
     return;
   }
 
+  info->initiator_url = fallback_timing_info_->initiator_url;
+
   DOMWindowPerformance::performance(*GetDocument().domWindow())
       ->AddResourceTiming(std::move(info), localName());
   DidReportResourceTiming();
@@ -638,7 +652,7 @@ bool HTMLFrameOwnerElement::LazyLoadIfPossible(
     const ResourceRequestHead& request,
     WebFrameLoadType frame_load_type) {
   const auto& loading_attr = FastGetAttribute(html_names::kLoadingAttr);
-  bool loading_lazy_set = EqualIgnoringASCIICase(loading_attr, "lazy");
+  bool loading_lazy_set = EqualIgnoringAsciiCase(loading_attr, "lazy");
 
   if (!IsFrameLazyLoadable(GetExecutionContext(), url, loading_lazy_set,
                            should_lazy_load_children_)) {
@@ -686,10 +700,18 @@ bool HTMLFrameOwnerElement::LoadOrRedirectSubframe(
 
   // If the subframe navigation is aborted or TAO fails, we report a "fallback"
   // entry that starts at navigation and ends at load/error event.
-  if (url.ProtocolIsInHTTPFamily()) {
+  if (url.ProtocolIsInHttpFamily()) {
     fallback_timing_info_ =
         CreateResourceTimingInfo(base::TimeTicks::Now(), url,
                                  /*response=*/nullptr);
+
+    if (RuntimeEnabledFeatures::ResourceTimingInitiatorEnabled()) {
+      v8::Isolate* isolate =
+          ResourceInitiatorHelper::GetIsolateIfRunningScriptOnMainThread();
+      fallback_timing_info_->initiator_url =
+          isolate ? ResourceInitiatorHelper::GetScriptInitiatorUrl(*isolate)
+                  : GetDocument().Url();
+    }
   }
 
   // Update the |should_lazy_load_children_| value according to the "loading"
@@ -697,7 +719,7 @@ bool HTMLFrameOwnerElement::LoadOrRedirectSubframe(
   // attribute gets parsed in ParseAttribute() before the "loading" attribute
   // does.
   if (should_lazy_load_children_ &&
-      EqualIgnoringASCIICase(FastGetAttribute(html_names::kLoadingAttr),
+      EqualIgnoringAsciiCase(FastGetAttribute(html_names::kLoadingAttr),
                              "eager")) {
     should_lazy_load_children_ = false;
   }
@@ -705,7 +727,7 @@ bool HTMLFrameOwnerElement::LoadOrRedirectSubframe(
   UpdateContainerPolicy();
   UpdateRequiredPolicy();
 
-  KURL url_to_request = url.IsNull() ? BlankURL() : url;
+  KURL url_to_request = url.IsNull() ? BlankUrl() : url;
   ResourceRequestHead request(url_to_request);
   request.SetReferrerPolicy(ReferrerPolicyAttribute());
   request.SetHasUserGesture(
@@ -757,7 +779,7 @@ bool HTMLFrameOwnerElement::LoadOrRedirectSubframe(
   // kReloadBypassingCache navigation, following the parent frame. If the frame
   // URL is about:blank, it should be committed synchronously as a
   // kReplaceCurrentItem navigation (see https://crbug.com/778318).
-  if (url != BlankURL() && !GetDocument().LoadEventFinished() &&
+  if (url != BlankUrl() && !GetDocument().LoadEventFinished() &&
       GetDocument().Loader()->LoadType() ==
           WebFrameLoadType::kReloadBypassingCache) {
     child_load_type = WebFrameLoadType::kReloadBypassingCache;

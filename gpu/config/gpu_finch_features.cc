@@ -63,7 +63,7 @@ BASE_FEATURE(kAndroidSurfaceControl, base::FEATURE_ENABLED_BY_DEFAULT);
 // Hardware Overlays for WebView.
 BASE_FEATURE(kWebViewSurfaceControl, base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kWebViewSurfaceControlForTV, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kWebViewSurfaceControlForTV, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // This is used as default state because it's different for webview and chrome.
 // WebView hardcodes this as enabled in AwMainDelegate.
@@ -94,7 +94,7 @@ const base::FeatureParam<std::string>
     kRelaxLimitAImageReaderMaxSizeToOneManufacturerBlocklist{
         &kRelaxLimitAImageReaderMaxSizeToOne,
         "RelaxLimitAImageReaderMaxSizeToOneManufacturerBlocklist",
-        "*Broadcom*|*Google*"};
+        "*Broadcom*"};
 const base::FeatureParam<std::string>
     kRelaxLimitAImageReaderMaxSizeToOneDeviceBlocklist{
         &kRelaxLimitAImageReaderMaxSizeToOne,
@@ -110,6 +110,12 @@ const base::FeatureParam<std::string>
 // of associating with an unused IPC::Channel.
 BASE_FEATURE(kRemoveGPULegacyIPC, base::FEATURE_DISABLED_BY_DEFAULT);
 
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
+// Feature flag to control whether SharedImageStub sequence uses high priority
+// on ChromeOS and Linux. Enabled by default.
+BASE_FEATURE(kSharedImageStubHighPriority, base::FEATURE_DISABLED_BY_DEFAULT);
+#endif
+
 // Enable GPU Rasterization by default. This can still be overridden by
 // --enable-gpu-rasterization or --disable-gpu-rasterization.
 // DefaultEnableGpuRasterization has launched on Mac, Windows, ChromeOS,
@@ -122,6 +128,10 @@ BASE_FEATURE(kDefaultEnableGpuRasterization,
              base::FEATURE_DISABLED_BY_DEFAULT
 #endif
 );
+
+// Use a compound backing for shared images by default.
+BASE_FEATURE(kUseCompoundImageBackingAsDefault,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables the use of MSAA in skia on Ice Lake and later intel architectures.
 BASE_FEATURE(kEnableMSAAOnNewIntelGPUs,
@@ -173,6 +183,11 @@ BASE_FEATURE(kVulkan,
              base::FEATURE_DISABLED_BY_DEFAULT
 #endif
 );
+
+// Force enable WebGPU interop when enabled. When disabled the webgpu interop
+// mechanism will default to auto detection in 'GetWebGPUOnVulkanViaGLInterop'
+// function.
+BASE_FEATURE(kForceEnableWebGpuInterop, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kEnableDrDc,
 #if BUILDFLAG(IS_ANDROID)
@@ -298,11 +313,10 @@ const base::FeatureParam<std::string> kDrDcBlockListByAndroidBuildFP{
     &kEnableDrDc, "BlockListByAndroidBuildFP", ""};
 #endif  // BUILDFLAG(IS_ANDROID)
 
-// Enable Skia Graphite. This will use the Dawn backend by default, but can be
-// overridden with command line flags for testing on non-official developer
-// builds. See --skia-graphite-backend flag in gpu_switches.h.
-// Note: This can also be overridden by
-// --enable-skia-graphite & --disable-skia-graphite.
+// Enable Skia Graphite with the platform's default Dawn backend.
+// Note: This can be overridden by --enable-skia-graphite and
+// --disable-skia-graphite which take precedence over the feature flag, and the
+// Dawn backend can be overridden with the --skia-graphite-dawn-backend flag.
 BASE_FEATURE(kSkiaGraphite,
 #if BUILDFLAG(IS_APPLE)
              base::FEATURE_ENABLED_BY_DEFAULT
@@ -310,6 +324,10 @@ BASE_FEATURE(kSkiaGraphite,
              base::FEATURE_DISABLED_BY_DEFAULT
 #endif
 );
+
+// Allows CompoundImageBacking to allocate backings during runtime if a
+// compatible backing to serve clients requested usage is not already present.
+BASE_FEATURE(kUseDynamicBackingAllocations, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enable atlasing of small paths on Skia Graphite. Only meaningful if
 // SkiaGraphite is also enabled.
@@ -345,6 +363,10 @@ const base::FeatureParam<bool> kSkiaGraphiteDawnBackendValidation{
 // can have non-trivial performance overhead e.g. with Metal.
 const base::FeatureParam<bool> kSkiaGraphiteDawnBackendDebugLabels{
     &kSkiaGraphite, "dawn_backend_debug_labels", DCHECK_IS_ON()};
+
+// Enables automatic buffer mappings in Dawn's backend.
+const base::FeatureParam<bool> kSkiaGraphiteDawnEnableAutoMap{
+    &kSkiaGraphite, "dawn_enable_auto_map", true};
 
 // Whether to use PersistentCache for Dawn's pipeline cache.
 BASE_FEATURE_PARAM(bool,
@@ -419,10 +441,6 @@ BASE_FEATURE(kD3DBackingUploadWithUpdateSubresource,
              base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
 
-// This feature allows viz to handle overlays' swap failures instead of loosing a context and
-// restarting a gpu service.
-BASE_FEATURE(kHandleOverlaysSwapFailure, base::FEATURE_DISABLED_BY_DEFAULT);
-
 // This feature allows enabling specific entries in
 // software_rendering_list.json, via experimentation. The entries must have
 // test_group property and test_group feature parameter should be set in the
@@ -438,6 +456,12 @@ const base::FeatureParam<int> kGPUBlockListTestGroupId{&kGPUBlockListTestGroup,
 BASE_FEATURE(kGPUDriverBugListTestGroup, base::FEATURE_DISABLED_BY_DEFAULT);
 const base::FeatureParam<int> kGPUDriverBugListTestGroupId{
     &kGPUDriverBugListTestGroup, "test_group", 0};
+
+#if BUILDFLAG(IS_LINUX)
+bool IsForceEnableWebGpuInterop() {
+  return base::FeatureList::IsEnabled(kForceEnableWebGpuInterop);
+}
+#endif
 
 bool IsUsingVulkan() {
 #if BUILDFLAG(IS_ANDROID)

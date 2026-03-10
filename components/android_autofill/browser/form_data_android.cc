@@ -50,17 +50,6 @@ void FormDataAndroid::OnFormFieldDidChange(size_t index,
   fields_[index]->OnFormFieldDidChange(value);
 }
 
-bool FormDataAndroid::GetFieldIndex(const FormFieldData& field, size_t* index) {
-  for (size_t i = 0; i < form_.fields().size(); ++i) {
-    if (FormFieldData::IdenticalAndEquivalentDomElements(
-            form_.fields()[i], field, {FormFieldData::Exclusion::kValue})) {
-      *index = i;
-      return true;
-    }
-  }
-  return false;
-}
-
 bool FormDataAndroid::GetSimilarFieldIndex(const FormFieldData& field,
                                            size_t* index) {
   for (size_t i = 0; i < form_.fields().size(); ++i) {
@@ -153,7 +142,7 @@ std::vector<int> FormDataAndroid::UpdateFieldVisibilities(
   // reserve space in the vector.
   std::vector<int> indices;
   for (size_t i = 0; i < form_.fields().size(); ++i) {
-    if (form_.fields()[i].IsFocusable() != form.fields()[i].IsFocusable()) {
+    if (form_.fields()[i].is_focusable() != form.fields()[i].is_focusable()) {
       fields_[i]->OnFormFieldVisibilityDidChange(form.fields()[i]);
       indices.push_back(i);
     }

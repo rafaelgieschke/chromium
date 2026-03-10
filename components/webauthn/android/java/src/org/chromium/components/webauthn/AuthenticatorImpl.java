@@ -32,6 +32,7 @@ import org.chromium.build.annotations.Nullable;
 import org.chromium.components.password_manager.BrowserAssistedLoginType;
 import org.chromium.components.ukm.UkmRecorder;
 import org.chromium.content_public.browser.RenderFrameHost;
+import org.chromium.content_public.browser.Visibility;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.device.DeviceFeatureList;
 import org.chromium.device.DeviceFeatureMap;
@@ -177,14 +178,20 @@ public final class AuthenticatorImpl implements Authenticator, AuthenticationCon
             return;
         }
 
-        boolean isConditionalCreate =
-                options.isConditional
-                        && DeviceFeatureMap.isEnabled(DeviceFeatureList.WEBAUTHN_PASSKEY_UPGRADE);
+        if (mWebContents != null && mWebContents.getVisibility() != Visibility.VISIBLE) {
+            requestCallback.onComplete(
+                    WebauthnRequestResponse.forFailedMakeCredential(
+                            AuthenticatorStatus.NOT_FOCUSED, new RequestMetrics.Builder().build()));
+            return;
+        }
 
-        if (mCreateConfirmationUiDelegate != null && !isConditionalCreate) {
+        if (mCreateConfirmationUiDelegate != null && !options.isConditional) {
             if (!mCreateConfirmationUiDelegate.show(
                     () -> continueMakeCredential(options),
                     () -> {
+                        if (mRequestCallback == null) {
+                            return;
+                        }
                         RequestMetrics metrics =
                                 new RequestMetrics.Builder()
                                         .setMakeCredentialOutcome(
@@ -192,10 +199,9 @@ public final class AuthenticatorImpl implements Authenticator, AuthenticationCon
                                         .setMakeCredentialResult(
                                                 CredentialRequestResult.USER_CANCELLED)
                                         .build();
-                        assumeNonNull(mRequestCallback)
-                                .onComplete(
-                                        WebauthnRequestResponse.forFailedMakeCredential(
-                                                AuthenticatorStatus.NOT_ALLOWED_ERROR, metrics));
+                        mRequestCallback.onComplete(
+                                WebauthnRequestResponse.forFailedMakeCredential(
+                                        AuthenticatorStatus.NOT_ALLOWED_ERROR, metrics));
                     })) {
                 continueMakeCredential(options);
             }
@@ -241,9 +247,16 @@ public final class AuthenticatorImpl implements Authenticator, AuthenticationCon
         mIsConditionalRequest = options.mediation == Mediation.CONDITIONAL;
         mIsImmediateRequest = options.mediation == Mediation.IMMEDIATE;
 
+        boolean isPasswordOnlyFlux =
+                options.publicKey == null
+                        && options.password
+                        && options.mediation == Mediation.IMMEDIATE
+                        && DeviceFeatureMap.isEnabled(
+                                DeviceFeatureList
+                                        .WEBAUTHN_AUTHENTICATOR_PASSWORDS_ONLY_IMMEDIATE_REQUESTS);
         if (!GmsCoreUtils.isWebauthnSupported()
                 || (!isChrome(mWebContents) && !GmsCoreUtils.isResultReceiverSupported())
-                || options.publicKey == null) {
+                || (options.publicKey == null && !isPasswordOnlyFlux)) {
             RequestMetrics metrics =
                     new RequestMetrics.Builder()
                             .setGetAssertionOutcome(GetAssertionOutcome.OTHER_FAILURE)
@@ -253,7 +266,15 @@ public final class AuthenticatorImpl implements Authenticator, AuthenticationCon
                             AuthenticatorStatus.NOT_IMPLEMENTED, metrics));
             return;
         }
-        assumeNonNull(options.publicKey);
+
+        if (mWebContents != null
+                && options.mediation != Mediation.CONDITIONAL
+                && mWebContents.getVisibility() != Visibility.VISIBLE) {
+            requestCallback.onComplete(
+                    WebauthnRequestResponse.forFailedGetCredential(
+                            AuthenticatorStatus.NOT_FOCUSED, new RequestMetrics.Builder().build()));
+            return;
+        }
 
         mPendingFido2CredentialRequest = getFido2CredentialRequest();
         mPendingFido2CredentialRequest.handleGetCredentialRequest(
@@ -263,10 +284,6 @@ public final class AuthenticatorImpl implements Authenticator, AuthenticationCon
     @Override
     public void report(PublicKeyCredentialReportOptions options, Report_Response callback) {
         log(TAG, "report");
-        if (!DeviceFeatureMap.isEnabled(DeviceFeatureList.WEBAUTHN_ANDROID_SIGNAL)) {
-            callback.call(AuthenticatorStatus.NOT_IMPLEMENTED, null);
-            return;
-        }
 
         WebauthnRequestCallback requestCallback = WebauthnRequestCallback.forReport(callback);
         if (mRequestCallback != null) {
@@ -367,14 +384,10 @@ public final class AuthenticatorImpl implements Authenticator, AuthenticationCon
                                     createWebAuthnClientCapability(
                                             AuthenticatorConstants.CAPABILITY_UVPAA,
                                             couldSupportUvpaa() && isUvpaa));
-                            boolean conditionalCreateEnabled =
-                                    couldSupportConditionalMediation()
-                                            && DeviceFeatureMap.isEnabled(
-                                                    DeviceFeatureList.WEBAUTHN_PASSKEY_UPGRADE);
                             capabilities.add(
                                     createWebAuthnClientCapability(
                                             AuthenticatorConstants.CAPABILITY_CONDITIONAL_CREATE,
-                                            isUvpaa && conditionalCreateEnabled));
+                                            isUvpaa && couldSupportConditionalMediation()));
                             capabilities.add(
                                     createWebAuthnClientCapability(
                                             AuthenticatorConstants.CAPABILITY_IMMEDIATE_GET,
@@ -382,25 +395,21 @@ public final class AuthenticatorImpl implements Authenticator, AuthenticationCon
                                                             DeviceFeatureList
                                                                     .WEBAUTHN_IMMEDIATE_GET)
                                                     && isUvpaa));
-                            boolean signalSupported =
-                                    isUvpaa
-                                            && DeviceFeatureMap.isEnabled(
-                                                    DeviceFeatureList.WEBAUTHN_ANDROID_SIGNAL);
                             capabilities.add(
                                     createWebAuthnClientCapability(
                                             AuthenticatorConstants
                                                     .CAPABILITY_SIGNAL_ALL_ACCEPTED_CREDENTIALS,
-                                            signalSupported));
+                                            isUvpaa));
                             capabilities.add(
                                     createWebAuthnClientCapability(
                                             AuthenticatorConstants
                                                     .CAPABILITY_SIGNAL_CURRENT_USER_DETAILS,
-                                            signalSupported));
+                                            isUvpaa));
                             capabilities.add(
                                     createWebAuthnClientCapability(
                                             AuthenticatorConstants
                                                     .CAPABILITY_SIGNAL_UNKNOWN_CREDENTIAL,
-                                            signalSupported));
+                                            isUvpaa));
                             callback.call(capabilities.toArray(new WebAuthnClientCapability[0]));
                         });
     }

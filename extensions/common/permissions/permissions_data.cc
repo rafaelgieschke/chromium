@@ -4,11 +4,11 @@
 
 #include "extensions/common/permissions/permissions_data.h"
 
+#include <algorithm>
 #include <memory>
 #include <utility>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/memory/stack_allocated.h"
 #include "base/no_destructor.h"
@@ -120,7 +120,7 @@ bool PermissionsData::CanExecuteScriptEverywhere(
   const ExtensionsClient::ScriptingAllowlist& allowlist =
       ExtensionsClient::Get()->GetScriptingAllowlist();
 
-  return base::Contains(allowlist, extension_id);
+  return std::ranges::contains(allowlist, extension_id);
 }
 
 bool PermissionsData::IsRestrictedUrl(const GURL& document_url,
@@ -516,8 +516,8 @@ bool PermissionsData::CanCaptureVisiblePage(
     // (such as file:// URLs or chrome:// URLs for component extensions). If an
     // extension has <all_urls>, GetPageAccess() will still (correctly) return
     // false if, for instance, the URL is a file:// URL and the extension does
-    // not have file access. See https://crbug.com/810220. If the extension has
-    // page access (and has activeTab or <all_urls>), allow the capture.
+    // not have file access. See https://crbug.com/40090425. If the extension
+    // has page access (and has activeTab or <all_urls>), allow the capture.
     if (GetPageAccess(origin_url, tab_id, &access_error) ==
         PageAccess::kAllowed)
       return true;

@@ -8,9 +8,8 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.lens.LensEntryPoint;
 import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionHandler;
-import org.chromium.components.omnibox.AutocompleteRequestType;
-
-import java.util.List;
+import org.chromium.components.omnibox.AutocompleteInput;
+import org.chromium.url.GURL;
 
 /**
  * Handles user interaction with the stubbed Omnibox (a.k.a. fakebox) used in the pages such as NTP
@@ -19,28 +18,17 @@ import java.util.List;
 @NullMarked
 public interface OmniboxStub {
     /**
-     * Signal a {@link UrlBar} focus change request.
+     * Begins an Omnibox input session with the given input. This will typically focus the Omnibox
+     * and initialize autocomplete.
      *
-     * @param shouldBeFocused Whether the focus should be requested or cleared. True requests focus
-     *     and False clears focus.
-     * @param pastedText The given pasted text when focus, which could be null.
-     * @param reason The given reason.
+     * @param input The AutocompleteInput object with details for the focus operation.
      */
-    void setUrlBarFocus(
-            boolean shouldBeFocused,
-            @Nullable String pastedText,
-            @OmniboxFocusReason int reason,
-            @AutocompleteRequestType int requestType);
+    void beginInput(AutocompleteInput input);
 
     /**
-     * Performs a search query on the current {@link Tab}. This calls {@link
-     * TemplateUrlService#getUrlForSearchQuery(String)} to get a url based on {@code query} and
-     * loads that url in the current {@link Tab}.
-     *
-     * @param query The {@link String} that represents the text query that should be searched for.
-     * @param searchParams A list of params for the search query.
+     * Ends the current Omnibox input session. This will typically clear the focus from the Omnibox.
      */
-    void performSearchQuery(String query, List<String> searchParams);
+    void endInput();
 
     /**
      * @return Whether the URL bar is currently focused.
@@ -77,4 +65,14 @@ public interface OmniboxStub {
      * @param lensEntryPoint the Lens entry point.
      */
     void startLens(@LensEntryPoint int lensEntryPoint);
+
+    // Methods migrated from VoiceRecognitionHandler.Delegate
+
+    /**
+     * Loads the provided URL, assumes the PageTransition type is TYPED.
+     *
+     * @param url The URL to load.
+     */
+    // TODO(crbug.com/477922724): migrate to loadUrl()
+    void loadUrlFromVoice(GURL url);
 }

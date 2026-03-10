@@ -16,7 +16,7 @@
 namespace blink {
 
 RecyclableCanvasResource::RecyclableCanvasResource(
-    std::unique_ptr<CanvasResourceProviderSharedImage> resource_provider,
+    std::unique_ptr<CanvasNon2DResourceProviderSharedImage> resource_provider,
     base::WeakPtr<WebGPURecyclableResourceCache> cache)
     : resource_provider_(std::move(resource_provider)), cache_(cache) {}
 
@@ -41,20 +41,16 @@ WebGPURecyclableResourceCache::WebGPURecyclableResourceCache(
 
 std::unique_ptr<RecyclableCanvasResource>
 WebGPURecyclableResourceCache::GetOrCreateCanvasResource(
-    const SkImageInfo& info) {
+    viz::SharedImageFormat format,
+    gfx::Size size,
+    const gfx::ColorSpace& color_space,
+    SkAlphaType alpha_type) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
-  gfx::Size size = gfx::Size(info.width(), info.height());
-  viz::SharedImageFormat format =
-      viz::SkColorTypeToSinglePlaneSharedImageFormat(info.colorType());
-  SkAlphaType alpha_type = info.alphaType();
-  gfx::ColorSpace color_space =
-      SkColorSpaceToGfxColorSpace(info.refColorSpace());
-
-  std::unique_ptr<CanvasResourceProviderSharedImage> provider =
+  std::unique_ptr<CanvasNon2DResourceProviderSharedImage> provider =
       AcquireCachedProvider(size, format, alpha_type, color_space);
   if (!provider) {
-    provider = CanvasResourceProvider::CreateWebGPUImageProvider(
+    provider = CanvasNon2DResourceProviderSharedImage::CreateForWebGPU(
         size, format, alpha_type, color_space);
     if (!provider)
       return nullptr;
@@ -65,7 +61,7 @@ WebGPURecyclableResourceCache::GetOrCreateCanvasResource(
 }
 
 void WebGPURecyclableResourceCache::OnDestroyRecyclableResource(
-    std::unique_ptr<CanvasResourceProviderSharedImage> resource_provider,
+    std::unique_ptr<CanvasNon2DResourceProviderSharedImage> resource_provider,
     const gpu::SyncToken& completion_sync_token) {
   int resource_size =
       resource_provider->GetSharedImageFormat().EstimatedSizeInBytes(
@@ -92,7 +88,7 @@ void WebGPURecyclableResourceCache::OnDestroyRecyclableResource(
 }
 
 WebGPURecyclableResourceCache::Resource::Resource(
-    std::unique_ptr<CanvasResourceProviderSharedImage> resource_provider,
+    std::unique_ptr<CanvasNon2DResourceProviderSharedImage> resource_provider,
     unsigned int timer_id,
     int resource_size)
     : resource_provider_(std::move(resource_provider)),
@@ -104,7 +100,7 @@ WebGPURecyclableResourceCache::Resource::Resource(Resource&& that) noexcept =
 
 WebGPURecyclableResourceCache::Resource::~Resource() = default;
 
-std::unique_ptr<CanvasResourceProviderSharedImage>
+std::unique_ptr<CanvasNon2DResourceProviderSharedImage>
 WebGPURecyclableResourceCache::AcquireCachedProvider(
     const gfx::Size& size,
     const viz::SharedImageFormat& format,
@@ -113,7 +109,7 @@ WebGPURecyclableResourceCache::AcquireCachedProvider(
   // Loop from MRU to LRU
   DequeResourceProvider::iterator it;
   for (it = unused_providers_.begin(); it != unused_providers_.end(); ++it) {
-    CanvasResourceProviderSharedImage* resource_provider =
+    CanvasNon2DResourceProviderSharedImage* resource_provider =
         it->resource_provider_.get();
     if (resource_provider->Size() == size &&
         resource_provider->GetSharedImageFormat() == format &&
@@ -125,7 +121,7 @@ WebGPURecyclableResourceCache::AcquireCachedProvider(
 
   // Found one.
   if (it != unused_providers_.end()) {
-    std::unique_ptr<CanvasResourceProviderSharedImage> provider =
+    std::unique_ptr<CanvasNon2DResourceProviderSharedImage> provider =
         (std::move(it->resource_provider_));
     total_unused_resources_in_bytes_ -= it->resource_size_;
     // TODO(magchen@): If the cache capacity increases a lot, will erase(it)

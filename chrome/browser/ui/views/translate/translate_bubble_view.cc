@@ -32,7 +32,6 @@
 #include "chrome/browser/ui/translate/translate_bubble_model_impl.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
-#include "chrome/browser/ui/views/translate/translate_icon_view.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
@@ -135,12 +134,12 @@ void OpenLanguageSettings(TranslateBubbleModel* model_,
 }  // namespace
 
 TranslateBubbleView::TranslateBubbleView(
-    views::View* anchor_view,
+    views::BubbleAnchor anchor,
     std::unique_ptr<TranslateBubbleModel> model,
     translate::TranslateErrors error_type,
     content::WebContents* web_contents,
     base::OnceClosure on_closing)
-    : LocationBarBubbleDelegateView(anchor_view,
+    : LocationBarBubbleDelegateView(anchor,
                                     web_contents,
                                     /*autosize=*/true),
       model_(std::move(model)),

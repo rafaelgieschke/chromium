@@ -219,9 +219,6 @@ class VIZ_SERVICE_EXPORT Display : public DisplaySchedulerClient,
   // `old_client` is used to guarantee that the callee is a correct owner of
   // this Display instance.
   void ResetDisplayClientForTesting(DisplayClient* old_client);
-  void MaybeLogQuadsProperties(
-      AggregatedRenderPass& last_render_pass,
-      const SurfaceDamageRectList* surface_damage_rect_list);
 
   // Starts overdraw tacking for content rendered on the OutputSurface.
   void StartTrackingOverdraw(int interval_length_in_seconds);
@@ -250,20 +247,38 @@ class VIZ_SERVICE_EXPORT Display : public DisplaySchedulerClient,
     void AddPresentationHelper(
         std::unique_ptr<Surface::PresentationHelper> helper);
     void OnDraw(base::TimeTicks frame_time,
+                base::TimeDelta interval,
                 base::TimeTicks draw_start_timestamp,
                 base::flat_set<base::PlatformThreadId> animation_thread_ids,
                 base::flat_set<base::PlatformThreadId> renderer_main_thread_ids,
-                HintSession::BoostType boost_type);
+                HintSession::BoostType boost_type,
+                int64_t choreographer_vsync_id,
+                int64_t swap_trace_id,
+                std::optional<PossibleDeadline> deadline,
+                std::optional<PossibleDeadline> preferred,
+                base::TimeTicks throttled_adjusted_frame_time);
     void OnSwap(gfx::SwapTimings timings, DisplaySchedulerBase* scheduler);
     bool HasSwapped() const { return !swap_timings_.is_null(); }
     void OnPresent(const gfx::PresentationFeedback& feedback);
 
+    base::TimeTicks frame_time() const { return frame_time_; }
+    base::TimeDelta interval() const { return interval_; }
     base::TimeTicks draw_start_timestamp() const {
       return draw_start_timestamp_;
     }
 
+    int64_t choreographer_vsync_id() const { return choreographer_vsync_id_; }
+    int64_t swap_trace_id() const { return swap_trace_id_; }
+    const std::optional<PossibleDeadline>& deadline() const {
+      return deadline_;
+    }
+    const std::optional<PossibleDeadline>& preferred() const {
+      return preferred_;
+    }
+
    private:
     base::TimeTicks frame_time_;
+    base::TimeDelta interval_;
     base::TimeTicks draw_start_timestamp_;
     base::flat_set<base::PlatformThreadId> animation_thread_ids_;
     base::flat_set<base::PlatformThreadId> renderer_main_thread_ids_;
@@ -271,6 +286,11 @@ class VIZ_SERVICE_EXPORT Display : public DisplaySchedulerClient,
     std::vector<std::unique_ptr<Surface::PresentationHelper>>
         presentation_helpers_;
     HintSession::BoostType boost_type_;
+    int64_t choreographer_vsync_id_ = 0;
+    int64_t swap_trace_id_ = 0;
+    std::optional<PossibleDeadline> deadline_;
+    std::optional<PossibleDeadline> preferred_;
+    base::TimeTicks throttled_adjusted_frame_time_;
   };
 
   void InitializeRenderer();
@@ -346,14 +366,9 @@ class VIZ_SERVICE_EXPORT Display : public DisplaySchedulerClient,
   // Callback that will be run after all pending swaps have acked.
   base::OnceClosure no_pending_swaps_callback_;
 
-  std::deque<int64_t> pending_swap_ack_trace_ids_;
-  std::deque<int64_t> pending_presented_trace_ids_;
   int pending_swaps_ = 0;
 
   uint64_t frame_sequence_number_ = 0;
-
-  // A subsampler for potential quad information logging.
-  base::MetricsSubSampler metrics_subsampler_;
 };
 
 }  // namespace viz

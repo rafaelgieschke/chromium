@@ -60,7 +60,7 @@ enum class NotificationCatalogName {
   kScreenTimeLimit = 41,
   kBedtimeLimit = 42,
   kTPMFirmwareUpdate = 43,
-  kU2F = 44,
+  // [Deprecated] kU2F = 44,
   kReleaseNotes = 45,
   kSMS = 46,
   kAssistantNotification = 47,
@@ -106,7 +106,7 @@ enum class NotificationCatalogName {
   kEasyUnlockChromebookAdded = 87,
   kEasyUnlockPairingChange = 88,
   kEasyUnlockPairingChangeApplied = 89,
-  kEasyUnlockSmartLockSignInRemoved = 90,
+  // [Deprecated] kEasyUnlockSmartLockSignInRemoved = 90,
   kSystemProxy = 91,
   kDlpPolicy = 92,
   kPacketCapture = 93,
@@ -218,7 +218,8 @@ enum class NotificationCatalogName {
   kDemoMode = 199,
   kArcDlcInstall = 200,
   kIncompatibleCharger = 201,
-  kMaxValue = kIncompatibleCharger
+  kCameraUpload = 202,
+  kMaxValue = kCameraUpload
 };
 
 // A living catalog that registers system nudges.

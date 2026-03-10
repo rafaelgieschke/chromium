@@ -9,7 +9,6 @@
 
 #include "base/barrier_closure.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/containers/map_util.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
@@ -276,7 +275,7 @@ void BlockingGarbageCollect(
   }
   for (base::FilePath path = enumerator.Next(); !path.empty();
        path = enumerator.Next()) {
-    if (!base::Contains(active_paths, path) && path != trash_directory) {
+    if (!active_paths.contains(path) && path != trash_directory) {
       // Since |trash_directory| is unique for each run of this function there
       // can be no colllisions on the move.
       base::Move(path, trash_directory.Append(path.BaseName()));
@@ -398,8 +397,7 @@ void StoragePartitionImplMap::AsyncObliterate(
   for (auto*& active_partition : active_partitions) {
     active_partition->ClearData(
         // All except shader cache.
-        ~StoragePartition::REMOVE_DATA_MASK_SHADER_CACHE,
-        StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL, blink::StorageKey(),
+        ~StoragePartition::REMOVE_DATA_MASK_SHADER_CACHE, blink::StorageKey(),
         base::Time(), base::Time::Max(), subtask_done_callback);
   }
 

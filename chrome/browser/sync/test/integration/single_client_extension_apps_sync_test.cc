@@ -18,6 +18,7 @@
 #include "components/sync/service/sync_service_impl.h"
 #include "components/sync/test/fake_server.h"
 #include "content/public/test/browser_test.h"
+#include "content/public/test/test_utils.h"
 #include "extensions/common/constants.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -83,6 +84,15 @@ class SingleClientExtensionAppsSyncTest : public SyncTest {
  public:
   SingleClientExtensionAppsSyncTest() : SyncTest(SINGLE_CLIENT) {}
   ~SingleClientExtensionAppsSyncTest() override = default;
+
+  void TearDownOnMainThread() override {
+    // The installation of platform apps can be completed asynchronously after
+    // the test has already started the browser shutdown. The following call
+    // ensures that the test waits until the app installation is completed.
+    content::RunAllTasksUntilIdle();
+
+    SyncTest::TearDownOnMainThread();
+  }
 
   // Apps sync is only supported with Sync-the-feature.
   SetupSyncMode GetSetupSyncMode() const override {
@@ -214,7 +224,7 @@ IN_PROC_BROWSER_TEST_F(SingleClientExtensionAppsSyncTest, NoBookmarkApps) {
   ASSERT_EQ(1u, server_apps.size());
 
   ASSERT_TRUE(SetupSync());
-  // Since bookmark apps are deprecated (https://crbug.com/877898), the client
+  // Since bookmark apps are deprecated (https://crbug.com/40591010), the client
   // should have deleted it from the server.
   EXPECT_TRUE(NoBookmarkAppServerChecker().Wait());
 }

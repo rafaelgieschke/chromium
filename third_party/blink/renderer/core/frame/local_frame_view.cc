@@ -73,6 +73,7 @@
 #include "third_party/blink/renderer/core/editing/drag_caret.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
+#include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/core/events/error_event.h"
 #include "third_party/blink/renderer/core/exported/web_plugin_container_impl.h"
 #include "third_party/blink/renderer/core/fragment_directive/fragment_directive_utils.h"
@@ -98,6 +99,8 @@
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
 #include "third_party/blink/renderer/core/highlight/highlight_registry.h"
 #include "third_party/blink/renderer/core/html/anchor_element_viewport_position_tracker.h"
+#include "third_party/blink/renderer/core/html/canvas/canvas_paint_event.h"
+#include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
 #include "third_party/blink/renderer/core/html/fenced_frame/document_fenced_frames.h"
 #include "third_party/blink/renderer/core/html/fenced_frame/html_fenced_frame_element.h"
 #include "third_party/blink/renderer/core/html/forms/text_control_element.h"
@@ -148,6 +151,7 @@
 #include "third_party/blink/renderer/core/page/validation_message_client.h"
 #include "third_party/blink/renderer/core/paint/cull_rect_updater.h"
 #include "third_party/blink/renderer/core/paint/frame_painter.h"
+#include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
@@ -341,6 +345,7 @@ void LocalFrameView::Trace(Visitor* visitor) const {
   visitor->Trace(mobile_friendliness_checker_);
   visitor->Trace(tap_friendliness_checker_);
   visitor->Trace(lifecycle_observers_);
+  visitor->Trace(canvas_elements_needing_onpaint_);
   visitor->Trace(fullscreen_video_elements_);
   visitor->Trace(pending_transform_updates_);
   visitor->Trace(pending_opacity_updates_);
@@ -404,6 +409,19 @@ void LocalFrameView::ForAllNonThrottledLocalFrameViews(
 
   if (order == kPostOrder)
     function(*this);
+}
+
+void LocalFrameView::ForAllNonThrottledLocalFrameViews(
+    base::FunctionRef<bool(LocalFrameView&)> function) {
+  if (ShouldThrottleRendering()) {
+    return;
+  }
+
+  if (function(*this)) {
+    ForAllChildLocalFrameViews([&function](LocalFrameView& child_view) {
+      child_view.ForAllNonThrottledLocalFrameViews(function);
+    });
+  }
 }
 
 // Note: if this logic is updated, `ForAllNonThrottledLocalFrameViews()` may
@@ -763,13 +781,13 @@ void LocalFrameView::PerformLayout() {
           container->SetShouldCheckForPaintInvalidation();
       }
       layout_subtree_root_list_.Clear();
-#if DCHECK_IS_ON()
+#if EXPENSIVE_DCHECKS_ARE_ON()
       // Ensure fragment-tree consistency after a subtree layout.
       for (const auto& p : fragment_tree_spines) {
         p.key->AssertFragmentTree();
         DCHECK_EQ(p.value, 0u);
       }
-#endif
+#endif  // EXPENSIVE_DCHECKS_ARE_ON()
       fragment_tree_spines.clear();
     } else {
       GetLayoutView()->LayoutRoot();
@@ -925,11 +943,13 @@ gfx::SizeF LocalFrameView::LargeViewportSizeForViewportUnits() const {
     int viewport_width = frame_->GetPage()->GetVisualViewport().Size().width();
     if (frame_->IsOutermostMainFrame() && layout_size.width() &&
         viewport_width) {
+      // LINT.IfChange(LargeViewportSizeForViewportUnits)
       float layout_to_viewport_width_scale_factor =
           viewport_width / layout_size.width();
       layout_size.Enlarge(0, (browser_controls.TotalHeight() -
                               browser_controls.TotalMinHeight()) /
                                  layout_to_viewport_width_scale_factor);
+      // LINT.ThenChange(//content/public/test/android/dom_utils.cc:GetTopControlsShrinkBlinkHeight)
     }
   }
 
@@ -969,22 +989,83 @@ bool LocalFrameView::InvalidationDisallowed() const {
   return GetFrame().LocalFrameRoot().View()->invalidation_disallowed_;
 }
 
-void LocalFrameView::RunPostLifecycleSteps() {
-  InvalidationDisallowedScope invalidation_disallowed(*this);
-  AllowThrottlingScope allow_throttling(*this);
-  RunAccessibilitySteps();
-  RunIntersectionObserverSteps();
-  if (mobile_friendliness_checker_)
-    mobile_friendliness_checker_->MaybeRecompute();
+void LocalFrameView::WillBeginImplCommit() {
+  bool needs_post_lifecycle_steps_before_impl_commit = false;
+  if (RuntimeEnabledFeatures::CanvasDrawElementEnabled()) {
+    ForAllNonThrottledLocalFrameViews(
+        [&needs_post_lifecycle_steps_before_impl_commit](
+            LocalFrameView& frame_view) -> bool {
+          if (!needs_post_lifecycle_steps_before_impl_commit &&
+              frame_view.canvas_elements_needing_onpaint_.empty()) {
+            // Keep traversing
+            return true;
+          }
+          needs_post_lifecycle_steps_before_impl_commit = true;
+          // Stop traversing
+          return false;
+        });
+  }
 
-  ForAllRemoteFrameViews([](RemoteFrameView& frame_view) {
-    frame_view.UpdateCompositingScaleFactor();
-  });
+  if (needs_post_lifecycle_steps_before_impl_commit) {
+    RunPostLifecycleSteps();
+    did_run_post_lifecycle_steps_before_impl_commit_ = true;
+  }
+}
+
+void LocalFrameView::DidBeginMainFrame() {
+  if (!did_run_post_lifecycle_steps_before_impl_commit_) {
+    RunPostLifecycleSteps();
+  }
+  did_run_post_lifecycle_steps_before_impl_commit_ = false;
+}
+
+void LocalFrameView::RunPostLifecycleSteps() {
+  {
+    InvalidationDisallowedScope invalidation_disallowed(*this);
+    AllowThrottlingScope allow_throttling(*this);
+    RunAccessibilitySteps();
+    RunIntersectionObserverSteps();
+    if (mobile_friendliness_checker_) {
+      mobile_friendliness_checker_->MaybeRecompute();
+    }
+
+    ForAllRemoteFrameViews([](RemoteFrameView& frame_view) {
+      frame_view.UpdateCompositingScaleFactor();
+    });
+
+    ForAllNonThrottledLocalFrameViews([](LocalFrameView& frame_view) {
+      auto lifecycle_observers = frame_view.lifecycle_observers_;
+      for (auto& observer : lifecycle_observers) {
+        observer->DidFinishPostLifecycleSteps(frame_view);
+      }
+    });
+  }
+
+  RunCanvasOnpaintSteps();
+}
+
+void LocalFrameView::RunCanvasOnpaintSteps() {
+  if (!RuntimeEnabledFeatures::CanvasDrawElementEnabled()) {
+    return;
+  }
 
   ForAllNonThrottledLocalFrameViews([](LocalFrameView& frame_view) {
-    auto lifecycle_observers = frame_view.lifecycle_observers_;
-    for (auto& observer : lifecycle_observers)
-      observer->DidFinishPostLifecycleSteps(frame_view);
+    if (frame_view.canvas_elements_needing_onpaint_.empty()) {
+      return;
+    }
+    HeapHashMap<Member<HTMLCanvasElement>, HeapLinkedHashSet<Member<Element>>>
+        canvas_elements_needing_onpaint;
+    canvas_elements_needing_onpaint.swap(
+        frame_view.canvas_elements_needing_onpaint_);
+
+    for (const auto& entry : canvas_elements_needing_onpaint) {
+      HTMLCanvasElement* canvas = entry.key;
+      const HeapVector<Member<Element>> children(entry.value);
+      CanvasPaintEventInit* init = CanvasPaintEventInit::Create();
+      init->setChangedElements(std::move(children));
+      canvas->DispatchEvent(
+          *CanvasPaintEvent::Create(event_type_names::kPaint, init));
+    }
   });
 }
 
@@ -1062,39 +1143,41 @@ LayoutSVGRoot* LocalFrameView::EmbeddedReplacedContent() const {
 LocalFrameView::NaturalSizeLayoutScope::NaturalSizeLayoutScope(
     LocalFrameView* view) {
   const gfx::Size layout_size = view->GetLayoutSize();
-  if (!view->layout_height_for_natural_size_) {
+  if (!view->layout_size_for_natural_size_) {
     // If this is the first time, save the height and return. This will be the
     // "consistent ICB" size.
-    view->layout_height_for_natural_size_ = layout_size.height();
+    view->layout_size_for_natural_size_ = layout_size;
     return;
   }
-  if (*view->layout_height_for_natural_size_ == layout_size.height()) {
+  if (*view->layout_size_for_natural_size_ == layout_size) {
     return;
   }
 
   view_ = view;
   is_fixed_to_frame_size_ = view->LayoutSizeFixedToFrameSize();
-  height_ = layout_size.height();
-  view->SetLayoutSizeFixedToFrameSize(false);
-  view->SetLayoutSizeInternal(
-      {layout_size.width(), *view->layout_height_for_natural_size_});
+  saved_layout_size_ = layout_size;
+  view->SetLayoutSizeFixedToFrameSize(false, {.should_suppress_events = true});
+  view->SetLayoutSizeInternal(*view->layout_size_for_natural_size_,
+                              {.should_suppress_events = true});
 }
 
 LocalFrameView::NaturalSizeLayoutScope::~NaturalSizeLayoutScope() {
   if (!view_) {
     return;
   }
-  view_->SetLayoutSizeFixedToFrameSize(is_fixed_to_frame_size_);
+  view_->SetLayoutSizeFixedToFrameSize(is_fixed_to_frame_size_,
+                                       {.should_suppress_events = true});
   if (!is_fixed_to_frame_size_) {
-    view_->SetLayoutSizeInternal({view_->GetLayoutSize().width(), height_});
+    view_->SetLayoutSizeInternal(saved_layout_size_,
+                                 {.should_suppress_events = true});
   }
 }
 
 bool LocalFrameView::RecordNaturalDimensions() {
-  if (natural_height_ == layout_overflow_size_.height()) {
+  if (natural_size_ == layout_overflow_size_) {
     return false;
   }
-  natural_height_ = layout_overflow_size_.height();
+  natural_size_ = layout_overflow_size_;
   return true;
 }
 
@@ -1115,12 +1198,7 @@ bool LocalFrameView::HasRunningAnchorTransformAnimation() const {
   for (Frame* child = frame_->Tree().FirstChild(); child;
        child = child->Tree().NextSibling()) {
     const auto* child_view = DynamicTo<LocalFrameView>(child->View());
-    if (!child_view) {
-      // If this is not a local frame (in other words, it's typically a remote
-      // frame), there's no way of answering this. Err on the safe side.
-      return true;
-    }
-    if (child_view->HasRunningAnchorTransformAnimation()) {
+    if (child_view && child_view->HasRunningAnchorTransformAnimation()) {
       return true;
     }
   }
@@ -1139,14 +1217,14 @@ std::optional<NaturalSizingInfo> LocalFrameView::GetNaturalDimensions() const {
   if (LayoutSVGRoot* content_layout_object = EmbeddedReplacedContent()) {
     return content_layout_object->UnscaledNaturalSizingInfo();
   }
-  if (!natural_height_) {
+  if (!natural_size_) {
     return std::nullopt;
   }
   const LayoutView* layout_view = GetLayoutView();
   DCHECK(layout_view);
-  const float unscaled_natural_height =
-      AdjustForAbsoluteZoom::AdjustFloat(*natural_height_, *layout_view);
-  return NaturalSizingInfo::MakeHeight(unscaled_natural_height);
+  const gfx::SizeF unscaled_natural_size = AdjustForAbsoluteZoom::AdjustSize(
+      gfx::SizeF{*natural_size_}, layout_view->StyleRef());
+  return NaturalSizingInfo::MakeSize(unscaled_natural_size);
 }
 
 void LocalFrameView::UpdateGeometry() {
@@ -1301,7 +1379,7 @@ void LocalFrameView::InvalidateLayoutForViewportConstrainedObjects() {
   auto* layout_view = GetLayoutView();
   if (layout_view && !layout_view->NeedsLayout()) {
     for (const auto& fragment : layout_view->PhysicalFragments()) {
-      if (fragment.StickyDescendants()) {
+      if (!fragment.StickyDescendants().empty()) {
         layout_view->SetNeedsSimplifiedLayout();
         return;
       }
@@ -1393,13 +1471,15 @@ void LocalFrameView::SetLayoutSize(const gfx::Size& size) {
   SetLayoutSizeInternal(size);
 }
 
-void LocalFrameView::SetLayoutSizeFixedToFrameSize(bool is_fixed) {
+void LocalFrameView::SetLayoutSizeFixedToFrameSize(
+    bool is_fixed,
+    const DocumentResizeOptions options) {
   if (layout_size_fixed_to_frame_size_ == is_fixed)
     return;
 
   layout_size_fixed_to_frame_size_ = is_fixed;
   if (is_fixed)
-    SetLayoutSizeInternal(Size());
+    SetLayoutSizeInternal(Size(), options);
 }
 
 ChromeClient* LocalFrameView::GetChromeClient() const {
@@ -1554,6 +1634,8 @@ void LocalFrameView::ScheduleRelayoutOfSubtree(LayoutObject* relayout_root) {
 
     if (GetPage()->Animator().IsServicingAnimations())
       Lifecycle().EnsureStateAtMost(DocumentLifecycle::kStyleClean);
+  } else {
+    relayout_root->DumpForBug478682594();
   }
   DEVTOOLS_TIMELINE_TRACE_EVENT_INSTANT_WITH_CATEGORIES(
       TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "InvalidateLayout",
@@ -2284,9 +2366,18 @@ cc::PropertyChangeForcesCommitCriteria LocalFrameView::ForceCommitCriteria()
     const {
   cc::PropertyChangeForcesCommitCriteria criteria =
       cc::PropertyChangeForcesCommitCriteria::kNone;
-  if (HasActiveIntersectionObservations() ||
-      HasRunningAnchorTransformAnimation()) {
-    criteria = NeedsOcclusionTracking() && HasActiveIntersectionObservations()
+  if (!base::FeatureList::IsEnabled(
+          features::kCompositedAnimationsForceMainFrames)) {
+    return criteria;
+  }
+  bool force_for_intersection_observer =
+      HasActiveIntersectionObservations() &&
+      features::kForceMainFramesForIntersectionObserver.Get();
+  bool force_for_anchor_transform =
+      HasRunningAnchorTransformAnimation() &&
+      features::kForceMainFramesForAnchorTransform.Get();
+  if (force_for_intersection_observer || force_for_anchor_transform) {
+    criteria = force_for_intersection_observer && NeedsOcclusionTracking()
                    ? cc::PropertyChangeForcesCommitCriteria::kAny
                    : cc::PropertyChangeForcesCommitCriteria::kTransform;
   }
@@ -3151,12 +3242,18 @@ void LocalFrameView::PushPaintArtifactToCompositor(bool repainted) {
   StackScrollTranslationVector scroll_translation_nodes;
   ForAllNonThrottledLocalFrameViews([&scroll_translation_nodes](
                                         LocalFrameView& frame_view) {
+    // Skip scroll nodes from detached frames, or any subframe of a detached
+    // frame.
+    if (!frame_view.IsAttached() && !frame_view.GetFrame().IsLocalRoot()) {
+      return false;
+    }
     for (const auto& area : frame_view.scrollable_areas_with_scroll_node_) {
       const auto* paint_properties =
           area->GetLayoutBox()->FirstFragment().PaintProperties();
       CHECK(paint_properties && paint_properties->Scroll());
       scroll_translation_nodes.push_back(paint_properties->ScrollTranslation());
     }
+    return true;
   });
 
   Vector<std::unique_ptr<ViewTransitionRequest>> view_transition_requests;
@@ -3180,8 +3277,10 @@ void LocalFrameView::AppendViewTransitionRequests(
   DCHECK(frame_->IsLocalRoot());
 
   ForAllNonThrottledLocalFrameViews([&requests](LocalFrameView& frame_view) {
-    if (!frame_view.GetFrame().GetDocument())
+    // TODO: We should skip view transition requests from detached frames.
+    if (!frame_view.GetFrame().GetDocument()) {
       return;
+    }
 
     auto pending_requests = ViewTransitionUtils::GetPendingRequests(
         *frame_view.GetFrame().GetDocument());
@@ -3241,7 +3340,9 @@ void LocalFrameView::UpdateStyleAndLayoutIfNeededRecursive() {
   CheckDoesNotNeedLayout();
 #if DCHECK_IS_ON()
   frame_->GetDocument()->GetLayoutView()->AssertLaidOut();
+#if EXPENSIVE_DCHECKS_ARE_ON()
   frame_->GetDocument()->GetLayoutView()->AssertFragmentTree();
+#endif  // EXPENSIVE_DCHECKS_ARE_ON()
 #endif
 
   if (Lifecycle().GetState() < DocumentLifecycle::kLayoutClean)
@@ -3868,7 +3969,8 @@ void LocalFrameView::ZoomFactorChanged(float zoom_factor) {
   GetFrame().SetLayoutZoomFactor(zoom_factor);
 }
 
-void LocalFrameView::SetLayoutSizeInternal(const gfx::Size& size) {
+void LocalFrameView::SetLayoutSizeInternal(const gfx::Size& size,
+                                           DocumentResizeOptions options) {
   if (layout_size_ == size)
     return;
   layout_size_ = size;
@@ -3876,7 +3978,7 @@ void LocalFrameView::SetLayoutSizeInternal(const gfx::Size& size) {
   Document* document = GetFrame().GetDocument();
   if (!document || !document->IsActive())
     return;
-  document->LayoutViewportWasResized();
+  document->LayoutViewportWasResized(options);
   if (frame_->IsMainFrame())
     TextAutosizer::UpdatePageInfoInAllFrames(frame_);
 }
@@ -4053,10 +4155,11 @@ bool LocalFrameView::CapturePaintPreview(
   return true;
 }
 
-void LocalFrameView::Paint(GraphicsContext& context,
-                           PaintFlags paint_flags,
+void LocalFrameView::Paint(const PaintInfo& paint_info,
                            const CullRect& cull_rect,
                            const gfx::Vector2d& paint_offset) const {
+  GraphicsContext& context = paint_info.context;
+  PaintFlags paint_flags = paint_info.GetPaintFlags();
   const auto* owner_layout_object = GetFrame().OwnerLayoutObject();
   std::optional<Document::PaintPreviewScope> paint_preview;
   if (owner_layout_object &&
@@ -4818,14 +4921,18 @@ String LocalFrameView::MainThreadScrollingReasonsAsText() {
 bool LocalFrameView::MapToVisualRectInRemoteRootFrame(
     PhysicalRect& rect,
     bool apply_overflow_clip,
-    bool apply_viewport_transform) {
+    bool apply_viewport_transform,
+    bool apply_viewport_clip) {
   DCHECK(frame_->IsLocalRoot());
   // This is the top-level frame, so no mapping necessary.
   if (frame_->IsOutermostMainFrame())
     return true;
-  bool result = rect.InclusiveIntersect(PhysicalRect(
-      apply_overflow_clip ? frame_->RemoteViewportIntersection()
-                          : frame_->RemoteMainFrameIntersection()));
+  bool result = true;
+  if (apply_viewport_clip) {
+    result = rect.InclusiveIntersect(PhysicalRect(
+        apply_overflow_clip ? frame_->RemoteViewportIntersection()
+                            : frame_->RemoteMainFrameIntersection()));
+  }
   if (result) {
     if (LayoutView* layout_view = GetLayoutView()) {
       auto flags = kTraverseDocumentBoundaries | kApplyRemoteMainFrameTransform;
@@ -4939,6 +5046,27 @@ void LocalFrameView::NotifyVideoIsDominantVisibleStatus(
 
 bool LocalFrameView::HasDominantVideoElement() const {
   return !fullscreen_video_elements_.empty();
+}
+
+void LocalFrameView::DidPaintCanvasChild(HTMLCanvasElement& canvas,
+                                         Element& child) {
+  DCHECK(RuntimeEnabledFeatures::CanvasDrawElementEnabled());
+  if (IsUpdatingLifecycle()) {
+    // HeapHashMap::insert does nothing if key is already present, so this
+    // won't overwrite an existing set if one exists.
+    canvas_elements_needing_onpaint_
+        .insert(&canvas, HeapLinkedHashSet<Member<Element>>())
+        .stored_value->value.insert(&child);
+  }
+}
+
+void LocalFrameView::RequestCanvasOnpaint(HTMLCanvasElement& canvas) {
+  DCHECK(RuntimeEnabledFeatures::CanvasDrawElementEnabled());
+  // HeapHashMap::insert does nothing if key is already present, so this
+  // won't overwrite an existing set if one exists.
+  canvas_elements_needing_onpaint_.insert(&canvas,
+                                          HeapLinkedHashSet<Member<Element>>());
+  ScheduleAnimation();
 }
 
 #if DCHECK_IS_ON()

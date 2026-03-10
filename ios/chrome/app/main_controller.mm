@@ -77,7 +77,6 @@
 #import "ios/chrome/browser/accessibility/model/window_accessibility_change_notifier_app_agent.h"
 #import "ios/chrome/browser/appearance/ui_bundled/appearance_customization.h"
 #import "ios/chrome/browser/banner_promo/model/default_browser_banner_promo_app_agent.h"
-#import "ios/chrome/browser/browsing_data/model/sessions_storage_util.h"
 #import "ios/chrome/browser/content_settings/model/host_content_settings_map_factory.h"
 #import "ios/chrome/browser/crash_report/model/crash_helper.h"
 #import "ios/chrome/browser/crash_report/model/crash_keys_helper.h"
@@ -92,7 +91,6 @@
 #import "ios/chrome/browser/download/model/download_directory_util.h"
 #import "ios/chrome/browser/first_run/model/first_run.h"
 #import "ios/chrome/browser/first_run/public/first_run_util.h"
-#import "ios/chrome/browser/main/ui_bundled/browser_view_wrangler.h"
 #import "ios/chrome/browser/memory/model/memory_debugger_manager.h"
 #import "ios/chrome/browser/metrics/model/first_user_action_recorder.h"
 #import "ios/chrome/browser/metrics/model/incognito_usage_app_state_agent.h"
@@ -101,7 +99,7 @@
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_feature.h"
 #import "ios/chrome/browser/omaha/model/omaha_service.h"
 #import "ios/chrome/browser/passwords/model/password_manager_util_ios.h"
-#import "ios/chrome/browser/policy/model/management_service_ios_factory.h"
+#import "ios/chrome/browser/policy/model/browser_management_service_factory.h"
 #import "ios/chrome/browser/saved_tab_groups/model/tab_group_sync_service_factory.h"
 #import "ios/chrome/browser/screenshot/model/screenshot_metrics_recorder.h"
 #import "ios/chrome/browser/search_engines/model/search_engines_util.h"
@@ -272,12 +270,6 @@ void MarkSessionsAsDiscardedForAllProfiles(NSSet<UISceneSession*>* sessions) {
                                              ->GetProfileManager()
                                              ->GetProfileAttributesStorage();
 
-  // Prior to M-133, the list of sessions to discard was stored in a plist.
-  // If the file still exists, then copy the session identifiers, and then
-  // delete the file.
-  std::set<std::string> sessionIDs =
-      sessions_storage_util::GetDiscardedSessions();
-
   // Usually Chrome uses -[SceneState sceneSessionID] as identifier to properly
   // support devices that do not support multi-window (and which use a constant
   // identifier). For devices that do not support multi-window the session is
@@ -287,14 +279,13 @@ void MarkSessionsAsDiscardedForAllProfiles(NSSet<UISceneSession*>* sessions) {
   // session is garbage collected.
   //
   // Thus it is always correct to use -persistentIdentifier here.
+  std::set<std::string> sessionIDs;
   for (UISceneSession* session in sessions) {
     sessionIDs.insert(base::SysNSStringToUTF8(session.persistentIdentifier));
   }
 
   storage->IterateOverProfileAttributes(
       base::BindRepeating(&InsertDiscardedSessions, sessionIDs));
-
-  sessions_storage_util::ResetDiscardedSessions();
 }
 
 // It was found that -application:didDiscardSceneSessions: may be called with
@@ -344,22 +335,15 @@ enum class ProfileChoice {
   kNewProfile,
 };
 
-// Returns the available ProfileChoices depending on the enabled features.
+// Returns the available ProfileChoices.
 base::span<const ProfileChoice> GetProfileChoices() {
-  if (AreSeparateProfilesForManagedAccountsEnabled()) {
-    static constexpr ProfileChoice kProfileChoicesWithSeparateAccounts[] = {
-        ProfileChoice::kProfileForScene, ProfileChoice::kProfileFromActivity,
-        ProfileChoice::kLastUsedProfile, ProfileChoice::kPersonalProfile,
-        ProfileChoice::kNewProfile,
-    };
-    return kProfileChoicesWithSeparateAccounts;
-  }
-
-  static constexpr ProfileChoice kProfileChoices[] = {
+  static constexpr auto kProfileChoices = std::to_array<ProfileChoice>({
+      ProfileChoice::kProfileForScene,
       ProfileChoice::kProfileFromActivity,
+      ProfileChoice::kLastUsedProfile,
       ProfileChoice::kPersonalProfile,
       ProfileChoice::kNewProfile,
-  };
+  });
   return kProfileChoices;
 }
 
@@ -645,6 +629,10 @@ std::string GetProfileNameForChoice(ProfileChoice choice,
     [self application:[UIApplication sharedApplication]
         didDiscardSceneSessions:std::exchange(_sceneSessionsToDiscard, nil)];
   }
+
+  // Update IsEnableNewStartupFlowEnabled flag if needed.
+  // TODO(crbug.com/462018636): Remove once the feature is fully launched.
+  SaveEnableNewStartupFlowForNextStart();
 
   [self.appState queueTransitionToNextInitStage];
 }
@@ -1446,16 +1434,9 @@ std::string GetProfileNameForChoice(ProfileChoice choice,
       setObject:@(IsShareDefaultBrowserStatusEnabled())
          forKey:app_group::kChromeSupportShareDefaultBrowserStatusCapability];
 
-  if (base::FeatureList::IsEnabled(kYoutubeIncognito) &&
-      base::FeatureList::IsEnabled(kChromeStartupParametersAsync)) {
-    [capabilities
-        setObject:@[ app_group::kYoutubeBundleID ]
-           forKey:app_group::kChromeSupportOpenLinksParametersFromCapability];
-  } else {
-    [capabilities
-        removeObjectForKey:app_group::
-                               kChromeSupportOpenLinksParametersFromCapability];
-  }
+  [capabilities
+      setObject:@[ app_group::kYoutubeBundleID ]
+         forKey:app_group::kChromeSupportOpenLinksParametersFromCapability];
 
   [sharedDefaults setObject:capabilities
                      forKey:app_group::kChromeCapabilitiesPreference];
@@ -1508,7 +1489,7 @@ std::string GetProfileNameForChoice(ProfileChoice choice,
 - (void)logIfEnterpriseManagedDevice {
   base::UmaHistogramBoolean(
       "EnterpriseCheck.IsManaged2",
-      policy::ManagementServiceIOSFactory::GetForPlatform()->IsManaged());
+      policy::BrowserManagementServiceFactory::GetForPlatform()->IsManaged());
 }
 
 - (void)startFreeMemoryMonitoring {
@@ -1968,8 +1949,8 @@ std::string GetProfileNameForChoice(ProfileChoice choice,
 // Update the kLastUsedProfile preference if needed.
 - (void)updateLastUsedProfilePref {
   PrefService* localState = GetApplicationContext()->GetLocalState();
-  if (base::Contains(_profileControllers,
-                     localState->GetString(prefs::kLastUsedProfile))) {
+  if (_profileControllers.contains(
+          localState->GetString(prefs::kLastUsedProfile))) {
     // The last used profile is still loaded, no need to update the pref.
     return;
   }

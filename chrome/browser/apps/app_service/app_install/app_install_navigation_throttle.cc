@@ -8,7 +8,6 @@
 #include <optional>
 #include <string_view>
 
-#include "base/containers/contains.h"
 #include "base/functional/callback.h"
 #include "base/strings/string_util.h"
 #include "base/unguessable_token.h"
@@ -77,16 +76,7 @@ bool IsNavigationUserInitiated(content::NavigationThrottleRegistry& registry) {
     return true;
   }
 
-  switch (handle.GetNavigationInitiatorActivationAndAdStatus()) {
-    case blink::mojom::NavigationInitiatorActivationAndAdStatus::
-        kDidNotStartWithTransientActivation:
-      return false;
-    case blink::mojom::NavigationInitiatorActivationAndAdStatus::
-        kStartedWithTransientActivationFromNonAd:
-    case blink::mojom::NavigationInitiatorActivationAndAdStatus::
-        kStartedWithTransientActivationFromAd:
-      return true;
-  }
+  return handle.StartedWithTransientActivation();
 }
 
 }  // namespace
@@ -142,9 +132,9 @@ AppInstallNavigationThrottle::ExtractQueryParams(std::string_view query) {
 
     auto decode_value = [&]() {
       url::RawCanonOutputW<kMaxDecodeLength> decoded_value;
-      url::DecodeURLEscapeSequences(
+      url::DecodeUrlEscapeSequences(
           query.substr(value_slice.begin, value_slice.len),
-          url::DecodeURLMode::kUTF8OrIsomorphic, &decoded_value);
+          url::DecodeUrlMode::kUtf8OrIsomorphic, &decoded_value);
 
       // TODO(b/299825321): Make DecodeURLEscapeSequences() work with
       // RawCanonOutput to avoid this redundant UTF8 -> UTF16 -> UTF8

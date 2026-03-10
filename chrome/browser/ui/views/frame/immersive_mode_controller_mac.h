@@ -5,8 +5,6 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_IMMERSIVE_MODE_CONTROLLER_MAC_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_IMMERSIVE_MODE_CONTROLLER_MAC_H_
 
-#include <memory>
-
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -14,7 +12,6 @@
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "components/remote_cocoa/common/native_widget_ns_window.mojom.h"
 #include "ui/gfx/geometry/insets.h"
-#include "ui/views/animation/bounds_animator.h"
 #include "ui/views/cocoa/immersive_mode_reveal_client.h"
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/view_observer.h"
@@ -65,10 +62,11 @@ class ImmersiveModeControllerMac : public ImmersiveModeController,
     base::WeakPtr<ImmersiveModeControllerMac> controller_;
   };
 
-  // If `separate_tab_strip` is true, the tab strip is split out into its own
-  // widget separate from the overlay view so that it can live in the title bar.
+  // If `tab_strip_in_overlay_widget` is true, the tab strip is split out into
+  // its own widget separate from the overlay view so that it can live in the
+  // title bar.
   explicit ImmersiveModeControllerMac(BrowserWindowInterface* window,
-                                      bool separate_tab_strip);
+                                      bool tab_strip_in_overlay_widget);
 
   ImmersiveModeControllerMac(const ImmersiveModeControllerMac&) = delete;
   ImmersiveModeControllerMac& operator=(const ImmersiveModeControllerMac&) =
@@ -80,7 +78,6 @@ class ImmersiveModeControllerMac : public ImmersiveModeController,
   void Init(BrowserView* browser_view) override;
   void SetEnabled(bool enabled) override;
   bool IsEnabled() const override;
-  bool ShouldHideTopViews() const override;
   bool IsRevealed() const override;
   int GetTopContainerVerticalOffset(
       const gfx::Size& top_container_size) const override;
@@ -92,9 +89,18 @@ class ImmersiveModeControllerMac : public ImmersiveModeController,
   int GetMinimumContentOffset() const override;
   int GetExtraInfobarOffset() const override;
   void OnContentFullscreenChanged(bool is_content_fullscreen) override;
+  void OnVerticalTabStripModeChanged() override;
 
   // Set the widget id of the tab hosting widget. Set before calling SetEnabled.
   void SetTabNativeWidgetID(uint64_t widget_id);
+
+  // Updates whether the tab strip should be hosted in its own overlay widget.
+  // When `tab_strip_in_overlay_widget` is true, the tab strip is in its own
+  // overlay that can be hidden along with the rest of the top chrome. This is
+  // used for horizontal tabs.
+  // When `tab_strip_in_overlay_widget` is false, the tab strip is part of the
+  // main browser view and is always visible. This is used for vertical tabs.
+  void SetTabStripInOverlayWidget(bool tab_strip_in_overlay_widget);
 
   // views::FocusChangeListener implementation.
   void OnDidChangeFocus(views::View* focused_before,
@@ -152,10 +158,11 @@ class ImmersiveModeControllerMac : public ImmersiveModeController,
   // placed in the titlebar.
   uint64_t tab_native_widget_id_ = 0;
 
-  // Whether the tab strip should be a separate widget.
-  bool separate_tab_strip_ = false;
+  // Whether the tab strip is hosted in a separate overlay widget. See
+  // SetTabStripInOverlayWidget() for more details.
+  bool tab_strip_in_overlay_widget_ = false;
   // Height of the tab widget, used when resizing. Only non-zero if
-  // `separate_tab_strip_` is true.
+  // `tab_strip_in_overlay_widget_` is true.
   int tab_widget_height_ = 0;
   // Total height of the overlay (including the separate tab strip if relevant).
   int overlay_height_ = 0;
@@ -173,8 +180,6 @@ class ImmersiveModeControllerMac : public ImmersiveModeController,
   int menu_bar_height_ = 0;
 
   std::optional<base::CallbackListSubscription> browser_close_subscription_;
-
-  std::unique_ptr<views::BoundsAnimator> tab_bounds_animator_ = nullptr;
 
   base::WeakPtrFactory<ImmersiveModeControllerMac> weak_ptr_factory_{this};
 };

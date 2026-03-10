@@ -133,6 +133,18 @@ class AnimationFrameTimingInfo
     total_blocking_duration_ = duration;
   }
 
+  base::TimeDelta StyleDuration() const { return style_duration_; }
+
+  void SetStyleDuration(base::TimeDelta duration) {
+    style_duration_ = duration;
+  }
+
+  base::TimeDelta LayoutDuration() const { return layout_duration_; }
+
+  void SetLayoutDuration(base::TimeDelta duration) {
+    layout_duration_ = duration;
+  }
+
   void SetBeginFrameId(viz::BeginFrameId begin_frame_id) {
     begin_frame_id_ = begin_frame_id;
   }
@@ -165,6 +177,12 @@ class AnimationFrameTimingInfo
 
   // Collecting durations of all tasks in the LoAF, not including rendering.
   base::TimeDelta total_blocking_duration_;
+
+  // Render-phase style recalculation duration.
+  base::TimeDelta style_duration_;
+
+  // Render-phase layout duration.
+  base::TimeDelta layout_duration_;
 
   HeapVector<Member<ScriptTimingInfo>> scripts_;
 

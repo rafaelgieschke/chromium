@@ -19,6 +19,7 @@
 #include "base/check.h"
 #include "base/command_line.h"
 #include "base/containers/flat_set.h"
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/functional/bind.h"
@@ -53,6 +54,7 @@
 #include "components/cbor/writer.h"
 #include "components/os_crypt/sync/os_crypt_mocker.h"
 #include "components/signin/public/base/consent_level.h"
+#include "components/signin/public/identity_manager/account_info.h"
 #include "components/signin/public/identity_manager/identity_test_environment.h"
 #include "components/sync/protocol/webauthn_credential_specifics.pb.h"
 #include "components/trusted_vault/command_line_switches.h"
@@ -508,12 +510,17 @@ class EnclaveManagerTest : public testing::Test, EnclaveManager::Observer {
                               int last_key_version) {
     auto store_keys_lock = manager->GetStoreKeysLock();
     base::HistogramTester histogram_tester;
-    manager->StoreKeys(gaia_id_, {std::move(key)}, last_key_version);
-    histogram_tester.ExpectBucketCount(
-        "WebAuthentication.GPM.RecoveryEvent",
-        webauthn::metrics::WebAuthenticationGPMRecoveryEvent::
-            kStoreKeysFromExplicitFlowStarted,
-        1);
+    manager->StoreKeys(gaia_id_,
+                       {trusted_vault::TrustedVaultKeyAndVersion(
+                           std::move(key), last_key_version)},
+                       std::nullopt);
+    if (base::FeatureList::IsEnabled(device::kWebAuthnOpportunisticRetrieval)) {
+      histogram_tester.ExpectBucketCount(
+          "WebAuthentication.GPM.RecoveryEvent",
+          webauthn::metrics::WebAuthenticationGPMRecoveryEvent::
+              kStoreKeysFromExplicitFlowStarted,
+          1);
+    }
   }
 
   base::test::TaskEnvironment task_env_;
@@ -929,6 +936,10 @@ TEST_F(EnclaveManagerTest, SetupWithPIN_InvalidSigXmlIsIgnored) {
   scoped_feature_list.InitAndEnableFeatureWithParameters(
       device::enclave::kEnclaveTrustedVaultCohort, {{"sig_xml", "invalid"}});
 
+  // EnclaveManager should use the default if the Finch provided URL is invalid.
+  recovery_key_store_->set_sig_xml_url(
+      device::enclave::kSigXmlUrlFeature.default_value);
+
   BoolFuture setup_future;
   manager_.SetupWithPIN("123456", setup_future.GetCallback());
   EXPECT_TRUE(setup_future.Wait());
@@ -939,7 +950,11 @@ TEST_F(EnclaveManagerTest, SetupWithPIN_InvalidSigXmlIsIgnored) {
 TEST_F(EnclaveManagerTest, SetupWithPIN_InvalidCertXmlIsIgnored) {
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitAndEnableFeatureWithParameters(
-      device::enclave::kEnclaveTrustedVaultCohort, {{"sig_xml", "invalid"}});
+      device::enclave::kEnclaveTrustedVaultCohort, {{"cert_xml", "invalid"}});
+
+  // EnclaveManager should use the default if the Finch provided URL is invalid.
+  recovery_key_store_->set_cert_xml_url(
+      device::enclave::kCertXmlUrlFeature.default_value);
 
   BoolFuture setup_future;
   manager_.SetupWithPIN("123456", setup_future.GetCallback());
@@ -2155,6 +2170,24 @@ TEST_F(EnclaveManagerTest, CheckGpmPinAvailabilityWhenPinIsAvailable) {
             EnclaveManager::GpmPinAvailability::kGpmPinSetAndUsable);
 }
 
+TEST_F(EnclaveManagerTest, CheckGpmPinAvailabilityWhenPinIsUnusable) {
+  const std::string pin = "123456";
+  ASSERT_TRUE(Register());
+
+  BoolFuture setup_future;
+  manager_.SetupWithPIN(pin, setup_future.GetCallback());
+  EXPECT_TRUE(setup_future.Wait());
+  ASSERT_TRUE(manager_.IsReady());
+  ASSERT_TRUE(manager_.has_wrapped_pin());
+  security_domain_service_->MakePinMemberUnusable();
+
+  base::test::TestFuture<EnclaveManager::GpmPinAvailability> future;
+  manager_.CheckGpmPinAvailability(future.GetCallback());
+  EXPECT_TRUE(future.Wait());
+  EXPECT_EQ(future.Get(),
+            EnclaveManager::GpmPinAvailability::kGpmPinSetButNotUsable);
+}
+
 TEST_F(EnclaveManagerTest, CheckGpmPinAvailabilityWhenPinIsNotAvailable) {
   ASSERT_TRUE(Register());
 
@@ -2164,12 +2197,231 @@ TEST_F(EnclaveManagerTest, CheckGpmPinAvailabilityWhenPinIsNotAvailable) {
   EXPECT_EQ(future.Get(), EnclaveManager::GpmPinAvailability::kGpmPinUnset);
 }
 
+class OpportunisticKeyRetrievalEnclaveManagerTest : public EnclaveManagerTest {
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_{
+      device::kWebAuthnOpportunisticRetrieval};
+};
+
+#if !BUILDFLAG(IS_CHROMEOS)
+// This test verifies the following scenario:
+// - The system UV is not available.
+// - Imagine that there is an account "Account 1".
+// - "Account 1" has a GPM PIN knowledge factor.
+// - Imagine that the currently signed-in primary account is "Account 2".
+// - We opportunistically retrieved a passkey secret of "Account 1" and
+//   we are trying to store it in Enclave Manager.
+// - Since the primary account is "Account 2", we can't store the passkey
+//   secret at this point (we need to wait until "Account 1" becomes a
+//   primary account). Because of this, Enclave Manager will temporarily
+//   cache the opportunistically retrieved a passkey secret of "Account 1".
+// - After "Account 1" becomes a primary account Enclave Manager will try
+//   to store the cached opportunistically retrieved passkey secret of
+//   "Account 1".
+//  - Since "Account 1" has a GPM PIN knowledge factor, the opportunistically
+//    retrieved passkey secret will be successfully stored.
+TEST_F(OpportunisticKeyRetrievalEnclaveManagerTest,
+       StoringOpportunisticallyRetrievedKeyAfterSignInOfMatchingAccount) {
+  // Simulating the absence of system UV.
+  auto disabled_uv = crypto::ScopedNullUserVerifyingKeyProvider();
+  // Currently we are signed-in with some account (let's call it "Account 1").
+  const CoreAccountInfo account_1 =
+      identity_test_env_.identity_manager()->GetPrimaryAccountInfo(
+          signin::ConsentLevel::kSignin);
+  // Registering a GPM PIN knowledge factor for the account "Account 1".
+  ASSERT_TRUE(Register());
+  BoolFuture setup_future;
+  manager_.SetupWithPIN(/*pin=*/"123456", setup_future.GetCallback());
+  EXPECT_TRUE(setup_future.Wait());
+  // Enforce enclave manager to be unregistered (for being able to test the
+  // logic of storing the opportunistically retrieved key). After clearing
+  // registration, the GPM PIN knowledge factor remains available.
+  // The GPM PIN will be needed for storing opportunistically retrieved keys.
+  manager_.ClearRegistrationForTesting();
+  ASSERT_FALSE(manager_.IsRegistered());
+  // "Account 1" should have no keys.
+  EXPECT_EQ(manager_.store_keys_count(), 0u);
+
+  // Signing-in with another primary account (let's call it "Account 2").
+  identity_test_env_.MakePrimaryAccountAvailable("test2@gmail.com",
+                                                 signin::ConsentLevel::kSignin);
+  const CoreAccountInfo account_2 =
+      identity_test_env_.identity_manager()->GetPrimaryAccountInfo(
+          signin::ConsentLevel::kSignin);
+  identity_test_env_.SetCookieAccounts({});
+  EXPECT_THAT(GaiaAccountsInState(),
+              testing::UnorderedElementsAre(account_2.gaia.ToString()));
+
+  // While the primary account is "Account 2", we are trying to store the
+  // opportunistically retrieved key for the other account ("Account 1").
+  std::vector<uint8_t> key(kTestKey.begin(), kTestKey.end());
+  base::HistogramTester histogram_tester;
+  EnclaveKeysWaiter enclave_keys_waiter(&manager_);
+  manager_.StoreKeys(account_1.gaia,
+                     {trusted_vault::TrustedVaultKeyAndVersion(std::move(key),
+                                                               kSecretVersion)},
+                     /*user_action_trigger=*/std::nullopt);
+  // Since the account "Account 1" is not signed-in, the opportunistically
+  // retrieved key can't be stored immediately (it will be cached for some
+  // time). The corresponding metric is expected to be published in this case.
+  histogram_tester.ExpectBucketCount(
+      "WebAuthentication.GPM.RecoveryEvent",
+      webauthn::metrics::WebAuthenticationGPMRecoveryEvent::
+          kStoreKeysFromOpportunisticFlowCachedKeysBecauseAccountDoesNotMatch,
+      1);
+
+  // Signing-in with the "Account 1" account again.
+  identity_test_env_.MakePrimaryAccountAvailable(account_1.email,
+                                                 signin::ConsentLevel::kSignin);
+  identity_test_env_.SetCookieAccounts({});
+  EXPECT_THAT(GaiaAccountsInState(),
+              testing::UnorderedElementsAre(account_1.gaia.ToString()));
+
+  // Since the "Account 1" account is signed-in now, the cached
+  // opportunistically retrieved key should be stored now.
+  EXPECT_EQ(enclave_keys_waiter.Wait(),
+            EnclaveManager::OutOfContextRecoveryOutcome::
+                kStoreKeysFromOpportunisticFlowSucceeded);
+  EXPECT_EQ(manager_.store_keys_count(), 1u);
+
+  // The metrics indicating what happened with the cached key.
+  histogram_tester.ExpectBucketCount(
+      "WebAuthentication.GPM.CachedOpportunisticallyRetrievedKeyEvent",
+      webauthn::metrics::
+          WebAuthenticationGPMCachedOpportunisticallyRetrievedKeyEvent::
+              kStoreKeysFromOpportunisticFlowCachedKeysStoringAfterSignIn,
+      1);
+  histogram_tester.ExpectBucketCount(
+      "WebAuthentication.GPM.RecoveryEvent",
+      webauthn::metrics::WebAuthenticationGPMRecoveryEvent::
+          kStoreKeysFromOpportunisticFlowStarted,
+      1);
+  histogram_tester.ExpectBucketCount(
+      "WebAuthentication.GPM.RecoveryEvent",
+      webauthn::metrics::WebAuthenticationGPMRecoveryEvent::
+          kStoreKeysFromOpportunisticFlowSucceeded,
+      1);
+}
+#endif
+
 class EnclaveManagerMockTimeTest : public EnclaveManagerTest {
  public:
   EnclaveManagerMockTimeTest()
       : EnclaveManagerTest(base::test::TaskEnvironment::TimeSource::MOCK_TIME) {
   }
 };
+
+class OpportunisticKeyRetrievalEnclaveManagerMockTimeTest
+    : public EnclaveManagerMockTimeTest {
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_{
+      device::kWebAuthnOpportunisticRetrieval};
+};
+
+#if !BUILDFLAG(IS_CHROMEOS)
+TEST_F(OpportunisticKeyRetrievalEnclaveManagerMockTimeTest,
+       DiscardingOpportunisticallyRetrievedKeyAfterTimeout) {
+  // Trying to store the opportunistically retrieved key of some other account.
+  std::vector<uint8_t> key(kTestKey.begin(), kTestKey.end());
+  base::HistogramTester histogram_tester;
+  manager_.StoreKeys(GaiaId("some_other_account_id"),
+                     {trusted_vault::TrustedVaultKeyAndVersion(std::move(key),
+                                                               kSecretVersion)},
+                     /*user_action_trigger=*/std::nullopt);
+  // Since the other account is not signed-in, the opportunistically
+  // retrieved key can't be stored immediately (it will be cached for some
+  // time). The corresponding metric is expected to be published in this case.
+  histogram_tester.ExpectBucketCount(
+      "WebAuthentication.GPM.RecoveryEvent",
+      webauthn::metrics::WebAuthenticationGPMRecoveryEvent::
+          kStoreKeysFromOpportunisticFlowCachedKeysBecauseAccountDoesNotMatch,
+      1);
+
+  int ttl_seconds =
+      device::kWebAuthnOpportunisticRetrievalTimeToKeepCachedKeySeconds.Get();
+
+  // Move to the point in time before the timeout. The cached key should not be
+  // discarded before the timeout.
+  task_env_.FastForwardBy(base::Seconds(ttl_seconds - 1));
+  histogram_tester.ExpectBucketCount(
+      "WebAuthentication.GPM.CachedOpportunisticallyRetrievedKeyEvent",
+      webauthn::metrics::
+          WebAuthenticationGPMCachedOpportunisticallyRetrievedKeyEvent::
+              kStoreKeysFromOpportunisticFlowCachedKeysRemovedAfterTimeout,
+      0);
+
+  // Move a bit beyond the timeout. The cached key should be discarded.
+  task_env_.FastForwardBy(base::Seconds(2));
+  histogram_tester.ExpectBucketCount(
+      "WebAuthentication.GPM.CachedOpportunisticallyRetrievedKeyEvent",
+      webauthn::metrics::
+          WebAuthenticationGPMCachedOpportunisticallyRetrievedKeyEvent::
+              kStoreKeysFromOpportunisticFlowCachedKeysRemovedAfterTimeout,
+      1);
+}
+
+TEST_F(OpportunisticKeyRetrievalEnclaveManagerMockTimeTest,
+       OverwritingAndDiscardingOpportunisticallyRetrievedKey) {
+  // Trying to store the opportunistically retrieved key of some other account.
+  std::vector<uint8_t> key_1(kTestKey.begin(), kTestKey.end());
+  base::HistogramTester histogram_tester;
+  manager_.StoreKeys(GaiaId("some_other_account_id_1"),
+                     {trusted_vault::TrustedVaultKeyAndVersion(std::move(key_1),
+                                                               kSecretVersion)},
+                     /*user_action_trigger=*/std::nullopt);
+  // Since the other account is not signed-in, the opportunistically
+  // retrieved key will be cached.
+  histogram_tester.ExpectBucketCount(
+      "WebAuthentication.GPM.RecoveryEvent",
+      webauthn::metrics::WebAuthenticationGPMRecoveryEvent::
+          kStoreKeysFromOpportunisticFlowCachedKeysBecauseAccountDoesNotMatch,
+      1);
+
+  int ttl_seconds =
+      device::kWebAuthnOpportunisticRetrievalTimeToKeepCachedKeySeconds.Get();
+
+  // Move to the point in time before the timeout, and overwrite the cached key
+  // with another opportunistically retrieved key.
+  task_env_.FastForwardBy(base::Seconds(ttl_seconds - 1));
+  std::vector<uint8_t> key_2(kTestKey.begin(), kTestKey.end());
+  manager_.StoreKeys(GaiaId("some_other_account_id_2"),
+                     {trusted_vault::TrustedVaultKeyAndVersion(std::move(key_2),
+                                                               kSecretVersion)},
+                     /*user_action_trigger=*/std::nullopt);
+  // This metric is being published when the previous key is being overwritten.
+  histogram_tester.ExpectBucketCount(
+      "WebAuthentication.GPM.CachedOpportunisticallyRetrievedKeyEvent",
+      webauthn::metrics::
+          WebAuthenticationGPMCachedOpportunisticallyRetrievedKeyEvent::
+              kStoreKeysFromOpportunisticFlowCachedKeysHaveBeenOverwritten,
+      1);
+  // This metric is being incremented when the new key is being cached.
+  histogram_tester.ExpectBucketCount(
+      "WebAuthentication.GPM.RecoveryEvent",
+      webauthn::metrics::WebAuthenticationGPMRecoveryEvent::
+          kStoreKeysFromOpportunisticFlowCachedKeysBecauseAccountDoesNotMatch,
+      2);
+
+  // Move to the point in time before the timeout of the newly cached key. This
+  // key should not be discarded before its TTL timeout.
+  task_env_.FastForwardBy(base::Seconds(ttl_seconds - 1));
+  histogram_tester.ExpectBucketCount(
+      "WebAuthentication.GPM.CachedOpportunisticallyRetrievedKeyEvent",
+      webauthn::metrics::
+          WebAuthenticationGPMCachedOpportunisticallyRetrievedKeyEvent::
+              kStoreKeysFromOpportunisticFlowCachedKeysRemovedAfterTimeout,
+      0);
+
+  // The new cached key will be discarded after its TTL timeout.
+  task_env_.FastForwardBy(base::Seconds(2));
+  histogram_tester.ExpectBucketCount(
+      "WebAuthentication.GPM.CachedOpportunisticallyRetrievedKeyEvent",
+      webauthn::metrics::
+          WebAuthenticationGPMCachedOpportunisticallyRetrievedKeyEvent::
+              kStoreKeysFromOpportunisticFlowCachedKeysRemovedAfterTimeout,
+      1);
+}
+#endif
 
 TEST_F(EnclaveManagerMockTimeTest, AutomaticRenewal) {
   const std::string pin = "123456";
@@ -2222,9 +2474,6 @@ TEST_F(EnclaveManagerMockTimeTest, AutomaticRenewal) {
   // Ensure that no operation is outstanding.
   task_env_.FastForwardBy(base::Hours(1));
 }
-
-// UV keys are only supported on Windows macOS, and ChromeOS at this time.
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS)
 
 std::string ToString(base::span<const uint8_t> v) {
   return std::string(v.begin(), v.end());
@@ -2448,7 +2697,13 @@ TEST_F(EnclaveUVTest, UserVerifyingKeyUseExisting) {
             EnclaveManager::UvKeyState::kUsesSystemUI);
 }
 
-TEST_F(EnclaveUVTest, OpportunisticStoreKeys) {
+class OpportunisticKeyRetrievalEnclaveUVTest : public EnclaveUVTest {
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_{
+      device::kWebAuthnOpportunisticRetrieval};
+};
+
+TEST_F(OpportunisticKeyRetrievalEnclaveUVTest, OpportunisticStoreKeys) {
   security_domain_service_->pretend_there_are_members();
   ASSERT_FALSE(manager_.IsRegistered());
   EXPECT_EQ(manager_.store_keys_count(), 0u);
@@ -2456,11 +2711,16 @@ TEST_F(EnclaveUVTest, OpportunisticStoreKeys) {
   std::vector<uint8_t> key(kTestKey.begin(), kTestKey.end());
   base::HistogramTester histogram_tester;
   EnclaveKeysWaiter enclave_keys_waiter(&manager_);
-  manager_.StoreKeys(gaia_id_, {std::move(key)},
-                     /*last_key_version=*/kSecretVersion);
+  manager_.StoreKeys(gaia_id_,
+                     {trusted_vault::TrustedVaultKeyAndVersion(std::move(key),
+                                                               kSecretVersion)},
+                     /*user_action_trigger=*/
+                     trusted_vault::TrustedVaultUserActionTriggerForUMA::
+                         kPasskeyUnlockProfileMenu);
   EXPECT_EQ(enclave_keys_waiter.Wait(),
             EnclaveManager::OutOfContextRecoveryOutcome::
                 kStoreKeysFromOpportunisticFlowSucceeded);
+  EXPECT_FALSE(manager_.has_wrapped_pin());
 
   histogram_tester.ExpectBucketCount(
       "WebAuthentication.GPM.RecoveryEvent",
@@ -2473,20 +2733,37 @@ TEST_F(EnclaveUVTest, OpportunisticStoreKeys) {
       webauthn::metrics::WebAuthenticationGPMRecoveryEvent::
           kStoreKeysFromOpportunisticFlowSucceeded,
       1);
+  histogram_tester.ExpectUniqueSample(
+      "PasswordManager.UserActionTriggerThatRetrievedPasskeySecret",
+      /*sample=*/
+      trusted_vault::TrustedVaultUserActionTriggerForUMA::
+          kPasskeyUnlockProfileMenu,
+      /*expected_bucket_count=*/1);
 }
 
-TEST_F(EnclaveUVTest, OpportunisticStoreKeysAreIgnoredWhenFeatureIsDisabled) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndDisableFeature(
-      device::kWebAuthnOpportunisticRetrieval);
+class NoOpportunisticKeyRetrievalEnclaveUVTest : public EnclaveUVTest {
+ public:
+  NoOpportunisticKeyRetrievalEnclaveUVTest() {
+    scoped_feature_list_.InitAndDisableFeature(
+        device::kWebAuthnOpportunisticRetrieval);
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+TEST_F(NoOpportunisticKeyRetrievalEnclaveUVTest,
+       OpportunisticStoreKeysAreIgnoredWhenFeatureIsDisabled) {
   security_domain_service_->pretend_there_are_members();
   ASSERT_FALSE(manager_.IsRegistered());
   EXPECT_EQ(manager_.store_keys_count(), 0u);
 
   std::vector<uint8_t> key(kTestKey.begin(), kTestKey.end());
   base::HistogramTester histogram_tester;
-  manager_.StoreKeys(gaia_id_, {std::move(key)},
-                     /*last_key_version=*/kSecretVersion);
+  manager_.StoreKeys(gaia_id_,
+                     {trusted_vault::TrustedVaultKeyAndVersion(std::move(key),
+                                                               kSecretVersion)},
+                     /*user_action_trigger=*/std::nullopt);
   histogram_tester.ExpectBucketCount(
       "WebAuthentication.GPM.RecoveryEvent",
       webauthn::metrics::WebAuthenticationGPMRecoveryEvent::
@@ -2501,7 +2778,8 @@ TEST_F(EnclaveUVTest, OpportunisticStoreKeysAreIgnoredWhenFeatureIsDisabled) {
   EXPECT_FALSE(manager_.IsRegistered());
 }
 
-TEST_F(EnclaveUVTest, OpportunisticStoreKeysRedundant) {
+TEST_F(OpportunisticKeyRetrievalEnclaveUVTest,
+       OpportunisticStoreKeysRedundant) {
   ASSERT_FALSE(manager_.IsRegistered());
   EXPECT_EQ(manager_.store_keys_count(), 0u);
 
@@ -2512,8 +2790,11 @@ TEST_F(EnclaveUVTest, OpportunisticStoreKeysRedundant) {
   std::vector<uint8_t> key(kTestKey.begin(), kTestKey.end());
   base::HistogramTester histogram_tester;
   EnclaveKeysWaiter enclave_keys_waiter(&manager_);
-  manager_.StoreKeys(gaia_id_, {std::move(key)},
-                     /*last_key_version=*/kSecretVersion);
+  manager_.StoreKeys(gaia_id_,
+                     {trusted_vault::TrustedVaultKeyAndVersion(std::move(key),
+                                                               kSecretVersion)},
+                     trusted_vault::TrustedVaultUserActionTriggerForUMA::
+                         kPasskeyUnlockProfileMenu);
   EXPECT_EQ(enclave_keys_waiter.Wait(),
             EnclaveManager::OutOfContextRecoveryOutcome::
                 kStoreKeysFromOpportunisticFlowIgnoredRedundant);
@@ -2540,7 +2821,8 @@ TEST_F(EnclaveUVTest, OpportunisticStoreKeysRedundant) {
 // On Chrome OS, `AreUserVerifyingKeysSupported` always returns true, thus this
 // test cannot establish its preconditions.
 
-TEST_F(EnclaveUVTest, OpportunisticStoreKeysNoUVButHasUsableGpmPin) {
+TEST_F(OpportunisticKeyRetrievalEnclaveUVTest,
+       OpportunisticStoreKeysNoUVButHasUsableGpmPin) {
   const std::string pin = "123456";
   BoolFuture setup_future;
   manager_.SetupWithPIN(pin, setup_future.GetCallback());
@@ -2559,8 +2841,11 @@ TEST_F(EnclaveUVTest, OpportunisticStoreKeysNoUVButHasUsableGpmPin) {
   std::vector<uint8_t> key(kTestKey.begin(), kTestKey.end());
   base::HistogramTester histogram_tester;
   EnclaveKeysWaiter enclave_keys_waiter(&manager_);
-  manager_.StoreKeys(gaia_id_, {std::move(key)},
-                     /*last_key_version=*/kSecretVersion);
+  manager_.StoreKeys(gaia_id_,
+                     {trusted_vault::TrustedVaultKeyAndVersion(std::move(key),
+                                                               kSecretVersion)},
+                     trusted_vault::TrustedVaultUserActionTriggerForUMA::
+                         kPasskeyUnlockProfileMenu);
   EXPECT_EQ(enclave_keys_waiter.Wait(),
             EnclaveManager::OutOfContextRecoveryOutcome::
                 kStoreKeysFromOpportunisticFlowSucceeded);
@@ -2576,9 +2861,11 @@ TEST_F(EnclaveUVTest, OpportunisticStoreKeysNoUVButHasUsableGpmPin) {
       webauthn::metrics::WebAuthenticationGPMRecoveryEvent::
           kStoreKeysFromOpportunisticFlowSucceeded,
       1);
+  EXPECT_TRUE(manager_.has_wrapped_pin());
 }
 
-TEST_F(EnclaveUVTest, OpportunisticStoreKeysNoUVNoGpmPin) {
+TEST_F(OpportunisticKeyRetrievalEnclaveUVTest,
+       OpportunisticStoreKeysNoUVNoGpmPin) {
   ASSERT_FALSE(manager_.IsRegistered());
   EXPECT_EQ(manager_.store_keys_count(), 0u);
   DisableUVKeySupport();
@@ -2586,8 +2873,11 @@ TEST_F(EnclaveUVTest, OpportunisticStoreKeysNoUVNoGpmPin) {
   std::vector<uint8_t> key(kTestKey.begin(), kTestKey.end());
   base::HistogramTester histogram_tester;
   EnclaveKeysWaiter enclave_keys_waiter(&manager_);
-  manager_.StoreKeys(gaia_id_, {std::move(key)},
-                     /*last_key_version=*/kSecretVersion);
+  manager_.StoreKeys(gaia_id_,
+                     {trusted_vault::TrustedVaultKeyAndVersion(std::move(key),
+                                                               kSecretVersion)},
+                     trusted_vault::TrustedVaultUserActionTriggerForUMA::
+                         kPasskeyUnlockProfileMenu);
   EXPECT_EQ(enclave_keys_waiter.Wait(),
             EnclaveManager::OutOfContextRecoveryOutcome::
                 kStoreKeysFromOpportunisticFlowIgnoredNoUV);
@@ -2863,7 +3153,5 @@ TEST_F(EnclaveUVTest, UnregisterOnMissingUserVerifyingKey) {
 }
 
 #endif  // BUILDFLAG(IS_WIN)
-
-#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS)
 
 #endif  // !defined(MEMORY_SANITIZER)

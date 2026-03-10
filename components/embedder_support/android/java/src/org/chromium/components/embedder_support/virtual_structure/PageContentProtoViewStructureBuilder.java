@@ -92,7 +92,7 @@ public class PageContentProtoViewStructureBuilder implements VirtualStructurePro
             case CONTENT_ATTRIBUTE_IMAGE -> {
                 return "IMG";
             }
-            case CONTENT_ATTRIBUTE_SVG -> {
+            case CONTENT_ATTRIBUTE_SVG_ROOT -> {
                 return "SVG";
             }
             case CONTENT_ATTRIBUTE_CANVAS -> {
@@ -198,8 +198,7 @@ public class PageContentProtoViewStructureBuilder implements VirtualStructurePro
         viewRoot.asyncCommit();
     }
 
-    @Nullable
-    private static Selection getSelectionInfo(FrameData frameData) {
+    private static @Nullable Selection getSelectionInfo(FrameData frameData) {
         if (frameData.hasFrameInteractionInfo()) {
             var frameInteractionInfo = frameData.getFrameInteractionInfo();
             if (frameInteractionInfo.hasSelection()) {

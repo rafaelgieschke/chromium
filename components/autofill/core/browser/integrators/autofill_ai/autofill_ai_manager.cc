@@ -14,7 +14,6 @@
 #include <vector>
 
 #include "base/check_deref.h"
-#include "base/containers/contains.h"
 #include "base/containers/extend.h"
 #include "base/containers/fixed_flat_map.h"
 #include "base/containers/flat_set.h"
@@ -54,11 +53,13 @@
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/foundations/autofill_client.h"
 #include "components/autofill/core/browser/integrators/autofill_ai/autofill_ai_import_utils.h"
+#include "components/autofill/core/browser/integrators/autofill_ai/autofill_ai_wallet_utils.h"
 #include "components/autofill/core/browser/integrators/autofill_ai/metrics/autofill_ai_logger.h"
 #include "components/autofill/core/browser/integrators/autofill_ai/metrics/autofill_ai_metrics.h"
 #include "components/autofill/core/browser/logging/log_manager.h"
 #include "components/autofill/core/browser/metrics/autofill_metrics_utils.h"
 #include "components/autofill/core/browser/ml_model/autofill_ai/autofill_ai_model_executor.h"
+#include "components/autofill/core/browser/network/autofill_ai/wallet_pass_access_manager.h"
 #include "components/autofill/core/browser/permissions/autofill_ai/autofill_ai_permission_utils.h"
 #include "components/autofill/core/browser/strike_databases/autofill_ai/autofill_ai_save_strike_database_by_attribute.h"
 #include "components/autofill/core/browser/strike_databases/autofill_ai/autofill_ai_save_strike_database_by_host.h"
@@ -85,15 +86,15 @@ namespace autofill {
 namespace {
 
 bool DidUserExplicitlyDeclineImportPrompt(
-    AutofillClient::AutofillAiBubbleClosedReason close_reason) {
-  switch (close_reason) {
-    case AutofillClient::AutofillAiBubbleClosedReason::kCancelled:
-    case AutofillClient::AutofillAiBubbleClosedReason::kClosed:
+    AutofillClient::AutofillAiBubbleResult result) {
+  switch (result) {
+    case AutofillClient::AutofillAiBubbleResult::kCancelled:
+    case AutofillClient::AutofillAiBubbleResult::kClosed:
       return true;
-    case AutofillClient::AutofillAiBubbleClosedReason::kUnknown:
-    case AutofillClient::AutofillAiBubbleClosedReason::kAccepted:
-    case AutofillClient::AutofillAiBubbleClosedReason::kNotInteracted:
-    case AutofillClient::AutofillAiBubbleClosedReason::kLostFocus:
+    case AutofillClient::AutofillAiBubbleResult::kUnknown:
+    case AutofillClient::AutofillAiBubbleResult::kAccepted:
+    case AutofillClient::AutofillAiBubbleResult::kNotInteracted:
+    case AutofillClient::AutofillAiBubbleResult::kLostFocus:
       return false;
   }
 }
@@ -319,11 +320,11 @@ bool AutofillAiManager::MaybeImportForm(const FormStructure& form,
       GetEntityPromptCandidates(form);
 
   bool prompt_shown = false;
-  for (const auto& [prompt_type, prompt_candidate] : prompt_candidates) {
+  for (auto& [prompt_type, candidate_entity] : prompt_candidates) {
     base::UmaHistogramBoolean(
         base::StringPrintf("Autofill.Ai.PromptSuppression.%s.%s",
                            EntityPromptTypeToMetricsString(prompt_type),
-                           EntityTypeToMetricsString(prompt_candidate.type())),
+                           EntityTypeToMetricsString(candidate_entity.type())),
         prompt_shown);
 
     if (prompt_shown) {
@@ -332,17 +333,19 @@ bool AutofillAiManager::MaybeImportForm(const FormStructure& form,
 
     prompt_shown = true;
     AutofillClient::EntityImportPromptResultCallback prompt_result_callback =
-        BindOnce(&AutofillAiManager::HandlePromptResult, GetWeakPtr(),
-                 form.ToFormData(), prompt_candidate, ukm_source_id,
-                 prompt_type);
+        base::BindOnce(&AutofillAiManager::HandlePromptResult, GetWeakPtr(),
+                       form.ToFormData(), candidate_entity, ukm_source_id, prompt_type);
 
-    client_->ShowEntityImportBubble(
-        std::move(prompt_candidate),
-        prompt_type == AutofillClient::AutofillAiImportPromptType::kUpdate
-            ? std::optional(*client_->GetEntityDataManager()->GetEntityInstance(
-                  prompt_candidate.guid()))
-            : std::nullopt,
-        std::move(prompt_result_callback));
+    std::optional<EntityInstance> old_entity;
+    if (prompt_type == AutofillClient::AutofillAiImportPromptType::kUpdate) {
+      old_entity = *client_->GetEntityDataManager()->GetEntityInstance(
+          candidate_entity.guid());
+    }
+    const bool is_save_synchronous = !IsMaskedStorageSupported(
+        candidate_entity.type(), candidate_entity.record_type());
+    client_->ShowEntityImportBubble(std::move(candidate_entity),
+                                    std::move(old_entity), is_save_synchronous,
+                                    std::move(prompt_result_callback));
   }
   return prompt_shown;
 }
@@ -352,19 +355,17 @@ void AutofillAiManager::HandlePromptResult(
     EntityInstance entity,
     ukm::SourceId ukm_source_id,
     AutofillClient::AutofillAiImportPromptType prompt_type,
-    AutofillClient::AutofillAiBubbleClosedReason close_reason) {
+    AutofillClient::AutofillAiBubbleResult result) {
   logger_.OnImportPromptResult(form, prompt_type, entity.type(),
-                               entity.record_type(), close_reason,
-                               ukm_source_id);
+                               entity.record_type(), result, ukm_source_id);
   EntityDataManager& entity_manager =
       CHECK_DEREF(client_->GetEntityDataManager());
 
-  AddOrClearImportPromptStrikes(prompt_type, close_reason, form.url(), entity);
+  AddOrClearImportPromptStrikes(prompt_type, result, form.url(), entity);
 
   const bool prompt_accepted =
-      close_reason == AutofillClient::AutofillAiBubbleClosedReason::kAccepted;
+      result == AutofillClient::AutofillAiBubbleResult::kAccepted;
 
-  // This switch should handle prompt-type-specific logic.
   switch (prompt_type) {
     case AutofillClient::AutofillAiImportPromptType::kSave:
       client_->TriggerAutofillAiSavePromptSurvey(
@@ -376,11 +377,31 @@ void AutofillAiManager::HandlePromptResult(
       break;
   }
 
-  // Only add logic that is common across all prompt types below this line.
-  // Otherwise use the switch above.
+  if (!prompt_accepted) {
+    return;
+  }
 
-  if (prompt_accepted) {
+  if (!IsMaskedStorageSupported(entity.type(), entity.record_type())) {
     entity_manager.AddOrUpdateEntityInstance(std::move(entity));
+    return;
+  }
+
+  base::OnceCallback<void(std::optional<EntityInstance>)> callback =
+      base::BindOnce(&HandleWalletUpsertResponse,
+                     client_->GetEntityDataManager()->GetWeakPtr(),
+                     client_->GetWeakPtr(), prompt_type, entity);
+  // For now, asynchronous saves imply saving to Wallet.
+  if (WalletPassAccessManager* wallet_manager =
+          client_->GetWalletPassAccessManager()) {
+    switch (prompt_type) {
+      case AutofillClient::AutofillAiImportPromptType::kSave:
+      case AutofillClient::AutofillAiImportPromptType::kMigrate:
+        wallet_manager->SaveWalletEntityInstance(entity, std::move(callback));
+        break;
+      case AutofillClient::AutofillAiImportPromptType::kUpdate:
+        wallet_manager->UpdateWalletEntityInstance(entity, std::move(callback));
+        break;
+    }
   }
 }
 
@@ -425,20 +446,6 @@ bool AutofillAiManager::ShouldDisplayIph(const FormStructure& form,
     return false;
   }
 
-  // The user must have at least one address or payments instrument to indicate
-  // that they are an active Autofill user.
-  const AddressDataManager& adm =
-      client_->GetPersonalDataManager().address_data_manager();
-  const PaymentsDataManager& paydm =
-      client_->GetPersonalDataManager().payments_data_manager();
-  if (adm.GetProfiles().empty() && paydm.GetCreditCards().empty() &&
-      paydm.GetIbans().empty() && !paydm.HasEwalletAccounts() &&
-      !paydm.HasMaskedBankAccounts() &&
-      !base::FeatureList::IsEnabled(
-          features::
-              kAutofillAiIgnoreWhetherUserHasAddressOrPaymentsDataForIph)) {
-    return false;
-  }
   const AutofillField* const focused_field = form.GetFieldById(field_id);
   if (!focused_field) {
     return false;
@@ -449,10 +456,10 @@ bool AutofillAiManager::ShouldDisplayIph(const FormStructure& form,
   std::map<EntityType, DenseSet<AttributeType>> attributes_in_form;
   for (auto [entity, fields_and_types] : RationalizeAndDetermineAttributeTypes(
            form.fields(), focused_field->section())) {
-    if (base::Contains(fields_and_types, focused_field->global_id(),
-                       [](const AutofillFieldWithAttributeType& f) {
-                         return f.field->global_id();
-                       }) &&
+    if (std::ranges::contains(fields_and_types, focused_field->global_id(),
+                              [](const AutofillFieldWithAttributeType& f) {
+                                return f.field->global_id();
+                              }) &&
         MayPerformAutofillAiAction(*client_, AutofillAiAction::kIphForOptIn,
                                    entity)) {
       attributes_in_form[entity].insert_all(
@@ -471,24 +478,22 @@ LogManager* AutofillAiManager::GetCurrentLogManager() {
 
 void AutofillAiManager::AddOrClearImportPromptStrikes(
     AutofillClient::AutofillAiImportPromptType prompt_type,
-    AutofillClient::AutofillAiBubbleClosedReason close_reason,
+    AutofillClient::AutofillAiBubbleResult result,
     const GURL& url,
     const EntityInstance& entity) {
   switch (prompt_type) {
     case AutofillClient::AutofillAiImportPromptType::kSave:
     case AutofillClient::AutofillAiImportPromptType::kMigrate:
-      if (close_reason ==
-          AutofillClient::AutofillAiBubbleClosedReason::kAccepted) {
+      if (result == AutofillClient::AutofillAiBubbleResult::kAccepted) {
         ClearStrikesForSave(url, entity);
-      } else if (DidUserExplicitlyDeclineImportPrompt(close_reason)) {
+      } else if (DidUserExplicitlyDeclineImportPrompt(result)) {
         AddStrikeForSaveAttempt(url, entity);
       }
       break;
     case AutofillClient::AutofillAiImportPromptType::kUpdate:
-      if (close_reason ==
-          AutofillClient::AutofillAiBubbleClosedReason::kAccepted) {
+      if (result == AutofillClient::AutofillAiBubbleResult::kAccepted) {
         ClearStrikesForUpdate(entity.guid());
-      } else if (DidUserExplicitlyDeclineImportPrompt(close_reason)) {
+      } else if (DidUserExplicitlyDeclineImportPrompt(result)) {
         AddStrikeForUpdateAttempt(entity.guid());
       }
       break;
@@ -694,14 +699,11 @@ AutofillAiManager::GetUpdatePromptCandidates(
       // This will contain the attributes of the new to-be-updated entity.
       base::flat_set<AttributeInstance, AttributeInstance::CompareByType>
           new_attributes = std::move(mergeability->mergeable_attributes);
-      for (const AttributeInstance& curr_attribute :
-           saved_entity.attributes()) {
-        // Only add the attributes of the saved entity that weren't mergeable
-        // with the observed entity. The other attributes were added by
-        // `mergeable_attributes`.
-        // Note that `base::flat_set::insert` does exactly that.
-        new_attributes.insert(curr_attribute);
-      }
+      // First add the attributes from the observed entity since the saved
+      // entity only has masked attributes.
+      new_attributes.insert_range(observed_entity.attributes());
+      // Add the remaining attributes from the saved entity.
+      new_attributes.insert_range(saved_entity.attributes());
       update_candidates.emplace_back(
           AutofillClient::AutofillAiImportPromptType::kUpdate,
           EntityInstance(saved_entity.type(), std::move(new_attributes),
@@ -737,6 +739,11 @@ AutofillAiManager::GetMigratePromptCandidates(
       case EntityInstance::RecordType::kServerWallet:
         saved_server_entities.push_back(&entity);
         break;
+      case EntityInstance::RecordType::kAccessibilityAnnotator:
+        // kAccessibilityAnnotator entities are linked to a database in the
+        // Accessibility Annotator component. They must not be saved to the
+        // server to ensure they can be deleted if the source is removed.
+        break;
     }
   }
 
@@ -767,18 +774,8 @@ AutofillAiManager::GetMigratePromptCandidates(
           observed_entity.IsSubsetOf(*local_entity)) {
         migrate_candidates.emplace_back(
             AutofillClient::AutofillAiImportPromptType::kMigrate,
-            EntityInstance(
-                local_entity->type(),
-                base::ToVector(local_entity->attributes()),
-                local_entity->guid(), local_entity->nickname(),
-                local_entity->date_modified(), local_entity->use_count(),
-                local_entity->use_date(),
-                EntityInstance::RecordType::kServerWallet,
-                // Entities that are migrated from local to server are never
-                // read-only, since local entities can always be edited by the
-                // users, so can their server counterpart.
-                EntityInstance::AreAttributesReadOnly(false),
-                /*frecency_override=*/""));
+            local_entity->CopyWithNewRecordType(
+                EntityInstance::RecordType::kServerWallet));
       }
     }
   }

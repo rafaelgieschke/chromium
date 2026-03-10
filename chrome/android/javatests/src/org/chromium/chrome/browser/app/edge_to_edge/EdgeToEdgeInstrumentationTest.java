@@ -33,7 +33,6 @@ import org.chromium.base.test.util.CriteriaHelper;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.DoNotBatch;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
@@ -99,8 +98,8 @@ public class EdgeToEdgeInstrumentationTest {
     // Declare the watcher before the app launches.
     HistogramWatcher mEligibleHistograms =
             HistogramWatcher.newBuilder()
-                    .expectBooleanRecord("Android.EdgeToEdge.Eligible", true)
-                    .expectNoRecords("Android.EdgeToEdge.IneligibilityReason")
+                    .expectBooleanRecord("Android.EdgeToEdge.Eligible2.OnCreateController", true)
+                    .expectNoRecords("Android.EdgeToEdge.IneligibilityReason2.OnCreateController")
                     .build();
 
     @Before
@@ -239,6 +238,7 @@ public class EdgeToEdgeInstrumentationTest {
 
     @Test
     @MediumTest
+    @DisabledTest(message = "crbug.com/455479243")
     public void testRotationToPortrait_WhileOptedIntoE2E() {
         activateFeatureToEdge();
         rotate(Configuration.ORIENTATION_LANDSCAPE);
@@ -252,52 +252,6 @@ public class EdgeToEdgeInstrumentationTest {
 
     @Test
     @MediumTest
-    @DisableFeatures(ChromeFeatureList.FLOATING_SNACKBAR)
-    public void testSnackbar() throws InterruptedException {
-        activateFeatureToEdge();
-        optOutOfToEdge();
-        var snackbarManager = mActivity.getSnackbarManager();
-        ThreadUtils.runOnUiThreadBlocking(
-                () -> {
-                    snackbarManager.showSnackbar(
-                            Snackbar.make(
-                                    "Test",
-                                    new SnackbarManager.SnackbarController() {},
-                                    Snackbar.TYPE_PERSISTENT,
-                                    Snackbar.UMA_TEST_SNACKBAR));
-                });
-
-        UiUtils.settleDownUI(InstrumentationRegistry.getInstrumentation());
-
-        var adjuster =
-                snackbarManager
-                        .getCurrentSnackbarViewForTesting()
-                        .getEdgeToEdgePadAdjusterForTesting();
-        Assert.assertNotNull("Pad Adjuster should be created", adjuster);
-
-        int heightOnAuto =
-                snackbarManager.getCurrentSnackbarViewForTesting().getViewForTesting().getHeight();
-
-        goToEdge();
-        int heightOnCover =
-                snackbarManager.getCurrentSnackbarViewForTesting().getViewForTesting().getHeight();
-        Assert.assertEquals(
-                "New padding has been added to adjusters when viewport-fit=cover.",
-                mEdgeToEdgeController.getBottomInsetPx(),
-                heightOnCover - heightOnAuto);
-
-        optOutOfToEdge();
-        heightOnAuto =
-                snackbarManager.getCurrentSnackbarViewForTesting().getViewForTesting().getHeight();
-        Assert.assertEquals(
-                "Padding to adjusters has been removed when viewport-fit=auto.",
-                mEdgeToEdgeController.getBottomInsetPx(),
-                heightOnCover - heightOnAuto);
-    }
-
-    @Test
-    @MediumTest
-    @EnableFeatures(ChromeFeatureList.FLOATING_SNACKBAR)
     public void testFloatingSnackbar() throws InterruptedException {
         activateFeatureToEdge();
         optOutOfToEdge();
@@ -313,13 +267,6 @@ public class EdgeToEdgeInstrumentationTest {
                 });
 
         UiUtils.settleDownUI(InstrumentationRegistry.getInstrumentation());
-
-        var adjuster =
-                snackbarManager
-                        .getCurrentSnackbarViewForTesting()
-                        .getEdgeToEdgePadAdjusterForTesting();
-        Assert.assertNull(
-                "Pad Adjuster is not used in the floating snackbar and should be null.", adjuster);
     }
 
     @Test
@@ -410,7 +357,6 @@ public class EdgeToEdgeInstrumentationTest {
     @Test
     @MediumTest
     @Feature({"RenderTest"})
-    @EnableFeatures(ChromeFeatureList.EDGE_TO_EDGE_EVERYWHERE)
     @CommandLineFlags.Add(UiSwitches.ENABLE_EDGE_TO_EDGE_DEBUG_LAYERS)
     public void testPadWithEdgeToEdgeLayout() throws IOException {
         goToEdge();

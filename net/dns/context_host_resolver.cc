@@ -13,6 +13,7 @@
 #include "base/time/tick_clock.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_anonymization_key.h"
+#include "net/dns/canary_domain_service.h"
 #include "net/dns/dns_config.h"
 #include "net/dns/host_cache.h"
 #include "net/dns/host_resolver.h"
@@ -57,12 +58,12 @@ ContextHostResolver::~ContextHostResolver() {
 void ContextHostResolver::OnShutdown() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
+  CHECK(!shutting_down_);
+  shutting_down_ = true;
+
   CHECK(resolve_context_);
   manager_->DeregisterResolveContext(resolve_context_.get());
   resolve_context_.reset();
-
-  CHECK(!shutting_down_);
-  shutting_down_ = true;
 }
 
 std::unique_ptr<HostResolver::ResolveHostRequest>
@@ -88,6 +89,17 @@ ContextHostResolver::CreateRequestInternal(
       std::move(host), std::move(network_anonymization_key),
       std::move(source_net_log), std::move(optional_parameters),
       resolve_context_.get());
+}
+
+std::unique_ptr<CanaryDomainService>
+ContextHostResolver::CreateCanaryDomainService() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (shutting_down_) {
+    return nullptr;
+  }
+
+  return std::make_unique<CanaryDomainService>(resolve_context_->AsSafeRef(),
+                                               weak_ptr_factory_.GetSafeRef());
 }
 
 std::unique_ptr<HostResolver::ResolveHostRequest>
@@ -121,14 +133,16 @@ ContextHostResolver::CreateServiceEndpointRequest(
     NetLogWithSource net_log,
     ResolveHostParameters parameters) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  // TODO(crbug.com/41493696): The ServiceEndpoint API only supports schemeful
-  // hosts for now.
-  CHECK(host.HasScheme());
+
+  if (shutting_down_) {
+    return HostResolver::CreateFailingServiceEndpointRequest(
+        ERR_CONTEXT_SHUT_DOWN);
+  }
 
   // ServiceEndpointRequestImpl::Start() takes care of context shut down.
   return manager_->CreateServiceEndpointRequest(
-      host.AsSchemeHostPort(), std::move(network_anonymization_key),
-      std::move(net_log), std::move(parameters), resolve_context_.get());
+      std::move(host), std::move(network_anonymization_key), std::move(net_log),
+      std::move(parameters), resolve_context_.get());
 }
 
 std::unique_ptr<HostResolver::ProbeRequest>
@@ -154,7 +168,7 @@ HostCache* ContextHostResolver::GetHostCache() {
   return resolve_context_->host_cache();
 }
 
-base::Value::Dict ContextHostResolver::GetDnsConfigAsValue() const {
+base::DictValue ContextHostResolver::GetDnsConfigAsValue() const {
   return manager_->GetDnsConfigAsValue();
 }
 

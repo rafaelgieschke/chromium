@@ -36,16 +36,28 @@ namespace {
 
 constexpr bool is_android = !!BUILDFLAG(IS_ANDROID);
 
+#if BUILDFLAG(IS_ANDROID)
+constexpr char kChromeUINewTabHost[] = "newtab";
+// Returns true if the given `tab` is a chrome newtab page.
+bool IsNewTabPage(const TabMatcher::TabWrapper tab) {
+  if (tab.url.GetScheme() != content::kChromeUIScheme &&
+      tab.url.GetScheme() != content::kChromeNativeScheme) {
+    return false;
+  }
+  return tab.url.GetHost() == kChromeUINewTabHost;
+}
+#endif
+
 int Score(const AutocompleteInput& input,
           const query_parser::QueryNodeVector& input_query_nodes,
           const TabMatcher::TabWrapper tab) {
 #if BUILDFLAG(IS_ANDROID)
   // For Hub Search, remove both ZPS and search suggestions that involve open
-  // chrome prefixed tabs. This is done by returning a score of 0 for all such
+  // chrome new tab pages. This is done by returning a score of 0 for all such
   // tabs.
   if (input.current_page_classification() ==
           ::metrics::OmniboxEventProto::ANDROID_HUB &&
-      tab.url.GetScheme().starts_with(content::kChromeUIScheme)) {
+      IsNewTabPage(tab)) {
     return 0;
   }
 #endif
@@ -192,6 +204,7 @@ AutocompleteMatch OpenTabProvider::CreateOpenTabMatch(
   if (template_url) {
     match.keyword = template_url->keyword();
     match.transition = ui::PAGE_TRANSITION_KEYWORD;
+    match.fill_into_edit.insert(0, match.keyword + u" ");
   }
 
   // For display in the suggestion UI, elide all optional parts. The user has

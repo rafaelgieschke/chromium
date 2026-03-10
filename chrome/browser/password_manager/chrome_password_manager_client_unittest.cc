@@ -246,7 +246,7 @@ class DummyLogReceiver : public autofill::LogReceiver {
   DummyLogReceiver(const DummyLogReceiver&) = delete;
   DummyLogReceiver& operator=(const DummyLogReceiver&) = delete;
 
-  void LogEntry(const base::Value::Dict& entry) override {}
+  void LogEntry(const base::DictValue& entry) override {}
 };
 
 class FakePasswordAutofillAgent
@@ -704,7 +704,7 @@ TEST_F(ChromePasswordManagerClientTest, PasswordManagerBlocklistPolicy) {
                   .empty());
   // Add a URL to the blocklist.
   {
-    base::Value::List blocked_list;
+    base::ListValue blocked_list;
     blocked_list.Append("https://example.com");
     profile()->GetTestingPrefService()->SetList(
         password_manager::prefs::kPasswordManagerBlocklist,
@@ -759,7 +759,8 @@ TEST_F(ChromePasswordManagerClientTest,
   using Observer = autofill::AutofillManager::Observer;
   autofill_driver->GetAutofillManager().NotifyObservers(
       &Observer::OnFieldTypesDetermined, form.global_id(),
-      Observer::FieldTypeSource::kAutofillServer);
+      Observer::FieldTypeSource::kAutofillServer,
+      /*small_forms_were_parsed=*/false);
 
   EXPECT_THAT(static_cast<const password_manager::PasswordManager*>(
                   GetClient()->GetPasswordManager())
@@ -800,7 +801,8 @@ TEST_F(ChromePasswordManagerClientTest,
   using Observer = autofill::AutofillManager::Observer;
   autofill_driver->GetAutofillManager().NotifyObservers(
       &Observer::OnFieldTypesDetermined, form.global_id(),
-      Observer::FieldTypeSource::kHeuristicsOrAutocomplete);
+      Observer::FieldTypeSource::kHeuristicsOrAutocomplete,
+      /*small_forms_were_parsed=*/false);
 
   auto received_predictions =
       static_cast<const password_manager::PasswordManager*>(
@@ -868,7 +870,8 @@ TEST_F(ChromePasswordManagerClientTest,
   using Observer = autofill::AutofillManager::Observer;
   main_driver->GetAutofillManager().NotifyObservers(
       &Observer::OnFieldTypesDetermined, main_form.global_id(),
-      Observer::FieldTypeSource::kAutofillServer);
+      Observer::FieldTypeSource::kAutofillServer,
+      /*small_forms_were_parsed=*/false);
 
   // Even though `OnFieldTypesDetermined` was only called for a single form (the
   // browser form that is the result of merging both forms), password manager
@@ -983,7 +986,7 @@ TEST_P(ChromePasswordManagerClientAutomatedTest, SavingDependsOnAutomation) {
 }
 
 // Check that password manager is disabled on about:blank pages.
-// See https://crbug.com/756587.
+// See https://crbug.com/40088741.
 TEST_F(ChromePasswordManagerClientTest, SavingAndFillingDisabledForAboutBlank) {
   const GURL kUrl(url::kAboutBlankURL);
   NavigateAndCommit(kUrl);
@@ -1694,8 +1697,8 @@ TEST_F(ChromePasswordManagerClientAndroidTest,
       static_cast<MockPasswordStoreInterface*>(
           GetClient()->GetAccountPasswordStore());
   base::WeakPtr<PasswordStoreConsumer> store_consumer;
-  EXPECT_CALL(*mock_account_store, IsAbleToSavePasswords)
-      .WillRepeatedly(Return(true));
+  EXPECT_CALL(*mock_account_store, GetError)
+      .WillRepeatedly(Return(password_manager::ActionableError::kNoError));
   EXPECT_CALL(*mock_account_store, GetLogins(_, _))
       .WillOnce(SaveArg<1>(&store_consumer));
 
@@ -1742,8 +1745,8 @@ TEST_F(ChromePasswordManagerClientAndroidTest,
       static_cast<MockPasswordStoreInterface*>(
           GetClient()->GetProfilePasswordStore());
 
-  EXPECT_CALL(*mock_profile_store, IsAbleToSavePasswords)
-      .WillRepeatedly(Return(true));
+  EXPECT_CALL(*mock_profile_store, GetError)
+      .WillRepeatedly(Return(password_manager::ActionableError::kNoError));
   EXPECT_CALL(*mock_profile_store, GetLogins(_, _))
       .WillOnce(SaveArg<1>(&store_consumer));
   driver->GetPasswordManager()->OnPasswordFormsParsed(driver.get(),

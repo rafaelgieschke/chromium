@@ -2,12 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "components/safe_browsing/content/browser/client_side_detection_host.h"
+
 #include "base/compiler_specific.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
+#include "chrome/browser/interstitials/security_interstitial_page_test_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/chrome_client_side_detection_host_delegate.h"
 #include "chrome/browser/safe_browsing/chrome_safe_browsing_blocking_page_factory.h"
@@ -47,6 +50,8 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/gfx/image/image_unittest_util.h"
 #include "url/gurl.h"
 
 namespace safe_browsing {
@@ -114,6 +119,11 @@ class FakeClientSideDetectionService : public ClientSideDetectionService {
     return visual_tflite_model_;
   }
 
+  int GetClassificationInputHeight() override { return 0; }
+  int GetClassificationInputWidth() override { return 0; }
+  int GetImageEmbeddingInputHeight() override { return 0; }
+  int GetImageEmbeddingInputWidth() override { return 0; }
+
   base::ReadOnlySharedMemoryRegion GetModelSharedMemoryRegion() override {
     base::MappedReadOnlyRegion mapped_region =
         base::ReadOnlySharedMemoryRegion::Create(client_side_model_.length());
@@ -165,6 +175,40 @@ class MockSafeBrowsingUIManager : public SafeBrowsingUIManager {
 
  protected:
   ~MockSafeBrowsingUIManager() override = default;
+};
+
+// This class waits for page load state that ClientSideDetectionHost observes as
+// a WebContentsObserver. ClientSideDetectionHost observes the two functions
+// listed before starting the preclassification check.
+class PaintObserverWaiter : public content::WebContentsObserver {
+ public:
+  explicit PaintObserverWaiter(content::WebContents* web_contents)
+      : WebContentsObserver(web_contents) {}
+
+  void DidFirstVisuallyNonEmptyPaint() override {
+    did_paint_ = true;
+    if (did_fcp_) {
+      run_loop_.Quit();
+    }
+  }
+
+  void OnFirstContentfulPaintInPrimaryMainFrame() override {
+    did_fcp_ = true;
+    if (did_paint_) {
+      run_loop_.Quit();
+    }
+  }
+
+  void Wait() {
+    if (!did_paint_ || !did_fcp_) {
+      run_loop_.Run();
+    }
+  }
+
+ private:
+  bool did_paint_ = false;
+  bool did_fcp_ = false;
+  base::RunLoop run_loop_;
 };
 
 std::string set_up_client_side_model() {
@@ -221,6 +265,7 @@ std::string set_up_client_side_model() {
   csd_model_builder.add_max_shingles_per_page(10);
   csd_model_builder.add_shingle_size(3);
   csd_model_builder.add_tflite_metadata(tflite_metadata_flat);
+  csd_model_builder.add_img_embedding_metadata(tflite_metadata_flat);
   builder.Finish(csd_model_builder.Finish());
 
   return std::string(reinterpret_cast<char*>(builder.GetBufferPointer()),
@@ -338,7 +383,17 @@ IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostPrerenderBrowserTest,
   fake_csd_service.SendModelToRenderers();
 
   GURL page_url(embedded_test_server()->GetURL("/safe_browsing/malware.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), page_url));
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    // With new observers, we wait beyond the prerender state to start
+    // pre-classification.
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), page_url));
+    prerender_helper().AddPrerender(page_url);
+    prerender_helper().NavigatePrimaryPage(page_url);
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), page_url));
+  }
 
   base::RunLoop run_loop;
   fake_csd_service.SetRequestCallback(run_loop.QuitClosure());
@@ -363,12 +418,75 @@ IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostPrerenderBrowserTest,
 
   ASSERT_FALSE(fake_csd_service.saved_callback_is_null());
 
-  EXPECT_EQ(fake_csd_service.saved_request().model_version(), 123);
-
   // Expect an interstitial to be shown.
   EXPECT_CALL(*mock_ui_manager, DisplayBlockingPage(_));
   std::move(fake_csd_service.saved_callback())
       .Run(page_url, true, net::HTTP_OK, std::nullopt);
+}
+
+IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostPrerenderBrowserTest,
+                       SamePageNavigationShouldNotAffectClientSideDetection) {
+  if (base::FeatureList::IsEnabled(kClientSideDetectionKillswitch)) {
+    GTEST_SKIP();
+  }
+
+  FakeClientSideDetectionService fake_csd_service;
+  fake_csd_service.SetModel(client_side_model());
+
+  auto* web_contents = browser()->tab_strip_model()->GetActiveWebContents();
+  std::unique_ptr<ClientSideDetectionHost> csd_host =
+      ChromeClientSideDetectionHostDelegate::CreateHost(web_contents);
+  csd_host->set_client_side_detection_service(fake_csd_service.GetWeakPtr());
+
+  fake_csd_service.SendModelToRenderers();
+
+  GURL page_url(embedded_test_server()->GetURL("/safe_browsing/malware.html"));
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(web_contents);
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), page_url));
+    prerender_helper().AddPrerender(page_url);
+    prerender_helper().NavigatePrimaryPage(page_url);
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), page_url));
+  }
+
+  base::RunLoop run_loop;
+  fake_csd_service.SetRequestCallback(run_loop.QuitClosure());
+
+  // Bypass the pre-classification checks.
+  csd_host->OnPhishingPreClassificationDone(
+      ClientSideDetectionType::TRIGGER_MODELS, /*should_classify=*/true,
+      /*is_sample_ping=*/false, /*did_match_high_confidence_allowlist=*/false);
+
+  run_loop.Run();
+
+  // A same page navigation committing should not cancel classification.
+  // The worst case if navigation in an iframe, so locate the iframe.
+  size_t frame_counter = 0;
+  content::RenderFrameHost* iframe_rfh = nullptr;
+  web_contents->ForEachRenderFrameHostWithAction(
+      [&frame_counter, &iframe_rfh](content::RenderFrameHost* current_frame) {
+        if (frame_counter == 1) {
+          iframe_rfh = current_frame;
+          return content::RenderFrameHost::FrameIterationAction::kStop;
+        }
+        frame_counter++;
+        return content::RenderFrameHost::FrameIterationAction::kContinue;
+      });
+
+  ASSERT_TRUE(content::ExecJs(iframe_rfh, "window.location.hash='#foo';"));
+
+  ASSERT_FALSE(fake_csd_service.saved_callback_is_null());
+
+  // Expect an interstitial to be shown. We intentionally use real ui manager to
+  // check that all ui manager pipeline works correctly.
+  content::TestNavigationObserver observer(web_contents);
+  std::move(fake_csd_service.saved_callback())
+      .Run(page_url, true, net::HTTP_OK, std::nullopt);
+  observer.Wait();
+  EXPECT_TRUE(
+      chrome_browser_interstitials::IsShowingInterstitial(web_contents));
 }
 
 IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostPrerenderBrowserTest,
@@ -395,13 +513,25 @@ IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostPrerenderBrowserTest,
   fake_csd_service.SetRequestCallback(run_loop.QuitClosure());
 
   const GURL initial_url(embedded_test_server()->GetURL("/title1.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  }
 
   // Prerender then activate a phishing page.
   const GURL prerender_url =
       embedded_test_server()->GetURL("/safe_browsing/malware.html");
   prerender_helper().AddPrerender(prerender_url);
-  prerender_helper().NavigatePrimaryPage(prerender_url);
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    prerender_helper().NavigatePrimaryPage(prerender_url);
+    paint_waiter.Wait();
+  } else {
+    prerender_helper().NavigatePrimaryPage(prerender_url);
+  }
 
   // Bypass the pre-classification checks.
   csd_host->OnPhishingPreClassificationDone(
@@ -412,12 +542,149 @@ IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostPrerenderBrowserTest,
 
   ASSERT_FALSE(fake_csd_service.saved_callback_is_null());
 
-  EXPECT_EQ(fake_csd_service.saved_request().model_version(), 123);
-
   // Expect an interstitial to be shown.
   EXPECT_CALL(*mock_ui_manager, DisplayBlockingPage(_));
   std::move(fake_csd_service.saved_callback())
       .Run(prerender_url, true, net::HTTP_OK, std::nullopt);
+}
+
+class ClientSideDetectionHostPrerenderBrowserTest_Screenshot
+    : public ClientSideDetectionHostPrerenderBrowserTest {
+ public:
+  ClientSideDetectionHostPrerenderBrowserTest_Screenshot() = default;
+  ~ClientSideDetectionHostPrerenderBrowserTest_Screenshot() override = default;
+
+ protected:
+  ClientPhishingRequest RunReportUnsafeSite(int screenshot_width,
+                                            int screenshot_height) {
+    FakeClientSideDetectionService fake_csd_service;
+    fake_csd_service.SetModel(client_side_model());
+
+    std::unique_ptr<ClientSideDetectionHost> csd_host =
+        ChromeClientSideDetectionHostDelegate::CreateHost(
+            browser()->tab_strip_model()->GetActiveWebContents());
+    csd_host->set_client_side_detection_service(fake_csd_service.GetWeakPtr());
+
+    fake_csd_service.SendModelToRenderers();
+
+    GURL page_url(
+        embedded_test_server()->GetURL("/safe_browsing/malware.html"));
+    CHECK(ui_test_utils::NavigateToURL(browser(), page_url));
+
+    base::RunLoop run_loop;
+    fake_csd_service.SetRequestCallback(run_loop.QuitClosure());
+
+    const SkBitmap screenshot =
+        gfx::test::CreateBitmap(screenshot_width, screenshot_height);
+    csd_host->ReportUnsafeSite(screenshot);
+
+    // Bypass the pre-classification check to directly test the screenshot
+    // plumbing.
+    csd_host->OnPhishingPreClassificationDone(
+        ClientSideDetectionType::USER_REPORT, /*should_classify=*/true,
+        /*is_sample_ping=*/false,
+        /*did_match_high_confidence_allowlist=*/false);
+
+    run_loop.Run();
+
+    return fake_csd_service.saved_request();
+  }
+
+  void CheckDimensions(const VisualFeatures_Screenshot& screenshot,
+                       int expected_width,
+                       int expected_height) {
+    EXPECT_EQ(screenshot.width(), expected_width);
+    EXPECT_EQ(screenshot.height(), expected_height);
+    EXPECT_EQ(screenshot.data().size(), expected_width * expected_height * 3);
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostPrerenderBrowserTest_Screenshot,
+                       ReportUnsafeSiteWithScreenshot) {
+  if (base::FeatureList::IsEnabled(kClientSideDetectionKillswitch)) {
+    GTEST_SKIP();
+  }
+
+  const int kScreenshotWidth = 100;
+  const int kScreenshotHeight = 100;
+  ASSERT_LT(kScreenshotWidth,
+            ClientSideDetectionHost::kMaxHighResScreenshotWidth);
+  ASSERT_LT(kScreenshotHeight,
+            ClientSideDetectionHost::kMaxHighResScreenshotHeight);
+  ClientPhishingRequest saved_request =
+      RunReportUnsafeSite(kScreenshotWidth, kScreenshotHeight);
+  CheckDimensions(saved_request.visual_features().high_res_screenshot(),
+                  kScreenshotWidth, kScreenshotHeight);
+  EXPECT_EQ(saved_request.client_side_detection_type(),
+            ClientSideDetectionType::USER_REPORT);
+}
+
+IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostPrerenderBrowserTest_Screenshot,
+                       ReportUnsafeSiteWithScreenshot_MaxSize) {
+  if (base::FeatureList::IsEnabled(kClientSideDetectionKillswitch)) {
+    GTEST_SKIP();
+  }
+
+  const int kScreenshotWidth =
+      ClientSideDetectionHost::kMaxHighResScreenshotWidth;
+  const int kScreenshotHeight =
+      ClientSideDetectionHost::kMaxHighResScreenshotHeight;
+  ClientPhishingRequest saved_request =
+      RunReportUnsafeSite(kScreenshotWidth, kScreenshotHeight);
+  CheckDimensions(saved_request.visual_features().high_res_screenshot(),
+                  kScreenshotWidth, kScreenshotHeight);
+  EXPECT_EQ(saved_request.client_side_detection_type(),
+            ClientSideDetectionType::USER_REPORT);
+}
+
+IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostPrerenderBrowserTest_Screenshot,
+                       ReportUnsafeSiteScreenshotTooWide) {
+  if (base::FeatureList::IsEnabled(kClientSideDetectionKillswitch)) {
+    GTEST_SKIP();
+  }
+
+  const int kScreenshotWidth = 5000;
+  const int kScreenshotHeight = 2000;
+  ASSERT_GT(kScreenshotWidth,
+            ClientSideDetectionHost::kMaxHighResScreenshotWidth);
+  ASSERT_LE(kScreenshotHeight,
+            ClientSideDetectionHost::kMaxHighResScreenshotHeight);
+  ClientPhishingRequest saved_request =
+      RunReportUnsafeSite(kScreenshotWidth, kScreenshotHeight);
+  EXPECT_FALSE(saved_request.visual_features().has_high_res_screenshot());
+  EXPECT_EQ(saved_request.client_side_detection_type(),
+            ClientSideDetectionType::USER_REPORT);
+}
+
+IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostPrerenderBrowserTest_Screenshot,
+                       ReportUnsafeSiteScreenshotTooTall) {
+  if (base::FeatureList::IsEnabled(kClientSideDetectionKillswitch)) {
+    GTEST_SKIP();
+  }
+
+  const int kScreenshotWidth = 2000;
+  const int kScreenshotHeight = 5000;
+  ASSERT_LE(kScreenshotWidth,
+            ClientSideDetectionHost::kMaxHighResScreenshotWidth);
+  ASSERT_GT(kScreenshotHeight,
+            ClientSideDetectionHost::kMaxHighResScreenshotHeight);
+  const ClientPhishingRequest& saved_request =
+      RunReportUnsafeSite(kScreenshotWidth, kScreenshotHeight);
+  EXPECT_FALSE(saved_request.visual_features().has_high_res_screenshot());
+  EXPECT_EQ(saved_request.client_side_detection_type(),
+            ClientSideDetectionType::USER_REPORT);
+}
+
+IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostPrerenderBrowserTest_Screenshot,
+                       ReportUnsafeSiteNoScreenshot) {
+  if (base::FeatureList::IsEnabled(kClientSideDetectionKillswitch)) {
+    GTEST_SKIP();
+  }
+
+  ClientPhishingRequest saved_request = RunReportUnsafeSite(0, 0);
+  EXPECT_FALSE(saved_request.visual_features().has_high_res_screenshot());
+  EXPECT_EQ(saved_request.client_side_detection_type(),
+            ClientSideDetectionType::USER_REPORT);
 }
 
 IN_PROC_BROWSER_TEST_F(
@@ -448,13 +715,25 @@ IN_PROC_BROWSER_TEST_F(
   fake_csd_service.SetRequestCallback(run_loop.QuitClosure());
 
   const GURL initial_url(embedded_test_server()->GetURL("/title1.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  }
 
   // Prerender then activate a phishing page.
   const GURL prerender_url =
       embedded_test_server()->GetURL("/safe_browsing/malware.html");
   prerender_helper().AddPrerender(prerender_url);
-  prerender_helper().NavigatePrimaryPage(prerender_url);
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    prerender_helper().NavigatePrimaryPage(prerender_url);
+    paint_waiter.Wait();
+  } else {
+    prerender_helper().NavigatePrimaryPage(prerender_url);
+  }
 
   // Bypass the pre-classification checks.
   csd_host->OnPhishingPreClassificationDone(
@@ -465,8 +744,6 @@ IN_PROC_BROWSER_TEST_F(
 
   ASSERT_FALSE(fake_csd_service.saved_callback_is_null());
 
-  EXPECT_EQ(fake_csd_service.saved_request().model_version(), 123);
-
   // Expect an interstitial to be shown.
   EXPECT_CALL(*mock_ui_manager, DisplayBlockingPage(_));
   std::move(fake_csd_service.saved_callback())
@@ -476,9 +753,7 @@ IN_PROC_BROWSER_TEST_F(
       ClientSideDetectionFeatureCache::FromWebContents(GetWebContents());
   LoginReputationClientRequest::DebuggingMetadata* debugging_metadata =
       feature_cache_map->GetOrCreateDebuggingMetadataForURL(prerender_url);
-  ClientPhishingRequest* verdict_from_cache =
-      feature_cache_map->GetVerdictForURL(prerender_url);
-  EXPECT_EQ(verdict_from_cache->model_version(), 123);
+
   // The value remains private ip since we bypassed it in the test.
   EXPECT_EQ(debugging_metadata->preclassification_check_result(),
             PreClassificationCheckResult::NO_CLASSIFY_PRIVATE_IP);
@@ -519,13 +794,25 @@ IN_PROC_BROWSER_TEST_F(
   fake_csd_service.SetRequestCallback(run_loop.QuitClosure());
 
   const GURL initial_url(embedded_test_server()->GetURL("/title1.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  }
 
   // Prerender then activate a phishing page.
   const GURL prerender_url =
       embedded_test_server()->GetURL("/safe_browsing/malware.html");
   prerender_helper().AddPrerender(prerender_url);
-  prerender_helper().NavigatePrimaryPage(prerender_url);
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    prerender_helper().NavigatePrimaryPage(prerender_url);
+    paint_waiter.Wait();
+  } else {
+    prerender_helper().NavigatePrimaryPage(prerender_url);
+  }
 
   feature_cache_map->Clear();
 
@@ -538,8 +825,6 @@ IN_PROC_BROWSER_TEST_F(
 
   ASSERT_FALSE(fake_csd_service.saved_callback_is_null());
 
-  EXPECT_EQ(fake_csd_service.saved_request().model_version(), 123);
-
   // Expect an interstitial to be shown.
   EXPECT_CALL(*mock_ui_manager, DisplayBlockingPage(_));
   std::move(fake_csd_service.saved_callback())
@@ -547,9 +832,7 @@ IN_PROC_BROWSER_TEST_F(
 
   LoginReputationClientRequest::DebuggingMetadata* debugging_metadata =
       feature_cache_map->GetOrCreateDebuggingMetadataForURL(prerender_url);
-  ClientPhishingRequest* verdict_from_cache =
-      feature_cache_map->GetVerdictForURL(prerender_url);
-  EXPECT_EQ(verdict_from_cache->model_version(), 123);
+
   // The value remains private ip since we bypassed it in the test, but we
   // cleared the cache before bypassing, so this should not equal anymore.
   EXPECT_NE(debugging_metadata->preclassification_check_result(),
@@ -586,12 +869,15 @@ IN_PROC_BROWSER_TEST_F(
   fake_csd_service.SendModelToRenderers();
 
   const GURL initial_url(embedded_test_server()->GetURL("/title1.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
-
-  // TODO(andysjlim): Navigating to initial page alongside the first page logs
-  // the histogram twice. Figure out why.
-  histogram_tester.ExpectTotalCount(
-      "SBClientPhishing.PreClassificationCheckResult", 2);
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+    prerender_helper().AddPrerender(initial_url);
+    prerender_helper().NavigatePrimaryPage(initial_url);
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  }
 
   EnterActiveTabFullscreen();
   ASSERT_TRUE(RequestKeyboardLock(/*esc_key_locked=*/true));
@@ -603,7 +889,7 @@ IN_PROC_BROWSER_TEST_F(
   // times with the keyboard lock notify, but this is added twice. Investigate
   // why.
   histogram_tester.ExpectTotalCount(
-      "SBClientPhishing.PreClassificationCheckResult", 4);
+      "SBClientPhishing.PreClassificationCheckResult.KeyboardLockRequested", 2);
 }
 
 IN_PROC_BROWSER_TEST_F(
@@ -632,11 +918,15 @@ IN_PROC_BROWSER_TEST_F(
   fake_csd_service.SendModelToRenderers();
 
   const GURL initial_url(embedded_test_server()->GetURL("/title1.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
-
-  // Navigating to initial page logs the histogram twice.
-  histogram_tester.ExpectTotalCount(
-      "SBClientPhishing.PreClassificationCheckResult", 2);
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+    prerender_helper().AddPrerender(initial_url);
+    prerender_helper().NavigatePrimaryPage(initial_url);
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  }
 
   // The function automatically approves the lock request, but for tests,
   // functionally, nothing changes.
@@ -649,7 +939,7 @@ IN_PROC_BROWSER_TEST_F(
   // response to web_contents observer that PointerLockRequest has been sent.
   csd_host->PointerLockRequested();
   histogram_tester.ExpectTotalCount(
-      "SBClientPhishing.PreClassificationCheckResult", 3);
+      "SBClientPhishing.PreClassificationCheckResult.PointerLockRequested", 1);
 }
 
 IN_PROC_BROWSER_TEST_F(
@@ -681,10 +971,22 @@ IN_PROC_BROWSER_TEST_F(
   fake_csd_service.SetRequestCallback(run_loop.QuitClosure());
 
   const GURL initial_url(embedded_test_server()->GetURL("/title1.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  }
 
   prerender_helper().AddPrerender(initial_url);
-  prerender_helper().NavigatePrimaryPage(initial_url);
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    prerender_helper().NavigatePrimaryPage(initial_url);
+    paint_waiter.Wait();
+  } else {
+    prerender_helper().NavigatePrimaryPage(initial_url);
+  }
 
   EnterActiveTabFullscreen();
   ASSERT_TRUE(RequestKeyboardLock(/*esc_key_locked=*/true));
@@ -707,8 +1009,6 @@ IN_PROC_BROWSER_TEST_F(
       "SBClientPhishing.ClientSideDetectionTypeRequest", 1);
 
   ASSERT_FALSE(fake_csd_service.saved_callback_is_null());
-
-  EXPECT_EQ(fake_csd_service.saved_request().model_version(), 123);
 
   // Expect an interstitial to be shown.
   EXPECT_CALL(*mock_ui_manager, DisplayBlockingPage(_));
@@ -753,10 +1053,22 @@ IN_PROC_BROWSER_TEST_F(
   fake_csd_service.SetRequestCallback(run_loop.QuitClosure());
 
   const GURL initial_url(embedded_test_server()->GetURL("/title1.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  }
 
   prerender_helper().AddPrerender(initial_url);
-  prerender_helper().NavigatePrimaryPage(initial_url);
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    prerender_helper().NavigatePrimaryPage(initial_url);
+    paint_waiter.Wait();
+  } else {
+    prerender_helper().NavigatePrimaryPage(initial_url);
+  }
 
   RequestToLockPointer(true, false);
   ASSERT_TRUE(GetExclusiveAccessManager()
@@ -779,8 +1091,6 @@ IN_PROC_BROWSER_TEST_F(
 
   ASSERT_FALSE(fake_csd_service.saved_callback_is_null());
 
-  EXPECT_EQ(fake_csd_service.saved_request().model_version(), 123);
-
   // Expect an interstitial to be shown.
   EXPECT_CALL(*mock_ui_manager, DisplayBlockingPage(_));
   std::move(fake_csd_service.saved_callback())
@@ -797,7 +1107,11 @@ IN_PROC_BROWSER_TEST_F(
 
 class ClientSideDetectionHostVibrateTest : public InProcessBrowserTest {
  public:
-  ClientSideDetectionHostVibrateTest() = default;
+  ClientSideDetectionHostVibrateTest() {
+    prerender_helper_ = std::make_unique<content::test::PrerenderTestHelper>(
+        base::BindRepeating(&ClientSideDetectionHostVibrateTest::GetWebContents,
+                            base::Unretained(this)));
+  }
 
   ClientSideDetectionHostVibrateTest(
       const ClientSideDetectionHostVibrateTest&) = delete;
@@ -813,6 +1127,10 @@ class ClientSideDetectionHostVibrateTest : public InProcessBrowserTest {
 
   std::string client_side_model() { return flatbuffer_model_str_; }
 
+  content::test::PrerenderTestHelper& prerender_helper() {
+    return *prerender_helper_.get();
+  }
+
   content::WebContents* GetWebContents() {
     return browser()->tab_strip_model()->GetActiveWebContents();
   }
@@ -826,10 +1144,8 @@ class ClientSideDetectionHostVibrateTest : public InProcessBrowserTest {
     std::move(vibrate_done).Run();
   }
 
-  base::test::ScopedFeatureList scoped_feature_list_{
-      kClientSideDetectionVibrationApi};
-
  private:
+  std::unique_ptr<content::test::PrerenderTestHelper> prerender_helper_;
   std::string flatbuffer_model_str_;
 };
 
@@ -858,8 +1174,7 @@ class VibrationObserverWaiter : public content::WebContentsObserver {
 
 IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostVibrateTest,
                        VibrationApiTriggersPreclassificationCheck) {
-  if (base::FeatureList::IsEnabled(kClientSideDetectionKillswitch) ||
-      !base::FeatureList::IsEnabled(kClientSideDetectionVibrationApi)) {
+  if (base::FeatureList::IsEnabled(kClientSideDetectionKillswitch)) {
     GTEST_SKIP();
   }
   SetSafeBrowsingState(browser()->profile()->GetPrefs(),
@@ -881,12 +1196,15 @@ IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostVibrateTest,
   fake_csd_service.SendModelToRenderers();
 
   const GURL initial_url(embedded_test_server()->GetURL("/title1.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
-
-  // TODO(andysjlim): Navigating to initial page alongside the first page logs
-  // the histogram twice. Figure out why.
-  histogram_tester.ExpectTotalCount(
-      "SBClientPhishing.PreClassificationCheckResult.TriggerModel", 2);
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+    prerender_helper().AddPrerender(initial_url);
+    prerender_helper().NavigatePrimaryPage(initial_url);
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  }
 
   VibrationObserverWaiter waiter(GetWebContents());
   EXPECT_FALSE(waiter.DidVibrate());
@@ -918,8 +1236,7 @@ IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostVibrateTest,
 
 IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostVibrateTest,
                        VibrationApiClassificationTriggersCSPPPing) {
-  if (base::FeatureList::IsEnabled(kClientSideDetectionKillswitch) ||
-      !base::FeatureList::IsEnabled(kClientSideDetectionVibrationApi)) {
+  if (base::FeatureList::IsEnabled(kClientSideDetectionKillswitch)) {
     GTEST_SKIP();
   }
   SetSafeBrowsingState(browser()->profile()->GetPrefs(),
@@ -944,7 +1261,13 @@ IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostVibrateTest,
   fake_csd_service.SetRequestCallback(run_loop.QuitClosure());
 
   const GURL initial_url(embedded_test_server()->GetURL("/title1.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  }
 
   // Bypass the pre-classification check because it would otherwise return
   // "NO_CLASSIFY_PRIVATE_IP".
@@ -960,8 +1283,6 @@ IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostVibrateTest,
       "SBClientPhishing.ClientSideDetectionTypeRequest", 1);
 
   ASSERT_FALSE(fake_csd_service.saved_callback_is_null());
-
-  EXPECT_EQ(fake_csd_service.saved_request().model_version(), 123);
 
   // Expect an interstitial to be shown.
   EXPECT_CALL(*mock_ui_manager, DisplayBlockingPage(_));
@@ -1102,7 +1423,13 @@ IN_PROC_BROWSER_TEST_P(ClientSideDetectionHostClipboardTest,
   fake_csd_service.SendModelToRenderers();
 
   const GURL initial_url(embedded_test_server()->GetURL("/title1.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  }
 
   histogram_tester.ExpectTotalCount(
       "SBClientPhishing.PreClassificationCheckResult.ClipboardCopyApi", 0);
@@ -1152,7 +1479,13 @@ IN_PROC_BROWSER_TEST_P(ClientSideDetectionHostClipboardTest,
   fake_csd_service.SetRequestCallback(csd_request_run_loop.QuitClosure());
 
   const GURL initial_url(embedded_test_server()->GetURL("/title1.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  }
 
   histogram_tester.ExpectTotalCount(
       "SBClientPhishing.PhishingDetectorResult.ClipboardCopyApi", 0);
@@ -1195,8 +1528,6 @@ IN_PROC_BROWSER_TEST_P(ClientSideDetectionHostClipboardTest,
   histogram_tester.ExpectTotalCount(
       "SBClientPhishing.ServerModelDetectsPhishing.ClipboardCopyApi", 0);
 
-  EXPECT_EQ(fake_csd_service.saved_request().model_version(), 123);
-
   if (ShouldProcessClipboardPayload()) {
     EXPECT_TRUE(
         fake_csd_service.saved_request().has_clipboard_extracted_data());
@@ -1209,7 +1540,7 @@ IN_PROC_BROWSER_TEST_P(ClientSideDetectionHostClipboardTest,
     histogram_tester.ExpectTotalCount(
         "SBClientPhishing.ClipboardCopyApi.PayloadExtraction.TokenCount", 1);
     histogram_tester.ExpectUniqueSample(
-        "SBClientPhishing.ClipboardCopyApi.PayloadExtraction.TokenCount", 4, 1);
+        "SBClientPhishing.ClipboardCopyApi.PayloadExtraction.TokenCount", 3, 1);
     histogram_tester.ExpectUniqueSample(
         "SBClientPhishing.ClipboardCopyApi.PayloadExtraction."
         "SuspiciousTokenCount",
@@ -1258,7 +1589,13 @@ IN_PROC_BROWSER_TEST_P(
   base::HistogramTester histogram_tester;
 
   const GURL initial_url(embedded_test_server()->GetURL("/title1.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  }
 
   histogram_tester.ExpectTotalCount(
       "SBClientPhishing.PreClassificationCheckResult.ClipboardCopyApi", 0);
@@ -1292,7 +1629,13 @@ IN_PROC_BROWSER_TEST_P(
   base::HistogramTester histogram_tester;
 
   const GURL initial_url(embedded_test_server()->GetURL("/title1.html"));
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  }
 
   histogram_tester.ExpectTotalCount(
       "SBClientPhishing.PreClassificationCheckResult.ClipboardCopyApi", 0);
@@ -1359,7 +1702,13 @@ class ClientSideDetectionHostCreditCardFormTest : public InProcessBrowserTest {
   GURL NavigateToCreditCardForm() {
     const GURL url(embedded_test_server()->GetURL(
         "/autofill/autofill_creditcard_form.html"));
-    EXPECT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
+    if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+      PaintObserverWaiter paint_waiter(GetWebContents());
+      EXPECT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
+      paint_waiter.Wait();
+    } else {
+      EXPECT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
+    }
     return url;
   }
 
@@ -1478,8 +1827,6 @@ IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostCreditCardFormTest,
   histogram_tester.ExpectTotalCount(
       "SBClientPhishing.ServerModelDetectsPhishing.CreditCardForm", 0);
 
-  EXPECT_EQ(fake_csd_service.saved_request().model_version(), 123);
-
   // Expect an interstitial to be shown.
   EXPECT_CALL(*mock_ui_manager, DisplayBlockingPage(_));
 
@@ -1493,6 +1840,113 @@ IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostCreditCardFormTest,
       "SBClientPhishing.ClientSideDetectionTypeRequest", 1);
   histogram_tester.ExpectTotalCount(
       "SBClientPhishing.ServerModelDetectsPhishing.CreditCardForm", 1);
+}
+
+class ClientSideDetectionHostGeminiAntiscamProtectionTest
+    : public InProcessBrowserTest {
+ public:
+  ClientSideDetectionHostGeminiAntiscamProtectionTest() {
+    scoped_feature_list_.InitAndEnableFeature(
+        kGeminiAntiscamProtectionForMetricsCollection);
+    prerender_helper_ = std::make_unique<
+        content::test::PrerenderTestHelper>(base::BindRepeating(
+        &ClientSideDetectionHostGeminiAntiscamProtectionTest::GetWebContents,
+        base::Unretained(this)));
+  }
+  ~ClientSideDetectionHostGeminiAntiscamProtectionTest() override = default;
+  ClientSideDetectionHostGeminiAntiscamProtectionTest(
+      const ClientSideDetectionHostGeminiAntiscamProtectionTest&) = delete;
+  ClientSideDetectionHostGeminiAntiscamProtectionTest& operator=(
+      const ClientSideDetectionHostGeminiAntiscamProtectionTest&) = delete;
+
+  void SetUp() override {
+    prerender_helper_->RegisterServerRequestMonitor(embedded_test_server());
+    InProcessBrowserTest::SetUp();
+  }
+
+  void SetUpOnMainThread() override {
+    flatbuffer_model_str_ = set_up_client_side_model();
+    host_resolver()->AddRule("*", "127.0.0.1");
+    ASSERT_TRUE(embedded_test_server()->Start());
+  }
+
+  content::test::PrerenderTestHelper& prerender_helper() {
+    return *prerender_helper_.get();
+  }
+
+  content::WebContents* GetWebContents() {
+    return browser()->tab_strip_model()->GetActiveWebContents();
+  }
+
+  std::string client_side_model() { return flatbuffer_model_str_; }
+
+ protected:
+  base::test::ScopedFeatureList scoped_feature_list_;
+
+ private:
+  std::unique_ptr<content::test::PrerenderTestHelper> prerender_helper_;
+  std::string flatbuffer_model_str_;
+};
+
+IN_PROC_BROWSER_TEST_F(ClientSideDetectionHostGeminiAntiscamProtectionTest,
+                       GeminiAntiscamProtectionServiceCalledWithInnerText) {
+  if (base::FeatureList::IsEnabled(kClientSideDetectionKillswitch)) {
+    GTEST_SKIP();
+  }
+  base::HistogramTester histogram_tester;
+  SetSafeBrowsingState(browser()->profile()->GetPrefs(),
+                       SafeBrowsingState::ENHANCED_PROTECTION);
+  FakeClientSideDetectionService fake_csd_service;
+  fake_csd_service.SetModel(client_side_model());
+
+  std::unique_ptr<ClientSideDetectionHost> csd_host =
+      ChromeClientSideDetectionHostDelegate::CreateHost(
+          browser()->tab_strip_model()->GetActiveWebContents());
+  csd_host->set_client_side_detection_service(fake_csd_service.GetWeakPtr());
+
+  fake_csd_service.SendModelToRenderers();
+
+  base::RunLoop run_loop;
+  fake_csd_service.SetRequestCallback(run_loop.QuitClosure());
+
+  const GURL initial_url(embedded_test_server()->GetURL("/title1.html"));
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+    paint_waiter.Wait();
+  } else {
+    ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+  }
+
+  prerender_helper().AddPrerender(initial_url);
+  if (base::FeatureList::IsEnabled(kClientSideDetectionNewObservers)) {
+    PaintObserverWaiter paint_waiter(GetWebContents());
+    prerender_helper().NavigatePrimaryPage(initial_url);
+    paint_waiter.Wait();
+  } else {
+    prerender_helper().NavigatePrimaryPage(initial_url);
+  }
+
+  csd_host->OnPhishingPreClassificationDone(
+      ClientSideDetectionType::FORCE_REQUEST, /*should_classify=*/true,
+      /*is_sample_ping=*/false,
+      /*did_match_high_confidence_allowlist=*/false);
+
+  run_loop.Run();
+
+  std::move(fake_csd_service.saved_callback())
+      .Run(initial_url, true, net::HTTP_OK, std::nullopt);
+
+  content::RunAllTasksUntilIdle();
+  EXPECT_GT(
+      histogram_tester
+          .GetTotalCountsForPrefix("SafeBrowsing.GeminiAntiscamProtection")
+          .size(),
+      1);
+  histogram_tester.ExpectUniqueSample(
+      "SafeBrowsing.GeminiAntiscamProtection.IsHistoryServiceResultValid",
+      /*sample=*/true,
+      /*expected_bucket_count=*/1);
 }
 
 }  // namespace safe_browsing

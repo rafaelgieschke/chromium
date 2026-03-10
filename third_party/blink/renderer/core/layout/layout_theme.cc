@@ -271,6 +271,17 @@ void LayoutTheme::AdjustStyle(const Element* element,
     return;
   }
 
+  AppearanceValue appearance = AdjustAppearanceWithAuthorStyle(
+      AdjustAppearanceWithElementType(builder, element), builder);
+  builder.SetEffectiveAppearance(appearance);
+  DCHECK_NE(appearance, AppearanceValue::kAuto);
+
+  if (RuntimeEnabledFeatures::FixMarkerSuppressionForAppearanceAutoEnabled() &&
+      appearance == AppearanceValue::kNone &&
+      original_appearance == AppearanceValue::kAuto) {
+    return;
+  }
+
   // Force inline and table display styles to be inline-block (except for table-
   // which is block)
   if (builder.Display() == EDisplay::kInline ||
@@ -282,16 +293,13 @@ void LayoutTheme::AdjustStyle(const Element* element,
       builder.Display() == EDisplay::kTableColumnGroup ||
       builder.Display() == EDisplay::kTableColumn ||
       builder.Display() == EDisplay::kTableCell ||
-      builder.Display() == EDisplay::kTableCaption)
+      builder.Display() == EDisplay::kTableCaption) {
     builder.SetDisplay(EDisplay::kInlineBlock);
-  else if (builder.Display() == EDisplay::kListItem ||
-           builder.Display() == EDisplay::kTable)
+  } else if (builder.Display() == EDisplay::kListItem ||
+             builder.Display() == EDisplay::kTable) {
     builder.SetDisplay(EDisplay::kBlock);
+  }
 
-  AppearanceValue appearance = AdjustAppearanceWithAuthorStyle(
-      AdjustAppearanceWithElementType(builder, element), builder);
-  builder.SetEffectiveAppearance(appearance);
-  DCHECK_NE(appearance, AppearanceValue::kAuto);
   if (appearance == AppearanceValue::kNone) {
     return;
   }
@@ -621,6 +629,17 @@ Color LayoutTheme::DefaultSystemColor(CSSValueID css_value_id,
                  : Color::FromRGBA32(0xFF000000);
     case CSSValueID::kCanvas:
     // The following system colors were deprecated to default to Canvas.
+    case CSSValueID::kActivecaption:
+      if (RuntimeEnabledFeatures::CSSActiveCaptionMapsToCanvasEnabled()) {
+        return color_scheme == mojom::blink::ColorScheme::kDark
+                   ? Color::FromRGBA32(0xFF121212)
+                   : Color::FromRGBA32(0xFFFFFFFF);
+      } else {
+        // The old behavior maps to CanvasText
+        return color_scheme == mojom::blink::ColorScheme::kDark
+                   ? Color::FromRGBA32(0xFFFFFFFF)
+                   : Color::FromRGBA32(0xFF000000);
+      }
     case CSSValueID::kAppworkspace:
     case CSSValueID::kBackground:
     case CSSValueID::kInactivecaption:
@@ -633,7 +652,6 @@ Color LayoutTheme::DefaultSystemColor(CSSValueID css_value_id,
                  : Color::FromRGBA32(0xFFFFFFFF);
     case CSSValueID::kCanvastext:
     // The following system colors were deprecated to default to CanvasText.
-    case CSSValueID::kActivecaption:
     case CSSValueID::kCaptiontext:
     case CSSValueID::kInfotext:
     case CSSValueID::kMenutext:
@@ -770,6 +788,12 @@ Color LayoutTheme::SystemColorFromColorProvider(
       break;
     case CSSValueID::kCanvas:
     // Deprecated colors, see DefaultSystemColor().
+    case CSSValueID::kActivecaption:
+      system_theme_color = color_provider->GetColor(
+          RuntimeEnabledFeatures::CSSActiveCaptionMapsToCanvasEnabled()
+              ? ui::kColorCssSystemWindow
+              : ui::kColorCssSystemWindowText);
+      break;
     case CSSValueID::kAppworkspace:
     case CSSValueID::kBackground:
     case CSSValueID::kInactivecaption:
@@ -781,7 +805,6 @@ Color LayoutTheme::SystemColorFromColorProvider(
       break;
     case CSSValueID::kCanvastext:
     // Deprecated colors, see DefaultSystemColor().
-    case CSSValueID::kActivecaption:
     case CSSValueID::kCaptiontext:
     case CSSValueID::kInfotext:
     case CSSValueID::kMenutext:
@@ -852,14 +875,6 @@ Color LayoutTheme::FocusRingColor(
     mojom::blink::ColorScheme color_scheme) const {
   return has_custom_focus_ring_color_ ? custom_focus_ring_color_
                                       : GetTheme().PlatformFocusRingColor();
-}
-
-bool LayoutTheme::DelegatesMenuListRendering() const {
-  return delegates_menu_list_rendering_;
-}
-
-void LayoutTheme::SetDelegatesMenuListRenderingForTesting(bool flag) {
-  delegates_menu_list_rendering_ = flag;
 }
 
 String LayoutTheme::DisplayNameForFile(const File& file) const {

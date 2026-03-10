@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/no_destructor.h"
 #include "base/observer_list.h"
@@ -286,7 +285,7 @@ bool PrintViewManager::PrintPreview(
     bool has_selection) {
   // Users can send print commands all they want and it is beyond
   // PrintViewManager's control. Just ignore the extra commands.
-  // See http://crbug.com/136842 for example.
+  // See http://crbug.com/40240300 for example.
   if (print_preview_state_ != NOT_PREVIEWING)
     return false;
 
@@ -339,7 +338,7 @@ void PrintViewManager::SetupScriptedPrintPreview(
   }
 
   auto& map = GetScriptedPrintPreviewClosureMap();
-  if (base::Contains(map, rph)) {
+  if (map.contains(rph)) {
     // Renderer already handling window.print(). Abort this attempt to prevent
     // the renderer from having multiple nested loops. If multiple nested loops
     // existed, then they have to exit in the right order and that is messy.
@@ -409,7 +408,7 @@ void PrintViewManager::OnScriptedPrintPreviewCallback(
     return;
 
   // Running a dialog causes an exit to webpage-initiated fullscreen.
-  // http://crbug.com/728276
+  // http://crbug.com/41322524
   if (web_contents()->IsFullscreen())
     web_contents()->ExitFullscreen(true);
 

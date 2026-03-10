@@ -121,7 +121,8 @@ bool MerchantTrustChipButtonController::ShouldBeVisible() {
 }
 
 void MerchantTrustChipButtonController::Show() {
-  const int radius = GetLayoutConstant(LOCATION_BAR_CHILD_CORNER_RADIUS);
+  const int radius =
+      GetLayoutConstant(LayoutConstant::kLocationBarChildCornerRadius);
   location_icon_view_->SetCornerRadii(
       gfx::RoundedCornersF(radius, 0, 0, radius));
   chip_button_->SetCornerRadii(gfx::RoundedCornersF(0, radius, radius, 0));
@@ -179,7 +180,7 @@ void MerchantTrustChipButtonController::OpenPageInfoSubpage() {
   // and set chip_button_ as highlighted button.
   views::BubbleDialogDelegateView* const bubble =
       PageInfoBubbleView::CreatePageInfoBubble(std::move(specification));
-  bubble->SetHighlightedButton(chip_button_);
+  bubble->SetHighlightedElement(kMerchantTrustChipElementId);
   bubble->GetWidget()->Show();
 }
 

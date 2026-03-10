@@ -11,7 +11,6 @@
 #include <utility>
 
 #include "base/base64.h"
-#include "base/containers/contains.h"
 #include "base/files/file_util.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/ref_counted_memory.h"
@@ -91,14 +90,12 @@ std::string AsyncParamDataAsCSV(
 std::map<std::string, std::string> ExtractQueryParams(
     std::string_view query_params) {
   std::map<std::string, std::string> params;
-  url::Component query(0, query_params.length());
+  url::Component query(query_params);
   url::Component key, value;
   while (url::ExtractQueryKeyValue(query_params, &query, &key, &value)) {
-    url::RawCanonOutputW<kMaxUriDecodeLen> output;
-    url::DecodeURLEscapeSequences(query_params.substr(value.begin, value.len),
-                                  url::DecodeURLMode::kUTF8OrIsomorphic,
-                                  &output);
-    params.insert({std::string(query_params.substr(key.begin, key.len)),
+    url::UrlEscapeDecoder<kMaxUriDecodeLen> output(
+        value.AsViewOn(query_params), url::DecodeUrlMode::kUtf8OrIsomorphic);
+    params.insert({std::string(key.AsViewOn(query_params)),
                    base::UTF16ToUTF8(output.view())});
   }
 
@@ -300,8 +297,7 @@ bool UntrustedSource::ShouldServiceRequest(
   return path == "one-google-bar" || path == "one_google_bar.js" ||
          path == "one_google_bar_api.js" || path == "image" ||
          path == "background_image" || path == "custom_background_image" ||
-         path == "background_image.js" ||
-         base::Contains(path, "background.jpg");
+         path == "background_image.js" || path.contains("background.jpg");
 }
 
 void UntrustedSource::OnOneGoogleBarDataUpdated() {

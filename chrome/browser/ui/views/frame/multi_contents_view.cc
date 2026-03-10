@@ -15,12 +15,15 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
+#include "chrome/browser/ui/color/chrome_color_id.h"
+#include "chrome/browser/ui/read_anything/read_anything_immersive_overlay_view.h"
+#include "chrome/browser/ui/sad_tab_helper.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/contents_container_view.h"
-#include "chrome/browser/ui/views/frame/contents_rounded_corner.h"
 #include "chrome/browser/ui/views/frame/contents_separator.h"
 #include "chrome/browser/ui/views/frame/contents_web_view.h"
+#include "chrome/browser/ui/views/frame/custom_floating_corner.h"
 #include "chrome/browser/ui/views/frame/multi_contents_background_view.h"
 #include "chrome/browser/ui/views/frame/multi_contents_drop_target_view.h"
 #include "chrome/browser/ui/views/frame/multi_contents_resize_area.h"
@@ -28,7 +31,7 @@
 #include "chrome/browser/ui/views/frame/multi_contents_view_drop_target_controller.h"
 #include "chrome/browser/ui/views/frame/multi_contents_view_mini_toolbar.h"
 #include "chrome/browser/ui/views/frame/scrim_view.h"
-#include "chrome/browser/ui/views/frame/top_container_background.h"
+#include "chrome/browser/ui/views/frame/themed_background.h"
 #include "chrome/browser/ui/views/new_tab_footer/footer_web_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/pref_names.h"
@@ -41,10 +44,14 @@
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_type.h"
 #include "ui/events/types/event_type.h"
+#include "ui/gfx/geometry/outsets.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rounded_corners_f.h"
 #include "ui/gfx/scoped_canvas.h"
 #include "ui/ozone/public/ozone_platform.h"
+#include "ui/views/layout/flex_layout_types.h"
+#include "ui/views/layout/layout_types.h"
+#include "ui/views/layout/proposed_layout.h"
 #include "ui/views/view_class_properties.h"
 
 namespace {
@@ -55,8 +62,7 @@ void MultiContentsView::ContentsSeparators::Reset() {
   top_separator = nullptr;
   leading_separator = nullptr;
   trailing_separator = nullptr;
-  top_leading_rounded_corner = nullptr;
-  top_trailing_rounded_corner = nullptr;
+  corner_separator = nullptr;
 }
 
 MultiContentsView::MultiContentsView(
@@ -108,42 +114,48 @@ MultiContentsView::MultiContentsView(
   contents_separators_.trailing_separator->SetProperty(
       views::kElementIdentifierKey, kContentsSeparatorTrailingEdgeElementId);
 
-  contents_separators_.top_leading_rounded_corner =
-      AddChildView(std::make_unique<ContentsRoundedCorner>(
-          browser_view_, views::ShapeContextTokens::kContentSeparatorRadius,
-          base::BindRepeating([]() { return base::i18n::IsRTL(); })));
-  contents_separators_.top_leading_rounded_corner->SetProperty(
-      views::kElementIdentifierKey,
-      kContentsSeparatorLeadingTopCornerElementId);
-
-  contents_separators_.top_trailing_rounded_corner =
-      AddChildView(std::make_unique<ContentsRoundedCorner>(
-          browser_view_, views::ShapeContextTokens::kContentSeparatorRadius,
-          base::BindRepeating([]() { return !base::i18n::IsRTL(); })));
-  contents_separators_.top_trailing_rounded_corner->SetProperty(
-      views::kElementIdentifierKey,
-      kContentsSeparatorTrailingTopCornerElementId);
+  contents_separators_.corner_separator =
+      AddChildView(std::make_unique<CustomFloatingCorner>(
+          *browser_view_, CustomFloatingCorner::CornerOrientation::kTopLeading,
+          views::ShapeContextTokens::kContentSeparatorRadius,
+          CustomFloatingCorner::ToolbarTheme(),
+          kColorToolbarContentAreaSeparator));
+  contents_separators_.corner_separator->SetProperty(
+      views::kElementIdentifierKey, kContentsSeparatorTopCornerElementId);
 
   for (auto* contents_container_view : contents_container_views_) {
-    web_contents_focused_subscriptions_.push_back(
-        contents_container_view->contents_view()->AddWebContentsFocusedCallback(
-            base::BindRepeating(&MultiContentsView::OnWebContentsFocused,
-                                base::Unretained(this))));
+    auto& view_map = container_focusable_map_[contents_container_view];
 
-    if (contents_container_view->new_tab_footer_view()) {
-      ntp_footer_focused_subscriptions_.push_back(
-          contents_container_view->new_tab_footer_view()
-              ->AddWebContentsFocusedCallback(
-                  base::BindRepeating(&MultiContentsView::OnNtpFooterFocused,
-                                      base::Unretained(this))));
+    auto* contents_view = contents_container_view->contents_view();
+    view_map[contents_view->GetClassName()] = contents_view;
+
+    contents_focused_subscriptions_.push_back(
+        contents_view->AddWebContentsFocusedCallback(base::BindRepeating(
+            &MultiContentsView::OnWebContentsFocused, base::Unretained(this))));
+
+    if (auto* footer = contents_container_view->new_tab_footer_view()) {
+      view_map[footer->GetClassName()] = footer;
+      contents_focused_subscriptions_.push_back(
+          footer->AddWebContentsFocusedCallback(base::BindRepeating(
+              &MultiContentsView::OnNtpFooterFocused, base::Unretained(this))));
     }
 
-    if (contents_container_view->actor_overlay_web_view()) {
-      actor_overlay_focused_subscriptions_.push_back(
-          contents_container_view->actor_overlay_web_view()
-              ->AddWebContentsFocusedCallback(
-                  base::BindRepeating(&MultiContentsView::OnActorOverlayFocused,
-                                      base::Unretained(this))));
+    if (auto* actor_overlay =
+            contents_container_view->actor_overlay_web_view()) {
+      view_map[actor_overlay->GetClassName()] = actor_overlay;
+      contents_focused_subscriptions_.push_back(
+          actor_overlay->AddWebContentsFocusedCallback(
+              base::BindRepeating(&MultiContentsView::OnActorOverlayFocused,
+                                  base::Unretained(this))));
+    }
+
+    if (auto* read_anything_overlay =
+            contents_container_view->read_anything_immersive_overlay_view()) {
+      view_map[read_anything_overlay->GetClassName()] = read_anything_overlay;
+      contents_focused_subscriptions_.push_back(
+          read_anything_overlay->AddWebViewFocusedCallback(base::BindRepeating(
+              &MultiContentsView::OnReadAnythingOverlayFocused,
+              base::Unretained(this), contents_container_view)));
     }
   }
 
@@ -159,6 +171,9 @@ MultiContentsView::MultiContentsView(
 }
 
 MultiContentsView::~MultiContentsView() {
+  // Clear the map before `RemoveAllChildViews()` to avoid having dangling
+  // pointers.
+  container_focusable_map_.clear();
   if (drop_target_controller_) {
     drop_target_controller_.reset();
   }
@@ -205,6 +220,17 @@ ContentsContainerView* MultiContentsView::GetContentsContainerViewFor(
   return nullptr;
 }
 
+const MultiContentsView::FocusableViewMap*
+MultiContentsView::GetFocusableViewsMapFor(
+    const ContentsContainerView* container) const {
+  auto it = container_focusable_map_.find(container);
+  if (it != container_focusable_map_.end()) {
+    return &it->second;
+  }
+
+  return nullptr;
+}
+
 bool MultiContentsView::IsInSplitView() const {
   return resize_area_->GetVisible();
 }
@@ -220,6 +246,12 @@ void MultiContentsView::SetWebContentsAtIndex(
     contents_container_views_[1]->SetVisible(true);
     resize_area_->SetVisible(true);
     UpdateContentsBorderAndOverlay();
+  }
+
+  if (web_contents) {
+    if (auto* sad_tab_helper = SadTabHelper::FromWebContents(web_contents)) {
+      sad_tab_helper->ReinstallInWebView();
+    }
   }
 }
 
@@ -267,6 +299,12 @@ void MultiContentsView::CloseSplitView() {
   contents_container_views_[1]->SetVisible(false);
   resize_area_->SetVisible(false);
   UpdateContentsBorderAndOverlay();
+
+  if (auto* active_contents = GetActiveContentsView()->web_contents()) {
+    if (auto* sad_tab_helper = SadTabHelper::FromWebContents(active_contents)) {
+      sad_tab_helper->ReinstallInWebView();
+    }
+  }
 }
 
 void MultiContentsView::SetActiveIndex(int index) {
@@ -309,6 +347,16 @@ void MultiContentsView::ExecuteOnEachVisibleContentsView(
 void MultiContentsView::OnSwap() {
   CHECK(IsInSplitView());
   delegate_->ReverseWebContents();
+}
+
+void MultiContentsView::SetTargetContentBounds(
+    std::optional<TargetContentBounds> target_content_bounds) {
+  if (target_content_bounds_ == target_content_bounds) {
+    return;
+  }
+  target_content_bounds_ = target_content_bounds;
+
+  InvalidateLayout(/*avoid_propagate_during_layout=*/true);
 }
 
 std::vector<views::View*> MultiContentsView::GetAccessiblePanes() {
@@ -405,6 +453,16 @@ void MultiContentsView::OnNtpFooterFocused(views::WebView* web_view) {
   }
 }
 
+void MultiContentsView::OnReadAnythingOverlayFocused(
+    ContentsContainerView* container,
+    views::WebView* web_view) {
+  if (IsInSplitView() && GetWidget()->IsVisible()) {
+    if (GetInactiveContentsContainerView() == container) {
+      delegate_->WebContentsFocused(container->contents_view()->web_contents());
+    }
+  }
+}
+
 // TODO(crbug.com/397777917): Consider using FlexSpecification weights and
 // interior margins instead of a custom layout once this bug is resolved.
 views::ProposedLayout MultiContentsView::CalculateProposedLayout(
@@ -459,6 +517,66 @@ views::ProposedLayout MultiContentsView::CalculateProposedLayout(
   return layouts;
 }
 
+void MultiContentsView::BeforeApplyLayout(const views::ProposedLayout& layout) {
+  if (!target_content_bounds_) {
+    for (auto* contents : contents_container_views_) {
+      contents->SetTargetContentBounds(std::nullopt);
+    }
+    return;
+  }
+
+  if (!IsInSplitView()) {
+    auto* const contents = GetActiveContentsContainerView();
+    contents->SetTargetContentBounds(
+        -target_content_bounds_->clipped_area.ToOutsets());
+
+    // Clear out the other contents just in case.
+    for (auto* other : contents_container_views_) {
+      if (other != contents) {
+        other->SetTargetContentBounds(std::nullopt);
+      }
+    }
+    return;
+  }
+
+  // Need to calculate what the layout *would* be at the actual size.
+  //
+  // This is a bit more expensive than a normal layout but only happens during
+  // animation when the target bounds are set.
+  const auto target_layout = CalculateProposedLayout(
+      views::SizeBounds(target_content_bounds_->actual_size));
+
+  const auto& default_clip = target_content_bounds_->clipped_area;
+
+  // Due to the way web contents resize, and the fact that both split views will
+  // grow or shrink as the animation progresses, always clip from the trailing
+  // edge for both split webviews. This reduces jumping/popping for very slow
+  // websites.
+
+  gfx::Outsets first_outsets = gfx::Outsets::TLBR(
+      default_clip.top(), 0, default_clip.bottom(), default_clip.left());
+  auto* const first = contents_container_views_[0];
+  auto* const first_current = layout.GetLayoutFor(first);
+  auto* const first_target = target_layout.GetLayoutFor(first);
+  if (first_current && first_target) {
+    first_outsets.set_right(std::max(
+        0, first_target->bounds.width() - first_current->bounds.width()));
+  }
+
+  gfx::Outsets second_outsets = gfx::Outsets::TLBR(
+      default_clip.top(), 0, default_clip.bottom(), default_clip.right());
+  auto* const second = contents_container_views_[1];
+  auto* const second_current = layout.GetLayoutFor(second);
+  auto* const second_target = target_layout.GetLayoutFor(second);
+  if (second_current && second_target) {
+    second_outsets.set_right(std::max(
+        0, second_target->bounds.width() - second_current->bounds.width()));
+  }
+
+  first->SetTargetContentBounds(first_outsets);
+  second->SetTargetContentBounds(second_outsets);
+}
+
 gfx::Rect MultiContentsView::CalculateDropTargetLayout(
     const gfx::Rect& available_space,
     std::vector<views::ChildLayout>& child_layouts) const {
@@ -501,12 +619,8 @@ gfx::Rect MultiContentsView::CalculateSeparatorLayouts(
                                false, gfx::Rect());
     child_layouts.emplace_back(contents_separators_.trailing_separator.get(),
                                false, gfx::Rect());
-    child_layouts.emplace_back(
-        contents_separators_.top_leading_rounded_corner.get(), false,
-        gfx::Rect());
-    child_layouts.emplace_back(
-        contents_separators_.top_trailing_rounded_corner.get(), false,
-        gfx::Rect());
+    child_layouts.emplace_back(contents_separators_.corner_separator.get(),
+                               false, gfx::Rect());
     return available_space;
   }
 
@@ -547,23 +661,28 @@ gfx::Rect MultiContentsView::CalculateSeparatorLayouts(
       gfx::Rect(available_space.right() - trailing_separator_width,
                 available_space.y(), trailing_separator_width, height));
 
-  child_layouts.emplace_back(
-      contents_separators_.top_leading_rounded_corner.get(),
-      should_show_leading && contents_separators_.should_show_top,
-      gfx::Rect(
-          available_space.origin(),
-          contents_separators_.top_leading_rounded_corner->GetPreferredSize()));
-
-  child_layouts.emplace_back(
-      contents_separators_.top_trailing_rounded_corner.get(),
-      should_show_trailing && contents_separators_.should_show_top,
-      gfx::Rect({available_space.right() -
-                     contents_separators_.top_trailing_rounded_corner
-                         ->GetPreferredSize()
-                         .width(),
-                 available_space.y()},
-                contents_separators_.top_trailing_rounded_corner
-                    ->GetPreferredSize()));
+  // Place the corner separator and set its orientation.
+  auto* const corner_separator = contents_separators_.corner_separator.get();
+  const auto corner_preferred_size = corner_separator->GetPreferredSize();
+  views::ChildLayout corner_layout(
+      corner_separator, contents_separators_.should_show_top &&
+                            (should_show_leading || should_show_trailing));
+  if (corner_layout.visible) {
+    if (should_show_leading) {
+      corner_layout.bounds =
+          gfx::Rect(available_space.origin(), corner_preferred_size);
+      corner_separator->SetOrientation(
+          CustomFloatingCorner::CornerOrientation::kTopLeading);
+    } else {
+      corner_layout.bounds = gfx::Rect(
+          gfx::Point(available_space.right() - corner_preferred_size.width(),
+                     available_space.y()),
+          corner_preferred_size);
+      corner_separator->SetOrientation(
+          CustomFloatingCorner::CornerOrientation::kTopTrailing);
+    }
+  }
+  child_layouts.push_back(corner_layout);
 
   return gfx::Rect(available_space.x() + leading_separator_width,
                    available_space.y() + separator_height,

@@ -22,7 +22,6 @@
 #include <cstdint>
 #include <optional>
 #include <string>
-#include <unordered_set>
 
 #include "base/format_macros.h"
 #include "base/functional/bind.h"
@@ -50,6 +49,7 @@
 #include "sql/test/test_helpers.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
 
 namespace history {
 namespace {
@@ -587,7 +587,7 @@ TEST_F(HistoryBackendDBTest, MigrateHashHttpMethodAndGenerateGuids) {
     ASSERT_TRUE(db.Open(history_dir_.Append(kHistoryFilename)));
     {
       sql::Statement s(db.GetUniqueStatement("SELECT guid, id from downloads"));
-      std::unordered_set<std::string> guids;
+      absl::flat_hash_set<std::string> guids;
       while (s.Step()) {
         std::string guid = s.ColumnString(0);
         uint32_t id = static_cast<uint32_t>(s.ColumnInt64(1));
@@ -1677,22 +1677,22 @@ TEST_F(HistoryBackendDBTest, MigrateVisitsWithoutIncrementedOmniboxTypedScore) {
       sql::Statement s(db.GetUniqueStatement(kInsertStatement));
       s.BindInt64(0, visit_id1);
       s.BindInt64(1, url_id1);
-      s.BindInt64(2, visit_time1.ToDeltaSinceWindowsEpoch().InMicroseconds());
+      s.BindTime(2, visit_time1);
       s.BindInt64(3, referring_visit1);
       s.BindInt64(4, transition1);
       s.BindInt64(5, segment_id1);
-      s.BindInt64(6, visit_duration1.InMicroseconds());
+      s.BindTimeDelta(6, visit_duration1);
       ASSERT_TRUE(s.Run());
     }
     {
       sql::Statement s(db.GetUniqueStatement(kInsertStatement));
       s.BindInt64(0, visit_id2);
       s.BindInt64(1, url_id2);
-      s.BindInt64(2, visit_time2.ToDeltaSinceWindowsEpoch().InMicroseconds());
+      s.BindTime(2, visit_time2);
       s.BindInt64(3, referring_visit2);
       s.BindInt64(4, transition2);
       s.BindInt64(5, segment_id2);
-      s.BindInt64(6, visit_duration2.InMicroseconds());
+      s.BindTimeDelta(6, visit_duration2);
       ASSERT_TRUE(s.Run());
     }
   }
@@ -1742,11 +1742,11 @@ TEST_F(HistoryBackendDBTest,
     sql::Statement s(db.GetUniqueStatement(kInsertStatement));
     s.BindInt64(0, visit_id);
     s.BindInt64(1, url_id);
-    s.BindInt64(2, visit_time.ToDeltaSinceWindowsEpoch().InMicroseconds());
+    s.BindTime(2, visit_time);
     s.BindInt64(3, referring_visit);
     s.BindInt64(4, transition);
     s.BindInt64(5, segment_id);
-    s.BindInt64(6, visit_duration.InMicroseconds());
+    s.BindTimeDelta(6, visit_duration);
     ASSERT_TRUE(s.Run());
   }
 
@@ -1792,11 +1792,11 @@ TEST_F(HistoryBackendDBTest, MigrateVisitsWithoutPubliclyRoutableColumn) {
     sql::Statement s(db.GetUniqueStatement(kInsertVisitStatement));
     s.BindInt64(0, visit_id1);
     s.BindInt64(1, url_id1);
-    s.BindInt64(2, visit_time.ToDeltaSinceWindowsEpoch().InMicroseconds());
+    s.BindTime(2, visit_time);
     s.BindInt64(3, referring_visit);
     s.BindInt64(4, transition);
     s.BindInt64(5, segment_id1);
-    s.BindInt64(6, visit_duration.InMicroseconds());
+    s.BindTimeDelta(6, visit_duration);
     ASSERT_TRUE(s.Run());
   }
 
@@ -1867,7 +1867,7 @@ TEST_F(HistoryBackendDBTest, MigrateFlocAllowedToAnnotationsTable) {
       sql::Statement s(db.GetUniqueStatement(kInsertVisitStatement));
       s.BindInt64(0, visit_id1);
       s.BindInt64(1, url_id1);
-      s.BindInt64(2, visit_time.ToDeltaSinceWindowsEpoch().InMicroseconds());
+      s.BindTime(2, visit_time);
       s.BindBool(3, publicly_routable1);
       ASSERT_TRUE(s.Run());
     }
@@ -1876,7 +1876,7 @@ TEST_F(HistoryBackendDBTest, MigrateFlocAllowedToAnnotationsTable) {
       sql::Statement s(db.GetUniqueStatement(kInsertVisitStatement));
       s.BindInt64(0, visit_id2);
       s.BindInt64(1, url_id2);
-      s.BindInt64(2, visit_time.ToDeltaSinceWindowsEpoch().InMicroseconds());
+      s.BindTime(2, visit_time);
       s.BindBool(3, publicly_routable2);
       ASSERT_TRUE(s.Run());
     }
@@ -1885,7 +1885,7 @@ TEST_F(HistoryBackendDBTest, MigrateFlocAllowedToAnnotationsTable) {
       sql::Statement s(db.GetUniqueStatement(kInsertVisitStatement));
       s.BindInt64(0, visit_id3);
       s.BindInt64(1, url_id3);
-      s.BindInt64(2, visit_time.ToDeltaSinceWindowsEpoch().InMicroseconds());
+      s.BindTime(2, visit_time);
       s.BindBool(3, publicly_routable3);
       ASSERT_TRUE(s.Run());
     }
@@ -2558,7 +2558,7 @@ TEST_F(HistoryBackendDBTest, MigrateVisitsAddIsKnownToSyncColumn) {
 TEST_F(HistoryBackendDBTest, MigrateClustersAddTriggerabilityCalculatedColumn) {
   ASSERT_NO_FATAL_FAILURE(CreateDBVersion(59));
 
-  int64_t cluster_id = 1;
+  ClusterId cluster_id = ClusterId(1);
 
   // Open the old version of the DB and make sure the new columns don't exist
   // yet.
@@ -2575,7 +2575,7 @@ TEST_F(HistoryBackendDBTest, MigrateClustersAddTriggerabilityCalculatedColumn) {
     // Add a row to `clusters` table.
     {
       sql::Statement s(db.GetUniqueStatement(kInsertClustersStatement));
-      s.BindInt64(0, cluster_id);
+      s.BindInt64(0, cluster_id.value());
       s.BindBool(1, true);
       s.BindString16(2, u"");
       s.BindString16(3, u"");
@@ -2605,7 +2605,7 @@ TEST_F(HistoryBackendDBTest,
        MigrateClustersAutoincrementIdAndAddOriginatorColumns) {
   ASSERT_NO_FATAL_FAILURE(CreateDBVersion(60));
 
-  int64_t cluster_id = 1;
+  ClusterId cluster_id = ClusterId(1);
 
   // Open the db for manual manipulation.
   {
@@ -2620,7 +2620,7 @@ TEST_F(HistoryBackendDBTest,
 
     // Add a row to `clusters` table.
     sql::Statement s(db.GetUniqueStatement(kInsertClustersStatement));
-    s.BindInt64(0, cluster_id);
+    s.BindInt64(0, cluster_id.value());
     s.BindBool(1, true);
     s.BindString16(2, u"");
     s.BindString16(3, u"");
@@ -2639,7 +2639,7 @@ TEST_F(HistoryBackendDBTest,
     // Check contents.
     Cluster cluster = db_->GetCluster(cluster_id);
     EXPECT_EQ(cluster.originator_cache_guid, "");
-    EXPECT_EQ(cluster.originator_cluster_id, 0);
+    EXPECT_EQ(cluster.originator_cluster_id, ClusterId(0));
   }
 }
 
@@ -2721,11 +2721,11 @@ TEST_F(HistoryBackendDBTest,
     sql::Statement s(db.GetUniqueStatement(kInsertStatement));
     s.BindInt64(0, visit_id);
     s.BindInt64(1, url_id);
-    s.BindInt64(2, visit_time.ToDeltaSinceWindowsEpoch().InMicroseconds());
+    s.BindTime(2, visit_time);
     s.BindInt64(3, referring_visit);
     s.BindInt64(4, transition);
     s.BindInt64(5, segment_id);
-    s.BindInt64(6, visit_duration.InMicroseconds());
+    s.BindTimeDelta(6, visit_duration);
 
     ASSERT_TRUE(s.Run());
   }
@@ -2896,9 +2896,9 @@ TEST_F(HistoryBackendDBTest, MigrateVisitsAddExternalReferrerUrlColumn) {
     sql::Statement s(db.GetUniqueStatement(kInsertStatement));
     s.BindInt64(0, visit_id);
     s.BindInt64(1, url_id);
-    s.BindInt64(2, visit_time.ToDeltaSinceWindowsEpoch().InMicroseconds());
+    s.BindTime(2, visit_time);
     s.BindInt64(3, transition);
-    s.BindInt64(4, visit_duration.InMicroseconds());
+    s.BindTimeDelta(4, visit_duration);
 
     ASSERT_TRUE(s.Run());
   }
@@ -2948,9 +2948,9 @@ TEST_F(HistoryBackendDBTest, MigrateVisitsAddVisitedLinkIdColumn) {
     sql::Statement s(db.GetUniqueStatement(kInsertStatement));
     s.BindInt64(0, visit_id);
     s.BindInt64(1, url_id);
-    s.BindInt64(2, visit_time.ToDeltaSinceWindowsEpoch().InMicroseconds());
+    s.BindTime(2, visit_time);
     s.BindInt64(3, transition);
-    s.BindInt64(4, visit_duration.InMicroseconds());
+    s.BindTimeDelta(4, visit_duration);
 
     ASSERT_TRUE(s.Run());
   }
@@ -3028,9 +3028,9 @@ TEST_F(HistoryBackendDBTest, MigrateVisitsAddAppId) {
     sql::Statement s(db.GetUniqueStatement(kInsertStatement));
     s.BindInt64(0, visit_id);
     s.BindInt64(1, url_id);
-    s.BindInt64(2, visit_time.ToDeltaSinceWindowsEpoch().InMicroseconds());
+    s.BindTime(2, visit_time);
     s.BindInt64(3, transition);
-    s.BindInt64(4, visit_duration.InMicroseconds());
+    s.BindTimeDelta(4, visit_duration);
     ASSERT_TRUE(s.Run());
   }
 

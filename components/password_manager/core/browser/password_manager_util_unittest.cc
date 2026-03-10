@@ -10,7 +10,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
@@ -714,12 +713,14 @@ TEST_F(PasswordManagerUtilTest, IsAbleToSavePasswords_Syncing) {
   // (sorry, Googlers only).
   std::swap(used_store, unused_store);
 #endif
-  EXPECT_CALL(*used_store, IsAbleToSavePasswords).WillOnce(Return(true));
-  EXPECT_CALL(*unused_store, IsAbleToSavePasswords).Times(0);
+  EXPECT_CALL(*used_store, GetError)
+      .WillOnce(Return(password_manager::ActionableError::kNoError));
+  EXPECT_CALL(*unused_store, GetError).Times(0);
 
   EXPECT_TRUE(IsAbleToSavePasswords(&mock_client_));
 
-  EXPECT_CALL(*used_store, IsAbleToSavePasswords).WillOnce(Return(false));
+  EXPECT_CALL(*used_store, GetError)
+      .WillOnce(Return(password_manager::ActionableError::kInactionable));
 
   EXPECT_FALSE(IsAbleToSavePasswords(&mock_client_));
 }
@@ -736,12 +737,14 @@ TEST_F(PasswordManagerUtilTest, IsAbleToSavePasswords_NotSyncing) {
   EXPECT_CALL(mock_client_, GetProfilePasswordStore)
       .WillRepeatedly(testing::Return(profile_store.get()));
 
-  EXPECT_CALL(*profile_store, IsAbleToSavePasswords).WillOnce(Return(true));
-  EXPECT_CALL(*account_store, IsAbleToSavePasswords).Times(0);
+  EXPECT_CALL(*profile_store, GetError)
+      .WillOnce(Return(password_manager::ActionableError::kNoError));
+  EXPECT_CALL(*account_store, GetError).Times(0);
 
   EXPECT_TRUE(IsAbleToSavePasswords(&mock_client_));
 
-  EXPECT_CALL(*profile_store, IsAbleToSavePasswords).WillOnce(Return(false));
+  EXPECT_CALL(*profile_store, GetError)
+      .WillOnce(Return(password_manager::ActionableError::kInactionable));
 
   EXPECT_FALSE(IsAbleToSavePasswords(&mock_client_));
 }

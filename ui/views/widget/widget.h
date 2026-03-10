@@ -1002,6 +1002,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // support workspaces).
   bool IsVisibleOnAllWorkspaces() const;
 
+#if BUILDFLAG(IS_MAC)
+  // Moves the widget into an active fullscreen space. Used to ensure that
+  // picture-in-picture windows can display on top of fullscreen.
+  void MoveToActiveFullscreenSpace();
+#endif  // BUILDFLAG(IS_MAC)
+
   // Maximizes/minimizes/restores the window.
   void Maximize();
   void Minimize();
@@ -1611,7 +1617,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // through the |native_widget_| weak ptr.
   std::unique_ptr<internal::NativeWidgetPrivate> owned_native_widget_;
 
-  base::ObserverList<WidgetObserver> observers_;
+  // A WidgetObserver handles an event that invokes other events, therefore is
+  // inherently reentrant.
+  base::ReentrantObserverList<WidgetObserver> observers_;
 
   base::ObserverList<WidgetRemovalsObserver>::Unchecked removals_observers_;
 

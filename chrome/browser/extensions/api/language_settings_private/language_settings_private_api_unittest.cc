@@ -4,16 +4,17 @@
 
 #include "chrome/browser/extensions/api/language_settings_private/language_settings_private_api.h"
 
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "base/check_deref.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/string_util.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -24,7 +25,6 @@
 #include "chrome/browser/spellchecker/spellcheck_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/crx_file/id_util.h"
@@ -39,6 +39,7 @@
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "ash/constants/ash_features.h"
+#include "ash/constants/ash_pref_names.h"
 #include "ui/base/ime/ash/component_extension_ime_manager.h"
 #include "ui/base/ime/ash/extension_ime_util.h"
 #include "ui/base/ime/ash/fake_input_method_delegate.h"
@@ -178,8 +179,8 @@ TEST_F(LanguageSettingsPrivateApiTest, GetSpellcheckDictionaryStatusesTest) {
                                                        profile());
   ASSERT_TRUE(actual) << function->GetError();
 
-  base::Value::List expected;
-  base::Value::Dict expected_status;
+  base::ListValue expected;
+  base::DictValue expected_status;
   expected_status.Set("languageCode", "fr");
   expected_status.Set("isReady", false);
   expected_status.Set("isDownloading", true);
@@ -461,8 +462,9 @@ class TestInputMethodManager : public input_method::MockInputMethodManager {
 
     void GetInputMethodExtensions(
         input_method::InputMethodDescriptors* descriptors) override {
-      for (const auto& descriptor : input_methods_)
+      for (const auto& descriptor : input_methods_) {
         descriptors->push_back(descriptor);
+      }
     }
 
     input_method::InputMethodDescriptors input_methods_;
@@ -508,9 +510,10 @@ TEST_F(LanguageSettingsPrivateApiTest, GetInputMethodListsTest) {
 
   // Initialize relevant prefs.
   StringPrefMember enabled_imes;
-  enabled_imes.Init(prefs::kLanguageEnabledImes, profile()->GetPrefs());
+  enabled_imes.Init(ash::prefs::kLanguageEnabledImes, profile()->GetPrefs());
   StringPrefMember preload_engines;
-  preload_engines.Init(prefs::kLanguagePreloadEngines, profile()->GetPrefs());
+  preload_engines.Init(ash::prefs::kLanguagePreloadEngines,
+                       profile()->GetPrefs());
 
   enabled_imes.SetValue(
       base::JoinString({GetExtensionImeId(), GetArcImeId()}, ","));
@@ -525,23 +528,24 @@ TEST_F(LanguageSettingsPrivateApiTest, GetInputMethodListsTest) {
   ASSERT_TRUE(result_val) << function->GetError();
   ASSERT_TRUE(result_val->is_dict());
 
-  const base::Value::Dict& result = result_val->GetDict();
-  const base::Value::List* input_methods =
+  const base::DictValue& result = result_val->GetDict();
+  const base::ListValue* input_methods =
       result.FindList("thirdPartyExtensionImes");
   ASSERT_NE(input_methods, nullptr);
   EXPECT_EQ(3u, input_methods->size());
 
   for (auto& input_method_val : *input_methods) {
-    const base::Value::Dict& input_method = input_method_val.GetDict();
-    const base::Value::List* ime_tags_ptr = input_method.FindList("tags");
+    const base::DictValue& input_method = input_method_val.GetDict();
+    const base::ListValue* ime_tags_ptr = input_method.FindList("tags");
     ASSERT_NE(nullptr, ime_tags_ptr);
 
     // Check tags contain input method's display name
     const base::Value* ime_name_ptr = input_method.Find("displayName");
-    EXPECT_TRUE(base::Contains(*ime_tags_ptr, CHECK_DEREF(ime_name_ptr)));
+    EXPECT_TRUE(
+        std::ranges::contains(*ime_tags_ptr, CHECK_DEREF(ime_name_ptr)));
 
     // Check tags contain input method's language codes' display names
-    const base::Value::List* ime_language_codes_ptr =
+    const base::ListValue* ime_language_codes_ptr =
         input_method.FindList("languageCodes");
     ASSERT_NE(nullptr, ime_language_codes_ptr);
     for (auto& language_code : *ime_language_codes_ptr) {
@@ -549,7 +553,7 @@ TEST_F(LanguageSettingsPrivateApiTest, GetInputMethodListsTest) {
           language_code.GetString(), "en", true);
       if (!language_display_name.empty()) {
         EXPECT_TRUE(
-            base::Contains(*ime_tags_ptr, base::Value(language_display_name)));
+            ime_tags_ptr->contains(base::UTF16ToUTF8(language_display_name)));
       }
     }
   }
@@ -564,11 +568,12 @@ TEST_F(LanguageSettingsPrivateApiTest, AddInputMethodTest) {
   profile()->GetPrefs()->SetString(language::prefs::kPreferredLanguages,
                                    "en-US");
   StringPrefMember enabled_imes;
-  enabled_imes.Init(prefs::kLanguageEnabledImes, profile()->GetPrefs());
+  enabled_imes.Init(ash::prefs::kLanguageEnabledImes, profile()->GetPrefs());
   StringPrefMember preload_engines;
-  preload_engines.Init(prefs::kLanguagePreloadEngines, profile()->GetPrefs());
+  preload_engines.Init(ash::prefs::kLanguagePreloadEngines,
+                       profile()->GetPrefs());
   BooleanPrefMember language_menu_enabled;
-  language_menu_enabled.Init(prefs::kLanguageImeMenuActivated,
+  language_menu_enabled.Init(ash::prefs::kLanguageImeMenuActivated,
                              profile()->GetPrefs());
   enabled_imes.SetValue(std::string());
   preload_engines.SetValue(std::string());
@@ -647,9 +652,10 @@ TEST_F(LanguageSettingsPrivateApiTest, RemoveInputMethodTest) {
 
   // Initialize relevant prefs.
   StringPrefMember enabled_imes;
-  enabled_imes.Init(prefs::kLanguageEnabledImes, profile()->GetPrefs());
+  enabled_imes.Init(ash::prefs::kLanguageEnabledImes, profile()->GetPrefs());
   StringPrefMember preload_engines;
-  preload_engines.Init(prefs::kLanguagePreloadEngines, profile()->GetPrefs());
+  preload_engines.Init(ash::prefs::kLanguagePreloadEngines,
+                       profile()->GetPrefs());
 
   enabled_imes.SetValue(
       base::JoinString({GetExtensionImeId(), GetArcImeId()}, ","));

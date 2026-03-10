@@ -29,7 +29,7 @@ namespace {
 
 bool DrawVideoFrameIntoResourceProvider(
     scoped_refptr<media::VideoFrame> frame,
-    CanvasResourceProviderSharedImage* resource_provider,
+    CanvasNon2DResourceProviderSharedImage* resource_provider,
     viz::RasterContextProvider* raster_context_provider,
     media::PaintCanvasVideoRenderer* video_renderer) {
   DCHECK(frame);
@@ -50,11 +50,10 @@ bool DrawVideoFrameIntoResourceProvider(
 
   media::PaintCanvasVideoRenderer::PaintParams params;
   params.dest_rect = gfx::RectF(resource_provider->Size());
-  resource_provider->ExternalCanvasDrawHelper(
-      [&](MemoryManagedPaintCanvas& canvas) {
-        video_renderer->Paint(frame.get(), &canvas, media_flags, params,
-                              raster_context_provider);
-      });
+  resource_provider->ExternalCanvasDrawHelper([&](cc::PaintCanvas& canvas) {
+    video_renderer->Paint(frame.get(), &canvas, media_flags, params,
+                          raster_context_provider);
+  });
   return true;
 }
 
@@ -384,13 +383,16 @@ ExternalTexture CreateExternalTexture(
 
   // In 0-copy path, uploading shares the whole frame into dawn and apply
   // visible rect and sample from it. For 1-copy path, we should obey the
-  // same behaviour by:
-  // - Get recycle cache with video frame visible size.
-  // - Draw video frame visible rect into recycle cache, uses visible size.
-  // - Reset origin of visible rect in ExternalTextureDesc and use internal
-  // shader to
-  //   handle visible rect.
+  // same behaviour similarly:
+  // - Get recycle cache with video frame natural size.
+  // - Draw video frame visible rect into recycle cache, scaling to natural
+  // size if needed.
+  // - Reset crop origin and size to fit the entire natural size in
+  // ExternalTextureDesc.
   external_texture_desc.cropOrigin = {};
+  external_texture_desc.cropSize = {
+      static_cast<uint32_t>(natural_size.width()),
+      static_cast<uint32_t>(natural_size.height())};
 
   std::unique_ptr<media::PaintCanvasVideoRenderer> local_video_renderer;
   if (!video_renderer) {
@@ -427,21 +429,19 @@ ExternalTexture CreateExternalTexture(
   }
 
   // High bit depth formats should also use F16, but do not yet.
-  auto sk_color_type = kN32_SkColorType;
+  auto format = GetN32FormatForCanvas();
   if (media_video_frame->format() == media::PIXEL_FORMAT_RGBAF16) {
-    sk_color_type = kRGBA_F16_SkColorType;
+    format = viz::SinglePlaneFormat::kRGBA_F16;
   }
 
   std::unique_ptr<RecyclableCanvasResource> recyclable_canvas_resource =
       device->GetDawnControlClient()->GetOrCreateCanvasResource(
-          SkImageInfo::Make(natural_size.width(), natural_size.height(),
-                            sk_color_type, kPremul_SkAlphaType,
-                            resource_color_space.ToSkColorSpace()));
+          format, natural_size, resource_color_space, kPremul_SkAlphaType);
   if (!recyclable_canvas_resource) {
     return external_texture;
   }
 
-  CanvasResourceProviderSharedImage* resource_provider =
+  CanvasNon2DResourceProviderSharedImage* resource_provider =
       recyclable_canvas_resource->resource_provider();
   DCHECK(resource_provider);
 
@@ -450,9 +450,7 @@ ExternalTexture CreateExternalTexture(
 
   if (use_copy_to_shared_image) {
     gpu::SyncToken sync_token;
-    auto client_si =
-        resource_provider->GetBackingClientSharedImageForExternalWrite(
-            gpu::SharedImageUsageSet(), sync_token);
+    auto client_si = resource_provider->BeginExternalWrite(sync_token);
 
     // The returned sync token is from the SharedGpuContext.
     sync_token = video_renderer->CopyVideoFrameToSharedImage(

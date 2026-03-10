@@ -5,7 +5,6 @@
 #include "base/strings/stringprintf.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/web_ui_mocha_browser_test.h"
-#include "components/power_bookmarks/core/power_bookmark_features.h"
 #include "content/public/test/browser_test.h"
 
 class SidePanelBookmarksTest : public WebUIMochaFocusTest {
@@ -57,7 +56,8 @@ IN_PROC_BROWSER_TEST_F(SidePanelPowerBookmarksTest, Labels) {
 }
 
 using SidePanelBookmarksListTest = SidePanelBookmarksTest;
-IN_PROC_BROWSER_TEST_F(SidePanelBookmarksListTest, General1) {
+// TODO(crbug.com/489813344): Flaky test.
+IN_PROC_BROWSER_TEST_F(SidePanelBookmarksListTest, DISABLED_General1) {
   SidePanelBookmarksTest::RunTest(
       "side_panel/bookmarks/power_bookmarks_list_test.js",
       "runMochaSuite('General Part1');");

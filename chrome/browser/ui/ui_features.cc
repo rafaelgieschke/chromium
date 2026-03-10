@@ -13,6 +13,7 @@
 #include "components/search/ntp_features.h"
 #include "components/variations/service/variations_service.h"
 #include "components/webui/flags/feature_entry.h"
+#include "content/public/common/content_features.h"
 #include "ui/base/ui_base_features.h"
 
 namespace features {
@@ -26,8 +27,16 @@ BASE_FEATURE(kAllowEyeDropperWGCScreenCapture,
 #endif  // BUILDFLAG(IS_WIN)
 );
 
+BASE_FEATURE(kBrowserWidgetCacheThemeService,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kCreateNewTabGroupAppMenuTopLevel,
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kTabStripDeclutter, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kGlassToolbar, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kDetachedTabs, base::FEATURE_DISABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 BASE_FEATURE(kDseIntegrity, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -49,28 +58,49 @@ BASE_FEATURE(kOfferPinToTaskbarWhenSettingToDefault,
              "OfferPinToTaskbarWhenSettingDefault",
              base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kOfferPinToTaskbarInFirstRunExperience,
-             base::FEATURE_DISABLED_BY_DEFAULT);
-BASE_FEATURE(kOfferPinToTaskbarInSettings, base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kOfferPinToTaskbarInSettings, base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
 // Shows an infobar at startup offering to pin Chrome to the taskbar (on
 // Windows) or the Dock (on MacOS).
-BASE_FEATURE(kOfferPinToTaskbarInfoBar, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kOfferPinToTaskbarInfoBar, base::FEATURE_ENABLED_BY_DEFAULT);
 // Shows an infobar on PDFs offering to become the default PDF viewer if Chrome
 // isn't the default already.
-BASE_FEATURE(kPdfInfoBar, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kPdfInfoBar, base::FEATURE_ENABLED_BY_DEFAULT);
 
-constexpr base::FeatureParam<PdfInfoBarTrigger>::Option
-    kPdfInfoBarTriggerOptions[] = {{PdfInfoBarTrigger::kPdfLoad, "pdf-load"},
-                                   {PdfInfoBarTrigger::kStartup, "startup"}};
-
-BASE_FEATURE_ENUM_PARAM(PdfInfoBarTrigger,
-                        kPdfInfoBarTrigger,
-                        &kPdfInfoBar,
-                        "trigger",
-                        PdfInfoBarTrigger::kPdfLoad,
-                        &kPdfInfoBarTriggerOptions);
+BASE_FEATURE(kSeparateDefaultAndPinPrompt, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE_PARAM(int,
+                   kSeparateDefaultAndPinPromptRandSeed,
+                   &kSeparateDefaultAndPinPrompt,
+                   "random_seed",
+                   0);
+BASE_FEATURE_PARAM(int,
+                   kSeparateDefaultAndPinPromptPinMaxCount,
+                   &kSeparateDefaultAndPinPrompt,
+                   "pin_max_count",
+                   5);
+BASE_FEATURE_PARAM(int,
+                   kSeparateDefaultAndPinPromptPinCooldownDays,
+                   &kSeparateDefaultAndPinPrompt,
+                   "pin_cooldown_days",
+                   21);
+BASE_FEATURE_PARAM(int,
+                   kSeparateDefaultAndPinPromptDefaultMaxCount,
+                   &kSeparateDefaultAndPinPrompt,
+                   "default_max_count",
+                   5);
+BASE_FEATURE_PARAM(int,
+                   kSeparateDefaultAndPinPromptDefaultCooldownDays,
+                   &kSeparateDefaultAndPinPrompt,
+                   "default_cooldown_days",
+                   21);
+BASE_FEATURE_PARAM(int,
+                   kSeparateDefaultAndPinPromptMessageVersion,
+                   &kSeparateDefaultAndPinPrompt,
+                   "message_version",
+                   0);
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
 
 // Preloads a WebContents with a Top Chrome WebUI on BrowserView initialization,
@@ -93,119 +123,7 @@ BASE_FEATURE(kShowTabGroupsMacSystemMenu, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kSideBySide, base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE_PARAM(int,
-                   kSideBySideDropTargetMinWidth,
-                   &kSideBySide,
-                   "drop_target_min_width",
-                   120);
-BASE_FEATURE_PARAM(int,
-                   kSideBySideDropTargetMaxWidth,
-                   &kSideBySide,
-                   "drop_target_max_width",
-                   420);
-BASE_FEATURE_PARAM(int,
-                   kSideBySideDropTargetTargetWidthPercentage,
-                   &kSideBySide,
-                   "drop_target_width_percentage",
-                   30);
-BASE_FEATURE_PARAM(int,
-                   kSideBySideDropTargetForLinkTargetWidthPercentage,
-                   &kSideBySide,
-                   "drop_target_for_link_width_percentage",
-                   15);
-BASE_FEATURE_PARAM(int,
-                   kSideBySideDropTargetHideForOSWidth,
-                   &kSideBySide,
-                   "drop_target_hide_for_os_width",
-#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN)
-                   32
-#elif BUILDFLAG(IS_LINUX)
-                   50
-#else
-                   0
-#endif
-);
-
-BASE_FEATURE_PARAM(double,
-                   kSideBySideDropTargetHideForOSPercentage,
-                   &kSideBySide,
-                   "drop_target_hide_for_os_percentage",
-#if BUILDFLAG(IS_WIN)
-                   1.4
-#else
-                   0
-#endif
-);
-
-BASE_FEATURE(kSideBySideDropTargetNudge, base::FEATURE_ENABLED_BY_DEFAULT);
-
-BASE_FEATURE_PARAM(int,
-                   kSideBySideDropTargetNudgeMinWidth,
-                   &kSideBySideDropTargetNudge,
-                   "drop_target_nudge_min_width",
-                   80);
-BASE_FEATURE_PARAM(int,
-                   kSideBySideDropTargetNudgeMaxWidth,
-                   &kSideBySideDropTargetNudge,
-                   "drop_target_nudge_max_width",
-                   200);
-BASE_FEATURE_PARAM(int,
-                   kSideBySideDropTargetNudgeTargetWidthPercentage,
-                   &kSideBySideDropTargetNudge,
-                   "drop_target_nudge_width_percentage",
-                   5);
-BASE_FEATURE_PARAM(int,
-                   kSideBySideDropTargetNudgeToFullMinWidth,
-                   &kSideBySideDropTargetNudge,
-                   "drop_target_nudge_to_full_min_width",
-                   120);
-BASE_FEATURE_PARAM(int,
-                   kSideBySideDropTargetNudgeToFullMaxWidth,
-                   &kSideBySideDropTargetNudge,
-                   "drop_target_nudge_to_full_max_width",
-                   360);
-BASE_FEATURE_PARAM(int,
-                   kSideBySideDropTargetNudgeToFullTargetWidthPercentage,
-                   &kSideBySideDropTargetNudge,
-                   "drop_target_nudge_to_full_width_percentage",
-                   15);
-BASE_FEATURE_PARAM(double,
-                   kSideBySideDropTargetNudgeShowRatio,
-                   &kSideBySideDropTargetNudge,
-                   "drop_target_nudge_show_ratio",
-                   0.4f);
-BASE_FEATURE_PARAM(int,
-                   kSideBySideDropTargetNudgeShownLimit,
-                   &kSideBySideDropTargetNudge,
-                   "drop_target_nudge_shown_limit",
-                   6);
-BASE_FEATURE_PARAM(int,
-                   kSideBySideDropTargetNudgeUsedLimit,
-                   &kSideBySideDropTargetNudge,
-                   "drop_target_nudge_used_limit",
-                   1);
-
 BASE_FEATURE(kSideBySideLinkMenuNewBadge, base::FEATURE_ENABLED_BY_DEFAULT);
-
-BASE_FEATURE(kSideBySideFocusClearing, base::FEATURE_ENABLED_BY_DEFAULT);
-
-constexpr base::FeatureParam<SidePanelRelativeAlignment>::Option
-    kSidePanelRelativeAlignmentOptions[] = {
-        {SidePanelRelativeAlignment::kShowPanelsOnSameSide, "same"},
-        {SidePanelRelativeAlignment::kShowPanelsOnOppositeSides, "opposite"}};
-
-BASE_FEATURE_ENUM_PARAM(SidePanelRelativeAlignment,
-                        kSidePanelRelativeAlignment,
-                        &kToolbarHeightSidePanel,
-                        "side_panel_relative_alignment",
-                        SidePanelRelativeAlignment::kShowPanelsOnOppositeSides,
-                        &kSidePanelRelativeAlignmentOptions);
-
-BASE_FEATURE(kAppBrowserUseNewLayout, base::FEATURE_ENABLED_BY_DEFAULT);
-
-BASE_FEATURE(kPopupBrowserUseNewLayout, base::FEATURE_ENABLED_BY_DEFAULT);
-
-BASE_FEATURE(kTabbedBrowserUseNewLayout, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kTabDuplicateMetrics, base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -217,7 +135,10 @@ BASE_FEATURE(kTabGroupsCollapseFreezing, base::FEATURE_ENABLED_BY_DEFAULT);
 // General improvements to tab group menus
 BASE_FEATURE(kTabGroupMenuImprovements, base::FEATURE_DISABLED_BY_DEFAULT);
 
-// Update menus to use tab group menus in the action menu
+bool IsTabGroupMenuImprovementsEnabled() {
+  return base::FeatureList::IsEnabled(kTabGroupMenuImprovements);
+}
+
 BASE_FEATURE(kTabGroupMenuMoreEntryPoints, base::FEATURE_DISABLED_BY_DEFAULT);
 
 bool IsTabGroupMenuMoreEntryPointsEnabled() {
@@ -276,39 +197,6 @@ BASE_FEATURE_PARAM(bool,
                    "trigger_demo_mode",
                    false);
 
-BASE_FEATURE(kTabstripDeclutter, base::FEATURE_DISABLED_BY_DEFAULT);
-
-bool IsTabstripDeclutterEnabled() {
-  return base::FeatureList::IsEnabled(features::kTabstripDeclutter);
-}
-
-BASE_FEATURE_PARAM(base::TimeDelta,
-                   kTabstripDeclutterStaleThresholdDuration,
-                   &kTabstripDeclutter,
-                   "stale_threshold_duration",
-                   base::Days(7));
-
-BASE_FEATURE_PARAM(base::TimeDelta,
-                   kTabstripDeclutterTimerInterval,
-                   &kTabstripDeclutter,
-                   "declutter_timer_interval",
-                   base::Minutes(10));
-
-BASE_FEATURE_PARAM(base::TimeDelta,
-                   kTabstripDeclutterNudgeTimerInterval,
-                   &kTabstripDeclutter,
-                   "nudge_timer_interval",
-                   base::Minutes(6 * 60));
-
-BASE_FEATURE(kTabstripDedupe, base::FEATURE_DISABLED_BY_DEFAULT);
-
-bool IsTabstripDedupeEnabled() {
-  return IsTabstripDeclutterEnabled() &&
-         base::FeatureList::IsEnabled(features::kTabstripDedupe);
-}
-
-BASE_FEATURE(kTabOrganizationAppMenuItem, base::FEATURE_ENABLED_BY_DEFAULT);
-
 BASE_FEATURE(kTabOrganizationModelStrategy, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kTabOrganizationUserInstruction,
@@ -328,27 +216,21 @@ BASE_FEATURE(kThreeButtonPasswordSaveDialog, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kToolbarHeightSidePanel, base::FEATURE_DISABLED_BY_DEFAULT);
 
+BASE_FEATURE(kSidePanelFlyoverAnimation, base::FEATURE_ENABLED_BY_DEFAULT);
+bool UseSidePanelFlyoverAnimation() {
+#if BUILDFLAG(IS_MAC)
+  // Mac can smoothly resize contents and does not need flyover.
+  return false;
+#else
+  return base::FeatureList::IsEnabled(kSidePanelFlyoverAnimation);
+#endif
+}
+
 // Enables enterprise profile badging for managed profiles on the toolbar avatar
 // and in the profile menu. On managed profiles, a building icon will be used as
 // a badge in the profile menu.
 BASE_FEATURE(kEnterpriseProfileBadgingForMenu,
              base::FEATURE_ENABLED_BY_DEFAULT);
-
-// Enables enterprise badging for managed browsers on the new tab page footer.
-// On managed browsers, a building icon and "Managed by <domain>" string will be
-// shown in the footer, unless the icon and label are customized by the admin.
-BASE_FEATURE(kEnterpriseBadgingForNtpFooter, base::FEATURE_DISABLED_BY_DEFAULT);
-
-// Enables enterprise badging for managed browsers with local management only on
-// the new tab page footer. On managed browsers, a building icon and "Managed by
-// your organization" string will be shown in the footer.
-BASE_FEATURE(kEnterpriseBadgingForLocalManagemenetNtpFooter,
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
-// Enables enterprise badging for managed browsers with local management only
-// AND 3 or more policies on the new tab page footer.
-BASE_FEATURE(kEnterpriseBadgingForNtpFooterWithOverThreePolicies,
-             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enables the management notice in the NTP footer if the custom policies are
 // set. This acts as a kill switch for "EnterpriseCustomLabelForBrowser" and
@@ -418,63 +300,27 @@ BASE_FEATURE_PARAM(bool,
                    false);
 
 BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationLensOverlay,
-                   &kPageActionsMigration,
-                   "lens_overlay",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationMemorySaver,
-                   &kPageActionsMigration,
-                   "memory_saver",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationTranslate,
-                   &kPageActionsMigration,
-                   "translate",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationIntentPicker,
                    &kPageActionsMigration,
                    "intent_picker",
-                   true);
+// TODOD(crbug.com/480035938): Enable on ChromeOS.
+#if BUILDFLAG(IS_CHROMEOS)
+                   false
+#else
+                   true
+#endif
+);
 
 BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationZoom,
                    &kPageActionsMigration,
                    "zoom",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationOfferNotification,
-                   &kPageActionsMigration,
-                   "offer_notification",
-                   true);
+                   false);
 
 BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationFileSystemAccess,
                    &kPageActionsMigration,
                    "file_system_access",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationPwaInstall,
-                   &kPageActionsMigration,
-                   "pwa_install",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationPriceInsights,
-                   &kPageActionsMigration,
-                   "price_insights",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationDiscounts,
-                   &kPageActionsMigration,
-                   "discounts",
                    true);
 
 BASE_FEATURE_PARAM(bool,
@@ -505,12 +351,6 @@ BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationCollaborationMessaging,
                    &kPageActionsMigration,
                    "collaboration_messaging",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationPriceTracking,
-                   &kPageActionsMigration,
-                   "price_tracking",
                    true);
 
 BASE_FEATURE_PARAM(bool,
@@ -577,29 +417,6 @@ BASE_FEATURE(kByDateHistoryInSidePanel, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kTabStripBrowserApi, base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kTabstripComboButton, base::FEATURE_DISABLED_BY_DEFAULT);
-
-// This serves as a "kill-switch" for migrating the Tab Search feature to be a
-// toolbar button for non-ChromeOS users in the US.
-BASE_FEATURE(kLaunchedTabSearchToolbarButton,
-#if BUILDFLAG(IS_CHROMEOS)
-             base::FEATURE_DISABLED_BY_DEFAULT
-#else
-             base::FEATURE_ENABLED_BY_DEFAULT
-#endif
-);
-
-BASE_FEATURE_PARAM(bool,
-                   kTabSearchToolbarButton,
-                   &kTabstripComboButton,
-                   "tab_search_toolbar_button",
-                   true);
-
-// TODO(crbug.com/471062209): Clean up all callers of this function.
-bool HasTabSearchToolbarButton() {
-  return true;
-}
-
 BASE_FEATURE(kNonMilestoneUpdateToast, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kBookmarkTabGroupConversion, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -629,6 +446,38 @@ bool IsWebUIReloadButtonEnabled() {
   return base::FeatureList::IsEnabled(features::kInitialWebUI) &&
          base::FeatureList::IsEnabled(features::kWebUIReloadButton);
 }
+
+bool IsWebUIHomeButtonEnabled() {
+  return base::FeatureList::IsEnabled(features::kInitialWebUI) &&
+         base::FeatureList::IsEnabled(features::kWebUIHomeButton);
+}
+
+bool IsWebUIBackForwardButtonEnabled() {
+  return base::FeatureList::IsEnabled(features::kInitialWebUI) &&
+         base::FeatureList::IsEnabled(features::kWebUIBackForwardButton);
+}
+
+bool IsWebUIPinnedToolbarActionsEnabled() {
+  return base::FeatureList::IsEnabled(features::kInitialWebUI) &&
+         base::FeatureList::IsEnabled(features::kWebUIPinnedToolbarActions);
+}
+
+bool IsWebUISplitTabsButtonEnabled() {
+  return base::FeatureList::IsEnabled(features::kInitialWebUI) &&
+         base::FeatureList::IsEnabled(features::kWebUISplitTabsButton);
+}
+
+bool IsWebUILocationBarEnabled() {
+  return base::FeatureList::IsEnabled(features::kInitialWebUI) &&
+         base::FeatureList::IsEnabled(features::kWebUILocationBar);
+}
+
+bool IsWebUIToolbarEnabled() {
+  return IsWebUIReloadButtonEnabled() || IsWebUISplitTabsButtonEnabled() ||
+         IsWebUIHomeButtonEnabled() || IsWebUILocationBarEnabled() ||
+         IsWebUIBackForwardButtonEnabled() ||
+         IsWebUIPinnedToolbarActionsEnabled();
+}
 #endif  // !BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(IS_ANDROID)
@@ -644,5 +493,21 @@ bool IsAndroidAnimatedProgressBarInBrowserEnabled() {
 BASE_FEATURE(kWhatsNewDesktopRefresh, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kTabGroupsFocusing, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE_PARAM(bool,
+                   kTabGroupsFocusingPinnedTabs,
+                   &kTabGroupsFocusing,
+                   "tab_groups_focusing_pinned_tabs",
+                   false);
+
+BASE_FEATURE_PARAM(bool,
+                   kTabGroupsFocusingDefaultToFocused,
+                   &kTabGroupsFocusing,
+                   "tab_groups_focusing_default_to_focused",
+                   false);
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+BASE_FEATURE(kUpdaterUI, base::FEATURE_DISABLED_BY_DEFAULT);
+#endif
 
 }  // namespace features

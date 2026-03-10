@@ -9,7 +9,6 @@
 #include <utility>
 
 #include "base/barrier_callback.h"
-#include "base/containers/contains.h"
 #include "base/containers/enum_set.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
@@ -151,9 +150,9 @@ DataTypeManagerImpl::DataTypeManagerImpl(
 
     if (state == DataTypeController::FAILED) {
       data_type_status_table_.UpdateFailedDataType(
-          type, SyncError::CreateFromModelError(ModelError(
-                    FROM_HERE,
-                    ModelError::Type::kDataTypeControllerInFailedState)));
+          type,
+          SyncError::CreateFromModelError(ModelError(
+              FROM_HERE, ModelError::Type::kDataTypeControllerInFailedState)));
     }
 
     // TODO(crbug.com/40901755): query the initial state of preconditions.
@@ -230,7 +229,9 @@ void DataTypeManagerImpl::DataTypePreconditionChanged(DataType type) {
     return;
   }
 
-  switch (controllers_.find(type)->second->GetPreconditionState()) {
+  switch (controllers_.find(type)->second->GetPreconditionState(
+      DataTypeController::PreconditionContext(
+          last_requested_context_.account_managed_status))) {
     case DataTypeController::PreconditionState::kPreconditionsMet:
       if (preferred_types_.Has(type)) {
         // Only reconfigure if the type is both ready and desired. This will
@@ -365,7 +366,7 @@ TypeStatusMapForDebugging DataTypeManagerImpl::GetTypeStatusMapForDebugging(
     TypeStatusForDebugging& type_status = result[type];
     type_status.state = DataTypeController::StateToString(controller->state());
 
-    if (base::Contains(data_type_error_map, type)) {
+    if (data_type_error_map.contains(type)) {
       const SyncError& error = data_type_error_map.at(type);
       switch (error.error_type()) {
         case SyncError::MODEL_ERROR:
@@ -422,13 +423,13 @@ TypeStatusMapForDebugging DataTypeManagerImpl::GetTypeStatusMapForDebugging(
 }
 
 void DataTypeManagerImpl::GetAllNodesForDebugging(
-    base::OnceCallback<void(base::Value::List)> callback) const {
+    base::OnceCallback<void(base::ListValue)> callback) const {
   const DataTypeSet active_types = GetActiveDataTypes();
   if (active_types.empty() || state_ != CONFIGURED) {
     // `GetAllNodesRequestBarrier` only supports waiting for a non-empty set of
     // types, so return empty here if there are no active types. This can happen
     // if no data types have been successfully configured yet.
-    std::move(callback).Run(base::Value::List());
+    std::move(callback).Run(base::ListValue());
     return;
   }
 
@@ -446,7 +447,7 @@ void DataTypeManagerImpl::GetAllNodesForDebugging(
       continue;
     }
 
-    CHECK(base::Contains(controllers_, type));
+    CHECK(controllers_.contains(type));
     const std::unique_ptr<DataTypeController>& controller =
         controllers_.at(type);
 
@@ -468,7 +469,7 @@ void DataTypeManagerImpl::GetEntityCountsForDebugging(
 }
 
 DataTypeController* DataTypeManagerImpl::GetControllerForTest(DataType type) {
-  CHECK(base::Contains(controllers_, type));
+  CHECK(controllers_.contains(type));
   return controllers_.at(type).get();
 }
 
@@ -494,9 +495,9 @@ void DataTypeManagerImpl::Restart() {
   for (const auto& [type, controller] : controllers_) {
     if (controller->state() == DataTypeController::FAILED) {
       data_type_status_table_.UpdateFailedDataType(
-          type, SyncError::CreateFromModelError(ModelError(
-                    FROM_HERE,
-                    ModelError::Type::kDataTypeControllerInFailedState)));
+          type,
+          SyncError::CreateFromModelError(ModelError(
+              FROM_HERE, ModelError::Type::kDataTypeControllerInFailedState)));
     }
   }
 
@@ -508,8 +509,8 @@ void DataTypeManagerImpl::Restart() {
     encrypted_types.RemoveAll(data_type_status_table_.GetCryptoErrorTypes());
     for (DataType type : encrypted_types) {
       data_type_status_table_.UpdateFailedDataType(
-          type,
-          SyncError::CreateFromErrorType(FROM_HERE, SyncError::CRYPTO_ERROR, ""));
+          type, SyncError::CreateFromErrorType(FROM_HERE,
+                                               SyncError::CRYPTO_ERROR, ""));
     }
   } else {
     data_type_status_table_.ResetCryptoErrors();
@@ -585,7 +586,9 @@ bool DataTypeManagerImpl::UpdatePreconditionError(DataType type) {
     return false;
   }
 
-  switch (iter->second->GetPreconditionState()) {
+  switch (iter->second->GetPreconditionState(
+      DataTypeController::PreconditionContext(
+          last_requested_context_.account_managed_status))) {
     case DataTypeController::PreconditionState::kPreconditionsMet: {
       if (!data_type_status_table_.ResetPreconditionErrorFor(type)) {
         // Nothing changed.
@@ -601,16 +604,16 @@ bool DataTypeManagerImpl::UpdatePreconditionError(DataType type) {
 
     case DataTypeController::PreconditionState::kMustStopAndClearData: {
       return data_type_status_table_.UpdateFailedDataType(
-          type, SyncError::CreateFromErrorType(
-                    FROM_HERE, SyncError::PRECONDITION_ERROR_WITH_CLEAR_DATA,
-                    ""));
+          type,
+          SyncError::CreateFromErrorType(
+              FROM_HERE, SyncError::PRECONDITION_ERROR_WITH_CLEAR_DATA, ""));
     }
 
     case DataTypeController::PreconditionState::kMustStopAndKeepData: {
       return data_type_status_table_.UpdateFailedDataType(
-          type, SyncError::CreateFromErrorType(
-                    FROM_HERE, SyncError::PRECONDITION_ERROR_WITH_KEEP_DATA,
-                    ""));
+          type,
+          SyncError::CreateFromErrorType(
+              FROM_HERE, SyncError::PRECONDITION_ERROR_WITH_KEEP_DATA, ""));
     }
   }
 
@@ -1029,7 +1032,7 @@ void DataTypeManagerImpl::RecordMemoryUsageAndCountsHistograms() {
       continue;
     }
 
-    CHECK(base::Contains(controllers_, type));
+    CHECK(controllers_.contains(type));
     controllers_.at(type)->RecordMemoryUsageAndCountsHistograms();
   }
 }

@@ -148,8 +148,14 @@ void ApplyCR2023OmniboxExpandedStateColors(ui::ColorMixer& mixer,
   mixer[kColorOmniboxComposeboxChipBackground] = {ui::kColorSysSurface3};
   mixer[kColorOmniboxComposeboxDivider] = {ui::kColorSysDivider};
   mixer[kColorOmniboxComposeboxFaviconBackground] = {ui::kColorSysSurface};
-  mixer[kColorOmniboxComposeboxForegroundDisabled] = {
-      ui::kColorSysStateDisabled};
+  mixer[kColorOmniboxComposeboxFileThumbnailOverlay] = {
+      ui::kColorSysStateScrim};
+
+  // TODO(b/478054110): Using sys/white is a temporary solution. Revert to
+  // sys/on-error once the dark theme color is fixed.
+  mixer[kColorOmniboxComposeboxFileThumbnailOverlayIcon] = {ui::kColorSysWhite};
+
+  mixer[kColorOmniboxForegroundDisabled] = {ui::kColorSysStateDisabled};
   mixer[kColorOmniboxComposeboxPrimaryAction] = {ui::kColorSysPrimary};
   mixer[kColorOmniboxComposeboxSubmitButtonBackground] = {
       kColorOmniboxComposeboxPrimaryAction};
@@ -179,7 +185,8 @@ void ApplyOmniboxCR2023FallbackColors(ui::ColorMixer& mixer,
   mixer[kColorOmniboxResultsButtonInkDropSelectedRowSelected] = {ui::SetAlpha(
       kColorOmniboxResultsButtonInkDropSelected, std::ceil(0.16f * 255.0f))};
 
-  mixer[kColorOmniboxContextEntrypointText] = {ui::kColorSysOnSurface};
+  mixer[kColorOmniboxContextEntrypointText] =
+      ui::GetColorWithMaxContrast(kColorToolbarBackgroundSubtleEmphasis);
 }
 
 // Apply updates to the Omnibox color tokens per CR2023 guidelines.
@@ -452,10 +459,11 @@ void AddOmniboxColorMixer(ui::ColorProvider* provider,
       kColorOmniboxResultsBackground, gfx::kGoogleGrey700, gfx::kGoogleGrey200);
   mixer[kColorOmniboxComposeboxFaviconBackground] = {
       kColorOmniboxComposeboxChipBackground};
-  mixer[kColorOmniboxComposeboxForegroundDisabled] = {kColorOmniboxTextDimmed};
-  mixer[kColorOmniboxComposeboxSubmitButtonBackground] =
-      ui::SelectBasedOnDarkInput(kColorOmniboxResultsBackground,
-                                 gfx::kGoogleBlue200, gfx::kGoogleBlue600);
+  mixer[kColorOmniboxForegroundDisabled] = {kColorOmniboxTextDimmed};
+  mixer[kColorOmniboxComposeboxPrimaryAction] = ui::SelectBasedOnDarkInput(
+      kColorOmniboxResultsBackground, gfx::kGoogleBlue200, gfx::kGoogleBlue600);
+  mixer[kColorOmniboxComposeboxSubmitButtonBackground] = {
+      kColorOmniboxComposeboxPrimaryAction};
   mixer[kColorOmniboxComposeboxSubmitButtonIcon] = ui::SelectBasedOnDarkInput(
       kColorOmniboxResultsBackground, gfx::kGoogleGrey900, gfx::kGoogleBlue200);
 

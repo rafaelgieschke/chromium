@@ -27,6 +27,7 @@ static_idl_files_in_modules = [
   "//third_party/blink/renderer/modules/ai/proofreader.idl",
   "//third_party/blink/renderer/modules/ai/rewriter.idl",
   "//third_party/blink/renderer/modules/ai/summarizer.idl",
+  "//third_party/blink/renderer/modules/ai/classifier.idl",
   "//third_party/blink/renderer/modules/ai/writer.idl",
   "//third_party/blink/renderer/modules/animationworklet/animation_worklet_global_scope.idl",
   "//third_party/blink/renderer/modules/animationworklet/css_animation_worklet.idl",
@@ -173,7 +174,6 @@ static_idl_files_in_modules = [
   "//third_party/blink/renderer/modules/credentialmanagement/authenticator_attestation_response_json.idl",
   "//third_party/blink/renderer/modules/credentialmanagement/authenticator_response.idl",
   "//third_party/blink/renderer/modules/credentialmanagement/authenticator_selection_criteria.idl",
-  "//third_party/blink/renderer/modules/credentialmanagement/cable_authentication_data.idl",
   "//third_party/blink/renderer/modules/credentialmanagement/collected_client_data.idl",
   "//third_party/blink/renderer/modules/credentialmanagement/credential.idl",
   "//third_party/blink/renderer/modules/credentialmanagement/credential_creation_options.idl",
@@ -394,8 +394,6 @@ static_idl_files_in_modules = [
   "//third_party/blink/renderer/modules/indexeddb/idb_version_change_event.idl",
   "//third_party/blink/renderer/modules/indexeddb/idb_version_change_event_init.idl",
   "//third_party/blink/renderer/modules/indexeddb/window_or_worker_global_scope_indexed_database.idl",
-  "//third_party/blink/renderer/modules/installedapp/navigator_installed_app.idl",
-  "//third_party/blink/renderer/modules/installedapp/related_application.idl",
   "//third_party/blink/renderer/modules/keyboard/keyboard.idl",
   "//third_party/blink/renderer/modules/keyboard/keyboard_layout_map.idl",
   "//third_party/blink/renderer/modules/keyboard/navigator_keyboard.idl",
@@ -692,6 +690,9 @@ static_idl_files_in_modules = [
   "//third_party/blink/renderer/modules/quota/navigator_storage.idl",
   "//third_party/blink/renderer/modules/remoteplayback/html_media_element_remote_playback.idl",
   "//third_party/blink/renderer/modules/remoteplayback/remote_playback.idl",
+  "//third_party/blink/renderer/modules/webrtc/navigator_rtc.idl",
+  "//third_party/blink/renderer/modules/webrtc/rtc.idl",
+  "//third_party/blink/renderer/modules/webrtc/rtc_diagnostic_logging_options.idl",
   "//third_party/blink/renderer/modules/screen_details/screen_detailed.idl",
   "//third_party/blink/renderer/modules/screen_details/screen_details.idl",
   "//third_party/blink/renderer/modules/screen_details/window_screen_details.idl",
@@ -833,6 +834,7 @@ static_idl_files_in_modules = [
   "//third_party/blink/renderer/modules/webaudio/audio_param.idl",
   "//third_party/blink/renderer/modules/webaudio/audio_param_descriptor.idl",
   "//third_party/blink/renderer/modules/webaudio/audio_param_map.idl",
+  "//third_party/blink/renderer/modules/webaudio/audio_playback_stats.idl",
   "//third_party/blink/renderer/modules/webaudio/audio_playout_stats.idl",
   "//third_party/blink/renderer/modules/webaudio/audio_processing_event.idl",
   "//third_party/blink/renderer/modules/webaudio/audio_processing_event_init.idl",
@@ -1336,6 +1338,15 @@ if (!target_os_is_android) {
 # we need to compile in the same way as would happen when current_os="android".
 if (!target_os_is_android && !is_ios) {
   static_idl_files_in_modules += [ "//third_party/blink/renderer/modules/awc/additional_windowing_controls.idl" ]
+}
+
+# Installed App (getInstalledRelatedApps) is excluded on iOS because the
+# webapp infrastructure required for this API is not yet implemented.
+if (!is_ios) {
+  static_idl_files_in_modules += [
+    "//third_party/blink/renderer/modules/installedapp/navigator_installed_app.idl",
+    "//third_party/blink/renderer/modules/installedapp/related_application.idl",
+  ]
 }
 
 # Compute Pressure

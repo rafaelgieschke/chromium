@@ -9,7 +9,6 @@
 <translation id="101823271612280837">បានបញ្ឈប់​ការថត។ មិនអាចប្រើ​ផ្ទាំងគ្រប់គ្រង​ហ្គេម​នៅក្នុង​មុខងារថេប្លេត​បានទេ។</translation>
 <translation id="1024364763893396229">រក្សាទុក <ph name="NAME" /> របស់អ្នក</translation>
 <translation id="1032891413405719768">ថាមពល​ថ្មរបស់ប៊ិចនៅសល់តិច</translation>
-<translation id="1036073649888683237">ដើម្បីគ្រប់គ្រងការជូនដំណឹង សូមចូលទៅកាន់ការកំណត់</translation>
 <translation id="1036348656032585052">បិទ</translation>
 <translation id="1037492556044956303">បាន​បញ្ចូល <ph name="DEVICE_NAME" /></translation>
 <translation id="1038106730571050514">បង្ហាញ​ការណែនាំ</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">រូបថតថ្មីៗ <ph name="INDEX" /> សន្លឹកក្នុងចំណោម <ph name="TOTAL_COUNT" /> សន្លឹក។</translation>
 <translation id="2201687081523799384">បង្រួម Google កិច្ចការ</translation>
 <translation id="2208323208084708176">របៀបដេស៍ថបរួមតែមួយ។</translation>
-<translation id="2210311543574621570">អ្នក​នឹងឃើញ​ឃ្លីបបត នៅពេលអ្នក​ចុច Ctrl + V ឱ្យជាប់។ អ្នកអាចបិទ​ផ្លូវកាត់នេះបាន​ដោយបិទ​ទង់ #clipboard-history-longpress នៅក្នុង chrome://flags។</translation>
 <translation id="2215920961700443347">គ្មាន​អ៊ីនធឺណិតទេ។ សូមភ្ជាប់​អ៊ីនធឺណិត រួច​ព្យាយាមម្ដងទៀត។</translation>
 <translation id="2222841058024245321">តុទី 7</translation>
 <translation id="2223384056430485343">ក្នុងមុខងារ​បំបែកអេក្រង់</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">តំឡើងកម្មវិធី</translation>
 <translation id="2482878487686419369">ការជូនដំណឹង</translation>
 <translation id="2484513351006226581">ចុច <ph name="KEYBOARD_SHORTCUT" /> ដើម្បី​ប្តូរប្លង់​ក្តារ​ចុច។</translation>
+<translation id="2485422356828889247">លុប</translation>
 <translation id="2486214324139475545">ការមើល <ph name="DESK_NAME" /> សាកល្បង។ តុ​សកម្ម។</translation>
 <translation id="2486405091093637109">"<ph name="DISPLAY_NAME" />" ត្រូវបាន​ប្ដូរទៅ​កម្រិតគុណភាព <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz)។ ប្រសិនបើ​មិនបញ្ជាក់ទេ ការកំណត់​ពីមុននឹងត្រូវបានស្ដារ​ក្នុងរយៈពេល <ph name="TIMEOUT_SECONDS" />។</translation>
 <translation id="2487915095798731898">ចូលរួម</translation>
@@ -2194,7 +2193,6 @@
 <translation id="8241650983304689286">បញ្ចូល​ផ្ទាំងទៅ​ទិដ្ឋភាព​បំបែកថ្មី</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, កម្លាំង​រលកសញ្ញា <ph name="SIGNAL_STRENGTH" />, ថ្មទូរសព្ទ <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">បង្ហាញ​ខ្លឹមសារ Google ថាស​ទាំងអស់</translation>
-<translation id="8257510091797044096">រៀបចំឧបករណ៍របស់អ្នក</translation>
 <translation id="8261506727792406068">លុប</translation>
 <translation id="8262312463845990408">បិទ/បើកការចាក់</translation>
 <translation id="8268302343625273732">មើល​កិច្ចការ​ទាំងអស់​នៅក្នុង Google ថ្នាក់រៀន</translation>

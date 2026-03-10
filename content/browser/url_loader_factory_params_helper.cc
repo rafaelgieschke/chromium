@@ -19,6 +19,7 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/runtime_feature_state/runtime_feature_state_document_data.h"
+#include "content/public/common/child_process_id_util.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
@@ -84,7 +85,7 @@ network::mojom::URLLoaderFactoryParamsPtr CreateParams(
   network::mojom::URLLoaderFactoryParamsPtr params =
       network::mojom::URLLoaderFactoryParams::New();
 
-  params->process_id = process->GetDeprecatedID();
+  params->process_id = ToOriginatingProcessId(process->GetID());
   params->request_initiator_origin_lock = request_initiator_origin_lock;
 
   params->is_trusted = is_trusted;
@@ -286,6 +287,7 @@ URLLoaderFactoryParamsHelper::CreateForWorker(
         url_loader_network_observer,
     mojo::PendingRemote<network::mojom::DevToolsObserver> devtools_observer,
     network::mojom::ClientSecurityStatePtr client_security_state,
+    const std::optional<base::UnguessableToken>& network_restrictions_id,
     std::string_view debug_tag,
     bool require_cross_site_request_for_cookies,
     bool is_for_service_worker) {
@@ -316,7 +318,7 @@ URLLoaderFactoryParamsHelper::CreateForWorker(
       network::mojom::TrustTokenOperationPolicyVerdict::kPotentiallyPermit,
       net::CookieSettingOverrides(), debug_tag,
       require_cross_site_request_for_cookies, is_for_service_worker,
-      /*TODO(crbug.com/447954811): network_restrictions_id*/ std::nullopt);
+      network_restrictions_id);
 }
 
 // static
@@ -360,7 +362,7 @@ URLLoaderFactoryParamsHelper::CreateForEarlyHintsPreload(
           early_hints.headers->cross_origin_embedder_policy,
           network::IsOriginPotentiallyTrustworthy(tentative_origin),
           early_hints.ip_address_space,
-          network::mojom::PrivateNetworkRequestPolicy::kBlock,
+          network::mojom::LocalNetworkAccessRequestPolicy::kBlock,
           network::DocumentIsolationPolicy());
 
   return CreateParams(

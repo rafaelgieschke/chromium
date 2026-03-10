@@ -38,6 +38,7 @@
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/web/web_link_preview_triggerer.h"
+#include "third_party/blink/renderer/core/ad_tracker/ad_tracker.h"
 #include "third_party/blink/renderer/core/css/scroll_target_group_scope.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
@@ -47,7 +48,6 @@
 #include "third_party/blink/renderer/core/events/mouse_event.h"
 #include "third_party/blink/renderer/core/events/pointer_event.h"
 #include "third_party/blink/renderer/core/events/web_input_event_conversion.h"
-#include "third_party/blink/renderer/core/frame/ad_tracker.h"
 #include "third_party/blink/renderer/core/frame/attribution_src_loader.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -55,6 +55,7 @@
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/anchor_element_metrics_sender.h"
 #include "third_party/blink/renderer/core/html/anchor_element_utils.h"
+#include "third_party/blink/renderer/core/html/html_area_element.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html_names.h"
@@ -133,6 +134,11 @@ FocusableState HTMLAnchorElementBase::SupportsFocus(
 }
 
 bool HTMLAnchorElementBase::ShouldHaveFocusAppearance() const {
+  if (RuntimeEnabledFeatures::AnchorFocusRingFixEnabled()) {
+    // When this flag is removed, we can remove
+    // HTMLAnchorElementBase::ShouldHaveFocusAppearance.
+    return HTMLElement::ShouldHaveFocusAppearance();
+  }
   // TODO(crbug.com/1444450): Can't this be done with focus-visible now?
   return (GetDocument().LastFocusType() != mojom::blink::FocusType::kMouse) ||
          HTMLElement::SupportsFocus(UpdateBehavior::kNoneForFocusManagement) !=
@@ -351,15 +357,17 @@ bool HTMLAnchorElementBase::CanStartSelection() const {
 bool HTMLAnchorElementBase::draggable() const {
   // Should be draggable if we have an href attribute.
   const AtomicString& value = FastGetAttribute(html_names::kDraggableAttr);
-  if (EqualIgnoringASCIICase(value, "true"))
+  if (EqualIgnoringAsciiCase(value, "true")) {
     return true;
-  if (EqualIgnoringASCIICase(value, "false"))
+  }
+  if (EqualIgnoringAsciiCase(value, "false")) {
     return false;
+  }
   return FastHasAttribute(html_names::kHrefAttr);
 }
 
 KURL HTMLAnchorElementBase::Href() const {
-  return GetDocument().CompleteURL(StripLeadingAndTrailingHTMLSpaces(
+  return GetDocument().CompleteURL(StripLeadingAndTrailingHtmlSpaces(
       FastGetAttribute(html_names::kHrefAttr)));
 }
 
@@ -435,7 +443,9 @@ void HTMLAnchorElementBase::NavigateToHyperlink(
     // Ensured by third_party/blink/renderer/core/loader/navigation_policy.cc.
     CHECK(base::FeatureList::IsEnabled(features::kLinkPreview));
 
-    DocumentSpeculationRules::From(GetDocument()).InitiatePreview(Url());
+    if (Url().ProtocolIsInHttpFamily()) {
+      DocumentSpeculationRules::From(GetDocument()).InitiatePreview(Url());
+    }
     return;
   }
 
@@ -547,6 +557,12 @@ void HTMLAnchorElementBase::HandleClick(MouseEvent& event) {
   if (!isConnected()) {
     UseCounter::Count(GetDocument(),
                       WebFeature::kAnchorClickDispatchForNonConnectedNode);
+    // Disconnected <area> elements should not trigger navigation.
+    // https://html.spec.whatwg.org/multipage/links.html#cannot-navigate
+    if (RuntimeEnabledFeatures::DisallowDisconnectedAreaNavigationEnabled() &&
+        IsA<HTMLAreaElement>(this)) {
+      return;
+    }
   }
 
   if (auto* tracker = GetDocument().GetAnchorElementInteractionTracker()) {
@@ -554,7 +570,7 @@ void HTMLAnchorElementBase::HandleClick(MouseEvent& event) {
   }
 
   StringBuilder url;
-  url.Append(StripLeadingAndTrailingHTMLSpaces(
+  url.Append(StripLeadingAndTrailingHtmlSpaces(
       FastGetAttribute(html_names::kHrefAttr)));
   AppendServerMapMousePosition(url, &event);
   KURL completed_url = GetDocument().CompleteURL(url.ToString());

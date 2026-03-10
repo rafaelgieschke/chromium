@@ -1056,8 +1056,9 @@ gunichar GetCharacterAtOffset(AtkText* atk_text, int offset) {
   size_t limited_offset = std::min(static_cast<size_t>(offset), text_length);
 
   base_icu::UChar32 code_point;
-  base::ReadUnicodeCharacter(text.c_str(), text_length + 1, &limited_offset,
-                             &code_point);
+  if (!base::ReadUnicodeCharacter(text, &limited_offset, &code_point)) {
+    return 0;
+  }
   return code_point;
 }
 
@@ -2749,9 +2750,14 @@ AtkRole AXPlatformNodeAuraLinux::GetAtkRole() const {
     case ax::mojom::Role::kEmbeddedObject:
       return ATK_ROLE_EMBEDDED;
     case ax::mojom::Role::kForm:
-      // TODO(accessibility) Forms which lack an accessible name are no longer
-      // exposed as forms. http://crbug.com/874384. Forms which have accessible
-      // names should be exposed as ATK_ROLE_LANDMARK according to Core AAM.
+      // Per Core AAM, named forms should be exposed as landmarks.
+      // TODO(crbug.com/468317749): Blink currently maps unnamed <form> to
+      // kSection instead of kForm. Once fixed, platforms will handle the
+      // mapping. For now, explicit role="form" without a name still reaches
+      // here and should remain ATK_ROLE_FORM.
+      if (HasStringAttribute(ax::mojom::StringAttribute::kName)) {
+        return ATK_ROLE_LANDMARK;
+      }
       return ATK_ROLE_FORM;
     case ax::mojom::Role::kFigure:
     case ax::mojom::Role::kFeed:
@@ -3596,6 +3602,24 @@ void AXPlatformNodeAuraLinux::OnWindowVisibilityChanged() {
   atk_object_notify_state_change(atk_object, ATK_STATE_ICONIFIED, minimized);
 }
 
+void AXPlatformNodeAuraLinux::HandleWindowActivatedEvent() {
+  if (AtkUtilAuraLinux::GetInstance()->IsAtSpiReady()) {
+    OnWindowActivated();
+  } else {
+    AtkUtilAuraLinux::GetInstance()->PostponeEventsFor(this);
+    window_activate_event_postponed_ = true;
+  }
+}
+
+void AXPlatformNodeAuraLinux::HandleWindowDeactivatedEvent() {
+  if (AtkUtilAuraLinux::GetInstance()->IsAtSpiReady()) {
+    OnWindowDeactivated();
+  } else {
+    AtkUtilAuraLinux::GetInstance()->CancelPostponedEventsFor(this);
+    window_activate_event_postponed_ = false;
+  }
+}
+
 void AXPlatformNodeAuraLinux::OnScrolledToAnchor() {
   AtkObject* atk_object = GetOrCreateAtkObject();
   if (!atk_object)
@@ -4132,20 +4156,10 @@ void AXPlatformNodeAuraLinux::NotifyAccessibilityEvent(
       OnValueChanged();
       break;
     case ax::mojom::Event::kWindowActivated:
-      if (AtkUtilAuraLinux::GetInstance()->IsAtSpiReady()) {
-        OnWindowActivated();
-      } else {
-        AtkUtilAuraLinux::GetInstance()->PostponeEventsFor(this);
-        window_activate_event_postponed_ = true;
-      }
+      HandleWindowActivatedEvent();
       break;
     case ax::mojom::Event::kWindowDeactivated:
-      if (AtkUtilAuraLinux::GetInstance()->IsAtSpiReady()) {
-        OnWindowDeactivated();
-      } else {
-        AtkUtilAuraLinux::GetInstance()->CancelPostponedEventsFor(this);
-        window_activate_event_postponed_ = false;
-      }
+      HandleWindowDeactivatedEvent();
       break;
     case ax::mojom::Event::kWindowVisibilityChanged:
       OnWindowVisibilityChanged();
@@ -4261,11 +4275,11 @@ AXPlatformNodeAuraLinux::GetHypertextAdjustments() {
   text_unicode_adjustments_.emplace();
 
   std::u16string text = GetHypertext();
-  size_t text_length = text.size();
+  size_t text_length = text.length();
   for (size_t i = 0; i < text_length; i++) {
     base_icu::UChar32 code_point;
     size_t original_i = i;
-    base::ReadUnicodeCharacter(text.c_str(), text_length + 1, &i, &code_point);
+    base::ReadUnicodeCharacter(text, &i, &code_point);
 
     if ((i - original_i + 1) != 1) {
       text_unicode_adjustments_->push_back(
@@ -4635,7 +4649,7 @@ void AXPlatformNodeAuraLinux::GetFloatAttributeInGValue(
     GValue* value) {
   float float_val;
   if (GetFloatAttribute(attr, &float_val)) {
-    UNSAFE_TODO(memset(value, 0, sizeof(*value)));
+    *value = {};
     g_value_init(value, G_TYPE_FLOAT);
     g_value_set_float(value, float_val);
   }

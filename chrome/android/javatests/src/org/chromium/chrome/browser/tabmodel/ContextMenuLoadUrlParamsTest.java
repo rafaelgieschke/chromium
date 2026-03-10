@@ -113,6 +113,8 @@ public class ContextMenuLoadUrlParamsTest {
                     AsyncTabParamsManagerSingleton.getInstance(),
                     false,
                     ActivityType.TABBED,
+                    /* customTabProfileType= */ null,
+                    TabModelType.STANDARD,
                     false);
         }
     }

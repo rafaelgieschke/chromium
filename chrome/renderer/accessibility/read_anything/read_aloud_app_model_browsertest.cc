@@ -4,6 +4,7 @@
 
 #include "chrome/renderer/accessibility/read_anything/read_aloud_app_model.h"
 
+#include <algorithm>
 #include <memory>
 
 #include "base/memory/raw_ptr.h"
@@ -43,7 +44,7 @@ class ReadAnythingReadAloudAppModelTest : public ChromeRenderViewTest {
     model_->set_speech_rate(speech_rate);
   }
 
-  const base::Value::List& EnabledLanguages() {
+  const base::ListValue& EnabledLanguages() {
     return model_->languages_enabled_in_pref();
   }
 
@@ -51,7 +52,7 @@ class ReadAnythingReadAloudAppModelTest : public ChromeRenderViewTest {
     model_->SetLanguageEnabled(lang, enabled);
   }
 
-  const base::Value::Dict& Voices() { return model_->voices(); }
+  const base::DictValue& Voices() { return model_->voices(); }
 
   void SetVoice(const std::string& voice, const std::string& lang) {
     model_->SetVoice(voice, lang);
@@ -73,15 +74,6 @@ class ReadAnythingReadAloudAppModelTest : public ChromeRenderViewTest {
 
   void LogSpeechStop(ReadAloudAppModel::ReadAloudStopSource source) {
     model_->LogSpeechStop(source);
-  }
-
-  void EnableReadAloud() {
-    scoped_feature_list_.InitAndEnableFeature(features::kReadAnythingReadAloud);
-  }
-
-  void DisableReadAloud() {
-    scoped_feature_list_.InitWithFeatures({},
-                                          {features::kReadAnythingReadAloud});
   }
 
   std::vector<ui::AXNodeID> MoveToNextGranularityAndGetText(
@@ -209,27 +201,8 @@ class ReadAnythingReadAloudAppModelTest : public ChromeRenderViewTest {
   std::unique_ptr<ui::AXTreeManager> tree_manager_;
 };
 
-// Read Aloud is currently only enabled by default on ChromeOS.
-#if !BUILDFLAG(IS_CHROMEOS)
-TEST_F(ReadAnythingReadAloudAppModelTest, LogSpeechStop_WithoutReadAloud) {
-  DisableReadAloud();
-  auto source = ReadAloudAppModel::ReadAloudStopSource::kCloseReadingMode;
-  base::HistogramTester histogram_tester;
-
-  LogSpeechStop(source);
-
-  histogram_tester.ExpectTotalCount(
-      ReadAloudAppModel::kSpeechStopSourceHistogramName, 0);
-  histogram_tester.ExpectTotalCount(
-      ReadAloudAppModel::kAudioStartTimeSuccessHistogramName, 0);
-  histogram_tester.ExpectTotalCount(
-      ReadAloudAppModel::kAudioStartTimeFailureHistogramName, 0);
-}
-#endif
-
 TEST_F(ReadAnythingReadAloudAppModelTest,
-       LogSpeechStop_WithReadAloud_AudioDidNotStart_LogsDelay) {
-  EnableReadAloud();
+       LogSpeechStop_AudioDidNotStart_LogsDelay) {
   SetSpeechPlaying(true);
   const auto delay = base::Milliseconds(25);
   task_environment_.FastForwardBy(delay);
@@ -247,8 +220,7 @@ TEST_F(ReadAnythingReadAloudAppModelTest,
 }
 
 TEST_F(ReadAnythingReadAloudAppModelTest,
-       LogSpeechStop_WithReadAloud_AudioDidStart_DoesNotLogDelay) {
-  EnableReadAloud();
+       LogSpeechStop_AudioDidStart_DoesNotLogDelay) {
   SetSpeechPlaying(true);
   const auto delay = base::Milliseconds(12);
   task_environment_.FastForwardBy(delay);
@@ -267,8 +239,7 @@ TEST_F(ReadAnythingReadAloudAppModelTest,
 }
 
 TEST_F(ReadAnythingReadAloudAppModelTest,
-       LogSpeechStop_WithReadAloud_LogsStopSourceWithSpeechNotPlaying) {
-  EnableReadAloud();
+       LogSpeechStop_LogsStopSourceWithSpeechNotPlaying) {
   auto source = ReadAloudAppModel::ReadAloudStopSource::kFinishContent;
   base::HistogramTester histogram_tester;
 
@@ -279,8 +250,7 @@ TEST_F(ReadAnythingReadAloudAppModelTest,
 }
 
 TEST_F(ReadAnythingReadAloudAppModelTest,
-       LogSpeechStop_WithReadAloud_LogsStopSourceWithSpeechPlaying) {
-  EnableReadAloud();
+       LogSpeechStop_LogsStopSourceWithSpeechPlaying) {
   SetSpeechPlaying(true);
   auto source = ReadAloudAppModel::ReadAloudStopSource::kFinishContent;
   base::HistogramTester histogram_tester;
@@ -292,7 +262,6 @@ TEST_F(ReadAnythingReadAloudAppModelTest,
 }
 
 TEST_F(ReadAnythingReadAloudAppModelTest, SetAudioCurrentlyPlaying_LogsDelay) {
-  EnableReadAloud();
   SetSpeechPlaying(true);
   const auto delay = base::Milliseconds(27);
   task_environment_.FastForwardBy(delay);
@@ -335,10 +304,10 @@ TEST_F(ReadAnythingReadAloudAppModelTest, EnabledLanguages) {
 
   const std::string enabled_lang = "fr";
   SetLanguageEnabled(enabled_lang, true);
-  EXPECT_TRUE(base::Contains(EnabledLanguages(), enabled_lang));
+  EXPECT_TRUE(EnabledLanguages().contains(enabled_lang));
 
   SetLanguageEnabled(enabled_lang, false);
-  EXPECT_FALSE(base::Contains(EnabledLanguages(), enabled_lang));
+  EXPECT_FALSE(EnabledLanguages().contains(enabled_lang));
 }
 
 TEST_F(ReadAnythingReadAloudAppModelTest, Voices) {
@@ -350,15 +319,15 @@ TEST_F(ReadAnythingReadAloudAppModelTest, Voices) {
   const char* voice2 = "Shang";
   SetVoice(voice1, lang1);
   SetVoice(voice2, lang2);
-  EXPECT_TRUE(base::Contains(Voices(), lang1));
-  EXPECT_TRUE(base::Contains(Voices(), lang2));
+  EXPECT_TRUE(Voices().contains(lang1));
+  EXPECT_TRUE(Voices().contains(lang2));
   EXPECT_STREQ(Voices().FindString(lang1)->c_str(), voice1);
   EXPECT_STREQ(Voices().FindString(lang2)->c_str(), voice2);
 
   const char* voice3 = "Mushu";
   SetVoice(voice3, lang2);
-  EXPECT_TRUE(base::Contains(Voices(), lang1));
-  EXPECT_TRUE(base::Contains(Voices(), lang2));
+  EXPECT_TRUE(Voices().contains(lang1));
+  EXPECT_TRUE(Voices().contains(lang2));
   EXPECT_STREQ(Voices().FindString(lang2)->c_str(), voice3);
 }
 
@@ -397,8 +366,7 @@ class ReadAnythingReadAloudAppModelV8SegmentationTest
     // Phrase highlighting currently doesn't work with the TS text segmentation
     // implementation, so we need to disable it to test phrase highlighting.
     scoped_feature_list_.InitWithFeatures(
-        {features::kReadAnythingReadAloud,
-         features::kReadAnythingReadAloudPhraseHighlighting},
+        {features::kReadAnythingReadAloudPhraseHighlighting},
         {features::kReadAnythingReadAloudTSTextSegmentation});
     ReadAnythingReadAloudAppModelTest::SetUp();
   }
@@ -620,7 +588,7 @@ TEST_F(ReadAnythingReadAloudAppModelV8SegmentationTest,
   // Expect that GetNextValidPosition fails without inserted the granularity.
   // The first segment was returned correctly.
   EXPECT_EQ(current_granularity.node_ids.size(), 1u);
-  EXPECT_TRUE(base::Contains(current_granularity.node_ids, kId1));
+  EXPECT_TRUE(std::ranges::contains(current_granularity.node_ids, kId1));
 
   ui::AXNodePosition::AXPositionInstance new_position =
       GetNextNodePosition(&current_nodes);
@@ -767,12 +735,12 @@ TEST_F(ReadAnythingReadAloudAppModelV8SegmentationTest,
   a11y::ReadAloudCurrentGranularity first_granularity =
       GetNextNodes(&current_nodes);
   EXPECT_EQ(first_granularity.node_ids.size(), 1u);
-  EXPECT_TRUE(base::Contains(first_granularity.node_ids, kId1));
+  EXPECT_TRUE(std::ranges::contains(first_granularity.node_ids, kId1));
   EXPECT_EQ(first_granularity.text, sentence1);
   a11y::ReadAloudCurrentGranularity next_granularity =
       GetNextNodes(&current_nodes);
   EXPECT_EQ(next_granularity.node_ids.size(), 1u);
-  EXPECT_TRUE(base::Contains(next_granularity.node_ids, kId2));
+  EXPECT_TRUE(std::ranges::contains(next_granularity.node_ids, kId2));
   EXPECT_EQ(next_granularity.text, sentence2);
 
   // If we init without resetting we should just go to the next sentence
@@ -780,7 +748,7 @@ TEST_F(ReadAnythingReadAloudAppModelV8SegmentationTest,
   a11y::ReadAloudCurrentGranularity last_granularity =
       GetNextNodes(&current_nodes);
   EXPECT_EQ(last_granularity.node_ids.size(), 1u);
-  EXPECT_TRUE(base::Contains(last_granularity.node_ids, kId3));
+  EXPECT_TRUE(std::ranges::contains(last_granularity.node_ids, kId3));
   EXPECT_EQ(last_granularity.text, sentence3);
 
   // After reset and then init, we should get the first sentence again.
@@ -788,7 +756,7 @@ TEST_F(ReadAnythingReadAloudAppModelV8SegmentationTest,
   InitAXPositionWithNode(kId1);
   a11y::ReadAloudCurrentGranularity after_reset = GetNextNodes(&current_nodes);
   EXPECT_EQ(after_reset.node_ids.size(), 1u);
-  EXPECT_TRUE(base::Contains(after_reset.node_ids, kId1));
+  EXPECT_TRUE(std::ranges::contains(after_reset.node_ids, kId1));
   EXPECT_EQ(first_granularity.text, sentence1);
 }
 

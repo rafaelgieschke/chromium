@@ -14,7 +14,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -270,7 +269,7 @@ void GaiaCookieManagerService::ExternalCcResultFetcher::
       continue;
     }
 
-    const base::Value::Dict& elem_dict = elem.GetDict();
+    const base::DictValue& elem_dict = elem.GetDict();
     const std::string* token = elem_dict.FindString("carryBackToken");
     const std::string* url = elem_dict.FindString("url");
     if (token && url) {
@@ -376,8 +375,7 @@ void GaiaCookieManagerService::ExternalCcResultFetcher::OnURLLoadComplete(
 
   // A character may be encoded into a maximum of 4 characters.
   constexpr int kEncodedLength = kTruncatedLength * 4;
-  url::RawCanonOutputT<char, kEncodedLength> encoded_data;
-  url::EncodeURIComponent(data, &encoded_data);
+  url::UriComponentEncoder<kEncodedLength> encoded_data(data);
   results_[it->second] = std::string(encoded_data.view());
 
   // Clean up tracking of this fetcher.  The rest will be cleaned up after
@@ -509,8 +507,8 @@ signin::AccountsInCookieJarInfo GaiaCookieManagerService::ListAccounts() {
     // `ListAccounts()` doesn't mean a change has happened that requires adding
     // a new /ListAccounts request even if there is one in-flight.
     // Only trigger a request, if none is ongoing.
-    if (!base::Contains(requests_, LIST_ACCOUNTS,
-                        &GaiaCookieRequest::request_type)) {
+    if (!std::ranges::contains(requests_, LIST_ACCOUNTS,
+                               &GaiaCookieRequest::request_type)) {
       TriggerListAccounts();
     }
   }
@@ -556,8 +554,8 @@ void GaiaCookieManagerService::LogOutAllAccounts(
   DCHECK(completion_callback);
 
   // Verify a LOG_OUT isn't already queued.
-  if (base::Contains(requests_, GaiaCookieRequestType::LOG_OUT,
-                     &GaiaCookieRequest::request_type)) {
+  if (std::ranges::contains(requests_, GaiaCookieRequestType::LOG_OUT,
+                            &GaiaCookieRequest::request_type)) {
     std::move(completion_callback)
         .Run(GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED));
     return;

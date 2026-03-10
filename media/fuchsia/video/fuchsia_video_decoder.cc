@@ -2,19 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "media/fuchsia/video/fuchsia_video_decoder.h"
 
 #include <fuchsia/sysmem/cpp/fidl.h>
-#include <inttypes.h>
 #include <lib/zx/eventpair.h>
 #include <vulkan/vulkan.h>
 
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
 #include "base/fuchsia/fuchsia_logging.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -22,6 +17,8 @@
 #include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/string_split.h"
 #include "base/task/bind_post_task.h"
 #include "base/task/sequenced_task_runner.h"
 #include "components/viz/common/gpu/raster_context_provider.h"
@@ -92,10 +89,13 @@ std::optional<gfx::Size> ParseMinBufferSize() {
           switches::kMinVideoDecoderOutputBufferSize);
   if (min_buffer_size_arg.empty())
     return std::nullopt;
+
+  auto parts = base::SplitStringPiece(
+      min_buffer_size_arg, "x", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   size_t width;
   size_t height;
-  if (sscanf(min_buffer_size_arg.c_str(), "%zux%zu" SCNu32, &width, &height) !=
-      2) {
+  if (parts.size() != 2 || !base::StringToSizeT(parts[0], &width) ||
+      !base::StringToSizeT(parts[1], &height)) {
     LOG(WARNING) << "Invalid value for --"
                  << switches::kMinVideoDecoderOutputBufferSize << ": '"
                  << min_buffer_size_arg << "'";
@@ -144,8 +144,7 @@ class FuchsiaVideoDecoder::OutputMailbox {
   OutputMailbox& operator=(const OutputMailbox&) = delete;
 
   ~OutputMailbox() {
-    raster_context_provider_->SharedImageInterface()->DestroySharedImage(
-        release_sync_token_, std::move(shared_image_));
+    shared_image_->UpdateDestructionSyncToken(release_sync_token_);
   }
 
   const gpu::Mailbox& mailbox() { return shared_image_->mailbox(); }
@@ -503,12 +502,13 @@ void FuchsiaVideoDecoder::OnStreamProcessorAllocateOutputBuffers(
     auto& image_constraints =
         constraints.mutable_image_format_constraints()->emplace_back();
     image_constraints.set_pixel_format(
-        kSupportedPixelFormats[pixel_format_index]);
+        UNSAFE_TODO(kSupportedPixelFormats[pixel_format_index]));
     image_constraints.set_pixel_format_modifier(
         fuchsia::images2::PixelFormatModifier::LINEAR);
 
     for (size_t i = 0; i < std::size(kSupportedColorSpaces); ++i) {
-      image_constraints.mutable_color_spaces()->emplace_back(kSupportedColorSpaces[i]);
+      image_constraints.mutable_color_spaces()->emplace_back(
+          UNSAFE_TODO(kSupportedColorSpaces[i]));
     }
   }
 
@@ -562,7 +562,7 @@ void FuchsiaVideoDecoder::OnStreamProcessorOutputPacket(
       fidl::ToUnderlying(output_format_.image_format.pixel_format.type));
 
   VideoPixelFormat pixel_format;
-  // The GMB is either kNV12 or kYV12.
+  // The output handle is either kNV12 or kYV12.
   viz::SharedImageFormat si_format;
   switch (sysmem_pixel_format) {
     case fuchsia::images2::PixelFormat::NV12:

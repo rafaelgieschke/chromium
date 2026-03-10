@@ -243,7 +243,9 @@ component("views") {
     "focus/focus_search.h",
     "focus/native_view_focus_manager.h",
     "input_event_activation_protector.h",
+    "interaction/element_highlighter_views.h",
     "interaction/element_tracker_views.h",
+    "interaction/element_tracker_widget_state.h",
     "interaction/interaction_sequence_views.h",
     "layout/animating_layout_manager.h",
     "layout/box_layout.h",
@@ -309,6 +311,7 @@ component("views") {
     "widget/tooltip_manager.h",
     "widget/unique_widget_ptr.h",
     "widget/widget.h",
+    "widget/widget_activation_delegate.h",
     "widget/widget_delegate.h",
     "widget/widget_deletion_observer.h",
     "widget/widget_enumerator.h",
@@ -479,7 +482,9 @@ component("views") {
     "focus/focus_search.cc",
     "focus/native_view_focus_manager.cc",
     "input_event_activation_protector.cc",
+    "interaction/element_highlighter_views.cc",
     "interaction/element_tracker_views.cc",
+    "interaction/element_tracker_widget_state.cc",
     "interaction/interaction_sequence_views.cc",
     "layout/animating_layout_manager.cc",
     "layout/box_layout.cc",
@@ -531,6 +536,7 @@ component("views") {
     "widget/tooltip_manager.cc",
     "widget/unique_widget_ptr.cc",
     "widget/widget.cc",
+    "widget/widget_activation_delegate.cc",
     "widget/widget_aura_utils.cc",
     "widget/widget_delegate.cc",
     "widget/widget_deletion_observer.cc",
@@ -591,7 +597,7 @@ component("views") {
     "//ui/color:mixers",
     "//ui/compositor_extra",
     "//ui/display",
-    "//ui/gfx:native_widget_types",
+    "//ui/gfx:native_ui_types",
     "//ui/latency",
     "//ui/lottie",
     "//ui/native_theme",
@@ -789,7 +795,6 @@ component("views") {
       "accessibility/ax_virtual_view_wrapper.h",
       "accessibility/ax_widget_obj_wrapper.h",
       "accessibility/ax_window_obj_wrapper.h",
-      "accessibility/tree/browser_views_ax_manager.h",
       "accessibility/tree/views_ax_manager.h",
       "controls/native/native_view_host_aura.h",
       "corewm/tooltip.h",
@@ -818,7 +823,6 @@ component("views") {
       "accessibility/ax_virtual_view_wrapper.cc",
       "accessibility/ax_widget_obj_wrapper.cc",
       "accessibility/ax_window_obj_wrapper.cc",
-      "accessibility/tree/browser_views_ax_manager.cc",
       "accessibility/tree/views_ax_manager.cc",
       "controls/menu/menu_pre_target_handler_aura.cc",
       "controls/menu/menu_pre_target_handler_aura.h",
@@ -1208,6 +1212,13 @@ source_set("test_support") {
     deps += [ "//ui/ozone" ]
   }
 
+  if (enable_desktop_aura || is_mac) {
+    sources += [
+      "test/mock_activation_controller.cc",
+      "test/mock_activation_controller.h",
+    ]
+  }
+
   if (use_ozone && enable_desktop_aura) {
     sources += [
       "test/test_desktop_screen_ozone.cc",
@@ -1307,6 +1318,7 @@ test("views_unittests") {
     "focus/focus_manager_unittest.cc",
     "focus/focus_traversal_unittest.cc",
     "interaction/element_tracker_views_unittest.cc",
+    "interaction/element_tracker_widget_state_unittest.cc",
     "interaction/interaction_sequence_views_unittest.cc",
     "interaction/interaction_test_util_views_unittest.cc",
     "interaction/interactive_views_test_unittest.cc",
@@ -1490,6 +1502,10 @@ test("views_unittests") {
     ]
   }
 
+  if (is_mac || enable_desktop_aura) {
+    sources += [ "widget/widget_activation_delegate_unittest.cc" ]
+  }
+
   if (is_fuchsia) {
     # These tests use SwiftShader (crbug.com/1022542), which uses JIT.
     test_runner_shard = "//build/config/fuchsia/test/elf_test_ambient_exec_runner.shard.test-cml"
@@ -1534,10 +1550,6 @@ test("views_unittests") {
 
     if (enable_desktop_aura || is_chromeos) {
       sources += [ "touchui/touch_selection_menu_runner_views_unittest.cc" ]
-    }
-
-    if (!is_chromeos) {
-      sources += [ "accessibility/tree/browser_views_ax_manager_unittest.cc" ]
     }
 
     if (enable_desktop_aura) {

@@ -13,6 +13,7 @@
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/service_worker_external_request_result.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/common/child_process_id.h"
 #include "extensions/browser/bad_message.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function_dispatcher.h"
@@ -22,6 +23,7 @@
 #include "extensions/browser/permissions_manager.h"
 #include "extensions/browser/process_map.h"
 #include "extensions/browser/service_worker/service_worker_task_queue.h"
+#include "extensions/browser/service_worker/worker_id.h"
 #include "extensions/common/api/messaging/port_context.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/mojom/frame.mojom.h"
@@ -36,6 +38,8 @@ using perfetto::protos::pbzero::ChromeTrackEvent;
 
 namespace {
 const void* const kUserDataKey = &kUserDataKey;
+
+ServiceWorkerHost::FactoryCallback* g_factory_for_testing = nullptr;
 
 class ServiceWorkerHostList : public base::SupportsUserData::Data {
  public:
@@ -79,6 +83,13 @@ ServiceWorkerHost::~ServiceWorkerHost() {
 }
 
 // static
+base::AutoReset<ServiceWorkerHost::FactoryCallback*>
+ServiceWorkerHost::SetFactoryForTesting(FactoryCallback* factory) {
+  return base::AutoReset<ServiceWorkerHost::FactoryCallback*>(
+      &g_factory_for_testing, factory);
+}
+
+// static
 void ServiceWorkerHost::BindReceiver(
     int render_process_id,
     mojo::PendingAssociatedReceiver<mojom::ServiceWorkerHost> receiver) {
@@ -90,8 +101,11 @@ void ServiceWorkerHost::BindReceiver(
   }
   auto* service_worker_host_list = ServiceWorkerHostList::Get(
       render_process_host, /*create_if_not_exists=*/true);
-  service_worker_host_list->list.push_back(std::make_unique<ServiceWorkerHost>(
-      render_process_host, std::move(receiver)));
+  service_worker_host_list->list.push_back(
+      g_factory_for_testing
+          ? g_factory_for_testing->Run(render_process_host, std::move(receiver))
+          : std::make_unique<ServiceWorkerHost>(render_process_host,
+                                                std::move(receiver)));
 }
 
 // static
@@ -142,6 +156,7 @@ void ServiceWorkerHost::RemoteDisconnected() {
 
 void ServiceWorkerHost::DidInitializeServiceWorkerContext(
     const ExtensionId& extension_id,
+    const base::UnguessableToken& activation_token,
     int64_t service_worker_version_id,
     int worker_thread_id,
     const blink::ServiceWorkerToken& service_worker_token,
@@ -169,9 +184,10 @@ void ServiceWorkerHost::DidInitializeServiceWorkerContext(
     return;
   }
 
-  int render_process_id = render_process_host_->GetDeprecatedID();
+  content::ChildProcessId render_process_id = render_process_host_->GetID();
   auto* process_map = ProcessMap::Get(browser_context);
-  if (!process_map || !process_map->Contains(extension_id, render_process_id)) {
+  if (!process_map || !process_map->Contains(
+                          extension_id, render_process_id.GetUnsafeValue())) {
     // We check the process in addition to the registry to guard against
     // situations in which an extension may still be enabled, but no longer
     // running in a given process.
@@ -184,10 +200,11 @@ void ServiceWorkerHost::DidInitializeServiceWorkerContext(
 
   ServiceWorkerTaskQueue::Get(browser_context)
       ->RendererDidInitializeServiceWorkerContext(
-          render_process_id, extension_id, service_worker_version_id,
-          worker_thread_id, service_worker_token);
+          render_process_id, extension_id, activation_token,
+          service_worker_version_id, worker_thread_id, service_worker_token);
   EventRouter::Get(browser_context)
-      ->BindServiceWorkerEventDispatcher(render_process_id, worker_thread_id,
+      ->BindServiceWorkerEventDispatcher(render_process_id.GetUnsafeValue(),
+                                         worker_thread_id,
                                          std::move(event_dispatcher));
 }
 
@@ -196,7 +213,8 @@ void ServiceWorkerHost::DidStartServiceWorkerContext(
     const base::UnguessableToken& activation_token,
     const GURL& service_worker_scope,
     int64_t service_worker_version_id,
-    int worker_thread_id) {
+    int worker_thread_id,
+    const blink::ServiceWorkerToken& service_worker_token) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   content::BrowserContext* browser_context = GetBrowserContext();
   if (!browser_context) {
@@ -204,9 +222,10 @@ void ServiceWorkerHost::DidStartServiceWorkerContext(
   }
 
   DCHECK_NE(kMainThreadId, worker_thread_id);
-  int render_process_id = render_process_host_->GetDeprecatedID();
+  content::ChildProcessId render_process_id = render_process_host_->GetID();
   auto* process_map = ProcessMap::Get(browser_context);
-  if (!process_map || !process_map->Contains(extension_id, render_process_id)) {
+  if (!process_map || !process_map->Contains(
+                          extension_id, render_process_id.GetUnsafeValue())) {
     // We can legitimately get here if the extension was already unloaded.
     return;
   }
@@ -216,7 +235,8 @@ void ServiceWorkerHost::DidStartServiceWorkerContext(
   ServiceWorkerTaskQueue::Get(browser_context)
       ->RendererDidStartServiceWorkerContext(
           render_process_id, extension_id, activation_token,
-          service_worker_scope, service_worker_version_id, worker_thread_id);
+          service_worker_scope, service_worker_version_id, worker_thread_id,
+          service_worker_token);
 }
 
 void ServiceWorkerHost::DidStopServiceWorkerContext(
@@ -224,7 +244,8 @@ void ServiceWorkerHost::DidStopServiceWorkerContext(
     const base::UnguessableToken& activation_token,
     const GURL& service_worker_scope,
     int64_t service_worker_version_id,
-    int worker_thread_id) {
+    int worker_thread_id,
+    const blink::ServiceWorkerToken& service_worker_token) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   content::BrowserContext* browser_context = GetBrowserContext();
   if (!browser_context) {
@@ -232,9 +253,10 @@ void ServiceWorkerHost::DidStopServiceWorkerContext(
   }
 
   DCHECK_NE(kMainThreadId, worker_thread_id);
-  int render_process_id = render_process_host_->GetDeprecatedID();
+  content::ChildProcessId render_process_id = render_process_host_->GetID();
   auto* process_map = ProcessMap::Get(browser_context);
-  if (!process_map || !process_map->Contains(extension_id, render_process_id)) {
+  if (!process_map || !process_map->Contains(
+                          extension_id, render_process_id.GetUnsafeValue())) {
     // We can legitimately get here if the extension was already unloaded.
     return;
   }
@@ -245,21 +267,22 @@ void ServiceWorkerHost::DidStopServiceWorkerContext(
   ServiceWorkerTaskQueue::Get(browser_context)
       ->RendererDidStopServiceWorkerContext(
           render_process_id, extension_id, activation_token,
-          service_worker_scope, service_worker_version_id, worker_thread_id);
+          service_worker_scope, service_worker_version_id, worker_thread_id,
+          service_worker_token);
 }
 
 void ServiceWorkerHost::RequestWorker(mojom::RequestParamsPtr params,
                                       RequestWorkerCallback callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!GetBrowserContext()) {
-    std::move(callback).Run(/*kFailed=*/true, base::Value::List(),
+    std::move(callback).Run(/*kFailed=*/true, base::ListValue(),
                             "No browser context", nullptr);
     return;
   }
 
-  dispatcher_->DispatchForServiceWorker(std::move(params),
-                                        render_process_host_->GetDeprecatedID(),
-                                        std::move(callback));
+  dispatcher_->DispatchForServiceWorker(
+      std::move(params), render_process_host_->GetID().GetUnsafeValue(),
+      std::move(callback));
 }
 
 void ServiceWorkerHost::WorkerResponseAck(const base::Uuid& request_uuid) {

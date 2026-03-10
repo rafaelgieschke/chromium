@@ -78,10 +78,51 @@ class ImageButtonFactoryWidgetTest : public ViewsTestBase {
 TEST_F(ImageButtonFactoryWidgetTest, SetImageFromVectorIconWithColor) {
   AddImageButton(CreateVectorImageButton(Button::PressedCallback()));
   SetImageFromVectorIconWithColor(button(), vector_icons::kCloseRoundedIcon,
-                                  SK_ColorRED, SK_ColorRED);
+                                  {SK_ColorBLUE, SK_ColorBLUE});
   EXPECT_FALSE(button()->GetImage(Button::STATE_NORMAL).isNull());
   EXPECT_FALSE(button()->GetImage(Button::STATE_DISABLED).isNull());
-  EXPECT_EQ(SK_ColorRED, InkDrop::Get(button())->GetBaseColor());
+  // Verify hovered/pressed images are set for high contrast mode support.
+  EXPECT_FALSE(button()->GetImage(Button::STATE_HOVERED).isNull());
+  EXPECT_FALSE(button()->GetImage(Button::STATE_PRESSED).isNull());
+  EXPECT_EQ(SK_ColorBLUE, InkDrop::Get(button())->GetBaseColor());
+}
+
+TEST_F(ImageButtonFactoryWidgetTest,
+       ToggleButtonSetsHoveredStateForBothToggledStates) {
+  auto toggle_button = CreateVectorToggleImageButton(Button::PressedCallback());
+  ToggleImageButton* toggle_button_ptr = toggle_button.get();
+  AddImageButton(std::move(toggle_button));
+
+  constexpr int kIconSize = 16;
+  SetImageFromVectorIconWithColor(toggle_button_ptr,
+                                  vector_icons::kCloseRoundedIcon, kIconSize,
+                                  {SK_ColorBLUE, SK_ColorGRAY});
+  SetToggledImageFromVectorIconWithColor(
+      toggle_button_ptr, vector_icons::kCloseRoundedIcon, kIconSize,
+      {SK_ColorRED, SK_ColorGRAY});
+
+  // Untoggled state uses images_.
+  EXPECT_FALSE(toggle_button_ptr->GetImage(Button::STATE_NORMAL).isNull());
+  EXPECT_FALSE(toggle_button_ptr->GetImage(Button::STATE_HOVERED).isNull());
+  EXPECT_FALSE(toggle_button_ptr->GetImage(Button::STATE_PRESSED).isNull());
+
+  // Toggled state uses alternate_images_.
+  toggle_button_ptr->SetToggled(true);
+  EXPECT_FALSE(toggle_button_ptr->GetImage(Button::STATE_NORMAL).isNull());
+  EXPECT_FALSE(toggle_button_ptr->GetImage(Button::STATE_HOVERED).isNull());
+  EXPECT_FALSE(toggle_button_ptr->GetImage(Button::STATE_PRESSED).isNull());
+}
+
+TEST_F(ImageButtonFactoryWidgetTest, IconColorsWithCustomHoveredColor) {
+  AddImageButton(CreateVectorImageButton(Button::PressedCallback()));
+  // Test that custom hovered_color is accepted via IconColors constructor.
+  IconColors colors(SK_ColorBLUE, SK_ColorGRAY, ui::kColorIcon);
+  SetImageFromVectorIconWithColor(button(), vector_icons::kCloseRoundedIcon,
+                                  colors);
+  EXPECT_FALSE(button()->GetImage(Button::STATE_NORMAL).isNull());
+  EXPECT_FALSE(button()->GetImage(Button::STATE_DISABLED).isNull());
+  EXPECT_FALSE(button()->GetImage(Button::STATE_HOVERED).isNull());
+  EXPECT_FALSE(button()->GetImage(Button::STATE_PRESSED).isNull());
 }
 
 TEST_F(ImageButtonFactoryWidgetTest, CreateVectorImageButtonWithNativeTheme) {

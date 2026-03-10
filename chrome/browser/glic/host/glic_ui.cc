@@ -16,6 +16,7 @@
 #include "chrome/browser/glic/fre/glic_fre_page_handler.h"
 #include "chrome/browser/glic/glic_net_log.h"
 #include "chrome/browser/glic/host/auth_controller.h"
+#include "chrome/browser/glic/host/glic_internals_page_handler.h"
 #include "chrome/browser/glic/host/glic_page_handler.h"
 #include "chrome/browser/glic/host/guest_util.h"
 #include "chrome/browser/glic/host/host.h"
@@ -49,11 +50,25 @@
 #include "ui/webui/webui_allowlist.h"
 #include "ui/webui/webui_util.h"
 
+#if !BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+#include "chrome/grit/guest_view_shared_resources_map.h"  // nogncheck
+#endif  // !BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+
 namespace glic {
 
 // Enables sending bitmaps across glic for favicons instead of converting to
 // PNG.
 BASE_FEATURE(kGlicBitmapsEnabled, base::FEATURE_ENABLED_BY_DEFAULT);
+
+// Sets the maximum number of in-flight requests to the guest.
+BASE_FEATURE(kGlicMaxInFlightRequests, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE_PARAM(int,
+                   kGlicMaxInFlightRequestLimit,
+                   &kGlicMaxInFlightRequests,
+                   "max_in_flight_request_limit",
+                   200);
+BASE_FEATURE(kGlicSendResponsesForAllRequests,
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 class GlicPreloadHandler : public glic::mojom::GlicPreloadHandler {
  public:
@@ -111,7 +126,11 @@ bool GlicUIConfig::IsWebUIEnabled(content::BrowserContext* browser_context) {
 }
 
 GlicUI::GlicUI(content::WebUI* web_ui)
-    : ui::MojoWebUIController(web_ui), preload_factory_receiver_{this} {
+    : ui::MojoWebUIController(web_ui,
+                              /*enable_chrome_send=*/false,
+                              /*enable_chrome_histograms=*/true),
+      internals_page_factory_receiver_{this},
+      preload_factory_receiver_{this} {
   static constexpr webui::LocalizedString kStrings[] = {
       {"closeButtonLabel", IDS_GLIC_NOTICE_CLOSE_BUTTON_LABEL},
       {"errorNotice", IDS_GLIC_ERROR_NOTICE},
@@ -146,20 +165,20 @@ GlicUI::GlicUI(content::WebUI* web_ui)
   webui::SetupWebUIDataSource(source, kGlicResources, IDR_GLIC_GLIC_HTML);
   ConfigureSharedWebUISource(*source);
 
+#if !BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+  auto bindings = web_ui->GetBindings();
+  bindings.Put(content::BindingsPolicyValue::kSlimWebView);
+  web_ui->SetBindings(bindings);
+  source->AddResourcePaths(kGuestViewSharedResources);
+#endif  // !BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+
   for (const auto& resource : kGlicFreResources) {
     source->AddResourcePath(base::StrCat({"fre/", resource.path}), resource.id);
   }
 
-  // Setup chrome://browser-switch/internals debug UI.
-
-  PrefService* local_state = g_browser_process->local_state();
-  DCHECK(local_state);
-  if (local_state->GetBoolean(chrome_urls::kInternalOnlyUisEnabled)) {
-    source->AddResourcePath("internals/",
-                            IDR_GLIC_INTERNALS_GLIC_INTERNALS_HTML);
-    source->AddResourcePath("internals",
-                            IDR_GLIC_INTERNALS_GLIC_INTERNALS_HTML);
-  }
+  // Setup chrome://glic/internals debug UI.
+  source->AddResourcePath("internals/", IDR_GLIC_INTERNALS_GLIC_INTERNALS_HTML);
+  source->AddResourcePath("internals", IDR_GLIC_INTERNALS_GLIC_INTERNALS_HTML);
 
   // Add localized strings.
   source->AddLocalizedStrings(kStrings);
@@ -180,6 +199,14 @@ GlicUI::GlicUI(content::WebUI* web_ui)
 
   source->AddBoolean("loggingEnabled",
                      command_line->HasSwitch(::switches::kGlicHostLogging));
+
+  source->AddInteger("maxInFlightRequests",
+                     base::FeatureList::IsEnabled(kGlicMaxInFlightRequests)
+                         ? kGlicMaxInFlightRequestLimit.Get()
+                         : INT_MAX);
+  source->AddBoolean(
+      "sendResponsesForAllRequests",
+      base::FeatureList::IsEnabled(kGlicSendResponsesForAllRequests));
 
   // Set up guest URL via cli flag or default to finch param value.
   const GURL guest_url = GetGuestURL();
@@ -204,9 +231,8 @@ GlicUI::GlicUI(content::WebUI* web_ui)
     allowed_origins = features::kGlicAllowedOriginsOverride.Get();
   }
 
-  auto* profile = Profile::FromBrowserContext(browser_context);
-
   // Allow corp origins for @google accounts.
+  auto* profile = Profile::FromBrowserContext(browser_context);
   signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(profile);
   if (identity_manager && IsPrimaryAccountGoogleInternal(*identity_manager)) {
@@ -260,7 +286,7 @@ GlicUI::GlicUI(content::WebUI* web_ui)
                      GlicEnabling::IsUnifiedFreEnabled(profile));
   source->AddBoolean(
       "shouldShowFre",
-      !base::FeatureList::IsEnabled(features::kGlicTrustFirstOnboarding) &&
+      !GlicEnabling::IsTrustFirstOnboardingEnabledForProfile(profile) &&
           !GlicEnabling::HasConsentedForProfile(profile));
   source->AddInteger("reloadMaxLoadingTimeMs",
                      features::kGlicReloadMaxLoadingTimeMs.Get());
@@ -300,6 +326,15 @@ void GlicUI::BindInterface(
     mojo::PendingReceiver<glic::mojom::PageHandlerFactory> receiver) {
   page_factory_receiver_.reset();
   page_factory_receiver_.Bind(std::move(receiver));
+}
+
+void GlicUI::BindInterface(
+    mojo::PendingReceiver<glic::mojom::InternalsPageHandlerFactory> receiver) {
+  std::string_view path = web_ui()->GetWebContents()->GetVisibleURL().path();
+  if (path == "/internals" || path.starts_with("/internals/")) {
+    internals_page_factory_receiver_.reset();
+    internals_page_factory_receiver_.Bind(std::move(receiver));
+  }
 }
 
 void GlicUI::BindInterface(
@@ -351,6 +386,12 @@ void GlicUI::CreatePageHandler(
       web_ui()->GetWebContents(), host_, std::move(receiver), std::move(page));
 }
 
+void GlicUI::CreateInternalsPageHandler(
+    mojo::PendingReceiver<glic::mojom::InternalsPageHandler> receiver) {
+  internals_page_handler_ = std::make_unique<GlicInternalsPageHandler>(
+      web_ui()->GetWebContents(), std::move(receiver));
+}
+
 void GlicUI::CreatePageHandler(
     mojo::PendingReceiver<glic::mojom::FrePageHandler> fre_receiver) {
   fre_page_handler_ = std::make_unique<GlicFrePageHandler>(
@@ -365,5 +406,11 @@ void GlicUI::CreatePreloadHandler(
       web_ui()->GetWebContents()->GetBrowserContext(), std::move(receiver),
       std::move(page));
 }
+
+#if !BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+content::RenderFrameHost* GlicUI::GetWebUiRenderFrameHost() {
+  return web_ui()->GetRenderFrameHost();
+}
+#endif  // !BUILDFLAG(ENABLE_EXTENSIONS_CORE)
 
 }  // namespace glic

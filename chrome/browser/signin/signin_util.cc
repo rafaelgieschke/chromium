@@ -8,7 +8,6 @@
 #include <string_view>
 
 #include "base/barrier_closure.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
@@ -51,8 +50,8 @@
 #include "ui/base/l10n/l10n_util.h"
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/dialogs/browser_dialogs.h"
 #include "components/strings/grit/components_strings.h"
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/base/models/dialog_model.h"
@@ -269,7 +268,7 @@ bool IsAccountExemptedFromEnterpriseProfileSeparation(
   const std::string domain = gaia::ExtractDomainName(email);
   const auto& allowed_domains = profile->GetPrefs()->GetList(
       prefs::kProfileSeparationDomainExceptionList);
-  return base::Contains(allowed_domains, base::Value(domain));
+  return allowed_domains.contains(domain);
 }
 #endif  // !BUILDFLAG(IS_CHROMEOS)
 
@@ -315,7 +314,7 @@ PrimaryAccountError SetPrimaryAccountWithInvalidToken(
 
   auto set_primary_account_result =
       identity_manager->GetPrimaryAccountMutator()->SetPrimaryAccount(
-          account_id, signin::ConsentLevel::kSignin);
+          account_id, signin::ConsentLevel::kSignin, access_point);
   DVLOG(1) << "Operation of setting account id <" << account_id.ToString()
            << "> received the following result: "
            << static_cast<int>(set_primary_account_result);
@@ -481,39 +480,30 @@ void EnableHistorySync(syncer::SyncService* sync_service) {
 bool IsValidAccessPointForHistoryOptinScreen(
     signin_metrics::AccessPoint access_point) {
   switch (access_point) {
-    case (signin_metrics::AccessPoint::kExtensionInstallBubble):
-    case (signin_metrics::AccessPoint::kBookmarkBubble):
-    case (signin_metrics::AccessPoint::kRecentTabs):
-    case (signin_metrics::AccessPoint::kCollaborationJoinTabGroup):
-    case (signin_metrics::AccessPoint::kCollaborationShareTabGroup):
-    case (signin_metrics::AccessPoint::kPasswordBubble):
-    case (signin_metrics::AccessPoint::kAddressBubble):
+    case signin_metrics::AccessPoint::kExtensionInstallBubble:
+    case signin_metrics::AccessPoint::kBookmarkBubble:
+    case signin_metrics::AccessPoint::kRecentTabs:
+    case signin_metrics::AccessPoint::kCollaborationJoinTabGroup:
+    case signin_metrics::AccessPoint::kCollaborationShareTabGroup:
+    case signin_metrics::AccessPoint::kPasswordBubble:
+    case signin_metrics::AccessPoint::kAddressBubble:
+    case signin_metrics::AccessPoint::kSearchAIModeBubble:
       return false;
     case signin_metrics::AccessPoint::kStartPage:
-    case signin_metrics::AccessPoint::kNtpLink:
     case signin_metrics::AccessPoint::kMenu:
     case signin_metrics::AccessPoint::kSettings:
     case signin_metrics::AccessPoint::kSettingsYourSavedInfo:
-    case signin_metrics::AccessPoint::kSupervisedUser:
     case signin_metrics::AccessPoint::kExtensions:
     case signin_metrics::AccessPoint::kBookmarkManager:
     case signin_metrics::AccessPoint::kAvatarBubbleSignIn:
     case signin_metrics::AccessPoint::kUserManager:
-    case signin_metrics::AccessPoint::kDevicesPage:
     case signin_metrics::AccessPoint::kFullscreenSigninPromo:
-    case signin_metrics::AccessPoint::kUnknown:
     case signin_metrics::AccessPoint::kAutofillDropdown:
     case signin_metrics::AccessPoint::kResigninInfobar:
-    case signin_metrics::AccessPoint::kTabSwitcher:
     case signin_metrics::AccessPoint::kMachineLogon:
-    case signin_metrics::AccessPoint::kGoogleServicesSettings:
-    case signin_metrics::AccessPoint::kSyncErrorCard:
     case signin_metrics::AccessPoint::kForcedSignin:
-    case signin_metrics::AccessPoint::kAccountRenamed:
     case signin_metrics::AccessPoint::kWebSignin:
     case signin_metrics::AccessPoint::kSafetyCheck:
-    case signin_metrics::AccessPoint::kKaleidoscope:
-    case signin_metrics::AccessPoint::kEnterpriseSignoutCoordinator:
     case signin_metrics::AccessPoint::kSigninInterceptFirstRunExperience:
     case signin_metrics::AccessPoint::kSendTabToSelfPromo:
     case signin_metrics::AccessPoint::kNtpFeedTopPromo:
@@ -529,7 +519,6 @@ bool IsValidAccessPointForHistoryOptinScreen(
     case signin_metrics::AccessPoint::kReadingList:
     case signin_metrics::AccessPoint::kReauthInfoBar:
     case signin_metrics::AccessPoint::kAccountConsistencyService:
-    case signin_metrics::AccessPoint::kSearchCompanion:
     case signin_metrics::AccessPoint::kSetUpList:
     case signin_metrics::AccessPoint::kSaveToPhotosIos:
     case signin_metrics::AccessPoint::kChromeSigninInterceptBubble:
@@ -541,7 +530,6 @@ bool IsValidAccessPointForHistoryOptinScreen(
     case signin_metrics::AccessPoint::kSigninChoiceRemembered:
     case signin_metrics::AccessPoint::kProfileMenuSignoutConfirmationPrompt:
     case signin_metrics::AccessPoint::kSettingsSignoutConfirmationPrompt:
-    case signin_metrics::AccessPoint::kNtpIdentityDisc:
     case signin_metrics::AccessPoint::kOidcRedirectionInterception:
     case signin_metrics::AccessPoint::kWebauthnModalDialog:
     case signin_metrics::AccessPoint::kAvatarBubbleSignInWithSyncPromo:
@@ -568,6 +556,11 @@ bool IsValidAccessPointForHistoryOptinScreen(
     case signin_metrics::AccessPoint::kNtpFeaturePromo:
     case signin_metrics::AccessPoint::kEnterpriseDialogAfterSigninInterception:
     case signin_metrics::AccessPoint::kCredentialExchangeImport:
+    case signin_metrics::AccessPoint::kSetSyncConsentFromSyncInternals:
+    case signin_metrics::AccessPoint::kIosChromeWebView:
+    case signin_metrics::AccessPoint::kAshChromeSessionManager:
+    case signin_metrics::AccessPoint::kAshUserSessionManager:
+    case signin_metrics::AccessPoint::kAvatarPillExpandPromo:
       return true;
   }
 }
@@ -613,16 +606,14 @@ bool ShouldShowAvatarSyncPromo(Profile* profile) {
     return false;
   }
 
-  // For non-dice users, do not show the promo for users that have been signed
-  // for a short period of time.
-  if (pref_service->GetBoolean(prefs::kExplicitBrowserSignin)) {
-    const base::Time last_changed = base::Time::FromSecondsSinceUnixEpoch(
-        pref_service->GetDouble(prefs::kGaiaCookieChangedTime));
-    if (last_changed.is_null() ||
-        (base::Time::Now() - last_changed <
-         switches::GetAvatarSyncPromoFeatureMinimumCookeAgeParam())) {
-      return false;
-    }
+  // Do not show the promo for users that have been signed for a short period of
+  // time.
+  const base::Time last_changed = base::Time::FromSecondsSinceUnixEpoch(
+      pref_service->GetDouble(prefs::kGaiaCookieChangedTime));
+  if (last_changed.is_null() ||
+      (base::Time::Now() - last_changed <
+       switches::GetAvatarSyncPromoFeatureMinimumCookeAgeParam())) {
+    return false;
   }
 
   return true;
@@ -645,6 +636,12 @@ void ShowErrorDialogWithMessage(Browser* browser, int error_message_id) {
 
   chrome::ShowBrowserModal(browser, std::move(dialog_model));
 }
+
 #endif  // BUILDFLAG(IS_LINUX) ||  BUILDFLAG(IS_MAC) ||  BUILDFLAG(IS_WIN)
+
+std::vector<net::SchemefulSite> GetDeviceBoundSessionRestrictedSites() {
+  return {net::SchemefulSite(GURL("https://google.com")),
+          net::SchemefulSite(GURL("https://youtube.com"))};
+}
 
 }  // namespace signin_util

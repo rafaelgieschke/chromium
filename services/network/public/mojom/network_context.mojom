@@ -25,6 +25,7 @@ import "services/network/public/mojom/cookie_setting_overrides.mojom";
 import "services/network/public/mojom/cors_origin_pattern.mojom";
 import "services/network/public/mojom/cross_origin_embedder_policy.mojom";
 import "services/network/public/mojom/ct_policy.mojom";
+import "services/network/public/mojom/originating_process_id.mojom";
 import "services/network/public/mojom/default_credentials.mojom";
 import "services/network/public/mojom/device_bound_sessions.mojom";
 import "services/network/public/mojom/devtools_observer.mojom";
@@ -55,6 +56,7 @@ import "services/network/public/mojom/proxy_resolving_socket.mojom";
 import "services/network/public/mojom/reporting_service.mojom";
 import "services/network/public/mojom/restricted_cookie_manager.mojom";
 import "services/network/public/mojom/restricted_udp_socket.mojom";
+import "services/network/public/mojom/schemeful_site.mojom";
 import "services/network/public/mojom/shared_dictionary_access_observer.mojom";
 import "services/network/public/mojom/shared_dictionary_isolation_key.mojom";
 import "services/network/public/mojom/shared_dictionary_usage_info.mojom";
@@ -150,6 +152,17 @@ struct CertVerifierServiceRemoteParams {
       cert_verifier_service_client_receiver;
 };
 
+// Callback interface for signaling that the provisional cookie store has
+// been closed and it's safe to open the cookie database file. Used by Android
+// WebView to synchronize cookie store handoff from the provisional store
+// to the Network Service's store.
+[EnableIf=is_android]
+interface CookieStoreReadyCallback {
+  // Called when the provisional cookie store has been fully closed and the
+  // cookie database file is available for the Network Service to open.
+  OnCookieStoreReady();
+};
+
 // Client to update the custom proxy config.
 interface CustomProxyConfigClient {
   OnCustomProxyConfigUpdated(CustomProxyConfig proxy_config) => ();
@@ -170,7 +183,8 @@ interface TrustedHeaderClient {
   // used. If |preserve_fragment_on_redirect_url| is populated, and the
   // request is redirected to exactly that URL, then the fragment of the
   // original URL will not be copied to the redirect target URL.
-  OnHeadersReceived(string headers, IPEndPoint remote_endpoint, SSLInfo? ssl_info)
+  OnHeadersReceived(
+      string headers, IPEndPoint remote_endpoint, SSLInfo? ssl_info)
       => (int32 result,
           string? headers,
           url.mojom.Url? preserve_fragment_on_redirect_url);
@@ -388,9 +402,6 @@ struct NetworkContextParams {
   [EnableIf=is_android]
   bool check_clear_text_permitted = false;
 
-  // If true, idle sockets won't be closed when memory pressure happens.
-  bool disable_idle_sockets_close_on_memory_pressure = false;
-
   // SSL configuration. |initial_proxy_config| is the initial SSL configuration
   // to use. If nullptr, uses the default configuration. Updated SSL
   // configurations can be passed in via |ssl_config_client_receiver|.
@@ -479,6 +490,13 @@ struct NetworkContextParams {
   // should only be handed out to trusted processes.
   [EnableIf=is_android]
   pending_receiver<CookieManager>? cookie_manager;
+
+  // Callback interface for signaling that the provisional cookie store has
+  // been closed and it's safe to open the cookie database. Used by Android
+  // WebView to synchronize cookie store handoff from the provisional store
+  // to the Network Service's store.
+  [EnableIf=is_android]
+  pending_receiver<CookieStoreReadyCallback>? cookie_store_ready_callback;
 
   // Whether to enable Domain Reliability.
   bool enable_domain_reliability = false;
@@ -573,6 +591,12 @@ struct NetworkContextParams {
   // Enables Device Bound Session Credential for this network context.
   bool device_bound_sessions_enabled = false;
 
+  // List of sites that are restricted from starting Device Bound
+  // Session Credential sessions unless
+  // `kDeviceBoundSessionsForRestrictedSites` is enabled. This is temporary
+  // while DBSC is still being rolled out.
+  array<SchemefulSite> device_bound_sessions_restricted_sites;
+
   // Represents a net::handles::NetworkHandle.
   // If != net::handles::kInvalidNetworkHandle (== -1), then the NetworkContext
   // built out of this will own a URLRequestContext bound to that network (refer
@@ -581,10 +605,6 @@ struct NetworkContextParams {
   // created out of this, will perform all network request using only
   // |bound_network|.
   int64 bound_network = -1;
-
-  // Stores mapping of endpoint name to endpoint url from initial reporting
-  // endpoints set by the ReportingEndpoints enterprise policy.
-  map<string, url.mojom.Url>? enterprise_reporting_endpoints;
 
   // Enables usage of net::dns::StaleHostResolver. This is only available
   // as opt-in in Android. This will be used during constructing
@@ -596,8 +616,7 @@ struct NetworkContextParams {
   // gets applied while constructing NetworkContext by updating the quic_params.
   int64? quic_idle_connection_timeout_seconds;
 
-  // If true, the HTTP cache will be encrypted on disk. For now, this only
-  // switches the backend on Windows.
+  // If true, the HTTP cache will be encrypted on disk.
   bool enable_encrypted_http_cache = false;
 
   // If set, the network process will use the remote to reach the unexportable
@@ -672,7 +691,7 @@ struct SharedDictionaryInfo {
   SHA256HashValue hash;
 };
 
-// An opaque handle that keeps preloaded the preloaded shared dictionaries.
+// An opaque handle that keeps the preloaded shared dictionaries.
 interface PreloadedSharedDictionaryInfoHandle {};
 
 // Represents a signed exchange report.
@@ -764,16 +783,16 @@ struct URLLoaderFactoryParams {
   // since only the Browser process should be able to call
   // NetworkContext::CreateURLLoaderFactory.)
   //
-  // Set to kBrowserProcessId to indicate the browser process.
-  // SECURITY NOTE: Factories with kBrowserProcessId should not be sent
-  // to untrustworthy processes.
+  // Set to `network.mojom.BrowserProcess` to indicate the browser process.
+  // SECURITY NOTE: Factories with `network.mojom.BrowserProcess` should not be
+  // sent to untrustworthy processes.
   //
-  // Set to RenderProcessHost::GetDeprecatedID() to indicate a renderer
-  // process.
+  // Set to `network.mojom.RendererProcessId` with `process_id` set to
+  // RenderProcessHost::GetID() to indicate a renderer process.
   // SECURITY NOTE: Factories should not be shared among multiple renderer
   // processes (e.g. |request_initiator_origin_lock| is specific to a single
   // renderer process).
-  int32 process_id = kInvalidProcessId;
+  network.mojom.OriginatingProcessId process_id;
 
   // If specified, then |request_initiator_origin_lock| locks
   // |ResourceRequest::request_initiator| to the specified origin.
@@ -1199,12 +1218,6 @@ interface NetworkContext {
       IsolationInfo isolation_info,
       map<string, string> endpoints);
 
-  // Configures reporting endpoints set by the ReportingEndpoints enterprise
-  // policy.
-  // `endpoints` is a mapping of endpoint name to URL (URLs will be rejected if
-  // they fail to parse or are not secure).
-  SetEnterpriseReportingEndpoints(map<string, url.mojom.Url> endpoints);
-
   // Queues any outstanding reports for a single |reporting_source| (which
   // must not be empty), and removes the reporting endpoint configuration for
   // that source. This is called when the reporting source (document or worker)
@@ -1405,15 +1418,12 @@ interface NetworkContext {
   // request. Headers semantically relevant to the WebSocket handshake such
   // as "sec-websocket-protocol" and "origin" are handled separately, (e.g.,
   // "sec-websocket-protocol" is constructed from  |requested_protocols| in this
-  // message). |site_for_cookies| represents the first-party origin for the
-  // request. |storage_access_api_status| is used to opt into using a
+  // message). |storage_access_api_status| is used to opt into using a
   // "storage-access" permission grant. |options| may be a combination of the
   // kWebSocketOption* flags.  |isolation_info| includes SiteForCookies, top
   // frame origin, and current frame origin, and is used to isolate shared
   // network stack resources based on the context. It must have
-  // RediredMode::kUpdateNothing. Currently, |isolation_info|'s SiteForCookies
-  // field is ignored, but it will eventually replace the |site_for_cookies|
-  // parameter.
+  // RediredMode::kUpdateNothing.
   //
   // If |header_client| is set, requests with the kURLLoadOptionUseHeaderClient
   // option will callback to the |header_client|, allowing the Cookie/Referrer
@@ -1440,11 +1450,10 @@ interface NetworkContext {
   CreateWebSocket(
       url.mojom.Url url,
       array<string> requested_protocols,
-      SiteForCookies site_for_cookies,
       StorageAccessApiStatus storage_access_api_status,
       IsolationInfo isolation_info,
       array<HttpHeader> additional_headers,
-      int32 process_id,
+      network.mojom.OriginatingProcessId process_id,
       url.mojom.Origin origin,
       ClientSecurityState client_security_state,
       uint32 options,
@@ -1489,13 +1498,19 @@ interface NetworkContext {
   // initiated from.
   // `keepalive_config` specifies keep-alive behavior such as periodic ping or
   // reconnect notifier.
-  // The preconnect is aborted if network access is disabled for
-  // `network_anonymization_key->GetNonce()`.
+  // The preconnect is aborted if
+  // 1. network access is disabled for `network_anonymization_key->GetNonce()`.
+  // 2. or the url is blocked by the connection-allowlist associated with the
+  // `network_restrictions_id`. Please see: crbug.com/447954811.
+  // More context on network revocation and connection-allowlist is in the
+  // comment for `RevokeNetworkForNonces()`. If `network_restrictions_id` is
+  // nullopt, connection-allowlist is not enforced on the preconnect.
   PreconnectSockets(
       uint32 num_streams,
       url.mojom.Url url,
       network.mojom.CredentialsMode credentials_mode,
       NetworkAnonymizationKey network_anonymization_key,
+      mojo_base.mojom.UnguessableToken? network_restrictions_id,
       MutableNetworkTrafficAnnotationTag traffic_annotation,
       ConnectionKeepAliveConfig? keepalive_config,
       pending_remote<ConnectionChangeObserverClient>? observer_client);

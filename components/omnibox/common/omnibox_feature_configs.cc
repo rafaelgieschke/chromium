@@ -77,8 +77,6 @@ AiMode::AiMode() {
 
 AiModeOmniboxEntryPoint::AiModeOmniboxEntryPoint() {
   enabled = base::FeatureList::IsEnabled(omnibox::kAiModeOmniboxEntryPoint);
-  enabledEnUs =
-      base::FeatureList::IsEnabled(omnibox::kAiModeOmniboxEntryPointEnUs);
 
   hide_aim_hint_text =
       base::FeatureParam<bool>(&omnibox::kAiModeOmniboxEntryPoint,
@@ -450,43 +448,6 @@ ForceAllowedToBeDefault& ForceAllowedToBeDefault::operator=(
 ForceAllowedToBeDefault::~ForceAllowedToBeDefault() = default;
 
 // static
-BASE_FEATURE(RealboxContextualAndTrendingSuggestions::
-                 kRealboxContextualAndTrendingSuggestions,
-             "NTPRealboxContextualAndTrendingSuggestions",
-             base::FEATURE_ENABLED_BY_DEFAULT);
-RealboxContextualAndTrendingSuggestions::
-    RealboxContextualAndTrendingSuggestions() {
-  enabled =
-      base::FeatureList::IsEnabled(kRealboxContextualAndTrendingSuggestions);
-  total_limit = base::FeatureParam<int>(
-                    &kRealboxContextualAndTrendingSuggestions, "TotalLimit", 4)
-                    .Get();
-  contextual_suggestions_limit =
-      base::FeatureParam<int>(&kRealboxContextualAndTrendingSuggestions,
-                              "ContextualSuggestionsLimit", 4)
-          .Get();
-  trending_suggestions_limit =
-      base::FeatureParam<int>(&kRealboxContextualAndTrendingSuggestions,
-                              "TrendingSuggestionsLimit", 4)
-          .Get();
-}
-
-RealboxContextualAndTrendingSuggestions::
-    RealboxContextualAndTrendingSuggestions(
-        const RealboxContextualAndTrendingSuggestions&) = default;
-RealboxContextualAndTrendingSuggestions::
-    RealboxContextualAndTrendingSuggestions(
-        RealboxContextualAndTrendingSuggestions&&) = default;
-RealboxContextualAndTrendingSuggestions&
-RealboxContextualAndTrendingSuggestions::operator=(
-    const RealboxContextualAndTrendingSuggestions&) = default;
-RealboxContextualAndTrendingSuggestions&
-RealboxContextualAndTrendingSuggestions::operator=(
-    RealboxContextualAndTrendingSuggestions&&) = default;
-RealboxContextualAndTrendingSuggestions::
-    ~RealboxContextualAndTrendingSuggestions() = default;
-
-// static
 BASE_FEATURE(SearchAggregatorProvider::kSearchAggregatorProvider,
              "SearchAggregatorProvider",
              base::FEATURE_ENABLED_BY_DEFAULT);
@@ -629,11 +590,11 @@ std::vector<base::Value> SearchAggregatorProvider::CreateMockSearchEngines()
   return engines;
 }
 
-base::Value::Dict SearchAggregatorProvider::CreateMockSearchAggregator(
+base::DictValue SearchAggregatorProvider::CreateMockSearchAggregator(
     bool featured_by_policy) const {
   CHECK(AreMockEnginesValid());
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("short_name", name);
   result.Set("keyword", featured_by_policy ? '@' + shortcut : shortcut);
   result.Set("url", search_url);
@@ -800,15 +761,15 @@ BASE_FEATURE(ComposeboxSuggestionLimit::kComposeboxSuggestionLimit,
 ComposeboxSuggestionLimit::ComposeboxSuggestionLimit() {
   enabled = base::FeatureList::IsEnabled(kComposeboxSuggestionLimit);
   max_suggestions = base::FeatureParam<size_t>(&kComposeboxSuggestionLimit,
-                                               "ComposeboxMaxSuggestions", 5)
+                                               "ComposeboxMaxSuggestions", 8)
                         .Get();
   max_aim_suggestions =
       base::FeatureParam<size_t>(&kComposeboxSuggestionLimit,
-                                 "ComposeboxMaxAimSuggestions", 5)
+                                 "ComposeboxMaxAimSuggestions", 8)
           .Get();
   max_contextual_suggestions =
       base::FeatureParam<size_t>(&kComposeboxSuggestionLimit,
-                                 "ComposeboxMaxContextualSuggestions", 5)
+                                 "ComposeboxMaxContextualSuggestions", 8)
           .Get();
 }
 

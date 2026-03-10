@@ -4,7 +4,6 @@
 
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_view_controller.h"
 
-#import "base/containers/contains.h"
 #import "base/functional/bind.h"
 #import "base/ios/ios_util.h"
 #import "base/metrics/histogram_functions.h"
@@ -21,7 +20,7 @@
 #import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_animator.h"
 #import "ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h"
-#import "ios/chrome/browser/intelligence/bwg/utils/bwg_constants.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/intelligence/page_action_menu/ui/page_action_menu_entrypoint_view.h"
 #import "ios/chrome/browser/lens/ui_bundled/lens_entrypoint.h"
@@ -32,6 +31,7 @@
 #import "ios/chrome/browser/location_bar/ui_bundled/fakebox_buttons_snapshot_provider.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_constants.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_metrics.h"
+#import "ios/chrome/browser/location_bar/ui_bundled/location_bar_mutator.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_placeholder_type.h"
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_steady_view.h"
 #import "ios/chrome/browser/omnibox/public/omnibox_constants.h"
@@ -40,21 +40,21 @@
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
 #import "ios/chrome/browser/shared/public/commands/activity_service_commands.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
 #import "ios/chrome/browser/shared/public/commands/browser_coordinator_commands.h"
 #import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
 #import "ios/chrome/browser/shared/public/commands/help_commands.h"
 #import "ios/chrome/browser/shared/public/commands/lens_commands.h"
 #import "ios/chrome/browser/shared/public/commands/lens_overlay_commands.h"
-#import "ios/chrome/browser/shared/public/commands/load_query_commands.h"
 #import "ios/chrome/browser/shared/public/commands/open_lens_input_selection_command.h"
 #import "ios/chrome/browser/shared/public/commands/page_action_menu_commands.h"
 #import "ios/chrome/browser/shared/public/commands/page_action_menu_entry_point_commands.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/browser/shared/ui/util/layout_guide_names.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
 #import "ios/chrome/browser/shared/ui/util/util_swift.h"
+#import "ios/chrome/browser/sharing/ui_bundled/sharing_metrics.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/public/toolbar_type.h"
 #import "ios/chrome/common/NSString+Chromium.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
@@ -84,23 +84,9 @@ const NSString* kScribbleOmniboxElementId = @"omnibox";
 // the white space on top.
 const CGFloat kShareIconBalancingHeightPadding = 1;
 
-// Returns a UILabel used to contain the text that the omnibox will display when
-// focused. See crbug.com/465394669 for rationale.
-// TODO(crbug.com/465030009): Remove the hidden omnibox text label.
-UILabel* OmniboxTextHiddenLabel() {
-  UILabel* label = [[UILabel alloc] init];
-  label.translatesAutoresizingMaskIntoConstraints = NO;
-  label.accessibilityIdentifier = kOmniboxTextHiddenLabelIdentifier;
-  label.isAccessibilityElement = YES;
-  label.accessibilityElementsHidden = YES;
-  label.hidden = YES;
-  return label;
-}
-
 }  // namespace
 
-@interface LocationBarViewController () <TextFieldViewContainingHeightDelegate,
-                                         UIContextMenuInteractionDelegate,
+@interface LocationBarViewController () <UIContextMenuInteractionDelegate,
                                          UIIndirectScribbleInteractionDelegate>
 // The injected edit view.
 @property(nonatomic, strong) UIView<TextFieldViewContaining>* editView;
@@ -173,10 +159,6 @@ UILabel* OmniboxTextHiddenLabel() {
 
   // The placeholder view that holds the DSE icon.
   UIImageView* _defaultSearchEngineIconView;
-
-  // Hidden label for omnibox text. See crbug.com/465394669 for rationale.
-  // TODO(crbug.com/465030009): Remove the hidden omnibox text label.
-  UILabel* _omniboxTextHiddenLabel;
 }
 
 #pragma mark - public
@@ -192,7 +174,6 @@ UILabel* OmniboxTextHiddenLabel() {
 - (void)setEditView:(UIView<TextFieldViewContaining>*)editView {
   DCHECK(!self.editView);
   _editView = editView;
-  _editView.heightDelegate = self;
   _textField = editView.textFieldView;
 }
 
@@ -327,7 +308,7 @@ UILabel* OmniboxTextHiddenLabel() {
                                 underName:kPageActionMenuEntrypointGuide];
   }
 
-  if (IsLensOverlayAvailable(_profilePrefs)) {
+  if (IsLensOverlayAllowedByPolicy(_profilePrefs)) {
     _lensOverlayPlaceholderView = [[LensOverlayEntrypointButton alloc]
         initWithProfilePrefs:_profilePrefs];
     [self.layoutGuideCenter referenceView:_lensOverlayPlaceholderView
@@ -357,9 +338,6 @@ UILabel* OmniboxTextHiddenLabel() {
     [self.view addSubview:self.editView];
     self.editView.translatesAutoresizingMaskIntoConstraints = NO;
     AddSameConstraints(self.editView, self.view);
-  } else {
-    _omniboxTextHiddenLabel = OmniboxTextHiddenLabel();
-    [self.view addSubview:_omniboxTextHiddenLabel];
   }
 
   [self.view addSubview:self.locationBarSteadyView];
@@ -370,9 +348,8 @@ UILabel* OmniboxTextHiddenLabel() {
   [self updateTrailingButtonState];
   [self switchToEditing:NO];
 
-  NSArray<UITrait>* traits = TraitCollectionSetForTraits(
-      @[ UITraitHorizontalSizeClass.class, UITraitVerticalSizeClass.class ]);
-  [self registerForTraitChanges:traits
+  [self registerForTraitChanges:
+            @[ UITraitHorizontalSizeClass.class, UITraitVerticalSizeClass.class ]
                      withAction:@selector(updateTrailingButtonState)];
 
   [self registerForTraitChanges:@[ UITraitHorizontalSizeClass.class ]
@@ -426,7 +403,7 @@ UILabel* OmniboxTextHiddenLabel() {
 #pragma mark - LocationBarConsumer
 
 - (void)defocusOmnibox {
-  [self.dispatcher cancelOmniboxEdit];
+  [self.dispatcher hideComposebox];
 }
 
 - (void)setPlaceholderText:(NSString*)searchProviderName {
@@ -446,9 +423,7 @@ UILabel* OmniboxTextHiddenLabel() {
 #pragma mark - LocationBarSteadyViewConsumer
 
 - (void)updateLocationText:(NSString*)string clipTail:(BOOL)clipTail {
-  [self.locationBarSteadyView setLocationLabelText:string];
-  self.locationBarSteadyView.locationLabel.lineBreakMode =
-      clipTail ? NSLineBreakByTruncatingTail : NSLineBreakByTruncatingHead;
+  [self.locationBarSteadyView setLocationLabelText:string clipTail:clipTail];
 }
 
 - (void)updateLocationIcon:(UIImage*)icon
@@ -494,7 +469,8 @@ UILabel* OmniboxTextHiddenLabel() {
 }
 
 - (void)attemptShowingLensOverlayIPH {
-  if (IsLensOverlayAvailable(_profilePrefs) && !IsPageActionMenuEnabled() &&
+  if (IsLensOverlayAllowedByPolicy(_profilePrefs) &&
+      !IsPageActionMenuEnabled() &&
       !self.locationBarSteadyView.badgesContainerView.placeholderView.hidden) {
     [self.helpCommandsHandler
         presentInProductHelpWithType:InProductHelpType::kLensOverlayEntrypoint];
@@ -705,7 +681,7 @@ UILabel* OmniboxTextHiddenLabel() {
     case kShareButton: {
       [self.locationBarSteadyView.trailingButton
                  addTarget:self.dispatcher
-                    action:@selector(showShareSheet)
+                    action:@selector(showShareSheetFromShareButton:)
           forControlEvents:UIControlEventTouchUpInside];
 
       // Add self as a target to collect the metrics.
@@ -777,10 +753,22 @@ UILabel* OmniboxTextHiddenLabel() {
 }
 
 - (void)setTrailingButtonState:(TrailingButtonState)state {
+  // This is dirty, but this is experiment-only and will be removed in one
+  // milestone.
+  if (base::FeatureList::IsEnabled(kDisableShareButton) &&
+      state == kShareButton) {
+    state = kNoButton;
+  }
+
   if (_trailingButtonState == state) {
     return;
   }
   _trailingButtonState = state;
+
+  if (state == kShareButton) {
+    base::UmaHistogramEnumeration("Mobile.ShareThisPage.Shown",
+                                  ShareThisPageLocation::kLocationBar);
+  }
 
   [self updateTrailingButton];
 }
@@ -798,6 +786,8 @@ UILabel* OmniboxTextHiddenLabel() {
 // here.
 - (void)shareButtonPressed {
   RecordAction(UserMetricsAction("MobileToolbarShareMenu"));
+  base::UmaHistogramEnumeration("Mobile.ShareThisPage.Used",
+                                ShareThisPageLocation::kLocationBar);
   [self.delegate recordShareButtonPressed];
 }
 
@@ -824,17 +814,35 @@ UILabel* OmniboxTextHiddenLabel() {
   }
 }
 
-// TODO(crbug.com/465030009): Remove the hidden omnibox text label.
-- (void)updateOmniboxTextHiddenLabel:(NSString*)text {
-  _omniboxTextHiddenLabel.text = text;
-  _omniboxTextHiddenLabel.accessibilityLabel = text;
-}
-
 #pragma mark - UIContextMenuInteractionDelegate
 
 - (UIMenu*)contextMenuUIMenu:(NSArray<UIMenuElement*>*)suggestedActions {
   NSMutableArray<UIMenuElement*>* menuElements = [[NSMutableArray alloc] init];
   __weak __typeof__(self) weakSelf = self;
+
+  if (base::FeatureList::IsEnabled(kShareInOmniboxLongPress) &&
+      self.shareButtonEnabled) {
+    base::UmaHistogramEnumeration("Mobile.ShareThisPage.Shown",
+                                  ShareThisPageLocation::kOmniboxLongPress);
+    UIImage* image =
+        DefaultSymbolWithPointSize(kShareSymbol, kSymbolImagePointSize);
+
+    UIAction* shareThisPageAction =
+        [UIAction actionWithTitle:l10n_util::GetNSString(
+                                      IDS_IOS_TOOLS_MENU_SHARE_THIS_PAGE)
+                            image:image
+                       identifier:nil
+                          handler:^(UIAction* action) {
+                            [weakSelf shareThisPage];
+                          }];
+
+    UIMenu* divider = [UIMenu menuWithTitle:@""
+                                      image:nil
+                                 identifier:nil
+                                    options:UIMenuOptionsDisplayInline
+                                   children:@[ shareThisPageAction ]];
+    [menuElements addObject:divider];
+  }
 
   UIImage* pasteImage = nil;
   if (IsBottomOmniboxAvailable()) {
@@ -864,8 +872,7 @@ UILabel* OmniboxTextHiddenLabel() {
   if (clipboard_content_types.has_value()) {
     std::set<ClipboardContentType> clipboard_content_types_values =
         clipboard_content_types.value();
-    if (base::Contains(clipboard_content_types_values,
-                       ClipboardContentType::Image)) {
+    if (clipboard_content_types_values.contains(ClipboardContentType::Image)) {
       // Either add an option to search the copied image with Lens, or via the
       // default search engine's reverse image search functionality.
       if (self.shouldUseLensInLongPressMenu) {
@@ -891,8 +898,8 @@ UILabel* OmniboxTextHiddenLabel() {
                               handler:searchCopiedImageHandler];
         [menuElements addObject:searchCopiedImageAction];
       }
-    } else if (base::Contains(clipboard_content_types_values,
-                              ClipboardContentType::URL)) {
+    } else if (clipboard_content_types_values.contains(
+                   ClipboardContentType::URL)) {
       id visitCopiedLinkHandler = ^(UIAction* action) {
         [self visitCopiedLink:nil];
       };
@@ -902,8 +909,8 @@ UILabel* OmniboxTextHiddenLabel() {
                identifier:nil
                   handler:visitCopiedLinkHandler];
       [menuElements addObject:visitCopiedLinkAction];
-    } else if (base::Contains(clipboard_content_types_values,
-                              ClipboardContentType::Text)) {
+    } else if (clipboard_content_types_values.contains(
+                   ClipboardContentType::Text)) {
       id searchCopiedTextHandler = ^(UIAction* action) {
         [self searchCopiedText:nil];
       };
@@ -914,6 +921,20 @@ UILabel* OmniboxTextHiddenLabel() {
                   handler:searchCopiedTextHandler];
       [menuElements addObject:searchCopiedTextAction];
     }
+  }
+
+  // Used to easily trigger the Assistant sheet during development.
+  if (IsAssistantContainerEnabled()) {
+    UIAction* assistantAction =
+        [UIAction actionWithTitle:l10n_util::GetNSString(
+                                      IDS_IOS_DIAMOND_PROTOTYPE_ASK_GEMINI)
+                            image:DefaultSymbolWithPointSize(
+                                      kMagicStackSymbol, kSymbolActionPointSize)
+                       identifier:nil
+                          handler:^(UIAction* action) {
+                            [weakSelf.dispatcher showAssistant];
+                          }];
+    [menuElements addObject:assistantAction];
   }
 
   // Show Top or Bottom Address Bar action.
@@ -946,6 +967,27 @@ UILabel* OmniboxTextHiddenLabel() {
                                  identifier:nil
                                     options:UIMenuOptionsDisplayInline
                                    children:@[ moveAddressBarAction ]];
+    [menuElements addObject:divider];
+  }
+
+  if (base::FeatureList::IsEnabled(kHideToolbarsInOverflowMenu)) {
+    UIImage* image =
+        DefaultSymbolWithPointSize(kExpandSymbol, kSymbolActionPointSize);
+
+    UIAction* hideAddressBarAction =
+        [UIAction actionWithTitle:l10n_util::GetNSString(
+                                      IDS_IOS_OVERFLOW_MENU_HIDE_TOOLBARS)
+                            image:image
+                       identifier:nil
+                          handler:^(UIAction* action) {
+                            [weakSelf hideToolbars];
+                          }];
+
+    UIMenu* divider = [UIMenu menuWithTitle:@""
+                                      image:nil
+                                 identifier:nil
+                                    options:UIMenuOptionsDisplayInline
+                                   children:@[ hideAddressBarAction ]];
     [menuElements addObject:divider];
   }
 
@@ -984,6 +1026,19 @@ UILabel* OmniboxTextHiddenLabel() {
   return configuration;
 }
 
+- (void)contextMenuInteraction:(UIContextMenuInteraction*)interaction
+    willDisplayMenuForConfiguration:(UIContextMenuConfiguration*)configuration
+                           animator:
+                               (id<UIContextMenuInteractionAnimating>)animator {
+  if (!IsGeminiCopresenceEnabled()) {
+    return;
+  }
+
+  [self.geminiHandler
+      hideFloatyIfInvokedAnimated:YES
+                       fromSource:gemini::FloatyUpdateSource::ContextMenu];
+}
+
 - (BOOL)canPerformAction:(SEL)action withSender:(id)sender {
   // Allow copying if the steady location bar is visible.
   if (!self.locationBarSteadyView.hidden && action == @selector(copy:)) {
@@ -1020,8 +1075,8 @@ UILabel* OmniboxTextHiddenLabel() {
         }
         NSString* url = base::SysUTF8ToNSString(optionalURL.value().spec());
         dispatch_async(dispatch_get_main_queue(), ^{
-          [self.dispatcher loadQuery:url immediately:YES];
-          [self.dispatcher cancelOmniboxEdit];
+          [self.mutator loadQuery:url];
+          [self.dispatcher hideComposebox];
         });
       }));
 }
@@ -1038,10 +1093,17 @@ UILabel* OmniboxTextHiddenLabel() {
         }
         NSString* query = base::SysUTF16ToNSString(optionalText.value());
         dispatch_async(dispatch_get_main_queue(), ^{
-          [self.dispatcher loadQuery:query immediately:YES];
-          [self.dispatcher cancelOmniboxEdit];
+          [self.mutator loadQuery:query];
+          [self.dispatcher hideComposebox];
         });
       }));
+}
+
+/// Shows the Share this page sheet.
+- (void)shareThisPage {
+  base::UmaHistogramEnumeration("Mobile.ShareThisPage.Used",
+                                ShareThisPageLocation::kOmniboxLongPress);
+  [self.dispatcher showShareSheetFromShareButton:_locationBarSteadyView];
 }
 
 /// Set the preferred omnibox position to `toolbarType`.
@@ -1059,6 +1121,10 @@ UILabel* OmniboxTextHiddenLabel() {
   }
 }
 
+- (void)hideToolbars {
+  [self.delegate locationBarHideToolbarTapped];
+}
+
 - (void)handleLensEntrypointPressed {
   RecordAction(UserMetricsAction("MobileToolbarLensOverlayTap"));
   if (self.lensOverlayVisible) {
@@ -1069,15 +1135,16 @@ UILabel* OmniboxTextHiddenLabel() {
 }
 
 - (void)handlePageActionMenuEntrypointTapped {
-  // TODO(crbug.com/402827015): Log opens.
   if (_pageActionMenuEntrypointView.newBadgeVisible) {
     RecordAIHubNewBadgeTapped();
     [self.delegate locationBarDidTapAIHubNewBadge];
     _pageActionMenuEntrypointView.newBadgeVisible = NO;
   }
   if (IsDirectBWGEntryPoint()) {
-    [self.BWGHandler
-        startGeminiFlowWithEntryPoint:gemini::EntryPoint::OmniboxChip];
+    [self.geminiHandler
+        startGeminiFlowWithStartupState:
+            [[GeminiStartupState alloc]
+                initWithEntryPoint:gemini::EntryPoint::OmniboxChip]];
   } else {
     RecordAIHubIconTapped();
     [self.pageActionMenuHandler showPageActionMenu];
@@ -1163,14 +1230,6 @@ UILabel* OmniboxTextHiddenLabel() {
       lens::ContainerPresentationType::kFullscreenCover;
   [_lensOverlayPlaceholderView
       setLensOverlayActive:shouldIndicateLensInUse && _lensOverlayVisible];
-}
-
-#pragma mark - TextFieldViewContainingHeightDelegate
-
-- (void)textFieldViewContaining:(UIView<TextFieldViewContaining>*)sender
-                didChangeHeight:(CGFloat)height {
-  [self.delegate locationBarViewController:self
-                  didChangeEditStateHeight:height];
 }
 
 - (UIView*)locationBarSteadyViewVisualCopy {

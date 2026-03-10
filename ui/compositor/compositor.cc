@@ -14,7 +14,6 @@
 
 #include "base/check.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/dcheck_is_on.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
@@ -749,7 +748,10 @@ void Compositor::RemoveAnimationObserver(
   if (!animation_observer_list_.HasObserver(observer))
     return;
 
-  animation_observer_list_.Notify(&CompositorAnimationObserver::Check);
+  // This may be called when an animation ends while processing OnAnimationStep,
+  // and `Check()` is a concrete method that can be called reentrantly.
+  animation_observer_list_.NotifyAllowReentrancy(
+      &CompositorAnimationObserver::Check);
 
   animation_observer_list_.RemoveObserver(observer);
   if (animation_observer_list_.empty()) {
@@ -949,7 +951,7 @@ Compositor::TrackerState::~TrackerState() = default;
 void Compositor::StartMetricsTracker(
     TrackerId tracker_id,
     CompositorMetricsTrackerHost::ReportCallback callback) {
-  DCHECK(!base::Contains(compositor_metrics_tracker_map_, tracker_id));
+  DCHECK(!compositor_metrics_tracker_map_.contains(tracker_id));
 
   auto& tracker_state = compositor_metrics_tracker_map_[tracker_id];
   tracker_state.report_callback = std::move(callback);
@@ -991,12 +993,12 @@ void Compositor::OnResume() {
     obs.ResetIfActive();
 }
 
-#if BUILDFLAG(IS_LINUX) && BUILDFLAG(IS_OZONE_X11)
+#if BUILDFLAG(IS_LINUX) && BUILDFLAG(SUPPORTS_OZONE_X11)
 void Compositor::OnCompleteSwapWithNewSize(const gfx::Size& size) {
   observer_list_.Notify(
       &CompositorObserver::OnCompositingCompleteSwapWithNewSize, this, size);
 }
-#endif  // BUILDFLAG(IS_LINUX) && BUILDFLAG(IS_OZONE_X11)
+#endif  // BUILDFLAG(IS_LINUX) && BUILDFLAG(SUPPORTS_OZONE_X11)
 
 void Compositor::SetOutputIsSecure(bool output_is_secure) {
   output_is_secure_ = output_is_secure;

@@ -92,11 +92,6 @@ PrefetchSchedulerPriority CalculatePriorityImpl(
 }
 
 bool IsReadyToStartPrefetch(const PrefetchQueue::Item& item) {
-  // Keep this method as similar as much as possible to a lambda in
-  // `PrefetchService::PopNextPrefetchContainer()`.
-  //
-  // TODO(crbug.com/406754449): Remove this comment.
-
   // `prefetch_container` must be valid. It will be ensured by `PrefetchService`
   // in the future.
   //
@@ -168,7 +163,7 @@ void PrefetchQueue::Push(base::WeakPtr<PrefetchContainer> prefetch_container,
 }
 
 bool PrefetchQueue::Remove(
-    base::WeakPtr<PrefetchContainer> prefetch_container) {
+    base::WeakPtr<const PrefetchContainer> prefetch_container) {
   for (auto it = queue_.cbegin(); it != queue_.cend(); ++it) {
     if (it->prefetch_container.get() == prefetch_container.get()) {
       queue_.erase(it);
@@ -271,7 +266,7 @@ void PrefetchScheduler::PushAndProgressAsync(
 }
 
 void PrefetchScheduler::RemoveAndProgressAsync(
-    PrefetchContainer& prefetch_container,
+    const PrefetchContainer& prefetch_container,
     bool should_progress) {
   TRACE_EVENT("loading", "PrefetchScheduler::RemoveAndProgressAsync",
               prefetch_container.request().preload_pipeline_info().GetFlow(),
@@ -430,12 +425,12 @@ void PrefetchScheduler::ProgressOne(
     {
       base::AutoReset<bool> guard{&in_eviction_, true};
       prefetch_service_->EvictPrefetch(base::PassKey<PrefetchScheduler>(),
-                                       prefetch_to_evict);
+                                       *prefetch_to_evict);
     }
   }();
 
   const bool is_started = prefetch_service_->StartSinglePrefetch(
-      base::PassKey<PrefetchScheduler>(), prefetch_container);
+      base::PassKey<PrefetchScheduler>(), *prefetch_container);
   if (is_started) {
     active_set_.push_back(prefetch_container);
   }

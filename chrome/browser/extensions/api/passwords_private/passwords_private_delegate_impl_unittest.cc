@@ -90,6 +90,7 @@
 #include "content/public/test/web_contents_tester.h"
 #include "extensions/browser/test_event_router.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/base/clipboard/test/clipboard_test_util.h"
 #include "ui/base/clipboard/test/test_clipboard.h"
 
 #if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
@@ -274,7 +275,6 @@ void SetUpSyncInTransportMode(Profile* profile) {
                 return std::make_unique<syncer::TestSyncService>();
               })));
   sync_service->SetSignedIn(signin::ConsentLevel::kSignin);
-  ASSERT_FALSE(sync_service->IsSyncFeatureEnabled());
 }
 
 class PasswordEventObserver
@@ -584,7 +584,7 @@ TEST_F(PasswordsPrivateDelegateImplTest, AddPassword) {
   std::unique_ptr<content::WebContents> web_contents = CreateWebContents();
   auto* client =
       MockPasswordManagerClient::CreateForWebContentsAndGet(web_contents.get());
-  ON_CALL(*(client->GetPasswordFeatureManager()), IsAccountStorageEnabled)
+  ON_CALL(*(client->GetPasswordFeatureManager()), IsAccountStorageActive)
       .WillByDefault(Return(false));
   auto delegate = CreateDelegate();
   // Spin the loop to allow PasswordStore tasks posted on the creation of
@@ -643,7 +643,7 @@ TEST_F(PasswordsPrivateDelegateImplTest,
   auto* fake_porter_ptr = fake_porter.get();
   delegate->SetPorterForTesting(std::move(fake_porter));
 
-  ON_CALL(*(client->GetPasswordFeatureManager()), IsAccountStorageEnabled)
+  ON_CALL(*(client->GetPasswordFeatureManager()), IsAccountStorageActive)
       .WillByDefault(Return(false));
 
   const auto kExpectedStatus =
@@ -674,7 +674,7 @@ TEST_F(PasswordsPrivateDelegateImplTest, TestReauthFailedOnImport) {
   auto fake_porter = std::make_unique<FakePasswordManagerPorter>();
   auto* fake_porter_ptr = fake_porter.get();
   delegate->SetPorterForTesting(std::move(fake_porter));
-  ON_CALL(*(client->GetPasswordFeatureManager()), IsAccountStorageEnabled)
+  ON_CALL(*(client->GetPasswordFeatureManager()), IsAccountStorageActive)
       .WillByDefault(Return(false));
 
   const auto kExpectedStatus =
@@ -710,7 +710,7 @@ TEST_F(PasswordsPrivateDelegateImplTest,
   auto* fake_porter_ptr = fake_porter.get();
   delegate->SetPorterForTesting(std::move(fake_porter));
 
-  ON_CALL(*(client->GetPasswordFeatureManager()), IsAccountStorageEnabled)
+  ON_CALL(*(client->GetPasswordFeatureManager()), IsAccountStorageActive)
       .WillByDefault(Return(false));
 
   const auto kExpectedStatus =
@@ -924,8 +924,9 @@ TEST_F(PasswordsPrivateDelegateImplTest, TestCopyPasswordCallbackResult) {
       password_callback.Get(), web_contents.get());
 
   std::u16string result;
-  test_clipboard_->ReadText(ui::ClipboardBuffer::kCopyPaste,
-                            /* data_dst = */ nullptr, &result);
+  result = ui::clipboard_test_util::ReadText(test_clipboard_,
+                                             ui::ClipboardBuffer::kCopyPaste,
+                                             /* data_dst = */ nullptr);
   EXPECT_EQ(form.password_value, result);
 
   histogram_tester().ExpectUniqueSample(
@@ -951,16 +952,17 @@ TEST_F(PasswordsPrivateDelegateImplTest, CopyPlaintextBackupPassword) {
                                         result_callback.Get());
 
   std::u16string result;
-  test_clipboard_->ReadText(ui::ClipboardBuffer::kCopyPaste,
-                            /* data_dst = */ nullptr, &result);
+  result = ui::clipboard_test_util::ReadText(test_clipboard_,
+                                             ui::ClipboardBuffer::kCopyPaste,
+                                             /* data_dst = */ nullptr);
   EXPECT_EQ(result, form.GetPasswordBackup());
 }
 
-TEST_F(PasswordsPrivateDelegateImplTest, TestShouldEnableAccountStorage) {
+TEST_F(PasswordsPrivateDelegateImplTest, TestShouldActivateAccountStorage) {
   std::unique_ptr<content::WebContents> web_contents = CreateWebContents();
   auto* client =
       MockPasswordManagerClient::CreateForWebContentsAndGet(web_contents.get());
-  ON_CALL(*(client->GetPasswordFeatureManager()), IsAccountStorageEnabled)
+  ON_CALL(*(client->GetPasswordFeatureManager()), IsAccountStorageActive)
       .WillByDefault(Return(false));
   sync_service()->GetUserSettings()->SetSelectedType(
       syncer::UserSelectableType::kPasswords, false);
@@ -978,8 +980,7 @@ TEST_F(PasswordsPrivateDelegateImplTest, TestShouldDisableAccountStorage) {
       MockPasswordManagerClient::CreateForWebContentsAndGet(web_contents.get());
   password_manager::MockPasswordFeatureManager* feature_manager =
       client->GetPasswordFeatureManager();
-  ON_CALL(*feature_manager, IsAccountStorageEnabled)
-      .WillByDefault(Return(true));
+  ON_CALL(*feature_manager, IsAccountStorageActive).WillByDefault(Return(true));
   sync_service()->GetUserSettings()->SetSelectedType(
       syncer::UserSelectableType::kPasswords, true);
 
@@ -1010,8 +1011,9 @@ TEST_F(PasswordsPrivateDelegateImplTest, TestCopyPasswordCallbackResultFail) {
       password_callback.Get(), web_contents.get());
   // Clipboard should not be modified in case Reauth failed
   std::u16string result;
-  test_clipboard_->ReadText(ui::ClipboardBuffer::kCopyPaste,
-                            /* data_dst = */ nullptr, &result);
+  result = ui::clipboard_test_util::ReadText(test_clipboard_,
+                                             ui::ClipboardBuffer::kCopyPaste,
+                                             /* data_dst = */ nullptr);
   EXPECT_EQ(std::u16string(), result);
   EXPECT_EQ(before_call, test_clipboard_->GetLastModifiedTime());
 
@@ -1038,8 +1040,9 @@ TEST_F(PasswordsPrivateDelegateImplTest,
                                         result_callback.Get());
 
   std::u16string result;
-  test_clipboard_->ReadText(ui::ClipboardBuffer::kCopyPaste,
-                            /* data_dst = */ nullptr, &result);
+  result = ui::clipboard_test_util::ReadText(test_clipboard_,
+                                             ui::ClipboardBuffer::kCopyPaste,
+                                             /* data_dst = */ nullptr);
   EXPECT_EQ(result, std::u16string());
 }
 
@@ -1218,7 +1221,7 @@ TEST_F(PasswordsPrivateDelegateImplTest, TestMovePasswordsToAccountStore) {
   std::unique_ptr<content::WebContents> web_contents = CreateWebContents();
   auto* client =
       MockPasswordManagerClient::CreateForWebContentsAndGet(web_contents.get());
-  ON_CALL(*(client->GetPasswordFeatureManager()), IsAccountStorageEnabled)
+  ON_CALL(*(client->GetPasswordFeatureManager()), IsAccountStorageActive)
       .WillByDefault(Return(true));
 
   auto delegate = CreateDelegate();
@@ -1231,12 +1234,6 @@ TEST_F(PasswordsPrivateDelegateImplTest, TestMovePasswordsToAccountStore) {
 
   delegate->MovePasswordsToAccount({first_id}, web_contents.get());
   base::RunLoop().RunUntilIdle();
-
-  histogram_tester().ExpectUniqueSample(
-      "PasswordManager.AccountStorage.MoveToAccountStoreFlowAccepted2",
-      password_manager::metrics_util::MoveToAccountStoreTrigger::
-          kExplicitlyTriggeredInSettings,
-      1);
 }
 
 TEST_F(PasswordsPrivateDelegateImplTest, VerifyCastingOfImportEntryStatus) {
@@ -2012,8 +2009,8 @@ class PasswordsPrivateDelegateImplFetchFamilyMembersTest
             version_info::Channel::DEFAULT,
             profile_url_loader_factory().GetSafeWeakWrapper(),
             identity_test_env_.identity_manager()));
-    identity_test_env_.MakePrimaryAccountAvailable("test@email.com",
-                                                   signin::ConsentLevel::kSync);
+    identity_test_env_.MakePrimaryAccountAvailable(
+        "test@email.com", signin::ConsentLevel::kSignin);
     identity_test_env_.SetAutomaticIssueOfAccessTokens(true);
   }
 
@@ -2191,6 +2188,9 @@ TEST_F(PasswordsPrivateDelegateImplFetchFamilyMembersTest,
   task_environment()->RunUntilIdle();
 }
 
+// TODO(crbug.com/40066949): Remove this test after kSync users are migrated to
+// kSignin in phase 3. As it will be identical to GetCredentialGroups_Butter.
+// See ConsentLevel::kSync documentation for details.
 TEST_F(PasswordsPrivateDelegateImplTest, GetCredentialGroups_SyncOn) {
   sync_service()->SetSignedIn(signin::ConsentLevel::kSync);
 

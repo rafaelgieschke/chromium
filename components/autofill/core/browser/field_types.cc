@@ -69,6 +69,7 @@ static constexpr auto kTypeNameToFieldType =
          {"ADDRESS_HOME_ZIP", ADDRESS_HOME_ZIP},
          {"ADDRESS_HOME_ZIP_PREFIX", ADDRESS_HOME_ZIP_PREFIX},
          {"ADDRESS_HOME_ZIP_SUFFIX", ADDRESS_HOME_ZIP_SUFFIX},
+         {"ADDRESS_HOME_ZIP_AND_CITY", ADDRESS_HOME_ZIP_AND_CITY},
          {"ADDRESS_HOME_COUNTRY", ADDRESS_HOME_COUNTRY},
          {"CREDIT_CARD_NAME_FULL", CREDIT_CARD_NAME_FULL},
          {"CREDIT_CARD_NUMBER", CREDIT_CARD_NUMBER},
@@ -155,6 +156,13 @@ static constexpr auto kTypeNameToFieldType =
          {"PASSPORT_ISSUING_COUNTRY", PASSPORT_ISSUING_COUNTRY},
          {"PASSPORT_EXPIRATION_DATE", PASSPORT_EXPIRATION_DATE},
          {"PASSPORT_ISSUE_DATE", PASSPORT_ISSUE_DATE},
+         {"ORDER_ID", ORDER_ID},
+         {"ORDER_DATE", ORDER_DATE},
+         {"ORDER_MERCHANT_NAME", ORDER_MERCHANT_NAME},
+         {"ORDER_MERCHANT_DOMAIN", ORDER_MERCHANT_DOMAIN},
+         {"ORDER_PRODUCT_NAMES", ORDER_PRODUCT_NAMES},
+         {"ORDER_ACCOUNT", ORDER_ACCOUNT},
+         {"ORDER_GRAND_TOTAL", ORDER_GRAND_TOTAL},
          {"LOYALTY_MEMBERSHIP_PROGRAM", LOYALTY_MEMBERSHIP_PROGRAM},
          {"LOYALTY_MEMBERSHIP_PROVIDER", LOYALTY_MEMBERSHIP_PROVIDER},
          {"LOYALTY_MEMBERSHIP_ID", LOYALTY_MEMBERSHIP_ID},
@@ -229,6 +237,7 @@ bool IsFillableFieldType(FieldType field_type) {
     case ADDRESS_HOME_ZIP:
     case ADDRESS_HOME_ZIP_PREFIX:
     case ADDRESS_HOME_ZIP_SUFFIX:
+    case ADDRESS_HOME_ZIP_AND_CITY:
     case ADDRESS_HOME_COUNTRY:
     case ADDRESS_HOME_STREET_ADDRESS:
     case ADDRESS_HOME_SORTING_CODE:
@@ -327,6 +336,13 @@ bool IsFillableFieldType(FieldType field_type) {
     case FLIGHT_RESERVATION_CONFIRMATION_CODE:
     case FLIGHT_RESERVATION_DEPARTURE_AIRPORT:
     case FLIGHT_RESERVATION_ARRIVAL_AIRPORT:
+    case ORDER_ID:
+    case ORDER_DATE:
+    case ORDER_MERCHANT_NAME:
+    case ORDER_MERCHANT_DOMAIN:
+    case ORDER_PRODUCT_NAMES:
+    case ORDER_ACCOUNT:
+    case ORDER_GRAND_TOTAL:
       return true;
 
     // Autofill AI types that are not fillable.
@@ -432,6 +448,13 @@ std::string_view FieldTypeToDeveloperRepresentationString(FieldType type) {
     case FLIGHT_RESERVATION_DEPARTURE_AIRPORT:
     case FLIGHT_RESERVATION_ARRIVAL_AIRPORT:
     case FLIGHT_RESERVATION_DEPARTURE_DATE:
+    case ORDER_ID:
+    case ORDER_DATE:
+    case ORDER_MERCHANT_NAME:
+    case ORDER_MERCHANT_DOMAIN:
+    case ORDER_PRODUCT_NAMES:
+    case ORDER_ACCOUNT:
+    case ORDER_GRAND_TOTAL:
       return "";
     case NUMERIC_QUANTITY:
       return "Numeric quantity";
@@ -555,6 +578,8 @@ std::string_view FieldTypeToDeveloperRepresentationString(FieldType type) {
       return "ZIP code prefix";
     case ADDRESS_HOME_ZIP_SUFFIX:
       return "ZIP code suffix";
+    case ADDRESS_HOME_ZIP_AND_CITY:
+      return "ZIP code and city";
     case ADDRESS_HOME_COUNTRY:
       return "Country";
     case ADDRESS_HOME_OVERFLOW:

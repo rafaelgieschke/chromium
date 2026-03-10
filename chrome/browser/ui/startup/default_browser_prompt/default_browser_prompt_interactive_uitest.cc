@@ -10,6 +10,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_browser_main.h"
 #include "chrome/browser/default_browser/default_browser_controller.h"
+#include "chrome/browser/default_browser/default_browser_features.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/shell_integration.h"
@@ -57,6 +58,11 @@ DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kSecondTabContents);
 class DefaultBrowserPromptInteractiveTest
     : public WebUiInteractiveTestMixin<InteractiveBrowserTest> {
  public:
+  DefaultBrowserPromptInteractiveTest() {
+    scoped_feature_list_.InitAndDisableFeature(
+        default_browser::kDefaultBrowserFramework);
+  }
+
   void SetUp() override {
     shell_integration::DefaultBrowserWorker::DisableSetAsDefaultForTesting();
     InteractiveBrowserTest::SetUp();
@@ -87,6 +93,9 @@ class DefaultBrowserPromptInteractiveTest
         WaitForHide(ConfirmInfoBar::kInfoBarElementId),
         DoesAppMenuItemExist(preserve_app_menu_item));
   }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_F(DefaultBrowserPromptInteractiveTest,
@@ -266,9 +275,10 @@ IN_PROC_BROWSER_TEST_F(DefaultBrowserPromptInteractiveTest,
                   PressButton(ConfirmInfoBar::kOkButtonElementId),
                   WaitForHide(ConfirmInfoBar::kInfoBarElementId));
 
-  histogram_tester.ExpectTotalCount("DefaultBrowser.InfoBar.Shown", 1);
+  histogram_tester.ExpectTotalCount(
+      "DefaultBrowser.InfoBar.ShellIntegration.Shown", 1);
   histogram_tester.ExpectUniqueSample(
-      "DefaultBrowser.InfoBar.Interaction",
+      "DefaultBrowser.InfoBar.ShellIntegration.Interaction",
       default_browser::DefaultBrowserInteractionType::kAccepted, 1);
 }
 
@@ -281,9 +291,10 @@ IN_PROC_BROWSER_TEST_F(DefaultBrowserPromptInteractiveTest,
                   PressButton(ConfirmInfoBar::kDismissButtonElementId),
                   WaitForHide(ConfirmInfoBar::kInfoBarElementId));
 
-  histogram_tester.ExpectTotalCount("DefaultBrowser.InfoBar.Shown", 1);
+  histogram_tester.ExpectTotalCount(
+      "DefaultBrowser.InfoBar.ShellIntegration.Shown", 1);
   histogram_tester.ExpectUniqueSample(
-      "DefaultBrowser.InfoBar.Interaction",
+      "DefaultBrowser.InfoBar.ShellIntegration.Interaction",
       default_browser::DefaultBrowserInteractionType::kDismissed, 1);
 }
 
@@ -300,9 +311,10 @@ IN_PROC_BROWSER_TEST_F(DefaultBrowserPromptInteractiveTest,
       Do([this]() { browser()->GetWindow()->Close(); }),
       WaitForHide(kBrowserViewElementId));
 
-  histogram_tester.ExpectTotalCount("DefaultBrowser.InfoBar.Shown", 1);
+  histogram_tester.ExpectTotalCount(
+      "DefaultBrowser.InfoBar.ShellIntegration.Shown", 1);
   histogram_tester.ExpectUniqueSample(
-      "DefaultBrowser.InfoBar.Interaction",
+      "DefaultBrowser.InfoBar.ShellIntegration.Interaction",
       default_browser::DefaultBrowserInteractionType::kIgnored, 1);
 }
 

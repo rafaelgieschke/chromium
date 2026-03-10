@@ -39,8 +39,9 @@ import org.chromium.base.CallbackUtils;
 import org.chromium.base.CollectionUtil;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.base.supplier.ObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
@@ -55,6 +56,7 @@ import org.chromium.chrome.browser.searchwidget.SearchActivity;
 import org.chromium.chrome.browser.settings.ChromeBaseSettingsFragment;
 import org.chromium.chrome.browser.settings.SettingsNavigationFactory;
 import org.chromium.chrome.browser.settings.search.ChromeBaseSearchIndexProvider;
+import org.chromium.chrome.browser.signin.SigninAndHistorySyncActivityLauncherImpl;
 import org.chromium.chrome.browser.signin.services.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.services.SigninManager;
 import org.chromium.chrome.browser.ui.messages.snackbar.Snackbar;
@@ -248,7 +250,8 @@ public class ClearBrowsingDataFragment extends ChromeBaseSettingsFragment
     private @TimePeriod int mLastSelectedTimePeriod;
     private boolean mShouldShowPostDeleteFeedback;
 
-    private final ObservableSupplierImpl<String> mPageTitle = new ObservableSupplierImpl<>();
+    private final SettableMonotonicObservableSupplier<String> mPageTitle =
+            ObservableSuppliers.createMonotonic();
 
     /**
      * @return All available {@link DialogOption} entries.
@@ -314,7 +317,7 @@ public class ClearBrowsingDataFragment extends ChromeBaseSettingsFragment
             case DialogOption.CLEAR_FORM_DATA:
                 return R.drawable.ic_edit_24dp;
             case DialogOption.CLEAR_HISTORY:
-                return R.drawable.ic_watch_later_24dp;
+                return R.drawable.ic_schedule_fill_24dp;
             case DialogOption.CLEAR_PASSWORDS:
                 return R.drawable.ic_password_manager_key;
             case DialogOption.CLEAR_SITE_SETTINGS:
@@ -689,7 +692,7 @@ public class ClearBrowsingDataFragment extends ChromeBaseSettingsFragment
     }
 
     @Override
-    public ObservableSupplier<String> getPageTitle() {
+    public MonotonicObservableSupplier<String> getPageTitle() {
         return mPageTitle;
     }
 
@@ -802,6 +805,7 @@ public class ClearBrowsingDataFragment extends ChromeBaseSettingsFragment
                         getActivity().getSupportFragmentManager(),
                         ((ModalDialogManagerHolder) getActivity()).getModalDialogManager(),
                         ((SnackbarManager.SnackbarManageable) getActivity()).getSnackbarManager(),
+                        SigninAndHistorySyncActivityLauncherImpl.get(),
                         SignoutReason.USER_CLICKED_SIGNOUT_FROM_CLEAR_BROWSING_DATA_PAGE,
                         /* showConfirmDialog= */ true,
                         CallbackUtils.emptyRunnable());
@@ -974,7 +978,6 @@ public class ClearBrowsingDataFragment extends ChromeBaseSettingsFragment
         return AnimationType.PROPERTY;
     }
 
-    // TODO(crbug.com/444470792): Determine what pieces of logic are dynamic and need handling.
     public static final ChromeBaseSearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
             new ChromeBaseSearchIndexProvider(
                     ClearBrowsingDataFragment.class.getName(),

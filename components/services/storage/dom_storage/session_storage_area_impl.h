@@ -27,7 +27,7 @@ class SessionStorageDataMap;
 // namespace-StorageKey area.
 //
 // This class delegates calls to SessionStorageDataMap objects, and can share
-// them with other SessionStorageLevelDBImpl instances to support shallow
+// them with other SessionStorageAreaImpl instances to support shallow
 // cloning (copy-on-write). This should be done through the |Clone()| method and
 // not manually.
 //
@@ -90,7 +90,6 @@ class SessionStorageAreaImpl : public blink::mojom::StorageArea {
       const std::string& source,
       mojo::PendingRemote<blink::mojom::StorageAreaObserver> new_observer,
       DeleteAllCallback callback) override;
-  void Get(const std::vector<uint8_t>& key, GetCallback callback) override;
   void GetAll(
       mojo::PendingRemote<blink::mojom::StorageAreaObserver> new_observer,
       GetAllCallback callback) override;
@@ -105,8 +104,7 @@ class SessionStorageAreaImpl : public blink::mojom::StorageArea {
       std::vector<blink::mojom::KeyValuePtr> entries);
   void OnDeleteAllResult(
       mojo::PendingRemote<blink::mojom::StorageAreaObserver> new_observer,
-      DeleteAllCallback callback,
-      bool success);
+      DeleteAllCallback callback);
 
   enum class NewMapType { FORKED, EMPTY_FROM_DELETE_ALL };
 

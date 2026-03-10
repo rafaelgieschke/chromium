@@ -30,7 +30,6 @@
 #include "chrome/browser/web_applications/web_app_command_scheduler.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/browser/web_applications/web_app_registrar.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -465,7 +464,7 @@ void AppUninstallDialogView::LoadSubAppIds(const std::string& short_app_name,
         web_app::AppLockDescription(parent_app_id),
         base::BindOnce(
             [](const std::string& parent_app_id, web_app::AppLock& lock,
-               base::Value::Dict& debug_value) {
+               base::DictValue& debug_value) {
               return lock.registrar().GetAllSubAppIds(parent_app_id);
             },
             parent_app_id),

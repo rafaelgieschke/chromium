@@ -38,9 +38,8 @@ inline constexpr char kIPHDemoModeFeatureChoiceParam[] = "chosen_feature";
 // Defines a single flags_ui::FeatureEntry::FeatureVariation entry, fully
 // enclosed. This is intended to be used with the declaration of
 // |kIPHDemoModeChoiceVariations| below.
-#define VARIATION_ENTRY(base_feature)                               \
-  {base_feature##Variation[0].param_value, base_feature##Variation, \
-   std::size(base_feature##Variation), nullptr}
+#define VARIATION_ENTRY(base_feature) \
+  {base_feature##Variation[0].param_value, base_feature##Variation, nullptr}
 
 // Defines a flags_ui::FeatureEntry::FeatureParam for each feature.
 DEFINE_VARIATION_PARAM(kIPHDummyFeature, "IPH_Dummy");
@@ -119,8 +118,10 @@ DEFINE_VARIATION_PARAM(kIPHDownloadInfoBarDownloadsAreFasterFeature,
                        "IPH_DownloadInfoBarDownloadsAreFaster");
 DEFINE_VARIATION_PARAM(kIPHEphemeralTabFeature, "IPH_EphemeralTab");
 DEFINE_VARIATION_PARAM(kIPHFeedCardMenuFeature, "IPH_FeedCardMenu");
+DEFINE_VARIATION_PARAM(kIPHFuseboxAttachmentFeature, "IPH_FuseboxAttachment");
 DEFINE_VARIATION_PARAM(kIPHGenericAlwaysTriggerHelpUiFeature,
                        "IPH_GenericAlwaysTriggerHelpUiFeature");
+DEFINE_VARIATION_PARAM(kIPHGlicPromoAndroidFeature, "IPH_GlicPromoAndroid");
 DEFINE_VARIATION_PARAM(kIPHIdentityDiscFeature, "IPH_IdentityDisc");
 DEFINE_VARIATION_PARAM(kIPHInstanceSwitcherFeature, "IPH_InstanceSwitcher");
 DEFINE_VARIATION_PARAM(kIPHKeyboardAccessoryAddressFillingFeature,
@@ -237,6 +238,8 @@ DEFINE_VARIATION_PARAM(kIPHBottomToolbarTipFeature, "IPH_BottomToolbarTip");
 #endif  // BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(IS_IOS)
+DEFINE_VARIATION_PARAM(kIPHiOSActiveDaysTrackingFeature,
+                       "IPH_iOSActiveDaysTrackingFeature");
 DEFINE_VARIATION_PARAM(kIPHiOSLensOverlayEntrypointTipFeature,
                        "IPH_iOSLensOverlayEntrypointTip");
 DEFINE_VARIATION_PARAM(kIPHiOSLensOverlayEscapeHatchTipFeature,
@@ -269,6 +272,8 @@ DEFINE_VARIATION_PARAM(kIPHiOSFeedSwipeStaticFeature,
 DEFINE_VARIATION_PARAM(kIPHiOSPromoAppStoreFeature, "IPH_iOSPromoAppStore");
 DEFINE_VARIATION_PARAM(kIPHiOSLensKeyboardFeature, "IPH_iOSLensKeyboard");
 DEFINE_VARIATION_PARAM(kIPHiOSPromoWhatsNewFeature, "IPH_iOSPromoWhatsNew");
+DEFINE_VARIATION_PARAM(kIPHiOSPromoBackgroundCustomizationFeature,
+                       "IPH_iOSPromoBackgroundCustomization");
 DEFINE_VARIATION_PARAM(kIPHiOSPromoSigninFullscreenFeature,
                        "IPH_iOSPromoSigninFullscreen");
 DEFINE_VARIATION_PARAM(kIPHiOSPromoPostRestoreFeature,
@@ -300,6 +305,8 @@ DEFINE_VARIATION_PARAM(kIPHiOSReplaceSyncPromosWithSignInPromos,
 DEFINE_VARIATION_PARAM(kIPHiOSTabGridSwipeRightForIncognito,
                        "IPH_iOSTabGridSwipeRightForIncognito");
 DEFINE_VARIATION_PARAM(kIPHiOSDockingPromoFeature, "IPH_iOSDockingPromo");
+DEFINE_VARIATION_PARAM(kIPHiOSDockingPromoEligibilityFeature,
+                       "IPH_iOSDockingPromoEligibility");
 DEFINE_VARIATION_PARAM(kIPHiOSDockingPromoRemindMeLaterFeature,
                        "IPH_iOSDockingPromoRemindMeLater");
 DEFINE_VARIATION_PARAM(kIPHiOSPromoAllTabsFeature, "IPH_iOSPromoAllTabs");
@@ -359,7 +366,10 @@ DEFINE_VARIATION_PARAM(kIPHiOSGeminiContextualCueChip,
                        "IPH_iOSGeminiContextualCueChip");
 DEFINE_VARIATION_PARAM(kIPHiOSGeminiFullscreenPromoFeature,
                        "IPH_iOSGeminiFullscreenPromoFeature");
-
+DEFINE_VARIATION_PARAM(kIPHiOSGeminiImageRemixFeature,
+                       "IPH_iOSGeminiImageRemixFeature");
+DEFINE_VARIATION_PARAM(kIPHiOSPinMostVisitedSiteFeature,
+                       "IPH_iOSPinMostVisitedSiteFeature");
 #endif  // BUILDFLAG(IS_IOS)
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
@@ -462,12 +472,17 @@ DEFINE_VARIATION_PARAM(kIPHSideSearchAutoTriggeringFeature,
                        "IPH_SideSearchAutoTriggering");
 DEFINE_VARIATION_PARAM(kIPHSideSearchPageActionLabelFeature,
                        "IPH_SideSearchPageActionLabel");
+
+DEFINE_VARIATION_PARAM(kIPHVerticalTabstripTutorialFeature,
+                       "IPH_VerticalTabstripTutorialFeature");
+
 DEFINE_VARIATION_PARAM(kIPHPwaQuietNotificationFeature,
                        "IPH_PwaQuietNotification");
 DEFINE_VARIATION_PARAM(kIPHTabAudioMutingFeature, "IPH_TabAudioMuting");
 DEFINE_VARIATION_PARAM(kIPHTabOrganizationSuccessFeature,
                        "IPH_TabOrganizationSuccess");
-DEFINE_VARIATION_PARAM(kIPHTabSearchFeature, "IPH_TabSearch");
+DEFINE_VARIATION_PARAM(kIPHTabSearchComboButtonFeature,
+                       "IPH_TabSearchComboButton");
 DEFINE_VARIATION_PARAM(kIPHTabSearchToolbarButtonFeature,
                        "IPH_TabSearchToolbarButton");
 DEFINE_VARIATION_PARAM(kIPHDesktopPwaInstallFeature, "IPH_DesktopPwaInstall");
@@ -530,69 +545,6 @@ DEFINE_VARIATION_PARAM(kIPHGoogleOneOfferNotificationFeature,
                        "IPH_GoogleOneOfferNotification");
 DEFINE_VARIATION_PARAM(kIPHLauncherSearchHelpUiFeature,
                        "IPH_LauncherSearchHelpUi");
-DEFINE_VARIATION_PARAM(kIPHScalableIphTimerBasedOneFeature,
-                       "IPH_ScalableIphTimerBasedOne");
-DEFINE_VARIATION_PARAM(kIPHScalableIphTimerBasedTwoFeature,
-                       "IPH_ScalableIphTimerBasedTwo");
-DEFINE_VARIATION_PARAM(kIPHScalableIphTimerBasedThreeFeature,
-                       "IPH_ScalableIphTimerBasedThree");
-DEFINE_VARIATION_PARAM(kIPHScalableIphTimerBasedFourFeature,
-                       "IPH_ScalableIphTimerBasedFour");
-DEFINE_VARIATION_PARAM(kIPHScalableIphTimerBasedFiveFeature,
-                       "IPH_ScalableIphTimerBasedFive");
-DEFINE_VARIATION_PARAM(kIPHScalableIphTimerBasedSixFeature,
-                       "IPH_ScalableIphTimerBasedSix");
-DEFINE_VARIATION_PARAM(kIPHScalableIphTimerBasedSevenFeature,
-                       "IPH_ScalableIphTimerBasedSeven");
-DEFINE_VARIATION_PARAM(kIPHScalableIphTimerBasedEightFeature,
-                       "IPH_ScalableIphTimerBasedEight");
-DEFINE_VARIATION_PARAM(kIPHScalableIphTimerBasedNineFeature,
-                       "IPH_ScalableIphTimerBasedNine");
-DEFINE_VARIATION_PARAM(kIPHScalableIphTimerBasedTenFeature,
-                       "IPH_ScalableIphTimerBasedTen");
-DEFINE_VARIATION_PARAM(kIPHScalableIphUnlockedBasedOneFeature,
-                       "IPH_ScalableIphUnlockedBasedOne");
-DEFINE_VARIATION_PARAM(kIPHScalableIphUnlockedBasedTwoFeature,
-                       "IPH_ScalableIphUnlockedBasedTwo");
-DEFINE_VARIATION_PARAM(kIPHScalableIphUnlockedBasedThreeFeature,
-                       "IPH_ScalableIphUnlockedBasedThree");
-DEFINE_VARIATION_PARAM(kIPHScalableIphUnlockedBasedFourFeature,
-                       "IPH_ScalableIphUnlockedBasedFour");
-DEFINE_VARIATION_PARAM(kIPHScalableIphUnlockedBasedFiveFeature,
-                       "IPH_ScalableIphUnlockedBasedFive");
-DEFINE_VARIATION_PARAM(kIPHScalableIphUnlockedBasedSixFeature,
-                       "IPH_ScalableIphUnlockedBasedSix");
-DEFINE_VARIATION_PARAM(kIPHScalableIphUnlockedBasedSevenFeature,
-                       "IPH_ScalableIphUnlockedBasedSeven");
-DEFINE_VARIATION_PARAM(kIPHScalableIphUnlockedBasedEightFeature,
-                       "IPH_ScalableIphUnlockedBasedEight");
-DEFINE_VARIATION_PARAM(kIPHScalableIphUnlockedBasedNineFeature,
-                       "IPH_ScalableIphUnlockedBasedNine");
-DEFINE_VARIATION_PARAM(kIPHScalableIphUnlockedBasedTenFeature,
-                       "IPH_ScalableIphUnlockedBasedTen");
-DEFINE_VARIATION_PARAM(kIPHScalableIphHelpAppBasedNudgeFeature,
-                       "IPH_ScalableIphHelpAppBasedNudge");
-DEFINE_VARIATION_PARAM(kIPHScalableIphHelpAppBasedOneFeature,
-                       "IPH_ScalableIphHelpAppBasedOne");
-DEFINE_VARIATION_PARAM(kIPHScalableIphHelpAppBasedTwoFeature,
-                       "IPH_ScalableIphHelpAppBasedTwo");
-DEFINE_VARIATION_PARAM(kIPHScalableIphHelpAppBasedThreeFeature,
-                       "IPH_ScalableIphHelpAppBasedThree");
-DEFINE_VARIATION_PARAM(kIPHScalableIphHelpAppBasedFourFeature,
-                       "IPH_ScalableIphHelpAppBasedFour");
-DEFINE_VARIATION_PARAM(kIPHScalableIphHelpAppBasedFiveFeature,
-                       "IPH_ScalableIphHelpAppBasedFive");
-DEFINE_VARIATION_PARAM(kIPHScalableIphHelpAppBasedSixFeature,
-                       "IPH_ScalableIphHelpAppBasedSix");
-DEFINE_VARIATION_PARAM(kIPHScalableIphHelpAppBasedSevenFeature,
-                       "IPH_ScalableIphHelpAppBasedSeven");
-DEFINE_VARIATION_PARAM(kIPHScalableIphHelpAppBasedEightFeature,
-                       "IPH_ScalableIphHelpAppBasedEight");
-DEFINE_VARIATION_PARAM(kIPHScalableIphHelpAppBasedNineFeature,
-                       "IPH_ScalableIphHelpAppBasedNine");
-DEFINE_VARIATION_PARAM(kIPHScalableIphHelpAppBasedTenFeature,
-                       "IPH_ScalableIphHelpAppBasedTen");
-DEFINE_VARIATION_PARAM(kIPHScalableIphGamingFeature, "IPH_ScalableIphGaming");
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
@@ -616,7 +568,15 @@ DEFINE_VARIATION_PARAM(kIPHiOSLensPromoDesktopFeature,
                        "IPH_iOSLensPromoDesktop");
 DEFINE_VARIATION_PARAM(kIPHiOSEnhancedBrowsingDesktopFeature,
                        "IPH_iOSEnhancedBrowsingDesktop");
+DEFINE_VARIATION_PARAM(kIPHiOSTabGroupsDesktopFeature,
+                       "IPH_iOSTabGroupsDesktop");
+DEFINE_VARIATION_PARAM(kIPHiOSPriceTrackingDesktopFeature,
+                       "IPH_iOSPriceTrackingDesktop");
 #endif  // !BUILDFLAG(IS_ANDROID)
+
+#if !BUILDFLAG(IS_IOS)
+DEFINE_VARIATION_PARAM(kIPHResumptionRailFeature, "IPH_ResumptionRail");
+#endif  // !BUILDFLAG(IS_IOS)
 
 // Defines the array of which features should be listed in the chrome://flags
 // UI to be able to select them alone for demo-mode. The features listed here
@@ -756,6 +716,7 @@ inline constexpr flags_ui::FeatureEntry::FeatureVariation
         VARIATION_ENTRY(kIPHiOSLensKeyboardFeature),
         VARIATION_ENTRY(kIPHiOSPromoAppStoreFeature),
         VARIATION_ENTRY(kIPHiOSPromoWhatsNewFeature),
+        VARIATION_ENTRY(kIPHiOSPromoBackgroundCustomizationFeature),
         VARIATION_ENTRY(kIPHiOSPromoPostRestoreFeature),
         VARIATION_ENTRY(kIPHiOSPromoCredentialProviderExtensionFeature),
         VARIATION_ENTRY(kIPHiOSHistoryOnOverflowMenuFeature),
@@ -798,6 +759,8 @@ inline constexpr flags_ui::FeatureEntry::FeatureVariation
         VARIATION_ENTRY(kIPHiOSAIHubNewBadge),
         VARIATION_ENTRY(kIPHiOSGeminiContextualCueChip),
         VARIATION_ENTRY(kIPHiOSGeminiFullscreenPromoFeature),
+        VARIATION_ENTRY(kIPHiOSGeminiImageRemixFeature),
+        VARIATION_ENTRY(kIPHiOSPinMostVisitedSiteFeature),
 #elif BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
     BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
         VARIATION_ENTRY(kIPHBatterySaverModeFeature),
@@ -843,6 +806,7 @@ inline constexpr flags_ui::FeatureEntry::FeatureVariation
         VARIATION_ENTRY(kIPHReadingListInSidePanelFeature),
         VARIATION_ENTRY(kIPHReadingModeSidePanelFeature),
         VARIATION_ENTRY(kIPHReadingModePageActionLabelFeature),
+        VARIATION_ENTRY(kIPHResumptionRailFeature),
         VARIATION_ENTRY(kIPHShoppingCollectionFeature),
         VARIATION_ENTRY(kIPHSideBySidePinnableFeature),
         VARIATION_ENTRY(kIPHSideBySideTabSwitchFeature),
@@ -850,7 +814,7 @@ inline constexpr flags_ui::FeatureEntry::FeatureVariation
         VARIATION_ENTRY(kIPHSideSearchAutoTriggeringFeature),
         VARIATION_ENTRY(kIPHSideSearchPageActionLabelFeature),
         VARIATION_ENTRY(kIPHTabAudioMutingFeature),
-        VARIATION_ENTRY(kIPHTabSearchFeature),
+        VARIATION_ENTRY(kIPHTabSearchComboButtonFeature),
         VARIATION_ENTRY(kIPHTabSearchToolbarButtonFeature),
         VARIATION_ENTRY(kIPHTabGroupsSharedTabChangedFeature),
         VARIATION_ENTRY(kIPHTabGroupsSharedTabFeedbackFeature),
@@ -887,38 +851,6 @@ inline constexpr flags_ui::FeatureEntry::FeatureVariation
         VARIATION_ENTRY(kIPHGrowthFramework),
         VARIATION_ENTRY(kIPHGoogleOneOfferNotificationFeature),
         VARIATION_ENTRY(kIPHLauncherSearchHelpUiFeature),
-        VARIATION_ENTRY(kIPHScalableIphTimerBasedOneFeature),
-        VARIATION_ENTRY(kIPHScalableIphTimerBasedTwoFeature),
-        VARIATION_ENTRY(kIPHScalableIphTimerBasedThreeFeature),
-        VARIATION_ENTRY(kIPHScalableIphTimerBasedFourFeature),
-        VARIATION_ENTRY(kIPHScalableIphTimerBasedFiveFeature),
-        VARIATION_ENTRY(kIPHScalableIphTimerBasedSixFeature),
-        VARIATION_ENTRY(kIPHScalableIphTimerBasedSevenFeature),
-        VARIATION_ENTRY(kIPHScalableIphTimerBasedEightFeature),
-        VARIATION_ENTRY(kIPHScalableIphTimerBasedNineFeature),
-        VARIATION_ENTRY(kIPHScalableIphTimerBasedTenFeature),
-        VARIATION_ENTRY(kIPHScalableIphUnlockedBasedOneFeature),
-        VARIATION_ENTRY(kIPHScalableIphUnlockedBasedTwoFeature),
-        VARIATION_ENTRY(kIPHScalableIphUnlockedBasedThreeFeature),
-        VARIATION_ENTRY(kIPHScalableIphUnlockedBasedFourFeature),
-        VARIATION_ENTRY(kIPHScalableIphUnlockedBasedFiveFeature),
-        VARIATION_ENTRY(kIPHScalableIphUnlockedBasedSixFeature),
-        VARIATION_ENTRY(kIPHScalableIphUnlockedBasedSevenFeature),
-        VARIATION_ENTRY(kIPHScalableIphUnlockedBasedEightFeature),
-        VARIATION_ENTRY(kIPHScalableIphUnlockedBasedNineFeature),
-        VARIATION_ENTRY(kIPHScalableIphUnlockedBasedTenFeature),
-        VARIATION_ENTRY(kIPHScalableIphHelpAppBasedNudgeFeature),
-        VARIATION_ENTRY(kIPHScalableIphHelpAppBasedOneFeature),
-        VARIATION_ENTRY(kIPHScalableIphHelpAppBasedTwoFeature),
-        VARIATION_ENTRY(kIPHScalableIphHelpAppBasedThreeFeature),
-        VARIATION_ENTRY(kIPHScalableIphHelpAppBasedFourFeature),
-        VARIATION_ENTRY(kIPHScalableIphHelpAppBasedFiveFeature),
-        VARIATION_ENTRY(kIPHScalableIphHelpAppBasedSixFeature),
-        VARIATION_ENTRY(kIPHScalableIphHelpAppBasedSevenFeature),
-        VARIATION_ENTRY(kIPHScalableIphHelpAppBasedEightFeature),
-        VARIATION_ENTRY(kIPHScalableIphHelpAppBasedNineFeature),
-        VARIATION_ENTRY(kIPHScalableIphHelpAppBasedTenFeature),
-        VARIATION_ENTRY(kIPHScalableIphGamingFeature),
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
@@ -934,6 +866,8 @@ inline constexpr flags_ui::FeatureEntry::FeatureVariation
         VARIATION_ENTRY(kIPHiOSPaymentPromoDesktopFeature),
         VARIATION_ENTRY(kIPHiOSLensPromoDesktopFeature),
         VARIATION_ENTRY(kIPHiOSEnhancedBrowsingDesktopFeature),
+        VARIATION_ENTRY(kIPHiOSTabGroupsDesktopFeature),
+        VARIATION_ENTRY(kIPHiOSPriceTrackingDesktopFeature),
 #endif  // !BUILDFLAG(IS_ANDROID)
 };
 

@@ -49,6 +49,8 @@ std::string FillingProductToString(FillingProduct filling_product) {
       return "DataList";
     case FillingProduct::kOneTimePassword:
       return "OneTimePassword";
+    case FillingProduct::kAtMemory:
+      return "AtMemory";
   }
   NOTREACHED();
 }
@@ -108,9 +110,13 @@ FillingProduct GetFillingProductFromSuggestionType(SuggestionType type) {
     case SuggestionType::kSeparator:
     case SuggestionType::kTitle:
     case SuggestionType::kUndoOrClear:
+    case SuggestionType::kLoadingThrobber:
+    case SuggestionType::kBnplFootnote:
       return FillingProduct::kNone;
     case SuggestionType::kFillAutofillAi:
     case SuggestionType::kManageAutofillAi:
+    case SuggestionType::kManageAutofillAiIdentityDocs:
+    case SuggestionType::kManageAutofillAiTravel:
       return FillingProduct::kAutofillAi;
     case SuggestionType::kAllLoyaltyCardsEntry:
     case SuggestionType::kLoyaltyCardEntry:
@@ -120,6 +126,8 @@ FillingProduct GetFillingProductFromSuggestionType(SuggestionType type) {
       return FillingProduct::kIdentityCredential;
     case SuggestionType::kOneTimePasswordEntry:
       return FillingProduct::kOneTimePassword;
+    case SuggestionType::kAtMemorySearchResult:
+      return FillingProduct::kAtMemory;
     case SuggestionType::kWebauthnCredential:
     case SuggestionType::kWebauthnSignInWithAnotherDevice:
       return FillingProduct::kPasskey;
@@ -128,11 +136,11 @@ FillingProduct GetFillingProductFromSuggestionType(SuggestionType type) {
 }
 
 #if BUILDFLAG(IS_ANDROID)
-static jint JNI_FillingProductBridge_GetFillingProductFromSuggestionType(
+static int32_t JNI_FillingProductBridge_GetFillingProductFromSuggestionType(
     JNIEnv* env,
-    jint type) {
+    int32_t type) {
   SuggestionType suggestion_type = static_cast<SuggestionType>(type);
-  return static_cast<jint>(
+  return static_cast<int32_t>(
       GetFillingProductFromSuggestionType(suggestion_type));
 }
 #endif  // BUILDFLAG(IS_ANDROID)

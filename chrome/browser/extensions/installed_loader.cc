@@ -114,7 +114,7 @@ enum class ExternalItemState {
   kMaxValue = kNonwebstoreUninstalled
 };
 
-bool IsManifestCorrupt(const base::Value::Dict& manifest) {
+bool IsManifestCorrupt(const base::DictValue& manifest) {
   // Because of bug #272524 sometimes manifests got mangled in the preferences
   // file, one particularly bad case resulting in having both a background page
   // and background scripts values. In those situations we want to reload the
@@ -398,7 +398,7 @@ void InstalledLoader::LoadAllExtensions(Profile* profile) {
         continue;
       }
 
-      info.extension_manifest = std::make_unique<base::Value::Dict>(
+      info.extension_manifest = std::make_unique<base::DictValue>(
           extension->manifest()->value()->Clone());
       should_write_prefs = true;
     }
@@ -700,7 +700,7 @@ void InstalledLoader::RecordExtensionsMetrics(Profile* profile) {
       if (GetBackgroundPageType(extension) == BackgroundPageType::kEventPage) {
         // Count extension event pages with no registered events. Either the
         // event page is badly designed, or there may be a bug where the event
-        // page failed to start after an update (crbug.com/469361).
+        // page failed to start after an update (crbug.com/40410577).
         if (!EventRouter::Get(profile_)->HasRegisteredEvents(extension->id())) {
           ++eventless_event_pages_count;
           VLOG(1) << "Event page without registered event listeners: "

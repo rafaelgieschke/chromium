@@ -296,6 +296,13 @@ public class Features {
     // Profile.clearPrefetch
     public static final String PREFETCH_WITH_URL = "PREFETCH_URL_V5";
 
+    // Profile.setMaxPrefetches
+    // Profile.setPrefetchTtlSeconds
+    public static final String PREFETCH_CACHE = "PREFETCH_CACHE_V1";
+
+    // Profile.setMaxPrerenders
+    public static final String SET_MAX_PRERENDERS = "SET_MAX_PRERENDERS_V1";
+
     // WebviewCompat.setDefaultTrafficStatsTag
     // WebviewCompat.setDefaultTrafficStatsUid
     public static final String DEFAULT_TRAFFICSTATS_TAGGING = "DEFAULT_TRAFFICSTATS_TAGGING";
@@ -305,6 +312,10 @@ public class Features {
     // WebViewStartUpResult.getAsyncStartUpLocations
     public static final String ASYNC_WEBVIEW_STARTUP_ASYNC_STARTUP_LOCATIONS =
             "ASYNC_WEBVIEW_STARTUP_ASYNC_STARTUP_LOCATIONS";
+
+    // WebViewCompat.startUpWebView
+    // WebViewStartUpResult.getAsyncStartUpLocations
+    public static final String ASYNC_WEBVIEW_STARTUP_V2 = "ASYNC_WEBVIEW_STARTUP_V2";
 
     // WebViewCompat.prerenderUrl
     // WebViewCompat.clearPrerender
@@ -416,16 +427,14 @@ public class Features {
     // BackForwardCacheSettings.setMaxPagesInCache
     // BackForwardCacheSettings.getTimeoutInSec
     // BackForwardCacheSettings.getMaxPagesInCache
-    public static final String BACK_FORWARD_CACHE_SETTINGS_V2 = "BACK_FORWARD_CACHE_SETTINGS_V2";
+    // V2 was deleted as it didn't get released and we made a major type change in V3.
+    public static final String BACK_FORWARD_CACHE_SETTINGS_V3 = "BACK_FORWARD_CACHE_SETTINGS_V3";
 
     // Profile.preconnect
     public static final String PRECONNECT = "PRECONNECT";
 
     // WebSettingsCompat#setHyperlinkContextMenuItems
     public static final String HYPERLINK_CONTEXT_MENU_ITEMS = "HYPERLINK_CONTEXT_MENU_ITEMS";
-
-    // Page.isPrerendering
-    public static final String PAGE_IS_PRERENDERING = "PAGE_IS_PRERENDERING";
 
     // Profile.addCustomHeader
     // Profile.clearAllCustomHeaders
@@ -440,4 +449,22 @@ public class Features {
 
     // Profile.addQuicHints
     public static final String ADD_QUIC_HINTS_V1 = "ADD_QUIC_HINTS_V1";
+
+    // JsReplyProxy.executeJavaScript
+    // WebViewCompat.addJavaScriptOnEvent
+    // WebViewCompat.removeJavaScriptOnEvent
+    // WebViewCompat.addWebMessageListener with world
+    // WebViewCompat.removeWebMessageListener with world
+    // WebViewCompat.getJavaScriptWorld
+    public static final String JS_INJECTION_IN_FRAME_AND_WORLD = "JS_INJECTION_IN_FRAME_AND_WORLD";
+
+    // WebViewBuilder.applyTo
+    public static final String WEBVIEW_BUILDER_V2 = "WEBVIEW_BUILDER_V2";
+
+    // Page.getUrl
+    public static final String PAGE_GET_URL = "PAGE_GET_URL";
+
+    // Navigation.getWebResourceError
+    public static final String NAVIGATION_GET_WEB_RESOURCE_ERROR =
+            "NAVIGATION_GET_WEB_RESOURCE_ERROR";
 }

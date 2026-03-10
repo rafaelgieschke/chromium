@@ -181,10 +181,13 @@ class MetricsWebContentsObserver
       const std::vector<mojom::ResourceDataUpdatePtr>& resources,
       mojom::FrameRenderDataUpdatePtr render_data,
       mojom::CpuTimingPtr cpu_timing,
-      mojom::InputTimingPtr input_timing_delta,
+      std::vector<mojom::EventTimingPtr> event_timings,
       const std::optional<blink::SubresourceLoadMetrics>&
           subresource_load_metrics,
-      mojom::SoftNavigationMetricsPtr);
+      std::vector<mojom::SoftNavigationMetricsPtr> soft_navigation_metrics,
+      std::vector<mojom::LargestContentfulPaintTimingPtr>
+          soft_largest_contentful_paint,
+      std::vector<mojom::CustomUserTimingMarkPtr> user_timings);
 
   void OnCustomUserTimingUpdated(content::RenderFrameHost* rfh,
                                  mojom::CustomUserTimingMarkPtr custom_timing);
@@ -262,10 +265,13 @@ class MetricsWebContentsObserver
       std::vector<mojom::ResourceDataUpdatePtr> resources,
       mojom::FrameRenderDataUpdatePtr render_data,
       mojom::CpuTimingPtr cpu_timing,
-      mojom::InputTimingPtr input_timing,
+      std::vector<mojom::EventTimingPtr> event_timings,
       const std::optional<blink::SubresourceLoadMetrics>&
           subresource_load_metrics,
-      mojom::SoftNavigationMetricsPtr soft_navigation_metrics) override;
+      std::vector<mojom::SoftNavigationMetricsPtr> soft_navigation_metrics,
+      std::vector<mojom::LargestContentfulPaintTimingPtr>
+          soft_largest_contentful_paint,
+      std::vector<mojom::CustomUserTimingMarkPtr> user_timings) override;
   void AddCustomUserTiming(
       mojom::CustomUserTimingMarkPtr custom_timing) override;
 

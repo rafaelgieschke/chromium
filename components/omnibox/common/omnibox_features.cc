@@ -66,6 +66,14 @@ BASE_FEATURE(kFocusTriggersWebAndSRPZeroSuggest,
              "OmniboxFocusTriggersWebAndSRPZeroSuggest",
              ENABLED);
 
+// Enables on-clobber suggestions on iOS.
+BASE_FEATURE(kOnClobberSuggestIOS, ENABLED);
+
+// If enabled, contextual suggestion group headers in the Omnibox popup will
+// be hidden (e.g. in order to minimize visual clutter in the zero-prefix
+// state).
+BASE_FEATURE(kHideContextualGroupHeaders, DISABLED);
+
 // If enabled, suggestion group headers in the Omnibox popup will be hidden
 // (e.g. in order to minimize visual clutter in the zero-prefix state).
 BASE_FEATURE(kHideSuggestionGroupHeaders,
@@ -98,7 +106,9 @@ BASE_FEATURE(kOnDeviceHeadProviderIncognito,
 BASE_FEATURE(kOnDeviceHeadProviderNonIncognito,
              "OmniboxOnDeviceHeadProviderNonIncognito",
              ENABLED);
-BASE_FEATURE(kOnDeviceTailModel, "OmniboxOnDeviceTailModel", DISABLED);
+BASE_FEATURE(kOnDeviceTailModel,
+             "OmniboxOnDeviceTailModel",
+             enable_if(IS_ANDROID || IS_IOS));
 BASE_FEATURE(kOnDeviceTailEnableEnglishModel,
              "OmniboxOnDeviceTailEnableEnglishModel",
              ENABLED);
@@ -161,12 +171,7 @@ BASE_FEATURE(kOmniboxMultimodalInput, DISABLED);
 
 // Whether the AI Mode entrypoint is shown in the Omnibox as a RHS button. Only
 // used on desktop platforms.
-// The first feature enables the entrypoint for all users. The second feature
-// enables the entrypoint only for users who have their locale set to English
-// and are located in the US, and has no effect if the first feature is
-// enabled.
-BASE_FEATURE(kAiModeOmniboxEntryPoint, DISABLED);
-BASE_FEATURE(kAiModeOmniboxEntryPointEnUs, ENABLED);
+BASE_FEATURE(kAiModeOmniboxEntryPoint, ENABLED);
 
 // Hides the AIM entrypoint in the Omnibox when user input is in progress. Only
 // used on desktop platforms.
@@ -232,8 +237,6 @@ BASE_FEATURE(kMlUrlSearchBlending, DISABLED);
 // `kMlUrlScoring` & `kMlUrlSearchBlending`.
 BASE_FEATURE(kUrlScoringModel, enable_if(!IS_ANDROID));
 
-BASE_FEATURE(kAnimateSuggestionsListAppearance, ENABLED);
-
 // If enabled, sends a signal when a user touches down on a search suggestion to
 // |SearchPrefetchService|. |SearchPrefetchService| will then prefetch
 // suggestion iff the SearchNavigationPrefetch feature and "touch_down" param
@@ -265,9 +268,6 @@ BASE_FEATURE(kOmniboxAsyncViewInflation, DISABLED);
 // Use FusedLocationProvider on Android to fetch device location.
 BASE_FEATURE(kUseFusedLocationProvider, ENABLED);
 
-// Enables storing successful query/match in the shortcut database On Android.
-BASE_FEATURE(kOmniboxShortcutsAndroid, ENABLED);
-
 // Updates various NTP/Omnibox assets and descriptions for visual alignment on
 // iOS.
 BASE_FEATURE(kOmniboxMobileParityUpdate, ENABLED);
@@ -276,10 +276,8 @@ BASE_FEATURE(kOmniboxMobileParityUpdate, ENABLED);
 // Android and iOS, V2.
 BASE_FEATURE(kOmniboxMobileParityUpdateV2, ENABLED);
 
-#if BUILDFLAG(IS_IOS)
-// Updates the search engine logo on NTP. iOS only.
-BASE_FEATURE(kOmniboxMobileParityUpdateV3, ENABLED);
-#endif  // BUILDFLAG(IS_IOS)
+// If enabled, the X-Geo header will include permission granularity.
+BASE_FEATURE(kOmniboxXGeoPermissionGranularity, ENABLED);
 
 // The features below allow tuning number of suggestions offered to users in
 // specific contexts. These features are default enabled and are used to control
@@ -321,10 +319,7 @@ BASE_FEATURE(kUseAgentspace25Logo, ENABLED);
 BASE_FEATURE(kEnableSiteSearchAllowUserOverridePolicy, ENABLED);
 
 // Enables preconnecting to omnibox suggestions that are not only Search types.
-BASE_FEATURE(kPreconnectNonSearchOmniboxSuggestions, DISABLED);
-
-// Enabls adding an aim shortcut in the typed state.
-BASE_FEATURE(kOmniboxAimShortcutTypedState, DISABLED);
+BASE_FEATURE(kPreconnectNonSearchOmniboxSuggestions, ENABLED);
 
 // When enabled, unblocks omnibox height on small form factor devices, allowing
 // users to type in multiline / longer text.
@@ -335,6 +330,16 @@ BASE_FEATURE(kComposeboxUsesChromeComposeClient, ENABLED);
 
 // Controls whether or not contextual composebox should display suggestions.
 BASE_FEATURE(kComposeboxAttachmentsTypedState, DISABLED);
+
+// Enables passthrough params to be sent to the AIM eligibility service.
+BASE_FEATURE(kAimUrlInterceptPassthrough, DISABLED);
+
+BASE_FEATURE(kOmniboxDebugLogs, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kThinkingModelIconUpdate, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// If enabled, animates the caret in the omnibox.
+BASE_FEATURE(kOmniboxAnimatedCaret, base::FEATURE_ENABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_ANDROID)
 // Accelerates time from cold start to focused Omnibox on low-end devices,
@@ -348,7 +353,7 @@ BASE_FEATURE(kJumpStartOmnibox, DISABLED);
 BASE_FEATURE(kSuppressIntermediateACUpdatesOnLowEndDevices, DISABLED);
 
 // (Android only) Show tab groups via the search feature in the hub.
-BASE_FEATURE(kAndroidHubSearchTabGroups, DISABLED);
+BASE_FEATURE(kAndroidHubSearchTabGroups, ENABLED);
 
 // When enabled, delay focusTab to prioritize navigation
 // (https://crbug.com/374852568).
@@ -364,11 +369,14 @@ BASE_FEATURE(kOmniboxImprovementForLFF, DISABLED);
 // If enabled, disables ligatures in the URL bar on Android.
 BASE_FEATURE(kUrlBarWithoutLigatures, ENABLED);
 
+// If enabled, Java-cached ZPS will be served.
+// The cached ZPS made sense on sub-4GB Android Go devices
+BASE_FEATURE(kServeJavaCachedZeroSuggest, ENABLED);
+
 namespace android {
-static jlong JNI_OmniboxFeatureMap_GetNativeMap(JNIEnv* env) {
+static int64_t JNI_OmniboxFeatureMap_GetNativeMap(JNIEnv* env) {
   static const base::Feature* const kFeaturesExposedToJava[] = {
       &kDiagnostics,
-      &kAnimateSuggestionsListAppearance,
       &kOmniboxTouchDownTriggerForPrefetch,
       &kOmniboxAsyncViewInflation,
       &kRichAutocompletion,
@@ -378,19 +386,27 @@ static jlong JNI_OmniboxFeatureMap_GetNativeMap(JNIEnv* env) {
       &kAndroidHubSearchTabGroups,
       &kPostDelayedTaskFocusTab,
       &kOmniboxMobileParityUpdateV2,
+      &kOmniboxXGeoPermissionGranularity,
       &kOmniboxSiteSearch,
-      &kOmniboxAimShortcutTypedState,
       &kOmniboxMultimodalInput,
       &kMultilineEditField,
       &kOmniboxImprovementForLFF,
+      &kServeJavaCachedZeroSuggest,
       &kRemoveSearchReadyOmnibox};
   static base::NoDestructor<base::android::FeatureMap> kFeatureMap(
       kFeaturesExposedToJava);
-  return reinterpret_cast<jlong>(kFeatureMap.get());
+  return reinterpret_cast<int64_t>(kFeatureMap.get());
 }
 }  // namespace android
 #endif  // BUILDFLAG(IS_ANDROID)
 // Note: no new flags beyond this point.
+
+namespace flag_descriptions {
+const char kOmniboxDebugLogsName[] = "Omnibox debug logs";
+const char kOmniboxDebugLogsDescription[] =
+    "Enables logging that can be read from an internals page.";
+}  // namespace flag_descriptions
+
 }  // namespace omnibox
 
 #if BUILDFLAG(IS_ANDROID)

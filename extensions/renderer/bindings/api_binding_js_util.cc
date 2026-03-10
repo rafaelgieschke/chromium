@@ -81,7 +81,7 @@ void APIBindingJSUtil::SendRequest(
       NOTREACHED();
     }
     v8::Local<v8::Object> options_obj = options.As<v8::Object>();
-    if (!options_obj->GetPrototypeV2()->IsNull()) {
+    if (!options_obj->GetPrototype()->IsNull()) {
       NOTREACHED();
     }
     gin::Dictionary options_dict(isolate, options_obj);
@@ -313,9 +313,8 @@ void APIBindingJSUtil::AddCustomSignature(
   }
 
   type_refs_->AddCustomSignature(
-      custom_signature_name,
-      APISignature::CreateFromValues(*base_signature, nullptr /*returns_async*/,
-                                     nullptr /*access_checker*/));
+      custom_signature_name, APISignature::CreateFromValues(
+                                 *base_signature, nullptr /*returns_async*/));
 }
 
 void APIBindingJSUtil::ValidateCustomSignature(

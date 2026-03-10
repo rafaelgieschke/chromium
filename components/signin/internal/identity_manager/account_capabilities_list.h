@@ -12,15 +12,24 @@
 // the constant declarations, include the file
 // "account_capabilities_constants.h".
 
+// WARNING: Care must be taken to ensure that capabilities are fully available
+// server-side before they are added here. This is because (on some platforms)
+// if one individual capability fails to evaluate, the fetch will fail for all
+// other capabilities as well. To add a capability, please either:
+// 1. Wait for the server-side rollout to complete, then add the capability with
+//    the ACCOUNT_CAPABILITY() macro.
+// 2. Or (if the capability needs to be added to the client before the
+//    server-side rollout is complete), add the capability with the
+//    ACCOUNT_CAPABILITY_F() macro instead. You must then ensure that the flag
+//    is only enabled once the server-side rollout is complete.
+
 // Here we define the values using a macro ACCOUNT_CAPABILITY, so it can be
 // expanded differently in some places. The macro has the following signature:
 // ACCOUNT_CAPABILITY(cpp_label, java_label, name).
 
 // To define a new account capability that is flag-guarded, add a
 // ACCOUNT_CAPABILITY_F(cpp_label, java_label, name, feature_flag) macro
-// instead of ACCOUNT_CAPABILITY. This allows the capability to be submitted
-// before it is fully rolled out server-side.
-// - This is currently not supported for capabilities exposed on Android
+// instead of ACCOUNT_CAPABILITY.
 // - The #include for the feature flag must be added to account_capabilities.cc
 //   and not to this file
 
@@ -39,9 +48,11 @@ ACCOUNT_CAPABILITY(kCanFetchFamilyMemberInfoCapabilityName,
                    CAN_FETCH_FAMILY_MEMBER_INFO_CAPABILITY_NAME,
                    "accountcapabilities/ge2dinbnmnqxa")
 
+#if !BUILDFLAG(IS_IOS)
 ACCOUNT_CAPABILITY(kCanHaveEmailAddressDisplayedCapabilityName,
                    CAN_HAVE_EMAIL_ADDRESS_DISPLAYED_CAPABILITY_NAME,
                    "accountcapabilities/haytqlldmfya")
+#endif
 
 #if !BUILDFLAG(IS_ANDROID)
 ACCOUNT_CAPABILITY(kCanMakeChromeSearchEngineChoiceScreenChoice,
@@ -66,29 +77,39 @@ ACCOUNT_CAPABILITY(kCanToggleAutoUpdatesName,
                    "accountcapabilities/gu4dmlldmfya")
 #endif
 
+#if BUILDFLAG(IS_CHROMEOS)
 ACCOUNT_CAPABILITY(kCanUseChromeOSGenerativeAi,
                    CAN_USE_CHROMEOS_GENERATIVE_AI,
                    "accountcapabilities/ge3dgmjnmnqxa")
+#endif
 
-ACCOUNT_CAPABILITY(kCanUseCopyEditorFeatureName,
-                   CAN_USE_COPYEDITOR_FEATURE_NAME,
-                   "accountcapabilities/ge2tkmznmnqxa")
-
+#if !BUILDFLAG(IS_IOS)
 ACCOUNT_CAPABILITY(kCanUseDevToolsGenerativeAiFeaturesCapabilityName,
                    CAN_USE_DEVTOOLS_GENERATIVE_AI_FEATURES_CAPABILITY_NAME,
                    "accountcapabilities/geztenjnmnqxa")
+#endif
 
+#if !BUILDFLAG(IS_IOS)
 ACCOUNT_CAPABILITY(kCanUseEduFeaturesCapabilityName,
                    CAN_USE_EDU_FEATURES_CAPABILITY_NAME,
                    "accountcapabilities/gezdsmbnmnqxa")
+#endif
 
+ACCOUNT_CAPABILITY(kCanUseGeminiInChromeCapabilityName,
+                   CAN_USE_GEMINI_IN_CHROME_CAPABILITY_NAME,
+                   "accountcapabilities/giytmnrnmnqxa")
+
+#if BUILDFLAG(IS_CHROMEOS)
 ACCOUNT_CAPABILITY(kCanUseGenerativeAiInRecorderApp,
                    CAN_USE_GENERATIVE_AI_IN_RECORDER_APP,
                    "accountcapabilities/ge2tkobnmnqxa")
+#endif
 
+#if BUILDFLAG(IS_CHROMEOS)
 ACCOUNT_CAPABILITY(kCanUseGenerativeAiPhotoEditing,
                    CAN_USE_GENERATIVE_AI_PHOTO_EDITING,
                    "accountcapabilities/ge3dgobnmnqxa")
+#endif
 
 ACCOUNT_CAPABILITY(kCanUseMantaServiceName,
                    CAN_USE_MANTA_SERVICE_NAME,
@@ -110,9 +131,10 @@ ACCOUNT_CAPABILITY(kIsOptedInToParentalSupervisionCapabilityName,
                    IS_OPTED_IN_TO_PARENTAL_SUPERVISION_CAPABILITY_NAME,
                    "accountcapabilities/guzdslldmfya")
 
-ACCOUNT_CAPABILITY(kIsSubjectToAccountLevelEnterprisePoliciesCapabilityName,
-                   IS_SUBJECT_TO_ACCOUNT_LEVEL_ENTERPRISE_POLICIES_CAPABILITY_NAME,
-                   "accountcapabilities/ge4tgnznmnqxa")
+ACCOUNT_CAPABILITY(
+    kIsSubjectToAccountLevelEnterprisePoliciesCapabilityName,
+    IS_SUBJECT_TO_ACCOUNT_LEVEL_ENTERPRISE_POLICIES_CAPABILITY_NAME,
+    "accountcapabilities/ge4tgnznmnqxa")
 
 ACCOUNT_CAPABILITY(
     kIsSubjectToChromePrivacySandboxRestrictedMeasurementNotice,
@@ -127,11 +149,28 @@ ACCOUNT_CAPABILITY(kIsSubjectToParentalControlsCapabilityName,
                    IS_SUBJECT_TO_PARENTAL_CONTROLS_CAPABILITY_NAME,
                    "accountcapabilities/guydolldmfya")
 
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-ACCOUNT_CAPABILITY_F(kCanUseGeminiInChromeCapabilityName,
-                     CAN_USE_GEMINI_IN_CHROME_CAPABILITY_NAME,
-                     "accountcapabilities/giytmnrnmnqxa",
-                     switches::kGlicEligibilitySeparateAccountCapability)
+#if BUILDFLAG(IS_IOS)
+ACCOUNT_CAPABILITY_F(kCanContextuallyUseModelExecutionFeaturesName,
+                     CAN_CONTEXTUALLY_USE_MODEL_EXECUTION_FEATURES_NAME,
+                     "accountcapabilities/giztinznmnqxa",
+                     switches::kReadContextualAccountCapabilities)
+#endif
+
+#if BUILDFLAG(IS_IOS)
+ACCOUNT_CAPABILITY_F(kCanSignInToChromeCapabilityName,
+                     CAN_SIGN_IN_TO_CHROME_CAPABILITY_NAME,
+                     "accountcapabilities/giztambnmnqxa",
+                     switches::kEnforceCanSignInToChromeCapability)
+#endif
+
+#if !defined(NDEBUG)
+// This is a fake account capability, used for unit tests only.
+// To avoid additional fetches in production code, only define this in debug
+// builds.
+ACCOUNT_CAPABILITY_F(kFakeCapabilityForTestingName,
+                     FAKE_CAPABILITY_FOR_TESTING_NAME,
+                     "accountcapabilities/fakecapabilityfortesting",
+                     switches::kEnableFakeCapabilityForTesting)
 #endif
 
 // keep-sorted end

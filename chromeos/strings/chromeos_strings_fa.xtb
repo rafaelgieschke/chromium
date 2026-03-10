@@ -94,7 +94,7 @@
 <translation id="1348657754632799065">نوار ضبط کردن</translation>
 <translation id="1350909945461913813">مراقب باشید کارهایتان را ذخیره کنید</translation>
 <translation id="1367951781824006909">انتخاب یک فایل</translation>
-<translation id="1371650399987522809">‏بازخورد درباره کاغذدیواری ایجادشده با بهره‌گیری از هوش مصنوعی Google</translation>
+<translation id="1371650399987522809">‏بازخورد درباره کاغذدیواری ایجادشده با بهره‌گیری از «هوشواره Google»</translation>
 <translation id="1374385338586507108">معنی</translation>
 <translation id="1376064675713230088">تی‌رکس</translation>
 <translation id="1383876407941801731">جستجو</translation>
@@ -138,15 +138,15 @@
 <translation id="1526389707933164996">پویانمایی محافظ صفحه‌نمایش</translation>
 <translation id="152892567002884378">افزایش صدا</translation>
 <translation id="1539864135338521185">سنگ لاجورد</translation>
-<translation id="1548555207631326346">‏زمینه‌ای را انتخاب کنید و سپس کلمات زیرخط‌دار را برای شخصی‌سازی کردن تصاویر هوش مصنوعی‌تان انتخاب کنید.<ph name="LINE_BREAK" />
+<translation id="1548555207631326346">‏زمینه‌ای را انتخاب کنید و سپس کلمات زیرخط‌دار را برای شخصی‌سازی کردن تصاویر هوشواره‌ای انتخاب کنید.<ph name="LINE_BREAK" />
           <ph name="LINE_BREAK" />
-          «به من ایده بده» را انتخاب کنید تا گزینه‌های منحصربه‌فرد و متنوع‌تری برای تصاویر هوش مصنوعی دریافت کنید.
-          <ph name="LINE_BREAK" />
-          <ph name="LINE_BREAK" />
-          وقتی محتوایی با هوش مصنوعی ایجاد می‌کنید، پیام‌واره شما برای تولید تصاویر و بهبود محصول، مطابق با <ph name="BEGIN_LINK_GOOGLE_PRIVACY_POLICY" />خط‌مشی رازداری Google<ph name="END_LINK_GOOGLE_PRIVACY_POLICY" /> به سرورهای هوش مصنوعی Google ارسال می‌شود.
+          «به من ایده بده» را انتخاب کنید تا گزینه‌های منحصربه‌فرد و متنوع‌تری برای تصاویر هوشواره‌ای دریافت کنید.
           <ph name="LINE_BREAK" />
           <ph name="LINE_BREAK" />
-          هوش مصنوعی زایا آزمایشی است، در مراحل اولیه توسعه است، و درحال‌حاضر به‌صورت محدود دردسترس است.</translation>
+          وقتی محتوایی با هوشواره می‌سازید، پیام‌واره شما برای تولید تصاویر و بهبود محصول، مطابق با <ph name="BEGIN_LINK_GOOGLE_PRIVACY_POLICY" />خط‌مشی رازداری Google<ph name="END_LINK_GOOGLE_PRIVACY_POLICY" /> به سرورهای «هوشواره Google» ارسال می‌شود.
+          <ph name="LINE_BREAK" />
+          <ph name="LINE_BREAK" />
+          «هوشواره زایا» آزمایشی است، در مراحل اولیه توسعه است، و درحال‌حاضر به‌صورت محدود دردسترس است.</translation>
 <translation id="1555130319947370107">آبی</translation>
 <translation id="155865706765934889">صفحه لمسی</translation>
 <translation id="1561927818299383735">رنگ نور پس‌زمینه</translation>
@@ -167,6 +167,7 @@
 <translation id="1621067168122174824">اجرای آزمایش شارژ</translation>
 <translation id="1622402072367425417">حباب‌های درخشان</translation>
 <translation id="1626590945318984973">میان‌بر دردسترس نیست. میان‌بر جدیدی را بدون استفاده از کلیدهای عملیات و <ph name="META_KEY" /> فشار دهید.</translation>
+<translation id="163774412591892664">سرپرست شما دستگاهتان را غیرفعال کرده است و می‌تواند به مکان آن دسترسی داشته باشد.</translation>
 <translation id="1639239467298939599">در حال بارگیری</translation>
 <translation id="1641857168437328880">تغذیه‌کننده سند (یک‌رو)</translation>
 <translation id="1642396894598555413">دوچرخه</translation>
@@ -367,7 +368,7 @@
 <translation id="2448312741937722512">نوع</translation>
 <translation id="2448857983905133469">ابزارهای کلاسی</translation>
 <translation id="2468124392950503650">پیام‌واره موردنظر را برای ایجاد کردن انتخاب کنید یا <ph name="BEGIN_LINK_PROMPTING_GUIDE" />راهنمای پیام‌واره‌ها<ph name="END_LINK_PROMPTING_GUIDE" /> را مشاهده کنید</translation>
-<translation id="2472215337771558851">‏بااستفاده از «کمک به نوشتن»، پیش‌نویس تهیه کنید یا کار موجود را پالایش کنید؛ از هوش مصنوعی Google بهره می‌گیرد</translation>
+<translation id="2472215337771558851">‏بااستفاده از «کمک به نوشتن»، پیش‌نویس تهیه کنید یا کار موجود را پالایش کنید؛ از «هوشواره Google» بهره می‌گیرد</translation>
 <translation id="2475982808118771221">یک خطا روی داد</translation>
 <translation id="2480572840229215612">خرچنگ</translation>
 <translation id="248546197012830854">‏دستگاه آفلاین است. برای دیدن محتوای راهنما، به شبکه Wi-Fi متصل شوید.</translation>
@@ -376,7 +377,7 @@
 <translation id="2493126929778606526">بهترین عکس‌هایتان که به‌طور خودکار انتخاب شده‌اند</translation>
 <translation id="249323605434939166"><ph name="QUERY_TEXT" /> · <ph name="SOURCE_LANGUAGE_NAME" /></translation>
 <translation id="2501126912075504550">عقیق</translation>
-<translation id="2501278716633472235">بازگشت</translation>
+<translation id="2501278716633472235">برگشتن</translation>
 <translation id="2505327257735685095">بازآوری کاغذدیواری کنونی</translation>
 <translation id="2507491234071975894">بلندگو</translation>
 <translation id="2512979179176933762">نمایش پنجره‌ها</translation>
@@ -428,7 +429,7 @@
 <translation id="2749164457515831917">پیشنهادها درهم شد</translation>
 <translation id="2751739896257479635">‏اصالت‌سنجی مرحله ۲ EAP</translation>
 <translation id="2754757901767760034">لامپ</translation>
-<translation id="2780756493585863768">‏پس‌زمینه‌های اخیر با بهره‌گیری از هوش مصنوعی Google ایجاد شده است</translation>
+<translation id="2780756493585863768">‏پس‌زمینه‌های اخیر با بهره‌گیری از «هوشواره Google» ایجاد شده است</translation>
 <translation id="2783010256799387990">موفق</translation>
 <translation id="2786429550992142861">کتان</translation>
 <translation id="2787237339470862294">درحال‌حاضر این زبان پشتیبانی نمی‌شود</translation>
@@ -727,6 +728,7 @@
 <translation id="4212169537710712814">مدل ترانویسی <ph name="LANGUAGE_NAME" /> بارگیری شد</translation>
 <translation id="42126664696688958">صادر کردن</translation>
 <translation id="4213104098953699324">‏صفحه‌کلید USB</translation>
+<translation id="4217571870635786043">املا</translation>
 <translation id="4227825898293920515">گذرواژه <ph name="TIME" /> دیگر منقضی می‌شود</translation>
 <translation id="4238516577297848345">هیچ کار چاپی درحال انجام نیست</translation>
 <translation id="4239069858505860023">GPRS</translation>
@@ -758,7 +760,7 @@
 <translation id="4300272766492248925">باز کردن برنامه</translation>
 <translation id="430786093962686457">تور نازک</translation>
 <translation id="4309762678330556039">به‌طور خودکار ترانویسی بسازید و در صدا جستجو کنید. حتی زمانی‌که به اینترنت متصل نیستید می‌توانید صدا ضبط کنید.</translation>
-<translation id="4310735698903592804">‏کاغذدیواری‌های اخیر با بهره‌گیری از هوش مصنوعی Google ایجاد شده است</translation>
+<translation id="4310735698903592804">‏کاغذدیواری‌های اخیر با بهره‌گیری از «هوشواره Google» ایجاد شده است</translation>
 <translation id="4320904097188876154">صورتی نئونی</translation>
 <translation id="432961742358282111">برای دریافت کردن تعریف، ترجمه، یا تبدیل واحد، کلیک راست کنید یا فشار دهید و نگه دارید. برای مدیریت این ویژگی، از کلیدهای «راست‌بَر» یا «چپ‌بَر» استفاده کنید.</translation>
 <translation id="4333390807948134856">کلید <ph name="KEY_NAME" /> فشار داده شد</translation>
@@ -933,7 +935,7 @@
 <translation id="5056587122125565772">ساختن تصویر</translation>
 <translation id="5078711626843651677">مدل‌های صوتی تا زمانی که برچسب‌گذاری گوینده کامل شود به‌طور موقت در دستگاه ذخیره می‌شوند. هروقت بخواهید می‌توانید این گزینه را در «تنظیمات» خاموش کنید.</translation>
 <translation id="5078983345702708852">آینده‌نگرانه</translation>
-<translation id="5087864757604726239">برگشت</translation>
+<translation id="5087864757604726239">برگشتن</translation>
 <translation id="5088172560898466307">نام سرور میزبان</translation>
 <translation id="5089810972385038852">ایالت</translation>
 <translation id="5090362543162270857">IPsec (IKEv2)</translation>
@@ -1397,7 +1399,7 @@
 <translation id="7138614237884624401">نوشتار ساده‌شده</translation>
 <translation id="7138668887584231801">تعداد کلمات برای خلاصه کردن کافی نیست</translation>
 <translation id="7143207342074048698">در حال اتصال</translation>
-<translation id="7144878232160441200">سعی مجدد</translation>
+<translation id="7144878232160441200">امتحان مجدد</translation>
 <translation id="7144954474087165241">بتخانه</translation>
 <translation id="7147557737960578492">با انتخاب کلید جدید، مجدداً تخصیص دهید</translation>
 <translation id="714876143603641390">‏اتصال LAN</translation>
@@ -1410,7 +1412,6 @@
 <translation id="7177485034254901881">این <ph name="DEVICE_TYPE" /> توسط <ph name="MANAGER" /> مدیریت می‌شود. سرپرستان می‌توانند این دستگاه را ازراه‌دور پیکربندی کنند.</translation>
 <translation id="7180611975245234373">بازآوری</translation>
 <translation id="7180865173735832675">سفارشی کردن</translation>
-<translation id="7182063559013288142">نقطه اتصال فوری</translation>
 <translation id="7184043045742675738">برای سفارشی‌سازی دکمه، روی یکی از کلیدها کلیک کنید. موقعیت را با موشواره یا کلیدهای جهت‌نما تغییر دهید.</translation>
 <translation id="7187669805838282391">در روز چهارشنبه</translation>
 <translation id="7205318498545665455">انتخاب میکروفون</translation>
@@ -1422,7 +1423,7 @@
 <translation id="7221869452894271364">بار کردن مجدد این صفحه</translation>
 <translation id="7223952304612664117">با این کار، خدمات سیستم می‌تواند برای تعیین مکان شما از «دقت مکان» استفاده کند. «دقت مکان» می‌تواند برای برآورد کردن مکان دستگاه از اطلاعات مربوط به حسگرها و سیگنال‌های بی‌سیم استفاده کند.</translation>
 <translation id="7233782086689993269">میان‌بر بازیابی شد</translation>
-<translation id="723419678599947502">‏ایجاد عنوان بااستفاده از هوش مصنوعی Google</translation>
+<translation id="723419678599947502">‏ایجاد عنوان بااستفاده از «هوشواره Google»</translation>
 <translation id="725133483556299729">انتخاب ایمیل</translation>
 <translation id="7255187042098209569">صورتی و بنفش</translation>
 <translation id="7267918995585557751">برای اینکه مطمئن شوید صفحه راه‌اندازی پیش‌فرض یک وب‌سایت رمزگیری نباشد، بازنشانی کنید. فقط از وب‌سایت‌های مورداعتمادتان استفاده کنید.</translation>
@@ -1445,10 +1446,10 @@
 <translation id="7319430975418800333">A3</translation>
 <translation id="7321055305895875150">سبز و سبزآبی</translation>
 <translation id="7328475450575141167">مرغ بهشتی</translation>
-<translation id="7331297744262591636">‏باید حداقل ۱۸ سال داشته باشید و موافقت کنید استفاده شما از کاغذدیواری‌های هوش مصنوعی تابع <ph name="GOOGLE_TERMS_OF_SERVICE_LINK" />شرایط خدمات Google<ph name="END_LINK_GOOGLE_TERMS_OF_SERVICE" /> و <ph name="BEGIN_LINK_GEN_AI_TERMS_OF_SERVICE" />شرایط خدمات تکمیلی هوش مصنوعی زایا<ph name="END_LINK_GEN_AI_TERMS_OF_SERVICE" /> است.
+<translation id="7331297744262591636">‏باید حداقل ۱۸ سال داشته باشید و موافقت کنید استفاده شما از کاغذدیواری‌های هوشواره‌ای تابع <ph name="GOOGLE_TERMS_OF_SERVICE_LINK" />شرایط خدمات Google<ph name="END_LINK_GOOGLE_TERMS_OF_SERVICE" /> و <ph name="BEGIN_LINK_GEN_AI_TERMS_OF_SERVICE" />شرایط خدمات اضافی هوشواره زایا<ph name="END_LINK_GEN_AI_TERMS_OF_SERVICE" /> است.
           <ph name="LINE_BREAK" />
           <ph name="LINE_BREAK" />
-          فقط می‌توانید برای استفاده شخصی و غیرتجاری، کاغذدیواری‌ها را با هوش مصنوعی بسازید. وقتی برای کاغذدیواری کمک دریافت می‌کنید، نوشتار به سرورهای هوش مصنوعی Google ارسال می‌شود تا کاغذدیواری‌های پیشنهادی مطابق با <ph name="BEGIN_LINK_GOOGLE_PRIVACY_POLICY" />خط‌مشی رازداری Google<ph name="END_LINK_GOOGLE_PRIVACY_POLICY" /> تولید شود. <ph name="BEGIN_LINK_LEARN_MORE" />بیشتر بدانید<ph name="END_LINK_LEARN_MORE" /></translation>
+          فقط می‌توانید برای استفاده شخصی و غیرتجاری، کاغذدیواری‌ها را با هوشواره بسازید. وقتی برای کاغذدیواری کمک دریافت می‌کنید، نوشتار به سرورهای «هوشواره Google» ارسال می‌شود تا کاغذدیواری‌های پیشنهادی مطابق با <ph name="BEGIN_LINK_GOOGLE_PRIVACY_POLICY" />خط‌مشی رازداری Google<ph name="END_LINK_GOOGLE_PRIVACY_POLICY" /> تولید شود. <ph name="BEGIN_LINK_LEARN_MORE" />بیشتر بدانید<ph name="END_LINK_LEARN_MORE" /></translation>
 <translation id="7343581795491695942">‏<ph name="QUERY_TEXT" />؛ <ph name="RESULT_TEXT" />؛ کلیدهای «جستجو» و «فاصله» را فشار دهید تا نتیجه را در «جستجوی Google» ببینید</translation>
 <translation id="7343649194310845056">دستگاه‌های شبکه</translation>
 <translation id="7344788170842919262">ساده</translation>
@@ -1558,7 +1559,7 @@
 <translation id="7849030488395653706">شفق قطبی</translation>
 <translation id="7849737607196682401">تور دانتل</translation>
 <translation id="7850320739366109486">مزاحم نشوید</translation>
-<translation id="7850847810298646851">‏کاغذدیواری با بهره‌گیری از هوش مصنوعی Google ایجاد شده است</translation>
+<translation id="7850847810298646851">‏کاغذدیواری با بهره‌گیری از «هوشواره Google» ایجاد شده است</translation>
 <translation id="785170686607360576">لاله</translation>
 <translation id="7856267634822906833">صفحه لمسی بلوتوث</translation>
 <translation id="7859006200041800233">گل کاکتوس</translation>
@@ -1611,7 +1612,7 @@
 <translation id="8067208048261192356">قهوه‌ای</translation>
 <translation id="8067224607978179455">حذف <ph name="ACTION_NAME" /></translation>
 <translation id="8075838845814659848">شارژ باقی‌مانده</translation>
-<translation id="8076492880354921740">برگه‌ها</translation>
+<translation id="8076492880354921740">زبانه‌ها</translation>
 <translation id="8079860070590459552">دشت گل</translation>
 <translation id="8082366717211101304">‏نمی‌توان ساناد را از برنامه‌های Android حل‌وفصل کرد</translation>
 <translation id="8082644724189923105">منطقه صفحه‌کلید</translation>
@@ -1633,11 +1634,11 @@
 <translation id="8152370627892825"><ph name="DESCRIPTION" />، <ph name="ACCELERATOR_INFO" />.</translation>
 <translation id="8156233298086717232">جادویی</translation>
 <translation id="8162776280680283326">روباه</translation>
-<translation id="8167413449582155132">‏پس‌زمینه با بهره‌گیری از هوش مصنوعی Google ایجاد شده است</translation>
-<translation id="8171020708598805594">‏به‌طور خودکار ترانویسی بسازید، با «هوش مصنوعی Google» خلاصه قطعه ضبط‌شده را دریافت کنید، و در صدای ضبط‌شده جستجو کنید. حتی زمانی‌که به اینترنت متصل نیستید، صدا ضبط کنید.</translation>
+<translation id="8167413449582155132">‏پس‌زمینه با بهره‌گیری از «هوشواره Google» ایجاد شده است</translation>
+<translation id="8171020708598805594">‏به‌طور خودکار ترانویسی بسازید، با «هوشواره Google» خلاصه قطعه ضبط‌شده را دریافت کنید، و در صدای ضبط‌شده جستجو کنید. حتی زمانی که به اینترنت متصل نیستید، صدا ضبط کنید.</translation>
 <translation id="8179976553408161302">ورود</translation>
 <translation id="8183975772394450380">ساحل</translation>
-<translation id="819278132617411009">‏برای بهره‌وری بیشتر، از هوش مصنوعی Google استفاده کنید</translation>
+<translation id="819278132617411009">‏برای بهره‌وری بیشتر، از «هوشواره Google» استفاده کنید</translation>
 <translation id="8200772114523450471">ازسرگیری</translation>
 <translation id="8206859287963243715">سلولی</translation>
 <translation id="8208861521865154048">هدیه‌ها</translation>
@@ -1652,7 +1653,7 @@
 <translation id="8262870577632766028">۱ ساعت</translation>
 <translation id="827422111966801947">نیلی سیر</translation>
 <translation id="8280687443902283243">ویرایش عنوان</translation>
-<translation id="8286154143153872371">لطفاً برای مشاهده کاغذدیواری، به شبکه متصل شوید و صفحه را بار کردن مجدد کنید.</translation>
+<translation id="8286154143153872371">لطفاً برای مشاهده کاغذدیواری، به شبکه متصل شوید و صفحه را مجدداً بار کنید.</translation>
 <translation id="8291967909914612644">کشور ارائه‌دهنده اصلی</translation>
 <translation id="8294431847097064396">منبع</translation>
 <translation id="8302368968391049045">‏دیواره آتش HTTPS</translation>
@@ -1677,7 +1678,7 @@
 <translation id="8372667721254470022">زیتونی</translation>
 <translation id="8373046809163484087">از مجموعه‌های رنگ مطابق با کاغذدیواری‌تان استفاده کنید</translation>
 <translation id="8380114448424469341">پنجره را از نیمه سمت <ph name="DIRECTION" /> صفحه‌نمایش روی پایه قرار دهید</translation>
-<translation id="8391349326751432483">برای اجرای «آزمایش حافظه»، به حداقل ۵۰۰ مگابایت فضای آزاد نیاز دارید. برای آزاد کردن حافظه، برنامه‌ها و برگه‌ها را ببندید.</translation>
+<translation id="8391349326751432483">برای اجرای «آزمایش حافظه»، به حداقل ۵۰۰ مگابایت فضای آزاد نیاز دارید. برای آزاد کردن حافظه، برنامه‌ها و زبانه‌ها را ببندید.</translation>
 <translation id="8395584934117017006">این <ph name="DEVICE_TYPE" /> تحت‌مدیریت سازمان است</translation>
 <translation id="8398927464629426868">سرعت شارژ یا تخلیه شارژ دستگاه درحال‌حاضر</translation>
 <translation id="8403988360557588704">نقاشی <ph name="ART_FEATURE" /> به‌سبک <ph name="ART_MOVEMENT" /></translation>
@@ -1686,12 +1687,13 @@
 <translation id="8420955526972171689">اجرای آزمایش و عیب‌یابی مشکلات سخت‌افزاری</translation>
 <translation id="8422748173858722634">IMEI</translation>
 <translation id="8424039430705546751">پایین</translation>
+<translation id="8427213022735114808">‏با دیکته کردن، صدایتان به Google ارسال می‌شود تا بتوانید در هر فیلد نوشتاری تایپ صوتی انجام دهید.</translation>
 <translation id="8428213095426709021">تنظیمات</translation>
 <translation id="8431300646573772016">‏ویژگی‌های جدید ChromeOS</translation>
 <translation id="8433186206711564395">تنظیمات شبکه</translation>
 <translation id="843568408673868420">اتصال اینترنت</translation>
 <translation id="844521431886043384">ساناد تنظیم نشده است</translation>
-<translation id="8456200178779628126">‏برای کمک گرفتن در خواندن و نوشتن، از هوش مصنوعی Google استفاده کنید</translation>
+<translation id="8456200178779628126">‏برای کمک گرفتن در خواندن و نوشتن، از «هوشواره Google» استفاده کنید</translation>
 <translation id="8456761643544401578">حالت تاریک خودکار</translation>
 <translation id="8461329675984532579">نام ارائه‌دهنده اصلی</translation>
 <translation id="8475690821716466388">‏شبکه Wi-Fi با پروتکل ضعیف WEP PSK ایمن شده است</translation>
@@ -1715,7 +1717,7 @@
 <translation id="8528615187455571738">Crosvm</translation>
 <translation id="852896705346853285">چای‌خانه</translation>
 <translation id="8531692079895415839">مه‌آلود</translation>
-<translation id="8538236298648811558">‏با بهره‌گیری از هوش مصنوعی Google</translation>
+<translation id="8538236298648811558">‏با بهره‌گیری از «هوشواره Google»</translation>
 <translation id="8550364285433943656">برای بازی با کلیدهای صفحه‌کلید، کنترل‌ها را روی کنش‌های بازی قرار دهید</translation>
 <translation id="8557447961879934694">WPA2</translation>
 <translation id="8558521694042102707">هوش مصنوعی زایا ممکن است اشتباه کند (ازجمله درباره افراد)، بنابراین پاسخ‌ها را دوباره‌سنجی کنید.</translation>
@@ -1724,6 +1726,7 @@
 <translation id="8584654835905316966">برای تکمیل نصب سفت‌افزار <ph name="DEVICE_NAME" /> به نسخه <ph name="VERSION" />، بازراه‌اندازی لازم است. ممکن است رایانه شما در ظاهر چندین بار بازراه‌اندازی شود. این رفتار طبیعی است.</translation>
 <translation id="8593058461203131755">مکث رسانه</translation>
 <translation id="8620617069779373398">وضعیت فراگردی</translation>
+<translation id="8624524972189162859">سرپرست <ph name="DOMAIN_NAME" /> شما دستگاهتان را غیرفعال کرده است و می‌تواند به مکان آن دسترسی داشته باشد.</translation>
 <translation id="8626489604350149811">کنش‌های بیشتر برای <ph name="APN_NAME" /></translation>
 <translation id="86356131183441916">بنفش روشن</translation>
 <translation id="8647595191512746911">ترانویسی</translation>
@@ -1732,13 +1735,13 @@
 <translation id="8655295600908251630">کانال</translation>
 <translation id="8655828773034788261">نشانی وب هم‌رسانی:</translation>
 <translation id="8660881923941176839">پوند</translation>
-<translation id="8669187096858652220">برای نمایش برگه‌ها، کلیک کنید</translation>
+<translation id="8669187096858652220">برای نمایش زبانه‌ها، کلیک کنید</translation>
 <translation id="8670574982334489519">راست</translation>
 <translation id="8675354002693747642">کلید ازپیش هم‌رسانی‌شده</translation>
 <translation id="8677859815076891398">‏آلبومی وجود ندارد. آلبومی در <ph name="LINK_BEGIN" />Google Photos<ph name="LINK_END" /> ایجاد کنید.</translation>
 <translation id="8682949824227998083">رامِن</translation>
 <translation id="8689520252402395106">‏برای ادامه فرایند به‌روزرسانی، کابل USB دستگاه <ph name="DEVICE_NAME" /> را دوباره وصل کنید</translation>
-<translation id="8699053192961439771">برای پنهان کردن خودکار برگه‌ها، کلیک کنید</translation>
+<translation id="8699053192961439771">برای پنهان کردن خودکار زبانه‌ها، کلیک کنید</translation>
 <translation id="8709616837707653427"><ph name="DESC_TEXT" /> برای مدیریت این ویژگی، از کلیدهای جهت‌نما روبه راست یا روبه چپ استفاده کنید.</translation>
 <translation id="8712637175834984815">متوجه شدم</translation>
 <translation id="871560550817059752">انجام نشد - جوهر تمام شده است</translation>
@@ -1876,7 +1879,7 @@
 <translation id="952992212772159698">فعال نشد</translation>
 <translation id="95718197892796296">خاک رس</translation>
 <translation id="959792926760890141">‏«بازنشانی ایمنی» افزونه‌های مرورگر Chrome را خاموش می‌کند و شبکه و تنظیمات دیگر را به پیش‌فرض‌های ایمن بازمی‌گرداند.
-          موتور جستجوی پیش‌فرض شما بازنشانی می‌شود اما برگه‌ها، فایل‌ها، کوکی‌ها، و سابقه‌تان تغییر نخواهد کرد.</translation>
+          موتور جستجوی پیش‌فرض شما بازنشانی می‌شود اما زبانه‌ها، فایل‌ها، کوکی‌ها، و سابقه‌تان تغییر نخواهد کرد.</translation>
 <translation id="960719561871045870">کد اپراتور</translation>
 <translation id="965918541715156800">زرد و سبزآبی</translation>
 <translation id="966787709310836684">منو</translation>

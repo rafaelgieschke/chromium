@@ -93,6 +93,7 @@
   E(kActionShowMemorySaverChip) \
   E(kActionShowJsOptimizationsIcon) \
   E(kActionShowCookieControls) \
+  E(kActionUnfocusTabGroup, IDC_UNFOCUS_TAB_GROUP) \
   /* Page-manipulation commands that target a specified tab, which may not */ \
   /* be the active one. */ \
   E(kActionMuteTargetSite, IDC_MUTE_TARGET_SITE) \
@@ -192,6 +193,7 @@
   E(kActionShowFullUrls, IDC_SHOW_FULL_URLS) \
   E(kActionShowGoogleLensShortcut, IDC_SHOW_GOOGLE_LENS_SHORTCUT) \
   E(kActionShowAiModeOmniboxButton, IDC_SHOW_AI_MODE_OMNIBOX_BUTTON) \
+  E(kActionRecordReplay, IDC_RECORD_REPLAY) \
   E(kActionShowSearchTools, IDC_SHOW_SEARCH_TOOLS) \
   E(kActionCaretBrowsingToggle, IDC_CARET_BROWSING_TOGGLE) \
   E(kActionChromeTips, IDC_CHROME_TIPS) \
@@ -209,6 +211,7 @@
   E(kActionRecentTabsSeeDeviceTabs, \
     IDC_RECENT_TABS_SEE_DEVICE_TABS) \
   E(kActionOpenRecentTab, IDC_OPEN_RECENT_TAB) \
+  E(kActionIndigo) \
   /* Spell-check */ \
   /* Insert any additional suggestions before _LAST; these have to be */ \
   /* consecutive. */ \
@@ -521,6 +524,10 @@
   E(kActionOmniboxContextAddFile, IDC_OMNIBOX_CONTEXT_ADD_FILE)  \
   E(kActionOmniboxContextCreateImages, IDC_OMNIBOX_CONTEXT_CREATE_IMAGES)  \
   E(kActionOmniboxContextDeepResearch, IDC_OMNIBOX_CONTEXT_DEEP_RESEARCH)  \
+  E(kActionOmniboxContextCanvas, IDC_OMNIBOX_CONTEXT_CANVAS)  \
+  E(kActionOmniboxContextSetModelAuto, IDC_OMNIBOX_CONTEXT_SET_MODEL_AUTO)  \
+  E(kActionOmniboxContextSetModelThinking, IDC_OMNIBOX_CONTEXT_SET_MODEL_THINKING)  \
+  E(kActionOmniboxContextSetModelRegular, IDC_OMNIBOX_CONTEXT_SET_MODEL_REGULAR)  \
 
 #if BUILDFLAG(IS_CHROMEOS)
 #define CHROME_PLATFORM_SPECIFIC_ACTION_IDS \
@@ -597,6 +604,7 @@
   E(kActionTabGroupsMenu, IDC_SAVED_TAB_GROUPS_MENU) \
   E(kActionTabSearch, IDC_TAB_SEARCH) \
   E(kActionSplitTab, IDC_SPLIT_TAB) \
+  E(kActionFederation) \
 
 #define CHROME_ACTION_IDS \
     CHROME_COMMON_ACTION_IDS \

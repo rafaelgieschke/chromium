@@ -20,7 +20,7 @@
 #include "content/browser/devtools/devtools_instrumentation.h"
 #include "content/browser/devtools/devtools_throttle_handle.h"
 #include "content/browser/devtools/service_worker_devtools_manager.h"
-#include "content/browser/renderer_host/private_network_access_util.h"
+#include "content/browser/renderer_host/local_network_access_util.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/service_worker/embedded_worker_instance.h"
 #include "content/browser/service_worker/service_worker_client.h"
@@ -78,8 +78,9 @@ ServiceWorkerRegisterJob::ServiceWorkerRegisterJob(
       requesting_frame_id_(requesting_frame_id),
       ancestor_frame_type_(ancestor_frame_type),
       creator_policy_container_policies_(std::move(policy_container_policies)) {
-  DCHECK(context_);
-  DCHECK(outside_fetch_client_settings_object_);
+  CHECK(context_);
+  CHECK(outside_fetch_client_settings_object_);
+  CHECK(outside_fetch_client_settings_object_->policy_container_policies);
 }
 
 ServiceWorkerRegisterJob::ServiceWorkerRegisterJob(
@@ -103,8 +104,9 @@ ServiceWorkerRegisterJob::ServiceWorkerRegisterJob(
       skip_script_comparison_(skip_script_comparison),
       promise_resolved_status_(blink::ServiceWorkerStatusCode::kOk),
       ancestor_frame_type_(registration->ancestor_frame_type()) {
-  DCHECK(context_);
-  DCHECK(outside_fetch_client_settings_object_);
+  CHECK(context_);
+  CHECK(outside_fetch_client_settings_object_);
+  CHECK(outside_fetch_client_settings_object_->policy_container_policies);
   internal_.registration = registration;
 
   ServiceWorkerVersion* version = registration->GetNewestVersion();
@@ -510,9 +512,9 @@ void ServiceWorkerRegisterJob::StartScriptFetchForNewWorker(
               creator_policy_container_policies_.cross_origin_embedder_policy,
               creator_policy_container_policies_.is_web_secure_context,
               creator_policy_container_policies_.ip_address_space,
-              DerivePrivateNetworkRequestPolicy(
+              DeriveLocalNetworkAccessRequestPolicy(
                   creator_policy_container_policies_,
-                  PrivateNetworkRequestContext::kWorker),
+                  LocalNetworkAccessRequestContext::kWorker),
               creator_policy_container_policies_.document_isolation_policy));
 
   new_script_fetcher_ = std::make_unique<ServiceWorkerNewScriptFetcher>(
@@ -624,9 +626,9 @@ void ServiceWorkerRegisterJob::UpdateAndContinue() {
               creator_policy_container_policies_.cross_origin_embedder_policy,
               creator_policy_container_policies_.is_web_secure_context,
               creator_policy_container_policies_.ip_address_space,
-              DerivePrivateNetworkRequestPolicy(
+              DeriveLocalNetworkAccessRequestPolicy(
                   creator_policy_container_policies_,
-                  PrivateNetworkRequestContext::kWorker),
+                  LocalNetworkAccessRequestContext::kWorker),
               creator_policy_container_policies_.document_isolation_policy));
   if (!loader_factory) {
     // We can't continue with update checking appropriately without

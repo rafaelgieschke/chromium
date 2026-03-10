@@ -121,7 +121,7 @@
 #include "content/child/child_process_sandbox_support_impl_win.h"
 #endif
 
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #include "content/child/font_data/font_data_manager.h"
 #include "skia/ext/font_utils.h"
 #include "third_party/blink/public/web/win/web_font_rendering.h"
@@ -219,7 +219,7 @@ RendererBlinkPlatformImpl::RendererBlinkPlatformImpl(
     SkFontConfigInterface::SetGlobal(font_loader);
 #endif
 
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
     // Create a FontDataManager if it's enabled, and if we're not in a
     // single-process environment. In single process, the SkFontMgr is already
     // installed by browser process code at this point.
@@ -1150,7 +1150,7 @@ RendererBlinkPlatformImpl::VideoFrameCompositorTaskRunner() {
       video_frame_compositor_thread_ =
           std::make_unique<base::Thread>("VideoFrameCompositor");
       video_frame_compositor_thread_->StartWithOptions(
-          base::Thread::Options(base::ThreadType::kDisplayCritical));
+          base::Thread::Options(base::ThreadType::kPresentation));
     }
 
     return video_frame_compositor_thread_->task_runner();

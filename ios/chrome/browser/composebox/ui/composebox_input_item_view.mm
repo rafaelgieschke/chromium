@@ -4,6 +4,7 @@
 
 #import "ios/chrome/browser/composebox/ui/composebox_input_item_view.h"
 
+#import "ios/chrome/browser/composebox/public/composebox_constants.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
@@ -50,9 +51,8 @@ const CGFloat kTrailingMargin = 8.0;
     [self setupConstraints];
   }
 
-  NSArray<UITrait>* traits =
-      TraitCollectionSetForTraits(@[ UITraitUserInterfaceStyle.class ]);
-  [self registerForTraitChanges:traits withAction:@selector(updateGradient)];
+  [self registerForTraitChanges:@[ UITraitUserInterfaceStyle.class ]
+                     withAction:@selector(updateGradient)];
 
   return self;
 }

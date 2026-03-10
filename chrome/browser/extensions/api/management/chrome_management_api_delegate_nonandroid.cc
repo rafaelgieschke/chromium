@@ -11,7 +11,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
-#include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/apps/app_service/browser_app_launcher.h"
@@ -22,19 +21,20 @@
 #include "chrome/browser/extensions/mv2_experiment_stage.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/dialogs/browser_dialogs.h"
 #include "chrome/browser/ui/extensions/extensions_dialogs.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
 #include "chrome/browser/ui/tab_helpers.h"
 #include "chrome/browser/ui/web_applications/web_app_dialog_utils.h"
-#include "chrome/browser/web_applications/commands/fetch_installability_for_chrome_management.h"
 #include "chrome/browser/web_applications/extension_status_utils.h"
 #include "chrome/browser/web_applications/mojom/user_display_mode.mojom.h"
 #include "chrome/browser/web_applications/proto/web_app_install_state.pb.h"
+#include "chrome/browser/web_applications/scheduler/fetch_installability_for_chrome_management_result.h"
 #include "chrome/browser/web_applications/web_app_command_scheduler.h"
+#include "chrome/browser/web_applications/web_app_filter.h"
 #include "chrome/browser/web_applications/web_app_helpers.h"
 #include "chrome/browser/web_applications/web_app_install_info.h"
 #include "chrome/browser/web_applications/web_app_install_manager.h"
@@ -43,10 +43,10 @@
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/browser/web_applications/web_app_registrar.h"
 #include "chrome/browser/web_applications/web_app_utils.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/extensions/extension_metrics.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/security_state/content/security_state_tab_helper.h"
+#include "components/services/app_service/public/cpp/app_launch_params.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "components/webapps/browser/install_result_code.h"
 #include "components/webapps/browser/installable/installable_manager.h"
@@ -176,7 +176,7 @@ class ChromeAppForLinkDelegate : public AppForLinkDelegate {
       // These modes are not supported by the extension app backend.
       case web_app::DisplayMode::kWindowControlsOverlay:
       case web_app::DisplayMode::kTabbed:
-      case web_app::DisplayMode::kBorderless:
+      case web_app::DisplayMode::kUnframed:
       case web_app::DisplayMode::kPictureInPicture:
       case web_app::DisplayMode::kUndefined:
         info.launch_type = api::management::LaunchType::kNone;
@@ -357,9 +357,8 @@ void ChromeManagementAPIDelegate::InstallOrLaunchReplacementWebApp(
   // Launch the app if web_app_url happens to match start_url. If not, the app
   // could still be installed with different start_url.
   webapps::AppId app_id = web_app::GenerateAppIdFromManifestId(web_app_url);
-  if (provider->registrar_unsafe().IsInstallState(
-          app_id, {web_app::proto::INSTALLED_WITHOUT_OS_INTEGRATION,
-                   web_app::proto::INSTALLED_WITH_OS_INTEGRATION})) {
+  if (provider->registrar_unsafe().AppMatches(
+          app_id, web_app::WebAppFilter::InstalledInChrome())) {
     LaunchWebApp(
         web_app::GenerateAppId(/*manifest_id_path=*/std::nullopt, web_app_url),
         profile);

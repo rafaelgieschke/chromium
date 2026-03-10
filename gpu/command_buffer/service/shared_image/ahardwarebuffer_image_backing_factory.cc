@@ -53,7 +53,6 @@
 #include "third_party/skia/include/gpu/ganesh/vk/GrVkBackendSurface.h"
 #include "third_party/skia/include/private/chromium/GrPromiseImageTexture.h"
 #include "ui/gfx/android/android_surface_control_compat.h"
-#include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gl/buildflags.h"
@@ -189,10 +188,11 @@ std::optional<uint64_t> GetRecommendedAHBUsage(VkPhysicalDevice device,
   return ahb_usage.androidHardwareBufferUsage;
 }
 
-constexpr viz::SharedImageFormat kSupportedFormats[5]{
-    viz::SinglePlaneFormat::kRGBA_8888, viz::SinglePlaneFormat::kBGR_565,
-    viz::SinglePlaneFormat::kRGBA_F16, viz::SinglePlaneFormat::kRGBX_8888,
-    viz::SinglePlaneFormat::kRGBA_1010102};
+constexpr viz::SharedImageFormat kSupportedFormats[7]{
+    viz::SinglePlaneFormat::kRGBA_8888,    viz::SinglePlaneFormat::kBGR_565,
+    viz::SinglePlaneFormat::kRGBA_F16,     viz::SinglePlaneFormat::kRGBX_8888,
+    viz::SinglePlaneFormat::kRGBA_1010102, viz::MultiPlaneFormat::kNV12,
+    viz::MultiPlaneFormat::kYV12};
 
 // Returns whether the format is supported by AHardwareBuffer.
 // TODO(vikassoni): In future we will need to expose the set of formats and
@@ -204,13 +204,16 @@ constexpr viz::SharedImageFormat kSupportedFormats[5]{
 // static mechanism like this. We probably need something like
 // gpu::SharedImageCapabilities.texture_target_exception_list.
 bool AHardwareBufferSupportedFormat(viz::SharedImageFormat format) {
-  return base::Contains(kSupportedFormats, format);
+  return std::ranges::contains(kSupportedFormats, format);
 }
 
 // Returns the corresponding AHardwareBuffer format.
 unsigned int AHardwareBufferFormat(viz::SharedImageFormat format) {
   DCHECK(AHardwareBufferSupportedFormat(format));
 
+  // Comes from:
+  // https://cs.android.com/android/platform/superproject/main/+/main:frameworks/base/graphics/java/android/graphics/ImageFormat.java
+  constexpr unsigned int AHARDWAREBUFFER_FORMAT_YV12 = 0x32315659;
   if (format == viz::SinglePlaneFormat::kRGBA_8888) {
     return AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM;
   } else if (format == viz::SinglePlaneFormat::kBGR_565) {
@@ -221,6 +224,10 @@ unsigned int AHardwareBufferFormat(viz::SharedImageFormat format) {
     return AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM;
   } else if (format == viz::SinglePlaneFormat::kRGBA_1010102) {
     return AHARDWAREBUFFER_FORMAT_R10G10B10A2_UNORM;
+  } else if (format == viz::MultiPlaneFormat::kYV12) {
+    return AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420;
+  } else if (format == viz::MultiPlaneFormat::kNV12) {
+    return AHARDWAREBUFFER_FORMAT_YV12;
   }
 
   NOTREACHED();
@@ -235,7 +242,8 @@ constexpr SharedImageUsageSet kSupportedUsage =
     SHARED_IMAGE_USAGE_WEBGPU_SWAP_CHAIN_TEXTURE |
     SHARED_IMAGE_USAGE_HIGH_PERFORMANCE_GPU |
     SHARED_IMAGE_USAGE_WEBGPU_STORAGE_TEXTURE |
-    SHARED_IMAGE_USAGE_CONCURRENT_READ_WRITE;
+    SHARED_IMAGE_USAGE_CONCURRENT_READ_WRITE |
+    SHARED_IMAGE_USAGE_VIDEO_ENCODE_ACCELERATOR;
 }  // namespace
 
 // Implementation of SharedImageBacking that holds an AHardwareBuffer. This
@@ -314,6 +322,19 @@ class AHardwareBufferImageBacking : public AndroidImageBacking {
       VideoDevice device) override;
 
  private:
+  struct GLTextureParams {
+    GLTextureParams();
+    ~GLTextureParams();
+    GLTextureParams(GLTextureParams&&);
+    GLTextureParams& operator=(GLTextureParams&&);
+
+    gl::ScopedEGLImage egl_image;
+    GLFormatDesc gl_format_desc;
+    GLuint service_id = 0;
+  };
+
+  std::optional<GLTextureParams> GetGLTextureParams();
+
   const base::android::ScopedHardwareBufferHandle hardware_buffer_handle_;
 
   scoped_refptr<OverlayImage> overlay_image_ GUARDED_BY(lock_);
@@ -470,68 +491,80 @@ AHardwareBufferImageBacking::GetAhbHandle() const {
   return hardware_buffer_handle_.Clone();
 }
 
-std::unique_ptr<GLTextureImageRepresentation>
-AHardwareBufferImageBacking::ProduceGLTexture(SharedImageManager* manager,
-                                              MemoryTypeTracker* tracker) {
-  // Use same texture for all the texture representations generated from same
-  // backing.
+AHardwareBufferImageBacking::GLTextureParams::GLTextureParams() = default;
+AHardwareBufferImageBacking::GLTextureParams::~GLTextureParams() = default;
+AHardwareBufferImageBacking::GLTextureParams::GLTextureParams(
+    GLTextureParams&&) = default;
+AHardwareBufferImageBacking::GLTextureParams&
+AHardwareBufferImageBacking::GLTextureParams::operator=(GLTextureParams&&) =
+    default;
+
+std::optional<AHardwareBufferImageBacking::GLTextureParams>
+AHardwareBufferImageBacking::GetGLTextureParams() {
   DCHECK(hardware_buffer_handle_.is_valid());
 
   auto egl_image =
       CreateEGLImageFromAHardwareBuffer(hardware_buffer_handle_.get());
 
   if (!egl_image.is_valid()) {
-    return nullptr;
+    return std::nullopt;
   }
 
   // Android documentation states that right GL format for RGBX AHardwareBuffer
   // is GL_RGB8, so we don't use angle rgbx.
-  GLFormatDesc gl_format_desc =
-      gl_format_caps_.ToGLFormatDescOverrideHalfFloatType(format(),
-                                                          /*plane_index=*/0);
+  GLFormatDesc gl_format_desc;
+  if (format().PrefersExternalSampler()) {
+    gl_format_desc = gl_format_caps_.ToGLFormatDescExternalSampler(format());
+  } else {
+    gl_format_desc = gl_format_caps_.ToGLFormatDescOverrideHalfFloatType(
+        format(), /*plane_index=*/0);
+  }
   GLuint service_id =
       CreateAndBindTexture(egl_image.get(), gl_format_desc.target);
 
-  auto* texture =
-      gles2::CreateGLES2TextureWithLightRef(service_id, gl_format_desc.target);
-  texture->SetLevelInfo(gl_format_desc.target, 0,
-                        gl_format_desc.image_internal_format, size().width(),
-                        size().height(), 1, 0, gl_format_desc.data_format,
-                        gl_format_desc.data_type, ClearedRect());
+  GLTextureParams params;
+  params.egl_image = std::move(egl_image);
+  params.gl_format_desc = gl_format_desc;
+  params.service_id = service_id;
+  return params;
+}
+
+std::unique_ptr<GLTextureImageRepresentation>
+AHardwareBufferImageBacking::ProduceGLTexture(SharedImageManager* manager,
+                                              MemoryTypeTracker* tracker) {
+  auto params = GetGLTextureParams();
+  if (!params) {
+    return nullptr;
+  }
+
+  auto* texture = gles2::CreateGLES2TextureWithLightRef(
+      params->service_id, params->gl_format_desc.target);
+  texture->SetLevelInfo(params->gl_format_desc.target, 0,
+                        params->gl_format_desc.image_internal_format,
+                        size().width(), size().height(), 1, 0,
+                        params->gl_format_desc.data_format,
+                        params->gl_format_desc.data_type, ClearedRect());
   texture->SetImmutable(true, false);
 
   return std::make_unique<GLTextureAndroidImageRepresentation>(
-      manager, this, tracker, std::move(egl_image), std::move(texture));
+      manager, this, tracker, std::move(params->egl_image), std::move(texture));
 }
 
 std::unique_ptr<GLTexturePassthroughImageRepresentation>
 AHardwareBufferImageBacking::ProduceGLTexturePassthrough(
     SharedImageManager* manager,
     MemoryTypeTracker* tracker) {
-  // Use same texture for all the texture representations generated from same
-  // backing.
-  DCHECK(hardware_buffer_handle_.is_valid());
-
-  auto egl_image =
-      CreateEGLImageFromAHardwareBuffer(hardware_buffer_handle_.get());
-  if (!egl_image.is_valid()) {
+  auto params = GetGLTextureParams();
+  if (!params) {
     return nullptr;
   }
 
-  // Android documentation states that right GL format for RGBX AHardwareBuffer
-  // is GL_RGB8, so we don't use angle rgbx.
-  GLFormatDesc gl_format_desc =
-      gl_format_caps_.ToGLFormatDescOverrideHalfFloatType(format(),
-                                                          /*plane_index=*/0);
-  GLuint service_id =
-      CreateAndBindTexture(egl_image.get(), gl_format_desc.target);
-
   auto texture = base::MakeRefCounted<gles2::TexturePassthrough>(
-      service_id, gl_format_desc.target);
+      params->service_id, params->gl_format_desc.target);
   texture->SetEstimatedSize(GetEstimatedSize());
 
   return std::make_unique<GLTexturePassthroughAndroidImageRepresentation>(
-      manager, this, tracker, std::move(egl_image), std::move(texture));
+      manager, this, tracker, std::move(params->egl_image), std::move(texture));
 }
 
 std::unique_ptr<SkiaGraphiteImageRepresentation>
@@ -737,6 +770,14 @@ AHardwareBufferImageBackingFactory::FormatInfoForSupportedFormat(
   const bool is_egl_image_supported =
       gl::g_current_gl_driver->ext.b_GL_OES_EGL_image;
   if (!is_egl_image_supported) {
+    return info;
+  }
+
+  if (format.is_multi_plane()) {
+    info.gl_supported = true;
+    info.gl_format = 0;
+    info.gl_type = 0;
+    info.internal_format = 0;
     return info;
   }
 
@@ -1012,7 +1053,7 @@ bool AHardwareBufferImageBackingFactory::IsSupported(
     gfx::GpuMemoryBufferType gmb_type,
     GrContextType gr_context_type,
     base::span<const uint8_t> pixel_data) {
-  if (format.is_multi_plane()) {
+  if (format.is_multi_plane() && !format.PrefersExternalSampler()) {
     return false;
   }
 

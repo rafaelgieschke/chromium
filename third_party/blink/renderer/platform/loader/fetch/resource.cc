@@ -121,13 +121,13 @@ const auto kHeaderPrefixesToIgnoreAfterRevalidation =
 
 inline bool ShouldUpdateHeaderAfterRevalidation(const AtomicString& header) {
   for (const auto* header_to_ignore : kHeadersToIgnoreAfterRevalidation) {
-    if (EqualIgnoringASCIICase(header, header_to_ignore)) {
+    if (EqualIgnoringAsciiCase(header, header_to_ignore)) {
       return false;
     }
   }
   for (const auto* header_prefix_to_ignore :
        kHeaderPrefixesToIgnoreAfterRevalidation) {
-    if (header.StartsWithIgnoringASCIICase(header_prefix_to_ignore)) {
+    if (header.StartsWithIgnoringAsciiCase(header_prefix_to_ignore)) {
       return false;
     }
   }
@@ -470,9 +470,10 @@ static base::TimeDelta FreshnessLifetime(const ResourceResponse& response,
 #endif
 
   // Cache other non-http / non-filesystem resources liberally.
-  if (!response.CurrentRequestUrl().ProtocolIsInHTTPFamily() &&
-      !response.CurrentRequestUrl().ProtocolIs("filesystem"))
+  if (!response.CurrentRequestUrl().ProtocolIsInHttpFamily() &&
+      !response.CurrentRequestUrl().ProtocolIs("filesystem")) {
     return base::TimeDelta::Max();
+  }
 
   // RFC2616 13.2.4
   std::optional<base::TimeDelta> max_age_value = response.CacheControlMaxAge();
@@ -923,8 +924,8 @@ void Resource::OnMemoryDump(WebMemoryDumpLevelOfDetail level_of_detail,
   if (level_of_detail == WebMemoryDumpLevelOfDetail::kDetailed) {
     String url_to_report = Url().GetString();
     if (url_to_report.length() > kMaxURLReportLength) {
-      url_to_report.Truncate(kMaxURLReportLength);
-      url_to_report = StrCat({url_to_report, "..."});
+      url_to_report =
+          StrCat({StringView(url_to_report, 0, kMaxURLReportLength), "..."});
     }
     dump->AddString("url", "", url_to_report);
 
@@ -1286,8 +1287,8 @@ void Resource::SetClockForTesting(const base::Clock* clock) {
   g_clock_for_testing = clock;
 }
 
-void Resource::SetIsAdResource() {
-  resource_request_.SetIsAdResource();
+void Resource::SetIsAdResource(AdProvenance ad_provenance) {
+  resource_request_.SetIsAdResource(std::move(ad_provenance));
 }
 
 void Resource::UpdateMemoryCacheLastAccessedTime() {

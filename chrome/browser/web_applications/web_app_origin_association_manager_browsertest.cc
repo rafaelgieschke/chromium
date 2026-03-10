@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "base/containers/contains.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/test_future.h"
@@ -109,11 +108,10 @@ class WebAppOriginAssociationManagerTest : public WebAppBrowserTestBase {
             /*has_origin_wildcard*/ valid_and_invalid_app_scope_extension_
                 ->has_origin_wildcard);
 
-    EXPECT_TRUE(base::Contains(result.scope_extensions,
-                               std::move(valid_app_scope_extension)));
     EXPECT_TRUE(
-        base::Contains(result.scope_extensions,
-                       std::move(valid_and_invalid_app_scope_extension)));
+        result.scope_extensions.contains(std::move(valid_app_scope_extension)));
+    EXPECT_TRUE(result.scope_extensions.contains(
+        std::move(valid_and_invalid_app_scope_extension)));
 
     if (callback_count_ == expected_callback_count) {
       callback_count_ = 0;
@@ -217,11 +215,8 @@ IN_PROC_BROWSER_TEST_F(WebAppOriginAssociationManagerTest,
                        InvalidMigrationSource) {
   base::test::TestFuture<OriginAssociations> future;
   OriginAssociations origin_associations;
-  web_app::proto::WebAppMigrationSource migration_source;
-  migration_source.set_manifest_id(kInvalidFileUrl);
-  migration_source.set_behavior(
-      web_app::proto::WEB_APP_MIGRATION_BEHAVIOR_SUGGEST);
-  origin_associations.migration_sources.push_back(std::move(migration_source));
+  origin_associations.migration_sources.emplace_back(
+      GURL(kInvalidFileUrl), MigrationBehavior::kSuggest);
 
   manager_->GetWebAppOriginAssociations(GURL(kWebAppIdentity),
                                         std::move(origin_associations),
@@ -237,12 +232,9 @@ IN_PROC_BROWSER_TEST_F(WebAppOriginAssociationManagerTest,
   {
     base::test::TestFuture<OriginAssociations> future;
     OriginAssociations origin_associations;
-    web_app::proto::WebAppMigrationSource migration_source;
-    migration_source.set_manifest_id(kAppWithMultipleMigrationCasesUrl);
-    migration_source.set_behavior(
-        web_app::proto::WEB_APP_MIGRATION_BEHAVIOR_SUGGEST);
-    origin_associations.migration_sources.push_back(
-        std::move(migration_source));
+    origin_associations.migration_sources.emplace_back(
+        webapps::ManifestId(GURL(kAppWithMultipleMigrationCasesUrl)),
+        MigrationBehavior::kSuggest);
     manager_->GetWebAppOriginAssociations(
         GURL("https://foo.com/index_no_migration"),
         std::move(origin_associations), future.GetCallback());
@@ -254,12 +246,9 @@ IN_PROC_BROWSER_TEST_F(WebAppOriginAssociationManagerTest,
   {
     base::test::TestFuture<OriginAssociations> future;
     OriginAssociations origin_associations;
-    web_app::proto::WebAppMigrationSource migration_source;
-    migration_source.set_manifest_id(kAppWithMultipleMigrationCasesUrl);
-    migration_source.set_behavior(
-        web_app::proto::WEB_APP_MIGRATION_BEHAVIOR_SUGGEST);
-    origin_associations.migration_sources.push_back(
-        std::move(migration_source));
+    origin_associations.migration_sources.emplace_back(
+        webapps::ManifestId(GURL(kAppWithMultipleMigrationCasesUrl)),
+        MigrationBehavior::kSuggest);
     manager_->GetWebAppOriginAssociations(
         GURL("https://foo.com/index_migration_true"),
         std::move(origin_associations), future.GetCallback());
@@ -277,14 +266,41 @@ IN_PROC_BROWSER_TEST_F(WebAppOriginAssociationManagerTest,
     migration_source.set_manifest_id(kAppWithMultipleMigrationCasesUrl);
     migration_source.set_behavior(
         web_app::proto::WEB_APP_MIGRATION_BEHAVIOR_SUGGEST);
-    origin_associations.migration_sources.push_back(
-        std::move(migration_source));
+    origin_associations.migration_sources.emplace_back(
+        webapps::ManifestId(GURL(kAppWithMultipleMigrationCasesUrl)),
+        MigrationBehavior::kSuggest);
     manager_->GetWebAppOriginAssociations(
         GURL("https://foo.com/index_migration_false"),
         std::move(origin_associations), future.GetCallback());
     const OriginAssociations result = future.Get<0>();
     ASSERT_TRUE(result.migration_sources.empty());
   }
+}
+
+IN_PROC_BROWSER_TEST_F(WebAppOriginAssociationManagerTest,
+                       SameOriginMigrationAllowedWithoutFetch) {
+  base::test::TestFuture<OriginAssociations> future;
+  OriginAssociations origin_associations;
+  web_app::proto::WebAppMigrationSource migration_source;
+  // Use same origin as kWebAppIdentity ("https://foo.com/index")
+  std::string same_origin_manifest_id = "https://foo.com/another_app";
+  migration_source.set_manifest_id(same_origin_manifest_id);
+  migration_source.set_behavior(
+      web_app::proto::WEB_APP_MIGRATION_BEHAVIOR_SUGGEST);
+  origin_associations.migration_sources.emplace_back(
+      webapps::ManifestId(GURL(same_origin_manifest_id)),
+      MigrationBehavior::kSuggest);
+
+  // The fetcher's data does NOT include any entry for foo.com.
+  // GetWebAppOriginAssociations should allow this without fetching.
+  manager_->GetWebAppOriginAssociations(GURL(kWebAppIdentity),
+                                        std::move(origin_associations),
+                                        future.GetCallback());
+
+  const OriginAssociations result = future.Get<0>();
+  ASSERT_EQ(result.migration_sources.size(), 1u);
+  EXPECT_EQ(GURL(result.migration_sources[0].manifest_id()).spec(),
+            same_origin_manifest_id);
 }
 
 }  // namespace web_app

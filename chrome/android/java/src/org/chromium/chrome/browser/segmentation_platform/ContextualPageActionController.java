@@ -17,8 +17,8 @@ import org.jni_zero.NativeMethods;
 
 import org.chromium.base.Callback;
 import org.chromium.base.lifetime.Destroyable;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.base.supplier.NullableObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.build.annotations.NullMarked;
@@ -74,7 +74,7 @@ public class ContextualPageActionController {
         default void destroy() {}
     }
 
-    private final ObservableSupplier<Profile> mProfileSupplier;
+    private final MonotonicObservableSupplier<Profile> mProfileSupplier;
     private final NullableObservableSupplier<Tab> mTabSupplier;
     private final AdaptiveToolbarButtonController mAdaptiveToolbarButtonController;
     private @Nullable CurrentTabObserver mCurrentTabObserver;
@@ -93,18 +93,18 @@ public class ContextualPageActionController {
      *     handles the logic to decide between multiple buttons to show.
      */
     public ContextualPageActionController(
-            ObservableSupplier<Profile> profileSupplier,
+            MonotonicObservableSupplier<Profile> profileSupplier,
             NullableObservableSupplier<Tab> tabSupplier,
             AdaptiveToolbarButtonController adaptiveToolbarButtonController,
             Supplier<ShoppingService> shoppingServiceSupplier,
-            Supplier<BookmarkModel> bookmarkModelSupplier) {
+            Supplier<@Nullable BookmarkModel> bookmarkModelSupplier) {
         mProfileSupplier = profileSupplier;
         mTabSupplier = tabSupplier;
         mAdaptiveToolbarButtonController = adaptiveToolbarButtonController;
         var defaultButtonVis = new OneshotSupplierImpl<Boolean>();
         defaultButtonVis.set(true);
         mButtonVisibilitySupplier = defaultButtonVis; // true by default for tabbed browser.
-        profileSupplier.addObserver(
+        profileSupplier.addSyncObserverAndPostIfNonNull(
                 profile -> {
                     if (profile.isOffTheRecord()) return;
 
@@ -148,7 +148,7 @@ public class ContextualPageActionController {
     @VisibleForTesting
     protected void initActionProviders(
             Supplier<ShoppingService> shoppingServiceSupplier,
-            Supplier<BookmarkModel> bookmarkModelSupplier) {
+            Supplier<@Nullable BookmarkModel> bookmarkModelSupplier) {
         removeProviders();
         mActionProviders.put(
                 AdaptiveToolbarButtonVariant.PRICE_TRACKING,
@@ -170,6 +170,9 @@ public class ContextualPageActionController {
             mActionProviders.put(
                     AdaptiveToolbarButtonVariant.TAB_GROUPING,
                     new TabGroupingActionProvider(groupSuggestionButtonControllerSupplier));
+        }
+        if (AdaptiveToolbarFeatures.isGlicActionEnabled()) {
+            mActionProviders.put(AdaptiveToolbarButtonVariant.GLIC, new GlicActionProvider());
         }
     }
 
@@ -212,6 +215,12 @@ public class ContextualPageActionController {
                 : mSignalAccumulator.getSignal(AdaptiveToolbarButtonVariant.READER_MODE);
     }
 
+    public boolean hasGlic() {
+        return mSignalAccumulator == null
+                ? false
+                : mSignalAccumulator.getSignal(AdaptiveToolbarButtonVariant.GLIC);
+    }
+
     private void removeProviders() {
         for (ActionProvider provider : mActionProviders.values()) {
             provider.destroy();
@@ -247,6 +256,11 @@ public class ContextualPageActionController {
     private void findBestAction() {
         Tab tab = getValidActiveTab();
         if (tab == null) return;
+        // IMPORTANT: The number of entries here MUST match kLabelInputSize in
+        // components/segmentation_platform/embedder/default_model/contextual_page_actions_model.cc;
+        // otherwise, ContextualPageActionsModel::ExecuteModelWithInput will return a null value,
+        // resulting in AdaptiveToolbarButtonVariant.UNKNOWN (0) and a fallback to the session
+        // default. Feature flag guarded page actions should not be conditionally added here.
         InputContext inputContext = new InputContext();
         assumeNonNull(mSignalAccumulator);
         inputContext.addEntry(
@@ -277,6 +291,12 @@ public class ContextualPageActionController {
                 Constants.CONTEXTUAL_PAGE_ACTIONS_TAB_GROPING_INPUT,
                 ProcessedValue.fromFloat(
                         mSignalAccumulator.getSignal(AdaptiveToolbarButtonVariant.TAB_GROUPING)
+                                ? 1.0f
+                                : 0.0f));
+        inputContext.addEntry(
+                Constants.CONTEXTUAL_PAGE_ACTIONS_GLIC_INPUT,
+                ProcessedValue.fromFloat(
+                        mSignalAccumulator.getSignal(AdaptiveToolbarButtonVariant.GLIC)
                                 ? 1.0f
                                 : 0.0f));
         inputContext.addEntry("url", ProcessedValue.fromGURL(tab.getUrl()));

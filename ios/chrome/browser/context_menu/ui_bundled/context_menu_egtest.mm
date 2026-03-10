@@ -32,7 +32,6 @@
 #import "ios/chrome/test/earl_grey/scoped_block_popups_pref.h"
 #import "ios/chrome/test/scoped_eg_synchronization_disabler.h"
 #import "ios/components/enterprise/data_controls/clipboard_enums.h"
-#import "ios/components/enterprise/data_controls/features.h"
 #import "ios/testing/earl_grey/app_launch_configuration.h"
 #import "ios/testing/earl_grey/app_launch_manager.h"
 #import "ios/testing/earl_grey/disabled_test_macros.h"
@@ -346,21 +345,9 @@ void RelaunchApp() {
   AppLaunchConfiguration config;
   config.features_enabled.push_back(
       data_sharing::features::kDataSharingFeature);
-  config.features_enabled.push_back(kEnableReaderMode);
   config.features_enabled.push_back(kEnableReaderModeInUS);
   config.features_disabled.push_back(web::features::kSmoothScrollingDefault);
 
-  if ([self isRunningTest:@selector(testCopyImageBlockedByPolicy)] ||
-      [self isRunningTest:@selector(testCopyImageWarnByPolicyProceed)] ||
-      [self isRunningTest:@selector(testCopyImageWarnByPolicyCancel)] ||
-      [self isRunningTest:@selector(testCopyLinkBlockedByPolicy)] ||
-      [self isRunningTest:@selector(testCopyLinkWarnByPolicyProceed)] ||
-      [self isRunningTest:@selector(testCopyLinkWarnByPolicyCancel)] ||
-      [self isRunningTest:@selector(testShareLinkHiddenByPolicy)] ||
-      [self isRunningTest:@selector(testShareImageHiddenByPolicy)]) {
-    config.features_enabled.push_back(
-        data_controls::kEnableClipboardDataControlsIOS);
-  }
   if ([self isRunningTest:@selector(testShowFullURLInWebContextMenu)]) {
     config.features_disabled.push_back(kIOSWebContextMenuNewTitle);
   }

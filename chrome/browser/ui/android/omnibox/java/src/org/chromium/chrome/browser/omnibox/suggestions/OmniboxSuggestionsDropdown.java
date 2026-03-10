@@ -34,7 +34,6 @@ import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.omnibox.OmniboxMetrics;
 import org.chromium.chrome.browser.omnibox.R;
-import org.chromium.components.browser_ui.widget.RoundedCornerOutlineProvider;
 import org.chromium.components.omnibox.OmniboxFeatures;
 import org.chromium.ui.base.KeyNavigationUtil;
 import org.chromium.ui.util.MotionEventUtils;
@@ -75,6 +74,7 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
     private boolean mToolbarOnTop = true;
 
     private final int mBaseBottomPadding;
+    private final int mBaseTopPadding;
 
     /**
      * Interface that will receive notifications when the user is interacting with an item on the
@@ -292,9 +292,9 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
         final Resources resources = context.getResources();
         mBaseBottomPadding =
                 resources.getDimensionPixelOffset(R.dimen.omnibox_suggestion_list_padding_bottom);
-        int paddingTop =
+        mBaseTopPadding =
                 resources.getDimensionPixelOffset(R.dimen.omnibox_suggestion_list_padding_top);
-        this.setPaddingRelative(0, paddingTop, 0, mBaseBottomPadding);
+        this.setPaddingRelative(0, mBaseTopPadding, 0, mBaseBottomPadding);
 
         // Disable the scrollbar since it causes the hover events happening near the
         // scrollbar not dispatched to the underlying views.
@@ -308,27 +308,6 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
     @Override
     protected void onSizeChanged(int w, int h, int oldW, int oldH) {
         mLayoutScrollListener.updateVisualScrollState();
-    }
-
-    /**
-     * Set whether the dropdown should be clipped to its outline.
-     *
-     * @param clip whether to clip the outline
-     */
-    public void setShouldClipToOutline(boolean clip) {
-        if (clip) {
-            setOutlineProvider(
-                    new RoundedCornerOutlineProvider(
-                            getContext()
-                                    .getResources()
-                                    .getDimensionPixelSize(
-                                            R.dimen
-                                                    .omnibox_suggestion_dropdown_round_corner_radius)));
-            setClipToOutline(true);
-        } else {
-            setOutlineProvider(null);
-            setClipToOutline(false);
-        }
     }
 
     /** Get the Android View implementing suggestion list. */
@@ -545,6 +524,11 @@ public class OmniboxSuggestionsDropdown extends RecyclerView {
     @VisibleForTesting
     int getBaseBottomPadding() {
         return mBaseBottomPadding;
+    }
+
+    @VisibleForTesting
+    int getBaseTopPadding() {
+        return mBaseTopPadding;
     }
 
     @VisibleForTesting

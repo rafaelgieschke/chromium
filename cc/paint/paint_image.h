@@ -8,6 +8,7 @@
 #include <array>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "base/gtest_prod_util.h"
@@ -42,7 +43,17 @@ class PaintImageGenerator;
 class PaintWorkletInput;
 class TextureBacking;
 
-enum class ImageType { kPNG, kJPEG, kWEBP, kGIF, kICO, kBMP, kAVIF, kInvalid };
+enum class ImageType {
+  kPNG,
+  kJPEG,
+  kWEBP,
+  kGIF,
+  kICO,
+  kBMP,
+  kAVIF,
+  kJXL,
+  kInvalid
+};
 
 // An encoded image may include several auxiliary images within it. This enum
 // is used to index those images. Auxiliary images can have different sizes and
@@ -175,6 +186,10 @@ class CC_PAINT_EXPORT PaintImage {
     FrameKey(ContentId content_id, size_t frame_index);
     bool operator==(const FrameKey& other) const;
     bool operator!=(const FrameKey& other) const;
+    auto operator<=>(const FrameKey& other) const {
+      return std::tie(content_id_, frame_index_) <=>
+             std::tie(other.content_id_, other.frame_index_);
+    }
 
     size_t hash() const { return hash_; }
     std::string ToString() const;

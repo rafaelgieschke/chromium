@@ -22,6 +22,7 @@
 #include "chrome/browser/extensions/sync/extension_sync_data.h"
 #include "chrome/browser/extensions/sync/extension_sync_service_factory.h"
 #include "chrome/browser/extensions/sync/extension_sync_util.h"
+#include "chrome/browser/extensions/sync/features.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -71,7 +72,7 @@ bool IsCorrectSyncType(const Extension& extension, syncer::DataType type) {
 
 // Predicate for PendingExtensionManager.
 // TODO(crbug.com/41401013): The !is_theme check should be unnecessary after all
-// the bad data from crbug.com/558299 has been cleaned up.
+// the bad data from crbug.com/40445445 has been cleaned up.
 bool ShouldAllowInstall(const Extension* extension,
                         content::BrowserContext* context) {
   return !extension->is_theme() &&
@@ -104,6 +105,20 @@ syncer::SyncDataList ToSyncerSyncDataList(
   result.reserve(data.size());
   for (const ExtensionSyncData& item : data) {
     result.push_back(item.GetSyncData());
+  }
+  return result;
+}
+
+std::vector<ExtensionSyncData> ToExtensionSyncDataList(
+    const syncer::SyncDataList& data) {
+  std::vector<ExtensionSyncData> result;
+  result.reserve(data.size());
+  for (const syncer::SyncData& item : data) {
+    std::unique_ptr<ExtensionSyncData> extension_sync_data =
+        ExtensionSyncData::CreateFromSyncData(item);
+    if (extension_sync_data) {
+      result.push_back(std::move(*extension_sync_data));
+    }
   }
   return result;
 }
@@ -163,6 +178,8 @@ ExtensionSyncService::ExtensionSyncService(Profile* profile)
       flare_(sync_start_util::GetFlareForSyncableService(profile->GetPath())) {
   registry_observation_.Observe(ExtensionRegistry::Get(profile_));
   prefs_observation_.Observe(ExtensionPrefs::Get(profile_));
+  extension_management_observation_.Observe(
+      ExtensionManagementFactory::GetForBrowserContext(profile_));
 }
 
 ExtensionSyncService::~ExtensionSyncService() = default;
@@ -211,27 +228,9 @@ ExtensionSyncService::MergeDataAndStartSyncing(
   SyncBundle* bundle = GetSyncBundle(type);
   bundle->StartSyncing(std::move(sync_processor));
 
-  // Apply the initial sync data, filtering out any items where we have more
-  // recent local changes. Also tell the SyncBundle the extension IDs.
-  for (const syncer::SyncData& sync_data : initial_sync_data) {
-    std::unique_ptr<ExtensionSyncData> extension_sync_data(
-        ExtensionSyncData::CreateFromSyncData(sync_data));
-    // If the extension has local state that needs to be synced, ignore this
-    // change (we assume the local state is more recent).
-    if (extension_sync_data) {
-      if (!ExtensionPrefs::Get(profile_)->NeedsSync(
-              extension_sync_data->id())) {
-        ApplySyncData(*extension_sync_data);
-      } else if (ShouldPromoteToAccountExtension(*extension_sync_data)) {
-        // In this case, sync data is not applied as local state takes
-        // precedence. However, the incoming sync data indicates that the
-        // extension is part of the user's account and so it should be promoted
-        // to an account extension.
-        AccountExtensionTracker::Get(profile_)->OnExtensionSyncDataReceived(
-            extension_sync_data->id());
-      }
-    }
-  }
+  std::vector<ExtensionSyncData> sync_data_list =
+      ToExtensionSyncDataList(initial_sync_data);
+  ApplySyncDataList(sync_data_list);
 
   AccountExtensionTracker::Get(profile_)->OnInitialExtensionsSyncDataReceived();
 
@@ -308,6 +307,14 @@ std::string ExtensionSyncService::GetClientTag(
   return entity_data.specifics.app().extension().id();
 }
 
+void ExtensionSyncService::OnExtensionManagementSettingsChanged() {
+  if (base::FeatureList::IsEnabled(
+          extensions::kReinstallSyncedExtensionsOnPolicyChange)) {
+    ReloadSyncData(syncer::EXTENSIONS);
+    ReloadSyncData(syncer::APPS);
+  }
+}
+
 ExtensionSyncData ExtensionSyncService::CreateSyncData(
     const Extension& extension) const {
   const std::string& id = extension.id();
@@ -367,6 +374,39 @@ ExtensionSyncData ExtensionSyncService::CreateSyncData(
   return result;
 }
 
+void ExtensionSyncService::ReloadSyncData(syncer::DataType type) {
+  CHECK(type == syncer::EXTENSIONS || type == syncer::APPS);
+  SyncBundle* bundle = GetSyncBundle(type);
+  if (!bundle->IsSyncing()) {
+    return;
+  }
+
+  const std::vector<ExtensionSyncData> synced_extensions =
+      bundle->GetSyncedExtensionData();
+
+  ApplySyncDataList(synced_extensions);
+}
+
+void ExtensionSyncService::ApplySyncDataList(
+    const std::vector<ExtensionSyncData>& sync_data_list) {
+  // Apply the sync data, filtering out any items where we have more
+  // recent local changes.
+  for (const ExtensionSyncData& extension_sync_data : sync_data_list) {
+    // If the extension has local state that needs to be synced, ignore this
+    // change (we assume the local state is more recent).
+    if (!ExtensionPrefs::Get(profile_)->NeedsSync(extension_sync_data.id())) {
+      ApplySyncData(extension_sync_data);
+    } else if (ShouldPromoteToAccountExtension(extension_sync_data)) {
+      // In this case, sync data is not applied as local state takes
+      // precedence. However, the incoming sync data indicates that the
+      // extension is part of the user's account and so it should be promoted
+      // to an account extension.
+      AccountExtensionTracker::Get(profile_)->OnExtensionSyncDataReceived(
+          extension_sync_data.id());
+    }
+  }
+}
+
 void ExtensionSyncService::ApplySyncData(
     const ExtensionSyncData& extension_sync_data) {
   const std::string& id = extension_sync_data.id();
@@ -388,7 +428,7 @@ void ExtensionSyncService::ApplySyncData(
   // extension is default-installed, but the sync server has data from another
   // (non-default-installed) installation. We can't apply the sync data because
   // it would always override the local state (which would never get sync'd).
-  // See crbug.com/731824.
+  // See crbug.com/40525123.
   if (extension && !ShouldReceiveSyncData(*extension)) {
     return;
   }
@@ -697,7 +737,7 @@ void ExtensionSyncService::OnExtensionUninstalled(
   // TODO(tim): If we get here and IsSyncing is false, this will cause
   // "back from the dead" style bugs, because sync will add-back the extension
   // that was uninstalled here when MergeDataAndStartSyncing is called.
-  // See crbug.com/256795.
+  // See crbug.com/40323998.
   // Possible fix: Set NeedsSync here, then in MergeDataAndStartSyncing, if
   // NeedsSync is set but the extension isn't installed, send a sync deletion.
   if (!ignore_updates_) {

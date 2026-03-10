@@ -68,6 +68,7 @@ CONTENT_EXPORT extern const char kDisableLCDText[];
 CONTENT_EXPORT extern const char kDisableKillAfterBadIPC[];
 CONTENT_EXPORT extern const char kDisableLocalStorage[];
 CONTENT_EXPORT extern const char kDisableLogging[];
+CONTENT_EXPORT extern const char kDisableMainThreadNameOverride[];
 CONTENT_EXPORT extern const char kDisableMojoBroker[];
 CONTENT_EXPORT extern const char kDisableNewContentRenderingTimeout[];
 CONTENT_EXPORT extern const char kDisableNotifications[];
@@ -90,7 +91,6 @@ CONTENT_EXPORT extern const char kDisableSpeechSynthesisAPI[];
 CONTENT_EXPORT extern const char kDisableThreadedCompositing[];
 extern const char kDisableV8IdleTasks[];
 CONTENT_EXPORT extern const char kDisableWebRtcEncryption[];
-CONTENT_EXPORT extern const char kDisableWebGLImageChromium[];
 CONTENT_EXPORT extern const char kDisableWebSecurity[];
 CONTENT_EXPORT extern const char kDisableZeroCopyDxgiVideo[];
 CONTENT_EXPORT extern const char kDomAutomationController[];
@@ -118,14 +118,12 @@ extern const char kEnableSkiaBenchmarking[];
 CONTENT_EXPORT extern const char kEnableSmoothScrolling[];
 CONTENT_EXPORT extern const char kEnableSpatialNavigation[];
 CONTENT_EXPORT extern const char kEnableStrictMixedContentChecking[];
-CONTENT_EXPORT extern const char kEnableStrictPowerfulFeatureRestrictions[];
 CONTENT_EXPORT extern const char kEnableTracingFraction[];
 CONTENT_EXPORT extern const char kEnableUserMediaScreenCapturing[];
 CONTENT_EXPORT extern const char kEnableViewport[];
 CONTENT_EXPORT extern const char kEnableVtune[];
 CONTENT_EXPORT extern const char kEnableWebGLDeveloperExtensions[];
 CONTENT_EXPORT extern const char kEnableWebGLDraftExtensions[];
-CONTENT_EXPORT extern const char kEnableWebGLImageChromium[];
 CONTENT_EXPORT extern const char kEnableWebVR[];
 CONTENT_EXPORT extern const char kFileUrlPathAlias[];
 CONTENT_EXPORT extern const char kForceDisplayList2dCanvas[];
@@ -166,6 +164,7 @@ CONTENT_EXPORT extern const char kProcessPerSite[];
 CONTENT_EXPORT extern const char kProcessPerTab[];
 CONTENT_EXPORT extern const char kProcessType[];
 CONTENT_EXPORT extern const char kProtectedAudiencesConsentedDebugToken[];
+CONTENT_EXPORT extern const char kPseudonymizationSaltHandle[];
 CONTENT_EXPORT extern const char kPullToRefresh[];
 CONTENT_EXPORT extern const char kReduceAcceptLanguage[];
 CONTENT_EXPORT extern const char kReduceAcceptLanguageHTTP[];
@@ -175,9 +174,6 @@ CONTENT_EXPORT extern const char kRemoteDebuggingPort[];
 CONTENT_EXPORT extern const char kRemoteAllowOrigins[];
 CONTENT_EXPORT extern const char kRendererClientId[];
 extern const char kRendererCmdPrefix[];
-#if !BUILDFLAG(IS_ANDROID)
-CONTENT_EXPORT extern const char kRendererForInitialWebUI[];
-#endif  // !BUILDFLAG(IS_ANDROID)
 CONTENT_EXPORT extern const char kRendererProcess[];
 CONTENT_EXPORT extern const char kRendererProcessLaunchTimeTicks[];
 CONTENT_EXPORT extern const char kRendererProcessLimit[];
@@ -252,6 +248,7 @@ CONTENT_EXPORT extern const char kEnableLongpressDragSelection[];
 CONTENT_EXPORT extern const char kForceOnlineConnectionStateForIndicator[];
 CONTENT_EXPORT extern const char kRemoteDebuggingSocketName[];
 CONTENT_EXPORT extern const char kRendererWaitForJavaDebugger[];
+CONTENT_EXPORT extern const char kJavalessRenderers[];
 #endif
 
 #if BUILDFLAG(IS_IOS)

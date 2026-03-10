@@ -30,6 +30,8 @@ import org.chromium.chrome.browser.ChromeTabbedActivity2;
 import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.browserservices.intents.WebappConstants;
 import org.chromium.chrome.browser.document.ChromeLauncherActivity;
+import org.chromium.chrome.browser.open_in_app.OpenInAppDelegate;
+import org.chromium.chrome.browser.open_in_app.OpenInAppUtils;
 import org.chromium.chrome.browser.password_manager.CctPasswordSavingMetricsRecorderBridge;
 import org.chromium.chrome.browser.safe_browsing.SafeBrowsingBridge;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
@@ -40,7 +42,9 @@ import org.chromium.chrome.browser.tabmodel.TabClosureParams;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorSupplier;
 import org.chromium.components.embedder_support.util.UrlConstants;
+import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.components.external_intents.ExternalNavigationDelegate;
+import org.chromium.components.external_intents.ExternalNavigationHelper;
 import org.chromium.components.external_intents.ExternalNavigationParams;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.base.WindowAndroid;
@@ -56,7 +60,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     protected final Context mApplicationContext;
     private final Tab mTab;
     private final TabObserver mTabObserver;
-    private final @Nullable Supplier<TabModelSelector> mTabModelSelectorSupplier;
+    private final @Nullable Supplier<@Nullable TabModelSelector> mTabModelSelectorSupplier;
 
     private boolean mIsTabDestroyed;
     private @TabLaunchType int mTabLaunchType;
@@ -322,6 +326,16 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     @Override
     public boolean shouldSelfNavigationLaunchAsMultipleTask(ExternalNavigationParams params) {
         return false;
+    }
+
+    @Override
+    public void setExternalNavigationHelper(ExternalNavigationHelper delegate) {
+        OpenInAppDelegate.from(mTab).setExternalNavigationHelper(delegate);
+    }
+
+    @Override
+    public boolean allowExternalNavigationForHttpProtocols(GURL url) {
+        return OpenInAppUtils.isOpenInAppAvailable() && UrlUtilities.isHttpOrHttps(url);
     }
 
     /**

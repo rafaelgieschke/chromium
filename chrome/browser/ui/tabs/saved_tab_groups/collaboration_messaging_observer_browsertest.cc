@@ -25,8 +25,8 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/tab_strip_region_view.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
+#include "chrome/browser/ui/views/tabs/tab/tab_icon.h"
 #include "chrome/browser/ui/views/tabs/tab_group_header.h"
-#include "chrome/browser/ui/views/tabs/tab_icon.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
@@ -150,19 +150,15 @@ class CollaborationMessagingObserverBrowserTest
     };
     std::vector<base::test::FeatureRef> disabled_features;
 
-    if (GetParam().page_actions_migration_enabled) {
-      enabled_features.push_back({
-          features::kPageActionsMigration,
-          {
-              {
-                  features::kPageActionsMigrationCollaborationMessaging.name,
-                  "true",
-              },
-          },
-      });
-    } else {
-      disabled_features.push_back(features::kPageActionsMigration);
-    }
+    enabled_features.push_back({
+        features::kPageActionsMigration,
+        {
+            {
+                features::kPageActionsMigrationCollaborationMessaging.name,
+                GetParam().page_actions_migration_enabled ? "true" : "false",
+            },
+        },
+    });
     features_.InitWithFeaturesAndParameters(enabled_features,
                                             disabled_features);
     CHECK_EQ(IsPageActionsMigrationEnabled(),

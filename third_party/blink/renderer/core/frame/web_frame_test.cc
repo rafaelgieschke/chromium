@@ -64,6 +64,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/context_menu_data/context_menu_data.h"
 #include "third_party/blink/public/common/context_menu_data/edit_flags.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/input/web_coalesced_input_event.h"
 #include "third_party/blink/public/common/input/web_keyboard_event.h"
 #include "third_party/blink/public/common/loader/referrer_utils.h"
@@ -110,6 +111,7 @@
 #include "third_party/blink/public/web/web_searchable_form_data.h"
 #include "third_party/blink/public/web/web_security_policy.h"
 #include "third_party/blink/public/web/web_settings.h"
+#include "third_party/blink/public/web/web_spelling_marker.h"
 #include "third_party/blink/public/web/web_text_check_client.h"
 #include "third_party/blink/public/web/web_text_checking_completion.h"
 #include "third_party/blink/public/web/web_text_checking_result.h"
@@ -337,6 +339,8 @@ class WebFrameTest : public PageTestBase {
     // which is needed for Javascript URL security checks to work properly in
     // tests below.
     url::AddStandardScheme("chrome", url::SCHEME_WITH_HOST);
+    feature_list_.InitAndEnableFeature(
+        blink::features::kUnrestrictSpellingAndGrammarForTesting);
   }
 
   ~WebFrameTest() override {
@@ -518,6 +522,7 @@ class WebFrameTest : public PageTestBase {
 
   ScopedTestingPlatformSupport<TestingPlatformSupport> platform_;
   url::ScopedSchemeRegistryForTests scoped_registry_;
+  base::test::ScopedFeatureList feature_list_;
 };
 
 TEST_F(WebFrameTest, ContentText) {
@@ -1808,8 +1813,8 @@ TEST_F(WebFrameTest, ChangeInFixedLayoutResetsTextAutosizingMultipliers) {
       document->GetViewportData().GetViewportDescription();
   // Choose a width that's not going match the viewport width of the loaded
   // document.
-  description.min_width = Length::Fixed(100);
-  description.max_width = Length::Fixed(100);
+  description.min_width = ViewportLength::Fixed(100);
+  description.max_width = ViewportLength::Fixed(100);
   web_view_helper.GetWebView()->UpdatePageDefinedViewportConstraints(
       description);
 
@@ -5313,8 +5318,9 @@ TEST_F(WebFrameTest, FindInPageMatchRects) {
     Range* result = main_frame->GetTextFinder()->ActiveMatch();
     ASSERT_TRUE(result);
     result->setEnd(result->endContainer(), result->endOffset() + 3);
-    EXPECT_EQ(result->GetText(),
-              String::Format("%s %02d", kFindString, result_index + 2));
+    EXPECT_EQ(
+        result->GetText(),
+        UNSAFE_TODO(String::Format("%s %02d", kFindString, result_index + 2)));
 
     // Verify that the expected match rect also matches the currently active
     // match.  Compare the enclosing rects to prevent precision issues caused by
@@ -6978,7 +6984,7 @@ class TextCheckClient : public WebTextCheckClient {
   bool IsSpellCheckingEnabled() const override { return true; }
   void RequestCheckingOfText(
       const WebString&,
-      const std::vector<gfx::Range>& spelling_markers,
+      const std::vector<WebSpellingMarker>&,
       WebTextCheckClient::ShouldForceRefreshTextCheckService,
       std::unique_ptr<WebTextCheckingCompletion> completion) override {
     ++number_of_times_checked_;
@@ -7125,7 +7131,7 @@ class StubbornTextCheckClient : public WebTextCheckClient {
   bool IsSpellCheckingEnabled() const override { return true; }
   void RequestCheckingOfText(
       const WebString&,
-      const std::vector<gfx::Range>& spelling_markers,
+      const std::vector<WebSpellingMarker>&,
       WebTextCheckClient::ShouldForceRefreshTextCheckService,
       std::unique_ptr<WebTextCheckingCompletion> completion) override {
     completion_ = std::move(completion);
@@ -7296,13 +7302,6 @@ class TestAccessInitialDocumentLocalFrameHost
     std::move(callback).Run();
   }
   void RequestClose() override {}
-  void ShowCreatedWindow(const ::blink::LocalFrameToken& opener_frame_token,
-                         ::ui::mojom::blink::WindowOpenDisposition disposition,
-                         const mojom::blink::WindowFeaturesPtr window_features,
-                         bool opened_by_user_gesture,
-                         ShowCreatedWindowCallback callback) override {
-    std::move(callback).Run();
-  }
   void SetWindowRect(const ::gfx::Rect& bounds,
                      SetWindowRectCallback callback) override {
     std::move(callback).Run();
@@ -7654,8 +7653,8 @@ class TestNewWindowWebFrameClient
 
   // frame_test_helpers::TestWebFrameClient:
   void BeginNavigation(std::unique_ptr<WebNavigationInfo> info) override {
+    begin_navigation_call_count_++;
     if (ignore_navigations_) {
-      begin_navigation_call_count_++;
       return;
     }
     TestWebFrameClient::BeginNavigation(std::move(info));
@@ -12076,8 +12075,8 @@ TEST_F(WebFrameTest, EmptyJavascriptFrameUrl) {
 
   LocalFrame* child = To<LocalFrame>(
       helper.GetWebView()->GetPage()->MainFrame()->Tree().FirstChild());
-  EXPECT_EQ(BlankURL(), child->GetDocument()->Url());
-  EXPECT_EQ(BlankURL(), child->Loader().GetDocumentLoader()->Url());
+  EXPECT_EQ(BlankUrl(), child->GetDocument()->Url());
+  EXPECT_EQ(BlankUrl(), child->Loader().GetDocumentLoader()->Url());
 }
 
 class TestResourcePriorityWebFrameClient
@@ -13779,7 +13778,8 @@ TEST_F(WebFrameTest, ContextMenuDataNonLocatedMenu) {
 
   RunPendingTasks();
   web_view_helper.Reset();
-  EXPECT_EQ(frame.GetMenuData().source_type, kMenuSourceTouch);
+  EXPECT_EQ(frame.GetMenuData().source_type,
+            ui::mojom::blink::MenuSourceType::kTouch);
   EXPECT_FALSE(frame.GetMenuData().selected_text.empty());
 }
 
@@ -14845,6 +14845,57 @@ TEST_F(WebFrameTest, IframeMoveBeforeConnectedSubframeCount) {
   EXPECT_EQ(body->ConnectedSubframeCount(), 1u);
   EXPECT_EQ(old_parent->ConnectedSubframeCount(), 0u);
   EXPECT_EQ(new_parent->ConnectedSubframeCount(), 1u);
+}
+class IframeBeginNavivationCountTestWebFrameClient
+    : public frame_test_helpers::TestWebFrameClient {
+ public:
+  IframeBeginNavivationCountTestWebFrameClient() = default;
+  ~IframeBeginNavivationCountTestWebFrameClient() override = default;
+
+  // WebLocalFrameClient:
+  WebLocalFrame* CreateChildFrame(
+      mojom::blink::TreeScopeType scope,
+      const WebString& name,
+      const WebString& fallback_name,
+      const FramePolicy& frame_policy,
+      const WebFrameOwnerProperties&,
+      FrameOwnerElementType,
+      WebPolicyContainerBindParams policy_container_bind_params,
+      ukm::SourceId document_ukm_source_id,
+      FinishChildFrameCreationFn finish_creation) override {
+    auto client = std::make_unique<TestNewWindowWebFrameClient>();
+    client_ = client.get();
+    client_->set_sandbox_flags(frame_policy.sandbox_flags);
+    return CreateLocalChild(*Frame(), scope, std::move(client),
+                            std::move(policy_container_bind_params),
+                            finish_creation);
+  }
+
+  TestNewWindowWebFrameClient* iframe_client() const { return client_; }
+
+ private:
+  TestNewWindowWebFrameClient* client_ = nullptr;
+};
+
+TEST_F(WebFrameTest, SandboxedIframePopupCtrlClick) {
+  RegisterMockedHttpURLLoad("sandboxed-srcdoc-ctrl-click.html");
+  IframeBeginNavivationCountTestWebFrameClient web_frame_client;
+  frame_test_helpers::WebViewHelper web_view_helper;
+  web_view_helper.InitializeAndLoad(
+      base_url_ + "sandboxed-srcdoc-ctrl-click.html", &web_frame_client);
+
+  ASSERT_EQ(web_frame_client.iframe_client()->BeginNavigationCallCount(), 1);
+
+  LocalFrame* child = To<LocalFrame>(
+      web_view_helper.GetWebView()->GetPage()->MainFrame()->FirstChild());
+  Element* element =
+      child->GetDocument()->body()->getElementById(AtomicString("btn"));
+  To<HTMLElement>(element)->click();
+
+  // Clicking the button will attempt a synthetic Ctrl+Click from an iframe
+  // sandboxed without `allow-popups`. This should be blocked before reaching
+  // BeginNavigation().
+  EXPECT_EQ(web_frame_client.iframe_client()->BeginNavigationCallCount(), 1);
 }
 
 }  // namespace blink

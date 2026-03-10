@@ -37,8 +37,8 @@
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/css/vision_deficiency.h"
+#include "third_party/blink/renderer/core/dom/element_rare_data_vector.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
-#include "third_party/blink/renderer/core/dom/node_rare_data.h"
 #include "third_party/blink/renderer/core/dom/visited_link_state.h"
 #include "third_party/blink/renderer/core/editing/drag_caret.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
@@ -93,6 +93,7 @@
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme_overlay_mobile.h"
 #include "third_party/blink/renderer/core/svg/graphics/svg_image_chrome_client.h"
 #include "third_party/blink/renderer/core/svg/svg_document_resource_tracker.h"
+#include "third_party/blink/renderer/core/svg/svg_resource_scheduler_registry.h"
 #include "third_party/blink/renderer/platform/bindings/source_location.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/heap/disallow_new_wrapper.h"
@@ -540,11 +541,18 @@ SpatialNavigationController& Page::GetSpatialNavigationController() {
 
 SVGDocumentResourceTracker& Page::GetSVGDocumentResourceTracker() {
   if (!svg_document_resource_tracker_) {
-    svg_document_resource_tracker_ =
-        MakeGarbageCollected<SVGDocumentResourceTracker>(
-            GetPageScheduler()->GetAgentGroupScheduler().DefaultTaskRunner(),
-            SVGDocumentResourceTracker::MakeCacheIdentifier(
-                String(BrowsingContextGroupToken().ToString())));
+    if (RuntimeEnabledFeatures::
+            SvgPartitionSVGDocumentResourcesInMemoryCacheEnabled()) {
+      svg_document_resource_tracker_ =
+          SVGResourceSchedulerRegistry::GetTracker(GetAgentGroupScheduler());
+
+    } else {
+      svg_document_resource_tracker_ =
+          MakeGarbageCollected<SVGDocumentResourceTracker>(
+              GetPageScheduler()->GetAgentGroupScheduler().DefaultTaskRunner(),
+              SVGDocumentResourceTracker::MakeCacheIdentifier(
+                  String(BrowsingContextGroupToken().ToString())));
+    }
   }
   return *svg_document_resource_tracker_;
 }
@@ -1221,6 +1229,9 @@ void Page::SettingsChanged(ChangeType change_type) {
       ForcedColorsChanged();
       break;
     }
+    case ChangeType::kAcceptLanguages:
+      AcceptLanguagesChanged();
+      break;
   }
 }
 
@@ -1283,8 +1294,7 @@ void Page::DidCommitLoad(LocalFrame* frame) {
     // See crbug.com/642279
     GetVisualViewport().SetScrollOffset(
         ScrollOffset(), mojom::blink::ScrollType::kProgrammatic,
-        cc::ScrollSourceType::kNone, mojom::blink::ScrollBehavior::kInstant,
-        ScrollableArea::ScrollCallback());
+        cc::ScrollSourceType::kNone, mojom::blink::ScrollBehavior::kInstant);
   }
   // crbug/1312107: If DevTools has "Highlight ad frames" checked when the
   // main frame is refreshed or the ad frame is navigated to a different
@@ -1606,7 +1616,7 @@ void Page::PrepareForLeakDetection() {
 // Ensure the 10 bits reserved for connected frame count in NodeRareData are
 // sufficient.
 static_assert(kMaxNumberOfFrames <
-                  (1 << NodeRareData::kConnectedFrameCountBits),
+                  (1 << ElementRareDataVector::kConnectedFrameCountBits),
               "Frame limit should fit in rare data count");
 static_assert(kTenFrames < kMaxNumberOfFrames,
               "Reduced frame limit for testing should actually be lower");

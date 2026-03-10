@@ -195,8 +195,17 @@ public final class ChromePreferenceKeys {
     public static final String CONTEXT_MENU_SHOP_IMAGE_WITH_GOOGLE_LENS_CLICKED =
             "Chrome.ContextMenu.ShopImageWithGoogleLensClicked";
 
+    public static final String CROSS_DEVICE_IMPORTED_BOTTOM_OMNIBOX =
+            "Chrome.CrossDeviceImport.FinishedBottomOmnibox";
+
+    public static final String CROSS_DEVICE_IMPORTED_ALL_SETTINGS =
+            "Chrome.CrossDeviceImport.FinishedAllSettings";
+
+    public static final String NTP_CUSTOMIZATION_BACKGROUND_ENABLED =
+            "Chrome.Policy.NtpCustomBackgroundEnabled";
+
     /** The Uri of the NTP's background image. */
-    public static final String NTP_CUSTOMIZATION_BACKGROUND_IMAGE_TYPE =
+    public static final String NTP_CUSTOMIZATION_BACKGROUND_TYPE =
             "Chrome.NtpCustomization.NtpBackgroundImageType";
 
     /** The background color of NTP. */
@@ -386,6 +395,21 @@ public final class ChromePreferenceKeys {
     public static final String FLAGS_LAST_CACHED_MINIMAL_BROWSER_FLAGS_TIME_MILLIS =
             "Chrome.Flags.LastCachedMinimalBrowserFlagsTimeMillis";
 
+    /** Whether the Glic button is pinned in the tab strip. */
+    public static final String GLIC_BUTTON_PINNED = "Chrome.Glic.ButtonPinned";
+
+    /** Whether the precise location setting is enabled for Glic */
+    public static final String GLIC_PRECISE_LOCATION_SETTING_ENABLED =
+            "Chrome.Glic.PreciseLocationSettingEnabled";
+
+    /** Whether the share current tab default access is enabled for Glic */
+    public static final String GLIC_SHARE_CURRENT_TAB_DEFAULT_ACCESS_ENABLED =
+            "Chrome.Glic.ShareCurrentTabDefaultAccessEnabled";
+
+    /** Whether the auto-browse setting is enabled for Glic */
+    public static final String GLIC_AUTO_BROWSE_SETTING_ENABLED =
+            "Chrome.Glic.AutoBrowseSettingEnabled";
+
     public static final String HISTORY_SHOW_HISTORY_INFO = "history_home_show_info";
 
     /** Whether the app-specific history info text was already seen by users. */
@@ -461,22 +485,18 @@ public final class ChromePreferenceKeys {
     /**
      * When the user is shown a badge that the current Android OS version is unsupported, and they
      * tap it to display the menu (which has additional information), we store the current version
-     * of Chrome to this preference to ensure we only show the badge once. The value is cleared
-     * if the Chrome version later changes.
+     * of Chrome to this preference to ensure we only show the badge once. The value is cleared if
+     * the Chrome version later changes.
      */
     public static final String LATEST_UNSUPPORTED_VERSION = "android_os_unsupported_chrome_version";
 
-    /** The previous browser process PID, updated when crash reporting is initialized. */
+    /** The previous browser process exit reason, recorded when the process is created. */
+    public static final String LAST_SESSION_BROWSER_EXIT_REASON =
+            "Chrome.CrashReporting.LastSessionBrowserExitReason";
+
+    /** The previous browser process PID, updated on deferred Startup for any ChromeActivity. */
     public static final String LAST_SESSION_BROWSER_PID =
             "Chrome.CrashReporting.LastSessionBrowserPid";
-
-    /**
-     * The application state last recorded by browser in previous session, updated when crash
-     * reporting is initialized and when current application state changes henceforth. If read after
-     * crash reporting is initialized, then the value would hold current session state.
-     */
-    public static final String LAST_SESSION_APPLICATION_STATE =
-            "Chrome.CrashReporting.LastSessionApplicationState";
 
     public static final String LOCALE_MANAGER_AUTO_SWITCH = "LocaleManager_PREF_AUTO_SWITCH";
     public static final String LOCALE_MANAGER_MISSING_TIMEZONES =
@@ -517,6 +537,8 @@ public final class ChromePreferenceKeys {
             new KeyPrefix("Chrome.MultiInstance.ProfileType.*");
     public static final String MULTI_INSTANCE_RESTORATION_MESSAGE_SHOWN =
             "Chrome.MultiWindow.RestorationMessageShown";
+    public static final KeyPrefix MULTI_INSTANCE_LATEST_PERSISTENT_STATE_ID =
+            new KeyPrefix("Chrome.MultiInstance.LatestPersistentStateId.*");
 
     public static final String MULTI_INSTANCE_START_TIME = "Chrome.MultiInstance.StartTime";
 
@@ -552,6 +574,8 @@ public final class ChromePreferenceKeys {
             new KeyPrefix("Chrome.MultiInstance.CustomTitle.*");
     public static final KeyPrefix MULTI_INSTANCE_LAST_ACCESSED_TIME =
             new KeyPrefix("Chrome.MultiInstance.LastAccessedTime.*");
+    public static final KeyPrefix MULTI_INSTANCE_CLOSURE_TIME =
+            new KeyPrefix("Chrome.MultiInstance.ClosureTime.*");
     public static final KeyPrefix MULTI_INSTANCE_URL = new KeyPrefix("Chrome.MultiInstance.Url.*");
     public static final KeyPrefix MULTI_INSTANCE_MARKED_FOR_DELETION =
             new KeyPrefix("Chrome.MultiInstance.MarkedForDeletion.*");
@@ -559,16 +583,16 @@ public final class ChromePreferenceKeys {
     // Start timestamp of 1-day period for measuring the duration of disjoint time spent in various
     // windowing modes.
     public static final String MULTI_WINDOW_MODE_CYCLE_START_TIME =
-            "Chrome.MultiWindowMode.CycleStartTime";
+            "Chrome.MultiWindowMode.CycleStartTime3";
     // Start timestamp of the current windowing mode.
     public static final KeyPrefix MULTI_WINDOW_MODE_START_TIME =
-            new KeyPrefix("Chrome.MultiWindowMode.StartTime.*");
-    // Number of activities in the current windowing mode.
-    public static final KeyPrefix MULTI_WINDOW_MODE_ACTIVITY_COUNT =
-            new KeyPrefix("Chrome.MultiWindowMode.ActivityCount.*");
+            new KeyPrefix("Chrome.MultiWindowMode.StartTime3.*");
+    // Tracks window IDs of activities in a given windowing mode.
+    public static final KeyPrefix MULTI_WINDOW_MODE_ACTIVITIES =
+            new KeyPrefix("Chrome.MultiWindowMode.Activities3.*");
     // Aggregated duration of time spent in a given windowing mode.
     public static final KeyPrefix MULTI_WINDOW_MODE_DURATION_MS =
-            new KeyPrefix("Chrome.MultiWindowMode.DurationMs.*");
+            new KeyPrefix("Chrome.MultiWindowMode.DurationMs3.*");
 
     public static final String NOTIFICATIONS_CHANNELS_VERSION = "channels_version_key";
     public static final String NOTIFICATIONS_LAST_SHOWN_NOTIFICATION_TYPE =
@@ -579,10 +603,21 @@ public final class ChromePreferenceKeys {
     public static final String NOTIFICATION_PERMISSION_RATIONALE_TIMESTAMP_KEY =
             "Chrome.NotificationPermission.RationaleTimestamp";
 
+    /**
+     * Stores the system time in milliseconds when the notification permission was requested for the
+     * first time.
+     */
+    public static final String NOTIFICATION_PERMISSION_FIRST_REQUEST_TIMESTAMP =
+            "Chrome.NotificationPermission.FirstRequestTimestamp";
+
     // Number of times we've showed any prompt (either Android UI or Chrome rationale) related to
     // the notification permission.
     public static final String NOTIFICATION_PERMISSION_REQUEST_COUNT =
             "Chrome.NotificationPermission.RequestCount";
+
+    /** Indicates whether a chrome page URL has been overridden by an enterprise policy. */
+    public static final String NTP_LOCATION_POLICY_ENABLED =
+            "Chrome.PolicyUrlOverrides.NewTabPageLocation";
 
     public static final String NTP_SNIPPETS_IS_SCHEDULED = "ntp_snippets.is_scheduled";
 
@@ -674,8 +709,16 @@ public final class ChromePreferenceKeys {
     public static final KeyPrefix PAYMENTS_PAYMENT_INSTRUMENT_USE_DATE =
             new KeyPrefix("payment_instrument_use_date_*");
 
-    /** Preference to indicate whether payment request has been completed successfully once.*/
+    /** Preference to indicate whether payment request has been completed successfully once. */
     public static final String PAYMENTS_PAYMENT_COMPLETE_ONCE = "payment_complete_once";
+
+    /** Represents the current authoritative store type for a given window. */
+    public static final KeyPrefix TAB_PERSISTENCE_CURRENT_AUTHORITATIVE_STORE =
+            new KeyPrefix("Chrome.TabPersistence.CurrentAuthoritativeStore.*");
+
+    /** Represents a persistent store that has fully written all tab state for a given window. */
+    public static final KeyPrefix TAB_PERSISTENCE_SHADOW_WRITTEN_STORE =
+            new KeyPrefix("Chrome.TabPersistence.ShadowWrittenStore.*");
 
     /**
      * Indicates whether or not there is any persistent (i.e. non-transient) content in chrome that
@@ -776,13 +819,6 @@ public final class ChromePreferenceKeys {
     /** Is this client in the crash reporting group. */
     public static final String PRIVACY_IN_SAMPLE_FOR_CRASHES =
             "Chrome.Privacy.InSampleForCrashReporting";
-
-    /**
-     * This is deprecated and is going to be removed in the future (See https://crbug.com/1320040).
-     * Use PrivacyPreferencesManagerImpl#isUsageAndCrashReportingPermitted to know if metrics
-     * reporting is allowed.
-     */
-    @Deprecated public static final String PRIVACY_METRICS_REPORTING = "metrics_reporting";
 
     public static final String PRIVACY_METRICS_REPORTING_PERMITTED_BY_USER =
             "Chrome.Privacy.UsageAndCrashReportingPermittedByUser";
@@ -894,6 +930,15 @@ public final class ChromePreferenceKeys {
 
     // Segmentation platform related prefs.
     public static final String SEGMENTATION_FEED_ACTIVE_USER = "Chrome.Segmentation.FeedActiveUser";
+
+    /**
+     * Key prefix for boolean preferences indicating whether a specific Setup List item has been
+     * completed by the user. The ModuleType integer is appended to this prefix to form the unique
+     * key for each item. For example, "Chrome.SetupList.Completed.15" would be the key for the
+     * SIGN_IN_PROMO.
+     */
+    public static final KeyPrefix SETUP_LIST_COMPLETED_KEY_PREFIX =
+            new KeyPrefix("Chrome.SetupList.Completed.*");
 
     // Tracks which GUIDs there is an active notification for.
     public static final String SEND_TAB_TO_SELF_ACTIVE_NOTIFICATIONS =
@@ -1176,7 +1221,10 @@ public final class ChromePreferenceKeys {
                 CONTEXT_MENU_OPEN_IN_EPHEMERAL_TAB_CLICKED,
                 CONTEXT_MENU_SEARCH_WITH_GOOGLE_LENS_CLICKED,
                 CONTEXT_MENU_SHOP_IMAGE_WITH_GOOGLE_LENS_CLICKED,
-                NTP_CUSTOMIZATION_BACKGROUND_IMAGE_TYPE,
+                CROSS_DEVICE_IMPORTED_BOTTOM_OMNIBOX,
+                CROSS_DEVICE_IMPORTED_ALL_SETTINGS,
+                NTP_CUSTOMIZATION_BACKGROUND_ENABLED,
+                NTP_CUSTOMIZATION_BACKGROUND_TYPE,
                 NTP_CUSTOMIZATION_THEME_COLOR_ID,
                 NTP_CUSTOMIZATION_BACKGROUND_COLOR,
                 NTP_CUSTOMIZATION_PRIMARY_COLOR,
@@ -1215,6 +1263,10 @@ public final class ChromePreferenceKeys {
                 FIRST_RUN_SKIPPED_BY_POLICY,
                 FIRST_CTA_START_TIMESTAMP,
                 FLAGS_LAST_CACHED_MINIMAL_BROWSER_FLAGS_TIME_MILLIS,
+                GLIC_BUTTON_PINNED,
+                GLIC_PRECISE_LOCATION_SETTING_ENABLED,
+                GLIC_SHARE_CURRENT_TAB_DEFAULT_ACCESS_ENABLED,
+                GLIC_AUTO_BROWSE_SETTING_ENABLED,
                 HISTORY_APP_SPECIFIC_INFO_SEEN,
                 HOME_MODULE_CARDS_ENABLED,
                 HOME_MODULES_MODULE_TYPE.pattern(),
@@ -1234,14 +1286,15 @@ public final class ChromePreferenceKeys {
                 IS_LAST_VISITED_TAB_SRP,
                 IS_DSE_GOOGLE,
                 IS_MVT_VISIBLE,
+                LAST_SESSION_BROWSER_EXIT_REASON,
                 LAST_SESSION_BROWSER_PID,
-                LAST_SESSION_APPLICATION_STATE,
                 LOCALE_MANAGER_PROMO_V3_CHECKED,
                 MULTI_WINDOW_START_TIME,
                 MULTI_INSTANCE_CLOSE_WINDOW_SKIP_CONFIRM,
                 MULTI_INSTANCE_MAX_INSTANCE_LIMIT,
                 MULTI_INSTANCE_INSTANCE_LIMIT_DOWNGRADE_TRIGGERED,
                 MULTI_INSTANCE_PROFILE_TYPE.pattern(),
+                MULTI_INSTANCE_LATEST_PERSISTENT_STATE_ID.pattern(),
                 MULTI_INSTANCE_RESTORATION_MESSAGE_SHOWN,
                 MULTI_INSTANCE_IS_INCOGNITO_SELECTED.pattern(),
                 MULTI_INSTANCE_INCOGNITO_TAB_COUNT.pattern(),
@@ -1250,6 +1303,7 @@ public final class ChromePreferenceKeys {
                 MULTI_INSTANCE_MAX_INSTANCE_COUNT,
                 MULTI_INSTANCE_MAX_INSTANCE_COUNT_INCOGNITO,
                 MULTI_INSTANCE_LAST_ACCESSED_TIME.pattern(),
+                MULTI_INSTANCE_CLOSURE_TIME.pattern(),
                 MULTI_INSTANCE_START_TIME,
                 MULTI_INSTANCE_TAB_COUNT.pattern(),
                 MULTI_INSTANCE_TAB_COUNT_FOR_RELAUNCH.pattern(),
@@ -1258,12 +1312,14 @@ public final class ChromePreferenceKeys {
                 MULTI_INSTANCE_CUSTOM_TITLE.pattern(),
                 MULTI_INSTANCE_URL.pattern(),
                 MULTI_INSTANCE_MARKED_FOR_DELETION.pattern(),
-                MULTI_WINDOW_MODE_ACTIVITY_COUNT.pattern(),
+                MULTI_WINDOW_MODE_ACTIVITIES.pattern(),
                 MULTI_WINDOW_MODE_CYCLE_START_TIME,
                 MULTI_WINDOW_MODE_DURATION_MS.pattern(),
                 MULTI_WINDOW_MODE_START_TIME.pattern(),
                 NOTIFICATION_PERMISSION_RATIONALE_TIMESTAMP_KEY,
+                NOTIFICATION_PERMISSION_FIRST_REQUEST_TIMESTAMP,
                 NOTIFICATION_PERMISSION_REQUEST_COUNT,
+                NTP_LOCATION_POLICY_ENABLED,
                 OFFLINE_INDICATOR_V2_WALL_TIME_SHOWN_MS,
                 OFFLINE_INDICATOR_V2_LAST_UPDATE_WALL_TIME_MS,
                 OFFLINE_INDICATOR_V2_TIME_IN_FOREGROUND_MS,
@@ -1308,6 +1364,7 @@ public final class ChromePreferenceKeys {
                 SEARCH_ENGINE_CHOICE_PENDING_OS_CHOICE_DIALOG_SHOWN_ATTEMPTS,
                 SEGMENTATION_FEED_ACTIVE_USER,
                 SERIAL_NOTIFICATION_IDS,
+                SETUP_LIST_COMPLETED_KEY_PREFIX.pattern(),
                 SETTINGS_SAFETY_CHECK_LAST_RUN_TIMESTAMP,
                 SETTINGS_SAFETY_CHECK_RUN_COUNTER,
                 SHARING_LAST_SHARED_COMPONENT_NAME,
@@ -1333,6 +1390,8 @@ public final class ChromePreferenceKeys {
                 TAB_DECLUTTER_DIALOG_IPH_DISMISS_COUNT,
                 TAB_OR_GROUP_TEARING_MAX_INSTANCES_FAILURE_START_TIME_MS,
                 TAB_OR_GROUP_TEARING_MAX_INSTANCES_FAILURE_COUNT,
+                TAB_PERSISTENCE_CURRENT_AUTHORITATIVE_STORE.pattern(),
+                TAB_PERSISTENCE_SHADOW_WRITTEN_STORE.pattern(),
                 TIPS_NOTIFICATIONS_CHANNEL_ENABLED,
                 TIPS_NOTIFICATIONS_OPT_IN_PROMO_SHOWN,
                 TOOLBAR_TOP_ANCHORED,

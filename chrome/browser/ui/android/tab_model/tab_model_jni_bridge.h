@@ -38,7 +38,9 @@ class TabModelJniBridge : public TabModel {
                     const jni_zero::JavaRef<jobject>& jobj,
                     Profile* profile,
                     chrome::android::ActivityType activity_type,
-                    bool is_archived_tab_model);
+                    std::optional<chrome::android::CustomTabProfileType>
+                        custom_tab_profile_type,
+                    TabModelType tab_model_type);
   void Destroy(JNIEnv* env);
 
   TabModelJniBridge(const TabModelJniBridge&) = delete;
@@ -48,6 +50,7 @@ class TabModelJniBridge : public TabModel {
 
   void AssociateWithBrowserWindow(JNIEnv* env,
                                   long native_android_browser_window);
+  void DissociateWithBrowserWindow(JNIEnv* env);
   void TabAddedToModel(JNIEnv* env, TabAndroid* tab);
   TabAndroid* DuplicateTab(JNIEnv* env, TabAndroid* tab);
   void MoveTabToWindowForTesting(JNIEnv* env,
@@ -59,7 +62,7 @@ class TabModelJniBridge : public TabModel {
                                       long android_browser_window_ptr,
                                       int new_index);
   void SetMuteSetting(JNIEnv* env, std::vector<TabAndroid*> tabs, bool mute);
-  jint GetSessionIdForTesting(JNIEnv* env);
+  int32_t GetSessionIdForTesting(JNIEnv* env);
   chrome::android::ActivityType GetActivityTypeForTesting(JNIEnv* env);
 
   // TabModel::
@@ -77,11 +80,12 @@ class TabModelJniBridge : public TabModel {
   void ForceCloseAllTabs() override;
   void CloseTabAt(int index) override;
 
-  void CreateTab(TabAndroid* parent,
-                 content::WebContents* web_contents,
-                 int index,
-                 TabLaunchType type,
-                 bool should_pin) override;
+  tabs::TabInterface* CreateTab(
+      TabAndroid* parent,
+      std::unique_ptr<content::WebContents> web_contents,
+      int index,
+      TabLaunchType type,
+      bool should_pin) override;
   void HandlePopupNavigation(TabAndroid* parent,
                              NavigateParams* params) override;
 
@@ -109,13 +113,22 @@ class TabModelJniBridge : public TabModel {
   void CloseTabsNavigatedInTimeWindow(const base::Time& begin_time,
                                       const base::Time& end_time) override;
 
+  tabs::TabCollection* GetTabStripCollection() const override;
+
   tabs::TabInterface* DuplicateTab(TabAndroid* tab);
 
   // TODO(crbug.com/415351293): Implement these.
   // TabListInterface implementation.
   void ActivateTab(tabs::TabHandle tab) override;
   tabs::TabInterface* OpenTab(const GURL& url, int index) override;
-  void DiscardTab(tabs::TabHandle tab) override;
+  void SetOpenerForTab(tabs::TabHandle target, tabs::TabHandle opener) override;
+  tabs::TabInterface* GetOpenerForTab(tabs::TabHandle target) override;
+  tabs::TabInterface* InsertWebContentsAt(
+      int index,
+      std::unique_ptr<content::WebContents> web_contents,
+      bool should_pin,
+      std::optional<tab_groups::TabGroupId> group) override;
+  content::WebContents* DiscardTab(tabs::TabHandle tab) override;
   tabs::TabInterface* DuplicateTab(tabs::TabHandle tab) override;
   tabs::TabInterface* GetTab(int index) override;
   int GetIndexOfTab(tabs::TabHandle tab) override;
@@ -128,8 +141,14 @@ class TabModelJniBridge : public TabModel {
   void UnpinTab(tabs::TabHandle tab) override;
   bool ContainsTabGroup(tab_groups::TabGroupId group_id) override;
   std::vector<tab_groups::TabGroupId> ListTabGroups() override;
+  std::optional<tab_groups::TabGroupVisualData> GetTabGroupVisualData(
+      tab_groups::TabGroupId group_id) override;
+  gfx::Range GetTabGroupTabIndices(tab_groups::TabGroupId group_id) override;
   std::optional<tab_groups::TabGroupId> CreateTabGroup(
       const std::vector<tabs::TabHandle>& tabs) override;
+  void SetTabGroupVisualData(
+      tab_groups::TabGroupId group_id,
+      const tab_groups::TabGroupVisualData& visual_data) override;
   std::optional<tab_groups::TabGroupId> AddTabsToGroup(
       std::optional<tab_groups::TabGroupId> group_id,
       const std::set<tabs::TabHandle>& tabs) override;
@@ -141,6 +160,8 @@ class TabModelJniBridge : public TabModel {
   void MoveTabGroupToWindow(tab_groups::TabGroupId group_id,
                             SessionID destination_window_id,
                             int destination_index) override;
+  bool IsThisTabListEditable() override;
+  bool IsClosingAllTabs() override;
 
   // Returns a corresponding Java Class object.
   static jclass GetClazz(JNIEnv* env);
@@ -165,7 +186,7 @@ class TabModelJniBridge : public TabModel {
   bool is_archived_tab_model_;
   // Cannot use a conventional member variable because this is initialized after
   // the constructor.
-  std::unique_ptr<ui::ScopedUnownedUserData<TabModel>>
+  std::unique_ptr<ui::ScopedUnownedUserData<TabListInterface>>
       scoped_unowned_user_data_;
 };
 

@@ -38,10 +38,10 @@ import org.mockito.Spy;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.annotation.Config;
-import org.robolectric.annotation.LooperMode;
 
 import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Batch;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.app.bookmarks.BookmarkEditActivity;
@@ -55,7 +55,7 @@ import org.chromium.chrome.browser.ui.messages.snackbar.Snackbar;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.components.bookmarks.BookmarkId;
 import org.chromium.components.bookmarks.BookmarkType;
-import org.chromium.components.browser_ui.widget.dragreorder.DragReorderableRecyclerViewAdapter;
+import org.chromium.components.browser_ui.widget.dragreorder.DragTouchHandler;
 import org.chromium.components.browser_ui.widget.selectable_list.SelectableListToolbar.NavigationButton;
 import org.chromium.components.browser_ui.widget.selectable_list.SelectionDelegate;
 import org.chromium.ui.base.Clipboard;
@@ -75,7 +75,6 @@ import java.util.function.BooleanSupplier;
 @Batch(Batch.UNIT_TESTS)
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
-@LooperMode(LooperMode.Mode.LEGACY)
 public class BookmarkToolbarMediatorTest {
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
 
@@ -84,7 +83,7 @@ public class BookmarkToolbarMediatorTest {
             new ActivityScenarioRule<>(TestActivity.class);
 
     @Mock private BookmarkDelegate mBookmarkDelegate;
-    @Mock private DragReorderableRecyclerViewAdapter mDragReorderableRecyclerViewAdapter;
+    @Mock private DragTouchHandler mDragTouchHandler;
     @Mock private BookmarkOpener mBookmarkOpener;
     @Mock private SelectionDelegate mSelectionDelegate;
     @Mock private Runnable mNavigateBackRunnable;
@@ -144,7 +143,7 @@ public class BookmarkToolbarMediatorTest {
                         mContext,
                         mProfile,
                         mModel,
-                        mDragReorderableRecyclerViewAdapter,
+                        mDragTouchHandler,
                         mBookmarkDelegateSupplier,
                         mSelectionDelegate,
                         mBookmarkModel,
@@ -157,6 +156,7 @@ public class BookmarkToolbarMediatorTest {
                         mSnackbarManager,
                         mClipboard);
         mBookmarkDelegateSupplier.set(mBookmarkDelegate);
+        RobolectricUtil.runAllBackgroundAndUi();
     }
 
     private boolean navigationButtonMatchesModel(@NavigationButton int navigationButton) {
@@ -181,7 +181,7 @@ public class BookmarkToolbarMediatorTest {
                         mContext,
                         mProfile,
                         mModel,
-                        mDragReorderableRecyclerViewAdapter,
+                        mDragTouchHandler,
                         mBookmarkDelegateSupplier,
                         mSelectionDelegate,
                         mBookmarkModel,

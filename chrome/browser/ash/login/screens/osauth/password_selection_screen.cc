@@ -21,7 +21,6 @@
 #include "chrome/browser/ash/login/screens/base_screen.h"
 #include "chrome/browser/ash/login/screens/osauth/base_osauth_setup_screen.h"
 #include "chrome/browser/ash/login/wizard_context.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -66,7 +65,7 @@ void MaybeExitWhenNoOnlinePassword(bool has_online_password) {
     return;
   }
   LOG(ERROR) << "Managed users should have online password by this point";
-  chrome::AttemptUserExit();
+  session_manager::SessionManager::Get()->RequestSignOut();
 }
 
 }  // namespace
@@ -123,7 +122,7 @@ void PasswordSelectionScreen::HideImpl() {
   is_shown_ = false;
 }
 
-void PasswordSelectionScreen::OnUserAction(const base::Value::List& args) {
+void PasswordSelectionScreen::OnUserAction(const base::ListValue& args) {
   const std::string& action_id = args[0].GetString();
   if (action_id == kUserActionBack) {
     exit_callback_.Run(Result::BACK);

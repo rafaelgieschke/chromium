@@ -18,7 +18,7 @@
 #include "net/base/io_buffer.h"
 
 // Must come after all headers that specialize FromJniType() / ToJniType().
-#include "components/embedder_support/android/util_jni_headers/InputStreamUtil_jni.h"
+#include "components/embedder_support/android/util_jni/InputStreamUtil_jni.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ClearException;
@@ -128,7 +128,7 @@ bool InputStream::Read(net::IOBuffer* dest, int length, int* bytes_read) {
     // Copy the data over to the provided C++ IOBuffer.
     DCHECK_GE(remaining_length, transfer_length);
     env->GetByteArrayRegion(buffer_.obj(), 0, transfer_length,
-                            reinterpret_cast<jbyte*>(dest_write_ptr));
+                            reinterpret_cast<int8_t*>(dest_write_ptr));
     if (ClearException(env))
       return false;
 

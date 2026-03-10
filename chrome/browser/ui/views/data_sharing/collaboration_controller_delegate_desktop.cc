@@ -4,20 +4,21 @@
 
 #include "chrome/browser/ui/views/data_sharing/collaboration_controller_delegate_desktop.h"
 
+#include "build/branding_buildflags.h"
 #include "chrome/browser/collaboration/collaboration_service_factory.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/dialogs/browser_dialogs.h"
 #include "chrome/browser/ui/profiles/profile_view_utils.h"
-#include "chrome/browser/ui/tabs/saved_tab_groups/tab_group_action_context_desktop.h"
+#include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
 #include "chrome/browser/ui/views/data_sharing/account_card_view.h"
 #include "chrome/browser/ui/views/data_sharing/data_sharing_bubble_controller.h"
 #include "chrome/common/webui_url_constants.h"
@@ -164,8 +165,6 @@ CollaborationControllerDelegateDesktop::CollaborationControllerDelegateDesktop(
       collaboration_service_(
           collaboration::CollaborationServiceFactory::GetForProfile(
               browser_->GetProfile())) {
-  browser_list_observer_.Observe(BrowserList::GetInstance());
-
   // Register for browser closed callback.
   if (browser_) {
     browser_close_subscription_ =
@@ -350,9 +349,8 @@ void CollaborationControllerDelegateDesktop::PromoteTabGroup(
     std::move(result).Run(CollaborationControllerDelegate::Outcome::kFailure);
     return;
   }
-  tab_group_sync_service->OpenTabGroup(
-      sync_id, std::make_unique<tab_groups::TabGroupActionContextDesktop>(
-                   browser_, tab_groups::OpeningSource::kConnectOnGroupShare));
+  tab_groups::SavedTabGroupUtils::OpenSavedTabGroup(
+      browser_, sync_id, tab_groups::OpeningSource::kConnectOnGroupShare);
   std::move(result).Run(CollaborationControllerDelegate::Outcome::kSuccess);
 }
 

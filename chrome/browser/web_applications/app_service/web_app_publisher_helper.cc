@@ -21,7 +21,6 @@
 #include "base/check.h"
 #include "base/check_op.h"
 #include "base/containers/checked_iterators.h"
-#include "base/containers/contains.h"
 #include "base/containers/extend.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
@@ -48,7 +47,6 @@
 #include "build/build_config.h"
 #include "build/buildflag.h"
 #include "chrome/browser/apps/app_service/app_icon/app_icon_factory.h"
-#include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/apps/app_service/intent_util.h"
@@ -86,6 +84,7 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/services/app_service/public/cpp/app_launch_params.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "components/services/app_service/public/cpp/file_handler.h"
 #include "components/services/app_service/public/cpp/icon_effects.h"
@@ -130,6 +129,7 @@
 #include "components/app_restore/full_restore_save_handler.h"
 #include "components/app_restore/full_restore_utils.h"
 #include "components/services/app_service/public/cpp/app_registry_cache.h"
+#include "components/services/app_service/public/cpp/preferred_apps_list_handle.h"
 #include "components/sessions/core/session_id.h"
 #include "extensions/browser/api/file_handlers/mime_util.h"  // nogncheck
 #include "ui/message_center/public/cpp/notification.h"
@@ -281,6 +281,7 @@ apps::InstallSource GetInstallSource(
     case webapps::WebappInstallSource::OOBE_APP_RECOMMENDATIONS:
     case webapps::WebappInstallSource::WEB_INSTALL:
     case webapps::WebappInstallSource::CHROMEOS_HELP_APP:
+    case webapps::WebappInstallSource::MIGRATION:
       return apps::InstallSource::kBrowser;
     case webapps::WebappInstallSource::ARC:
       return apps::InstallSource::kPlayStore;
@@ -315,8 +316,9 @@ apps::Readiness ConvertWebappUninstallSourceToReadiness(
     case webapps::WebappUninstallSource::kParentUninstall:
     case webapps::WebappUninstallSource::kTestCleanup:
     case webapps::WebappUninstallSource::kDevtools:
+    case webapps::WebappUninstallSource::kAppMigration:
       return apps::Readiness::kUninstalledByUser;
-    case webapps::WebappUninstallSource::kMigration:
+    case webapps::WebappUninstallSource::kUninstallAndReplaceMigration:
     case webapps::WebappUninstallSource::kInternalPreinstalled:
     case webapps::WebappUninstallSource::kExternalPreinstalled:
     case webapps::WebappUninstallSource::kExternalPolicy:
@@ -325,6 +327,7 @@ apps::Readiness ConvertWebappUninstallSourceToReadiness(
     case webapps::WebappUninstallSource::kInstallUrlDeduping:
     case webapps::WebappUninstallSource::kHealthcareUserInstallCleanup:
     case webapps::WebappUninstallSource::kIwaEnterprisePolicy:
+    case webapps::WebappUninstallSource::kIwaBlocklisted:
       return apps::Readiness::kUninstalledByNonUser;
   }
 }
@@ -484,6 +487,39 @@ apps::IntentFilters CreateIntentFiltersFromFileHandlers(
   return filters;
 }
 
+#if BUILDFLAG(IS_CHROMEOS)
+bool AppHasSupportedLinks(apps::AppServiceProxy* proxy,
+                         const webapps::AppId& app_id) {
+  bool has_intent_filters = false;
+  proxy->AppRegistryCache().ForOneApp(
+      app_id, [&](const apps::AppUpdate& update) {
+        for (auto& intent_filter : update.IntentFilters()) {
+          if (apps_util::IsSupportedLinkForApp(app_id, intent_filter)) {
+            has_intent_filters = true;
+            break;
+          }
+        }
+      });
+  return has_intent_filters;
+}
+
+bool AreOtherAppsPreferredForLinks(
+    apps::AppServiceProxy* proxy,
+    const webapps::AppId& app_id,
+    const std::optional<apps::IntentFilters>& new_app_intent_filters) {
+  if (!new_app_intent_filters.has_value() || new_app_intent_filters->empty()) {
+    return false;
+  }
+
+  base::flat_set<std::string> preferred_apps =
+      proxy->PreferredAppsList().FindPreferredAppsForFilters(
+          *new_app_intent_filters);
+  preferred_apps.erase(app_id);
+
+  return preferred_apps.size() > 0;
+}
+#endif  //  BUILDFLAG(IS_CHROMEOS)
+
 }  // namespace
 
 void UninstallImpl(WebAppProvider* provider,
@@ -544,7 +580,7 @@ WebAppPublisherHelper::~WebAppPublisherHelper() = default;
 // static
 bool WebAppPublisherHelper::IsSupportedWebAppPermissionType(
     ContentSettingsType permission_type) {
-  return base::Contains(kSupportedPermissionTypes, permission_type);
+  return std::ranges::contains(kSupportedPermissionTypes, permission_type);
 }
 
 void WebAppPublisherHelper::Shutdown() {
@@ -664,8 +700,9 @@ apps::IntentFilters WebAppPublisherHelper::CreateIntentFiltersForWebApp(
 
   // TODO(crbug.com/458291386): Launch protocol handlers for all PWAs (and not
   // just IWAs) on ChromeOS -- this requires some additional UX work.
-  if (provider.registrar_unsafe().AppMatches(app.app_id(),
-                                             WebAppFilter::IsIsolatedApp())) {
+  if (provider.registrar_unsafe().AppMatches(
+          app.app_id(),
+          WebAppFilter::IsIsolatedApp() | WebAppFilter::IsIsolatedSubApp())) {
     // Includes all protocol handlers except for the ones that the user has
     // explicitly disallowed.
     const std::vector<custom_handlers::ProtocolHandler> protocol_handlers =
@@ -704,6 +741,7 @@ apps::AppPtr WebAppPublisherHelper::CreateWebApp(const WebApp* web_app) {
                                       : apps::Readiness::kReady);
       break;
     case proto::InstallState::SUGGESTED_FROM_ANOTHER_DEVICE:
+    case proto::InstallState::SUGGESTED_FROM_MIGRATION:
       readiness = apps::Readiness::kDisabledByUser;
   }
 
@@ -723,7 +761,8 @@ apps::AppPtr WebAppPublisherHelper::CreateWebApp(const WebApp* web_app) {
 
   app->description =
       provider_->registrar_unsafe().GetAppDescription(web_app->app_id());
-  if (web_app->isolation_data().has_value()) {
+  if (provider_->registrar_unsafe().AppMatches(web_app->app_id(),
+                                               WebAppFilter::IsIsolatedApp())) {
     // Show the version of Isolated Web App in ChromeOS Settings
     app->version = web_app->isolation_data()->version().GetString();
   }
@@ -750,7 +789,9 @@ apps::AppPtr WebAppPublisherHelper::CreateWebApp(const WebApp* web_app) {
   app->permissions = CreatePermissions(web_app);
 
   // Isolated web apps can only be opened in window.
-  app->allow_window_mode_selection = !web_app->isolation_data().has_value();
+  app->allow_window_mode_selection = !provider_->registrar_unsafe().AppMatches(
+      web_app->app_id(),
+      WebAppFilter::IsIsolatedApp() | WebAppFilter::IsIsolatedSubApp());
 
   SetWebAppShowInFields(web_app, *app);
 
@@ -876,9 +917,7 @@ void WebAppPublisherHelper::UninstallWebApp(
           : std::make_unique<ScopedProfileKeepAlive>(
                 profile_, ProfileKeepAliveOrigin::kWebAppUninstall);
   // Ensure profile is kept alive until ClearSiteData is done.
-  auto callback = base::BindOnce(
-      [](std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive) {},
-      std::move(profile_keep_alive));
+  auto callback = base::DoNothingWithBoundArgs(std::move(profile_keep_alive));
   content::ClearSiteData(
       profile()->GetWeakPtr(),
       /*storage_partition_config=*/std::nullopt, origin,
@@ -1255,7 +1294,7 @@ apps::WindowMode WebAppPublisherHelper::ConvertDisplayModeToWindowMode(
     case blink::mojom::DisplayMode::kStandalone:
     case blink::mojom::DisplayMode::kFullscreen:
     case blink::mojom::DisplayMode::kWindowControlsOverlay:
-    case blink::mojom::DisplayMode::kBorderless:
+    case blink::mojom::DisplayMode::kUnframed:
     case blink::mojom::DisplayMode::kPictureInPicture:
       return apps::WindowMode::kWindow;
   }
@@ -1361,17 +1400,28 @@ void WebAppPublisherHelper::OnWebAppInstalled(const webapps::AppId& app_id) {
     // the raw icon might have changed. Notify App Service to invalidate the
     // icon disk cache.
     app->icon_key->update_version = true;
-    delegate_->PublishWebApp(std::move(app));
-  }
 
-// Todo(b:372661290): Extract custom link preference handling into a new post
-// web app install hook.
 #if BUILDFLAG(IS_CHROMEOS)
-  if (ChromeOsWebAppExperiments::ShouldAddLinkPreference(app_id, profile_)) {
-    auto* proxy = apps::AppServiceProxyFactory::GetForProfile(profile_);
-    proxy->SetSupportedLinksPreference(app_id);
-  }
+    bool iwa_capture_links_set_default =
+        registrar().AppMatches(app_id, WebAppFilter::IsIsolatedApp() |
+                                           WebAppFilter::IsIsolatedSubApp()) &&
+        !AreOtherAppsPreferredForLinks(
+            apps::AppServiceProxyFactory::GetForProfile(profile_), app_id,
+            app->intent_filters);
 #endif  // BUILDFLAG(IS_CHROMEOS)
+
+    delegate_->PublishWebApp(std::move(app));
+
+    // Todo(b:372661290): Extract custom link preference handling into a new
+    // post web app install hook.
+#if BUILDFLAG(IS_CHROMEOS)
+    if (iwa_capture_links_set_default ||
+        ChromeOsWebAppExperiments::ShouldAddLinkPreference(app_id, profile_)) {
+      auto* proxy = apps::AppServiceProxyFactory::GetForProfile(profile_);
+      proxy->SetSupportedLinksPreference(app_id);
+    }
+#endif  // BUILDFLAG(IS_CHROMEOS)
+  }
 }
 
 void WebAppPublisherHelper::OnWebAppInstalledWithOsHooks(
@@ -1387,12 +1437,34 @@ void WebAppPublisherHelper::OnWebAppManifestUpdated(
   const WebApp* web_app = GetWebApp(app_id);
   if (web_app) {
     auto app = CreateWebApp(web_app);
+
+#if BUILDFLAG(IS_CHROMEOS)
+    auto* proxy = apps::AppServiceProxyFactory::GetForProfile(profile_);
+
+    bool iwa_capture_links_set_default =
+        registrar().AppMatches(app_id, WebAppFilter::IsIsolatedApp() |
+                                           WebAppFilter::IsIsolatedSubApp()) &&
+        (proxy->PreferredAppsList().IsPreferredAppForSupportedLinks(app_id) ||
+         // IsPreferredAppForSupportedLinks returns false if app has 0 intent
+         // filters, regardless of SetSupportedLinksPreference was called on
+         // install.
+         (!AppHasSupportedLinks(proxy, app_id) &&
+          !AreOtherAppsPreferredForLinks(proxy, app_id, app->intent_filters)));
+
+#endif  //  BUILDFLAG(IS_CHROMEOS)
+
     // The manifest updated might cause the app raw icon updated. So set
     // a new `raw_icon_data_version`, to remove the icon files saved in the
     // AppService icon directory, to get the new raw icon files of the web app
     // for AppService.
     app->icon_key->update_version = true;
     delegate_->PublishWebApp(std::move(app));
+
+#if BUILDFLAG(IS_CHROMEOS)
+    if (iwa_capture_links_set_default) {
+      proxy->SetSupportedLinksPreference(app_id);
+    }
+#endif  //  BUILDFLAG(IS_CHROMEOS)
   }
 }
 

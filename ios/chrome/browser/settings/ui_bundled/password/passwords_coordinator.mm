@@ -23,6 +23,7 @@
 #import "ios/chrome/browser/favicon/model/favicon_loader.h"
 #import "ios/chrome/browser/favicon/model/ios_chrome_favicon_loader_factory.h"
 #import "ios/chrome/browser/feature_engagement/model/tracker_factory.h"
+#import "ios/chrome/browser/passwords/coordinator/password_utils.h"
 #import "ios/chrome/browser/passwords/model/ios_chrome_password_check_manager.h"
 #import "ios/chrome/browser/passwords/model/ios_chrome_password_check_manager_factory.h"
 #import "ios/chrome/browser/passwords/model/metrics/ios_password_manager_metrics.h"
@@ -43,12 +44,11 @@
 #import "ios/chrome/browser/settings/ui_bundled/password/passwords_settings_commands.h"
 #import "ios/chrome/browser/settings/ui_bundled/password/reauthentication/local_reauthentication_coordinator.h"
 #import "ios/chrome/browser/settings/ui_bundled/password/widget_promo_instructions/widget_promo_instructions_coordinator.h"
-#import "ios/chrome/browser/settings/ui_bundled/utils/password_utils.h"
 #import "ios/chrome/browser/shared/coordinator/alert/action_sheet_coordinator.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
 #import "ios/chrome/browser/shared/public/commands/browser_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/settings_commands.h"
 #import "ios/chrome/browser/shared/public/commands/snackbar_commands.h"
 #import "ios/chrome/browser/signin/model/identity_manager_factory.h"
@@ -121,7 +121,8 @@
       _trustedVaultReauthenticationCoordinator;
 
   // The coordinator for the Credential Exchange feature handling the import.
-  CredentialImportCoordinator* _credentialImportCoordinator;
+  CredentialImportCoordinator* _credentialImportCoordinator
+      API_AVAILABLE(ios(26.0));
 
   // If needed, used for sign-in during the Credential Exchange import flow.
   SigninCoordinator* _signinCoordinator;
@@ -178,8 +179,8 @@
   self.passwordsViewController = passwordsViewController;
 
   CommandDispatcher* dispatcher = self.browser->GetCommandDispatcher();
-  passwordsViewController.applicationHandler =
-      HandlerForProtocol(dispatcher, ApplicationCommands);
+  passwordsViewController.sceneHandler =
+      HandlerForProtocol(dispatcher, SceneCommands);
   passwordsViewController.browserHandler =
       HandlerForProtocol(dispatcher, BrowserCommands);
   passwordsViewController.settingsHandler =
@@ -236,7 +237,9 @@
   self.addPasswordCoordinator.delegate = nil;
   self.addPasswordCoordinator = nil;
 
-  [self dismissCredentialImportCoordinator];
+  if (@available(iOS 26, *)) {
+    [self dismissCredentialImportCoordinator];
+  }
   [self dismissSigninCoordinator];
 
   [self.reauthCoordinator stop];
@@ -503,9 +506,11 @@
 
   [_visitsRecorder maybeRecordVisitMetric];
 
-  if (self.credentialImportUUID) {
-    [self startCredentialImport];
-    return;
+  if (@available(iOS 26, *)) {
+    if (self.credentialImportUUID) {
+      [self startCredentialImport];
+      return;
+    }
   }
 
   [self.mediator askFETToShowPasswordManagerWidgetPromo];
@@ -555,7 +560,7 @@
 #pragma mark - CredentialImportCoordinatorDelegate
 
 - (void)credentialImportCoordinatorDidFinish:
-    (CredentialImportCoordinator*)coordinator {
+    (CredentialImportCoordinator*)coordinator API_AVAILABLE(ios(26.0)) {
   CHECK_EQ(coordinator, _credentialImportCoordinator);
   [self dismissCredentialImportCoordinator];
   [self restartReauthCoordinator];
@@ -648,7 +653,7 @@
 
 // Starts the credential import. If the user is signed-in, then displays the
 // credential import sheet. Otherwise, display a sign-in sheet.
-- (void)startCredentialImport {
+- (void)startCredentialImport API_AVAILABLE(ios(26.0)) {
   CHECK(self.credentialImportUUID);
   signin::IdentityManager* identityManager =
       IdentityManagerFactory::GetForProfile(self.profile);
@@ -685,7 +690,8 @@
 // in, starts the credential import coordinator. Otherwise, just returns as the
 // import should not start.
 - (void)signinForImportFinishedWithCoordinator:(SigninCoordinator*)coordinator
-                                      identity:(id<SystemIdentity>)identity {
+                                      identity:(id<SystemIdentity>)identity
+    API_AVAILABLE(ios(26.0)) {
   CHECK_EQ(coordinator, _signinCoordinator);
   [self dismissSigninCoordinator];
   if (identity) {
@@ -694,7 +700,7 @@
 }
 
 // Starts the credential import coordinator.
-- (void)startCredentialImportCoordinator {
+- (void)startCredentialImportCoordinator API_AVAILABLE(ios(26.0)) {
   [self stopReauthCoordinatorBeforeStartingChildCoordinator];
 
   _credentialImportCoordinator = [[CredentialImportCoordinator alloc]
@@ -708,7 +714,7 @@
 }
 
 // Stops the credential import coordinator.
-- (void)dismissCredentialImportCoordinator {
+- (void)dismissCredentialImportCoordinator API_AVAILABLE(ios(26.0)) {
   [_credentialImportCoordinator stop];
   _credentialImportCoordinator.delegate = nil;
   _credentialImportCoordinator = nil;

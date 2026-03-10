@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
@@ -20,6 +19,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
+#include "base/time/time.h"
+#include "base/time/time_override.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -193,12 +194,16 @@ class FormStructureBrowserTest
 
   std::unique_ptr<HttpResponse> HandleRequest(const HttpRequest& request);
 
+  static base::Time GetTestTime() { return test_time_; }
+
   // The response content to be returned by the embedded test server. Note that
   // this is populated in the main thread as a part of the setup in the
   // GenerateResults method but it is consumed later in the IO thread by the
   // embedded test server to generate the response.
   std::string html_content_;
 
+  static inline base::Time test_time_;
+  std::unique_ptr<base::subtle::ScopedTimeClockOverrides> time_override_;
   test::AutofillBrowserTestEnvironment autofill_test_environment_;
   TestAutofillManagerInjector<TestAutofillManager> autofill_manager_injector_;
   base::test::ScopedFeatureList feature_list_;
@@ -206,6 +211,10 @@ class FormStructureBrowserTest
 
 FormStructureBrowserTest::FormStructureBrowserTest()
     : ::testing::DataDrivenTest(GetTestDataDir(), kFeatureName, kTestName) {
+  std::ignore = base::Time::FromString("Sat, 01 Feb 2025 09:00:00 +0000",
+                                       &FormStructureBrowserTest::test_time_);
+  time_override_ = std::make_unique<base::subtle::ScopedTimeClockOverrides>(
+      &FormStructureBrowserTest::GetTestTime, nullptr, nullptr);
   feature_list_.InitWithFeatures(
       // Enabled
       {
@@ -216,6 +225,16 @@ FormStructureBrowserTest::FormStructureBrowserTest()
           features::kAutofillIgnoreCheckableElements,
           // TODO(crbug.com/369503318): Remove once launched.
           features::kAutofillSupportSplitZipCode,
+          // TODO(crbug.com/479503511): Remove once launched.
+          features::kAutofillNewRegexForPhoneCountryCode,
+          // TODO(crbug.com/479503511): Remove once launched.
+          features::kAutofillImprovePhoneFieldParser,
+          // TODO(crbug.com/479503511): Remove once launched.
+          features::kAutofillNewAugmentedPhoneCountryCodeRegex,
+          // TODO(crbug.com/479503511): Remove once launched.
+          features::kAutofillPreferPhoneCountryCodeTypeOverCountryHtmlType,
+          // TODO(crbug.com/479503511): Remove once launched.
+          features::kAutofillImprovePhoneNumberRationalization,
       },
       // Disabled
       {
@@ -268,11 +287,11 @@ void FormStructureBrowserTest::GenerateResults(const std::string& input,
   for (const char c : input) {
     // Strip `\n`, `\t`, `\r` from `html` to match old `data:` URL behavior.
     // TODO(crbug.com/40317270): the tests expect weird concatenation behavior
-    // based
-    //   legacy data URL behavior. Fix this so the the tests better represent
-    //   the parsing being done in the wild.
-    if (c != '\r' && c != '\n' && c != '\t')
+    // based on legacy data URL behavior. Fix this so the the tests better
+    // represent the parsing being done in the wild.
+    if (c != '\r' && c != '\n' && c != '\t') {
       html_content_.push_back(c);
+    }
   }
 
   ASSERT_NO_FATAL_FAILURE(ASSERT_TRUE(ui_test_utils::NavigateToURL(
@@ -295,11 +314,7 @@ std::unique_ptr<HttpResponse> FormStructureBrowserTest::HandleRequest(
   return std::move(response);
 }
 
-// TODO(crbug.com/472755511): consistent failing on multiple bots.
-// AllForms/FormStructureBrowserTest.DataDrivenHeuristics/181
-// AllForms/FormStructureBrowserTest.DataDrivenHeuristics/182
-IN_PROC_BROWSER_TEST_P(FormStructureBrowserTest,
-                       DISABLED_DataDrivenHeuristics) {
+IN_PROC_BROWSER_TEST_P(FormStructureBrowserTest, DataDrivenHeuristics) {
 #if BUILDFLAG(USE_INTERNAL_AUTOFILL_PATTERNS)
   GTEST_SKIP() << "DataDrivenHeuristics tests are only supported with legacy "
                   "parsing patterns";
@@ -307,7 +322,7 @@ IN_PROC_BROWSER_TEST_P(FormStructureBrowserTest,
   // Prints the path of the test to be executed.
   LOG(INFO) << GetParam().MaybeAsASCII();
   bool is_expected_to_pass =
-      !base::Contains(GetFailingTestNames(), GetParam().BaseName().value());
+      !GetFailingTestNames().contains(GetParam().BaseName().value());
   RunOneDataDrivenTest(GetParam(), GetOutputDirectory(), is_expected_to_pass);
 #endif
 }

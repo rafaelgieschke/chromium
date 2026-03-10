@@ -11,13 +11,13 @@ export function getHtml(this: WebuiBrowserAppElement) {
   return html`<!--_html_template_start_-->
 <div class="activeFrame" id="rootContainer">
   <div id="topContainer">
-    <div class="titlebarDiv" @mousedown="${this.onTabDragMouseDown_}">
+    <div class="titlebarDiv" @mousedown="${this.onTabDragMousedown_}">
       <div class="tabstripDiv" style="margin-left:${this.tabStripInset_}px">
         <webui-browser-tab-strip id="tabstrip"
-          @tab-click="${this.onTabClick_}"
-          @tab-drag-out-of-bounds="${this.onTabDragOutOfBounds_}"
-          @tab-close="${this.onTabClosed_}"
-          @tab-add="${this.onAddTabClick_}">
+            @tab-activated="${this.onTabActivated_}"
+            @tab-added="${this.onTabAdded_}"
+            @tab-closed="${this.onTabClosed_}"
+            @tab-updated="${this.onTabUpdated_}">
         </webui-browser-tab-strip>
       </div>
       <if expr="not is_macosx">

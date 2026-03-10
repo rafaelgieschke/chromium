@@ -4,11 +4,11 @@
 
 #include "chrome/browser/pdf/pdf_extension_util.h"
 
+#include <algorithm>
 #include <array>
 #include <string>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/notreached.h"
 #include "base/strings/string_util.h"
@@ -16,7 +16,9 @@
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/pdf/pdf_viewer_stream_manager.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/extensions/api/pdf_viewer_private.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
@@ -39,7 +41,9 @@
 #include "url/gurl.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
+#include "chromeos/ash/components/browser_context_helper/browser_context_helper.h"
 #include "chromeos/ash/components/browser_context_helper/browser_context_types.h"
+#include "components/user_manager/user.h"
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(ENABLE_PDF_INK2)
@@ -60,7 +64,7 @@ const char kNameTag[] = "<NAME>";
 
 // Gets strings that are used both by the stand-alone PDF Viewer and the Print
 // Preview PDF Viewer.
-base::Value::Dict GetCommonStrings() {
+base::DictValue GetCommonStrings() {
   static constexpr webui::LocalizedString kPdfResources[] = {
       {"errorDialogTitle", IDS_PDF_ERROR_DIALOG_TITLE},
       {"pageLoadFailed", IDS_PDF_PAGE_LOAD_FAILED},
@@ -72,7 +76,7 @@ base::Value::Dict GetCommonStrings() {
       {"tooltipZoomOut", IDS_PDF_TOOLTIP_ZOOM_OUT},
       {"twoUpViewEnable", IDS_PDF_TWO_UP_VIEW_ENABLE},
   };
-  base::Value::Dict dict;
+  base::DictValue dict;
   for (const auto& resource : kPdfResources) {
     dict.Set(resource.name, l10n_util::GetStringUTF16(resource.id));
   }
@@ -84,13 +88,15 @@ base::Value::Dict GetCommonStrings() {
 }
 
 // Gets strings that are used only by the stand-alone PDF Viewer.
-base::Value::Dict GetPdfViewerStrings() {
+base::DictValue GetPdfViewerStrings() {
   static constexpr webui::LocalizedString kPdfResources[] = {
       {"annotationsShowToggle", IDS_PDF_ANNOTATIONS_SHOW_TOGGLE},
-      {"bookmarks", IDS_PDF_BOOKMARKS},
       {"bookmarkExpandIconAriaLabel", IDS_PDF_BOOKMARK_EXPAND_ICON_ARIA_LABEL},
+      {"bookmarks", IDS_PDF_BOOKMARKS},
       {"downloadEdited", IDS_PDF_DOWNLOAD_EDITED},
       {"downloadOriginal", IDS_PDF_DOWNLOAD_ORIGINAL},
+      {"glicSummarize", IDS_PDF_GLIC_SUMMARIZE},
+      {"glicSummarizeTooltip", IDS_PDF_GLIC_SUMMARIZE_TOOLTIP},
       {"labelPageNumber", IDS_PDF_LABEL_PAGE_NUMBER},
       {"moreActions", IDS_DOWNLOAD_MORE_ACTIONS},
       {"oversizeAttachmentWarning", IDS_PDF_OVERSIZE_ATTACHMENT_WARNING},
@@ -132,6 +138,72 @@ base::Value::Dict GetPdfViewerStrings() {
       {"tooltipRotateCCW", IDS_PDF_TOOLTIP_ROTATE_CCW},
       {"tooltipThumbnails", IDS_PDF_TOOLTIP_THUMBNAILS},
       {"zoomTextInputAriaLabel", IDS_PDF_ZOOM_TEXT_INPUT_ARIA_LABEL},
+
+#if BUILDFLAG(ENABLE_PDF_INK2)
+      {"annotationColorBlack", IDS_PDF_ANNOTATION_COLOR_BLACK},
+      {"annotationColorBlue", IDS_PDF_ANNOTATION_COLOR_BLUE},
+      {"annotationColorGreen", IDS_PDF_ANNOTATION_COLOR_GREEN},
+      {"annotationColorLightBlue", IDS_PDF_ANNOTATION_COLOR_LIGHT_BLUE},
+      {"annotationColorLightGreen", IDS_PDF_ANNOTATION_COLOR_LIGHT_GREEN},
+      {"annotationColorLightGrey", IDS_PDF_ANNOTATION_COLOR_LIGHT_GREY},
+      {"annotationColorLightOrange", IDS_PDF_ANNOTATION_COLOR_LIGHT_ORANGE},
+      {"annotationColorOrange", IDS_PDF_ANNOTATION_COLOR_ORANGE},
+      {"annotationColorRed", IDS_PDF_ANNOTATION_COLOR_RED},
+      {"annotationColorWhite", IDS_PDF_ANNOTATION_COLOR_WHITE},
+      {"annotationColorYellow", IDS_PDF_ANNOTATION_COLOR_YELLOW},
+      {"annotationEraser", IDS_PDF_ANNOTATION_ERASER},
+      {"annotationHighlighter", IDS_PDF_ANNOTATION_HIGHLIGHTER},
+      {"annotationPen", IDS_PDF_ANNOTATION_PEN},
+      {"annotationRedo", IDS_PDF_ANNOTATION_REDO},
+      {"annotationUndo", IDS_PDF_ANNOTATION_UNDO},
+      {"cancelButton", IDS_CANCEL},
+      {"ink2BrushColorBlue1", IDS_PDF_INK2_ANNOTATION_COLOR_BLUE_1},
+      {"ink2BrushColorBlue2", IDS_PDF_INK2_ANNOTATION_COLOR_BLUE_2},
+      {"ink2BrushColorBlue3", IDS_PDF_INK2_ANNOTATION_COLOR_BLUE_3},
+      {"ink2BrushColorDarkGrey1", IDS_PDF_INK2_ANNOTATION_COLOR_DARK_GREY_1},
+      {"ink2BrushColorDarkGrey2", IDS_PDF_INK2_ANNOTATION_COLOR_DARK_GREY_2},
+      {"ink2BrushColorGreen1", IDS_PDF_INK2_ANNOTATION_COLOR_GREEN_1},
+      {"ink2BrushColorGreen2", IDS_PDF_INK2_ANNOTATION_COLOR_GREEN_2},
+      {"ink2BrushColorGreen3", IDS_PDF_INK2_ANNOTATION_COLOR_GREEN_3},
+      {"ink2BrushColorLightRed", IDS_PDF_INK2_ANNOTATION_COLOR_LIGHT_RED},
+      {"ink2BrushColorLightYellow", IDS_PDF_INK2_ANNOTATION_COLOR_LIGHT_YELLOW},
+      {"ink2BrushColorRed1", IDS_PDF_INK2_ANNOTATION_COLOR_RED_1},
+      {"ink2BrushColorRed2", IDS_PDF_INK2_ANNOTATION_COLOR_RED_2},
+      {"ink2BrushColorRed3", IDS_PDF_INK2_ANNOTATION_COLOR_RED_3},
+      {"ink2BrushColorTan1", IDS_PDF_INK2_ANNOTATION_COLOR_TAN_1},
+      {"ink2BrushColorTan2", IDS_PDF_INK2_ANNOTATION_COLOR_TAN_2},
+      {"ink2BrushColorTan3", IDS_PDF_INK2_ANNOTATION_COLOR_TAN_3},
+      {"ink2BrushColorYellow1", IDS_PDF_INK2_ANNOTATION_COLOR_YELLOW_1},
+      {"ink2BrushColorYellow2", IDS_PDF_INK2_ANNOTATION_COLOR_YELLOW_2},
+      {"ink2BrushColorYellow3", IDS_PDF_INK2_ANNOTATION_COLOR_YELLOW_3},
+      {"ink2BrushSizeExtraThick", IDS_PDF_INK2_ANNOTATION_SIZE_EXTRA_THICK},
+      {"ink2BrushSizeExtraThin", IDS_PDF_INK2_ANNOTATION_SIZE_EXTRA_THIN},
+      {"ink2BrushSizeMedium", IDS_PDF_INK2_ANNOTATION_SIZE_MEDIUM},
+      {"ink2BrushSizeThick", IDS_PDF_INK2_ANNOTATION_SIZE_THICK},
+      {"ink2BrushSizeThin", IDS_PDF_INK2_ANNOTATION_SIZE_THIN},
+      {"ink2Color", IDS_PDF_INK2_ANNOTATION_COLOR},
+      {"ink2Draw", IDS_PDF_INK2_DRAW},
+      {"ink2Size", IDS_PDF_INK2_ANNOTATION_SIZE},
+      {"ink2TextAlignCenter", IDS_PDF_INK2_TEXT_ALIGN_CENTER},
+      {"ink2TextAlignLeft", IDS_PDF_INK2_TEXT_ALIGN_LEFT},
+      {"ink2TextAlignRight", IDS_PDF_INK2_TEXT_ALIGN_RIGHT},
+      {"ink2TextAlignment", IDS_PDF_INK2_TEXT_ALIGNMENT},
+      {"ink2TextAnnotation", IDS_PDF_INK2_TEXT_ANNOTATION},
+      {"ink2TextColor", IDS_PDF_INK2_TEXT_COLOR},
+      {"ink2TextColorCyan1", IDS_PDF_INK2_ANNOTATION_COLOR_CYAN_1},
+      {"ink2TextColorCyan2", IDS_PDF_INK2_ANNOTATION_COLOR_CYAN_2},
+      {"ink2TextColorCyan3", IDS_PDF_INK2_ANNOTATION_COLOR_CYAN_3},
+      {"ink2TextFont", IDS_PDF_INK2_TEXT_FONT},
+      {"ink2TextFontMonospace", IDS_PDF_INK2_TEXT_FONT_MONOSPACE},
+      {"ink2TextFontSansSerif", IDS_PDF_INK2_TEXT_FONT_SANS_SERIF},
+      {"ink2TextFontSerif", IDS_PDF_INK2_TEXT_FONT_SERIF},
+      {"ink2TextFontSize", IDS_PDF_INK2_TEXT_FONT_SIZE},
+      {"ink2TextStyleBold", IDS_PDF_INK2_TEXT_STYLE_BOLD},
+      {"ink2TextStyleItalic", IDS_PDF_INK2_TEXT_STYLE_ITALIC},
+      {"ink2TextStyles", IDS_PDF_INK2_TEXT_STYLES},
+      {"ink2Tool", IDS_PDF_INK2_ANNOTATION_TOOL},
+#endif  // BUILDFLAG(ENABLE_PDF_INK2)
+
 #if BUILDFLAG(ENABLE_PDF_SAVE_TO_DRIVE)
       {"saveToDriveDialogCancelUploadButtonLabel",
        IDS_SAVE_TO_DRIVE_DIALOG_CANCEL_UPLOAD_BUTTON_LABEL},
@@ -157,72 +229,8 @@ base::Value::Dict GetPdfViewerStrings() {
        IDS_SAVE_TO_DRIVE_DIALOG_UPLOADING_TITLE},
       {"tooltipSaveToDrive", IDS_PDF_TOOLTIP_SAVE_TO_DRIVE},
 #endif  // BUILDFLAG(ENABLE_PDF_SAVE_TO_DRIVE)
-#if BUILDFLAG(ENABLE_PDF_INK2)
-      {"cancelButton", IDS_CANCEL},
-      {"annotationPen", IDS_PDF_ANNOTATION_PEN},
-      {"annotationHighlighter", IDS_PDF_ANNOTATION_HIGHLIGHTER},
-      {"annotationEraser", IDS_PDF_ANNOTATION_ERASER},
-      {"annotationUndo", IDS_PDF_ANNOTATION_UNDO},
-      {"annotationRedo", IDS_PDF_ANNOTATION_REDO},
-      {"annotationColorBlack", IDS_PDF_ANNOTATION_COLOR_BLACK},
-      {"annotationColorRed", IDS_PDF_ANNOTATION_COLOR_RED},
-      {"annotationColorYellow", IDS_PDF_ANNOTATION_COLOR_YELLOW},
-      {"annotationColorGreen", IDS_PDF_ANNOTATION_COLOR_GREEN},
-      {"annotationColorWhite", IDS_PDF_ANNOTATION_COLOR_WHITE},
-      {"annotationColorOrange", IDS_PDF_ANNOTATION_COLOR_ORANGE},
-      {"annotationColorBlue", IDS_PDF_ANNOTATION_COLOR_BLUE},
-      {"annotationColorLightGrey", IDS_PDF_ANNOTATION_COLOR_LIGHT_GREY},
-      {"annotationColorLightOrange", IDS_PDF_ANNOTATION_COLOR_LIGHT_ORANGE},
-      {"annotationColorLightGreen", IDS_PDF_ANNOTATION_COLOR_LIGHT_GREEN},
-      {"annotationColorLightBlue", IDS_PDF_ANNOTATION_COLOR_LIGHT_BLUE},
-      {"ink2Draw", IDS_PDF_INK2_DRAW},
-      {"ink2Tool", IDS_PDF_INK2_ANNOTATION_TOOL},
-      {"ink2Size", IDS_PDF_INK2_ANNOTATION_SIZE},
-      {"ink2Color", IDS_PDF_INK2_ANNOTATION_COLOR},
-      {"ink2BrushSizeExtraThin", IDS_PDF_INK2_ANNOTATION_SIZE_EXTRA_THIN},
-      {"ink2BrushSizeThin", IDS_PDF_INK2_ANNOTATION_SIZE_THIN},
-      {"ink2BrushSizeMedium", IDS_PDF_INK2_ANNOTATION_SIZE_MEDIUM},
-      {"ink2BrushSizeThick", IDS_PDF_INK2_ANNOTATION_SIZE_THICK},
-      {"ink2BrushSizeExtraThick", IDS_PDF_INK2_ANNOTATION_SIZE_EXTRA_THICK},
-      {"ink2BrushColorLightRed", IDS_PDF_INK2_ANNOTATION_COLOR_LIGHT_RED},
-      {"ink2BrushColorLightYellow", IDS_PDF_INK2_ANNOTATION_COLOR_LIGHT_YELLOW},
-      {"ink2BrushColorDarkGrey1", IDS_PDF_INK2_ANNOTATION_COLOR_DARK_GREY_1},
-      {"ink2BrushColorDarkGrey2", IDS_PDF_INK2_ANNOTATION_COLOR_DARK_GREY_2},
-      {"ink2BrushColorRed1", IDS_PDF_INK2_ANNOTATION_COLOR_RED_1},
-      {"ink2BrushColorYellow1", IDS_PDF_INK2_ANNOTATION_COLOR_YELLOW_1},
-      {"ink2BrushColorGreen1", IDS_PDF_INK2_ANNOTATION_COLOR_GREEN_1},
-      {"ink2BrushColorBlue1", IDS_PDF_INK2_ANNOTATION_COLOR_BLUE_1},
-      {"ink2BrushColorTan1", IDS_PDF_INK2_ANNOTATION_COLOR_TAN_1},
-      {"ink2BrushColorRed2", IDS_PDF_INK2_ANNOTATION_COLOR_RED_2},
-      {"ink2BrushColorYellow2", IDS_PDF_INK2_ANNOTATION_COLOR_YELLOW_2},
-      {"ink2BrushColorGreen2", IDS_PDF_INK2_ANNOTATION_COLOR_GREEN_2},
-      {"ink2BrushColorBlue2", IDS_PDF_INK2_ANNOTATION_COLOR_BLUE_2},
-      {"ink2BrushColorTan2", IDS_PDF_INK2_ANNOTATION_COLOR_TAN_2},
-      {"ink2BrushColorRed3", IDS_PDF_INK2_ANNOTATION_COLOR_RED_3},
-      {"ink2BrushColorYellow3", IDS_PDF_INK2_ANNOTATION_COLOR_YELLOW_3},
-      {"ink2BrushColorGreen3", IDS_PDF_INK2_ANNOTATION_COLOR_GREEN_3},
-      {"ink2BrushColorBlue3", IDS_PDF_INK2_ANNOTATION_COLOR_BLUE_3},
-      {"ink2BrushColorTan3", IDS_PDF_INK2_ANNOTATION_COLOR_TAN_3},
-      {"ink2TextAnnotation", IDS_PDF_INK2_TEXT_ANNOTATION},
-      {"ink2TextFont", IDS_PDF_INK2_TEXT_FONT},
-      {"ink2TextFontSansSerif", IDS_PDF_INK2_TEXT_FONT_SANS_SERIF},
-      {"ink2TextFontSerif", IDS_PDF_INK2_TEXT_FONT_SERIF},
-      {"ink2TextFontMonospace", IDS_PDF_INK2_TEXT_FONT_MONOSPACE},
-      {"ink2TextFontSize", IDS_PDF_INK2_TEXT_FONT_SIZE},
-      {"ink2TextStyles", IDS_PDF_INK2_TEXT_STYLES},
-      {"ink2TextStyleBold", IDS_PDF_INK2_TEXT_STYLE_BOLD},
-      {"ink2TextStyleItalic", IDS_PDF_INK2_TEXT_STYLE_ITALIC},
-      {"ink2TextAlignment", IDS_PDF_INK2_TEXT_ALIGNMENT},
-      {"ink2TextAlignLeft", IDS_PDF_INK2_TEXT_ALIGN_LEFT},
-      {"ink2TextAlignCenter", IDS_PDF_INK2_TEXT_ALIGN_CENTER},
-      {"ink2TextAlignRight", IDS_PDF_INK2_TEXT_ALIGN_RIGHT},
-      {"ink2TextColor", IDS_PDF_INK2_TEXT_COLOR},
-      {"ink2TextColorCyan1", IDS_PDF_INK2_ANNOTATION_COLOR_CYAN_1},
-      {"ink2TextColorCyan2", IDS_PDF_INK2_ANNOTATION_COLOR_CYAN_2},
-      {"ink2TextColorCyan3", IDS_PDF_INK2_ANNOTATION_COLOR_CYAN_3},
-#endif  // BUILDFLAG(ENABLE_PDF_INK2)
   };
-  base::Value::Dict dict;
+  base::DictValue dict;
   for (const auto& resource : kPdfResources) {
     dict.Set(resource.name, l10n_util::GetStringUTF16(resource.id));
   }
@@ -253,14 +261,46 @@ bool IsPdfAnnotationsEnabledByPolicy(content::BrowserContext* context) {
   return !prefs || !prefs->IsManagedPreference(prefs::kPdfAnnotationsEnabled) ||
          prefs->GetBoolean(prefs::kPdfAnnotationsEnabled);
 }
-#endif  // BUILDFLAG(ENABLE_PDF_INK2)
 
-#if BUILDFLAG(ENABLE_PDF_INK2)
 bool IsPdfInk2AnnotationsEnabled(content::BrowserContext* context) {
   return base::FeatureList::IsEnabled(chrome_pdf::features::kPdfInk2) &&
          IsPdfAnnotationsEnabledByPolicy(context);
 }
 #endif  // BUILDFLAG(ENABLE_PDF_INK2)
+
+#if BUILDFLAG(ENABLE_PDF_SAVE_TO_DRIVE)
+bool IsPdfSaveToDriveEnabled(content::BrowserContext* context) {
+#if BUILDFLAG(IS_CHROMEOS)
+  // TODO(crbug.com/488428177): Write unit test for this logic.
+  // On ChromeOS, only regular user session has accounts associated with the
+  // browser.
+
+  // Only allow regular user session profiles.
+  auto* user =
+      ash::BrowserContextHelper::Get()->GetUserByBrowserContext(context);
+  if (!user) {
+    return false;
+  }
+  switch (user->GetType()) {
+    case user_manager::UserType::kRegular:
+    case user_manager::UserType::kChild:
+      // These are regular user sessions.
+      break;
+    case user_manager::UserType::kGuest:
+    case user_manager::UserType::kPublicAccount:
+    case user_manager::UserType::kKioskChromeApp:
+    case user_manager::UserType::kKioskWebApp:
+    case user_manager::UserType::kKioskIWA:
+    case user_manager::UserType::kKioskArcvmApp:
+      // Disallows guest, managed guest and kiosk app sessions.
+      return false;
+  }
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+  return base::FeatureList::IsEnabled(chrome_pdf::features::kPdfSaveToDrive) &&
+         !Profile::FromBrowserContext(context)->IsOffTheRecord();
+}
+#endif  // BUILDFLAG(ENABLE_PDF_SAVE_TO_DRIVE)
 
 }  // namespace
 
@@ -281,8 +321,8 @@ std::string GetManifest() {
   return manifest_contents;
 }
 
-base::Value::Dict GetStrings(PdfViewerContext context) {
-  base::Value::Dict dict = GetCommonStrings();
+base::DictValue GetStrings(PdfViewerContext context) {
+  base::DictValue dict = GetCommonStrings();
   if (context == PdfViewerContext::kPdfViewer ||
       context == PdfViewerContext::kAll) {
     dict.Merge(GetPdfViewerStrings());
@@ -294,11 +334,21 @@ base::Value::Dict GetStrings(PdfViewerContext context) {
   return dict;
 }
 
-base::Value::Dict GetAdditionalData(content::BrowserContext* context) {
+base::DictValue GetAdditionalData(content::BrowserContext* context) {
   // NOTE: This function should not include any data used for $i18n{}
   // replacements. The i18n string resources should be added using GetStrings()
   // above instead.
-  base::Value::Dict dict;
+  base::DictValue dict;
+  dict.Set("pdfGetSaveDataInBlocks",
+           base::FeatureList::IsEnabled(
+               chrome_pdf::features::kPdfGetSaveDataInBlocks));
+  dict.Set("pdfGlicSummarizeEnabled", ShouldShowGlicSummarizeButton(context));
+  dict.Set(
+      "pdfSearchifySaveEnabled",
+      base::FeatureList::IsEnabled(chrome_pdf::features::kPdfSearchifySave));
+  dict.Set("pdfUseShowSaveFilePicker",
+           base::FeatureList::IsEnabled(
+               chrome_pdf::features::kPdfUseShowSaveFilePicker));
   dict.Set("printingEnabled", IsPrintingEnabled(context));
 
 #if BUILDFLAG(ENABLE_PDF_INK2)
@@ -307,24 +357,14 @@ base::Value::Dict GetAdditionalData(content::BrowserContext* context) {
   dict.Set("pdfTextAnnotationsEnabled",
            use_ink2 && chrome_pdf::features::kPdfInk2TextAnnotations.Get());
 #endif  // BUILDFLAG(ENABLE_PDF_INK2)
-  dict.Set("pdfGetSaveDataInBlocks",
-           base::FeatureList::IsEnabled(
-               chrome_pdf::features::kPdfGetSaveDataInBlocks));
-  dict.Set("pdfUseShowSaveFilePicker",
-           base::FeatureList::IsEnabled(
-               chrome_pdf::features::kPdfUseShowSaveFilePicker));
-  dict.Set(
-      "pdfSearchifySaveEnabled",
-      base::FeatureList::IsEnabled(chrome_pdf::features::kPdfSearchifySave));
 
 #if BUILDFLAG(ENABLE_PDF_SAVE_TO_DRIVE)
-  const bool save_to_drive_enabled =
-      base::FeatureList::IsEnabled(chrome_pdf::features::kPdfSaveToDrive) &&
-      !Profile::FromBrowserContext(context)->IsOffTheRecord();
+  const bool save_to_drive_enabled = IsPdfSaveToDriveEnabled(context);
   dict.Set("pdfSaveToDrive", save_to_drive_enabled);
   dict.Set("pdfSaveToDriveHelpCenterURL",
            chrome::kPdfViewerSaveToDriveHelpCenterURL);
 #endif
+
   return dict;
 }
 
@@ -357,7 +397,7 @@ std::vector<webui::ResourcePath> GetResources(PdfViewerContext context) {
   std::vector<webui::ResourcePath> resources;
   resources.reserve(std::size(kPdfResources));
   for (const webui::ResourcePath& resource : kPdfResources) {
-    if (base::Contains(exclusions, resource.path)) {
+    if (std::ranges::contains(exclusions, resource.path)) {
       continue;
     }
     resources.push_back(resource);
@@ -382,7 +422,7 @@ bool MaybeDispatchSaveEvent(content::RenderFrameHost* embedder_host) {
   base::WeakPtr<extensions::StreamContainer> stream =
       pdf_viewer_stream_manager->GetStreamContainer(embedder_host);
 
-  base::Value::List args;
+  base::ListValue args;
   args.Append(stream->stream_url().spec());
 
   content::BrowserContext* context = embedder_host->GetBrowserContext();
@@ -398,7 +438,7 @@ bool MaybeDispatchSaveEvent(content::RenderFrameHost* embedder_host) {
 
 void DispatchShouldUpdateViewportEvent(content::RenderFrameHost* embedder_host,
                                        const GURL& new_pdf_url) {
-  base::Value::List args;
+  base::ListValue args;
   args.Append(new_pdf_url.spec());
 
   content::BrowserContext* context = embedder_host->GetBrowserContext();
@@ -409,6 +449,22 @@ void DispatchShouldUpdateViewportEvent(content::RenderFrameHost* embedder_host,
   extensions::EventRouter* event_router = extensions::EventRouter::Get(context);
   event_router->DispatchEventToExtension(extension_misc::kPdfExtensionId,
                                          std::move(event));
+}
+
+bool ShouldShowGlicSummarizeButton(content::BrowserContext* context) {
+  Profile* profile = Profile::FromBrowserContext(context);
+  if (!glic::GlicEnabling::IsEnabledForProfile(profile)) {
+    return false;
+  }
+
+  // If the user has not passed FRE, and `kPdfGlicSummarizeFre` is false, then
+  // don't show the button.
+  if (!base::FeatureList::IsEnabled(features::kPdfGlicSummarizeFre) &&
+      !glic::GlicEnabling::HasConsentedForProfile(profile)) {
+    return false;
+  }
+
+  return base::FeatureList::IsEnabled(features::kPdfGlicSummarize);
 }
 
 }  // namespace pdf_extension_util

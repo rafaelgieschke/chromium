@@ -56,15 +56,15 @@ GURL GURLAndroid::ToNativeGURL(JNIEnv* env,
                                const base::android::JavaRef<jobject>& j_gurl) {
   GURL ret;
   Parsed parsed;
-  Java_GURL_toNativeGURL(env, j_gurl, reinterpret_cast<jlong>(&ret),
-                         reinterpret_cast<jlong>(&parsed));
+  Java_GURL_toNativeGURL(env, j_gurl, reinterpret_cast<int64_t>(&ret),
+                         reinterpret_cast<int64_t>(&parsed));
   return ret;
 }
 
 // static
-ScopedJavaLocalRef<jobject> GURLAndroid::FromNativeGURL(JNIEnv* env,
-                                                        const GURL& gurl) {
-  ScopedJavaLocalRef<jobject> j_gurl = Java_GURL_Constructor(env);
+ScopedJavaLocalRef<JGURL> GURLAndroid::FromNativeGURL(JNIEnv* env,
+                                                      const GURL& gurl) {
+  ScopedJavaLocalRef<JGURL> j_gurl = Java_GURL_Constructor(env);
   InitFromGURL(env, gurl, j_gurl);
   return j_gurl;
 }
@@ -75,35 +75,35 @@ ScopedJavaLocalRef<jobject> GURLAndroid::EmptyGURL(JNIEnv* env) {
 }
 
 static void JNI_GURL_GetOrigin(JNIEnv* env,
-                               GURL& gurl,
+                               const GURL& gurl,
                                const JavaRef<jobject>& target) {
   InitFromGURL(env, gurl.DeprecatedGetOriginAsURL(), target);
 }
 
-static jboolean JNI_GURL_DomainIs(JNIEnv* env,
-                                  GURL& gurl,
-                                  std::string& domain) {
+static bool JNI_GURL_DomainIs(JNIEnv* env,
+                              const GURL& gurl,
+                              const std::string& domain) {
   return gurl.DomainIs(domain);
 }
 
-static jboolean JNI_GURL_EqualsIgnoringRef(JNIEnv* env,
-                                           GURL& gurl,
-                                           GURL& other) {
+static bool JNI_GURL_EqualsIgnoringRef(JNIEnv* env,
+                                       const GURL& gurl,
+                                       const GURL& other) {
   return gurl.EqualsIgnoringRef(other);
 }
 
 static void JNI_GURL_Init(JNIEnv* env,
-                          std::string& spec,
+                          const std::string& spec,
                           const base::android::JavaRef<jobject>& target) {
   auto gurl = GURL(spec);
   InitFromGURL(env, gurl, target);
 }
 
 static void JNI_GURL_InitNative(JNIEnv* env,
-                                std::string& spec,
-                                jboolean is_valid,
-                                jlong native_gurl,
-                                jlong native_parsed) {
+                                const std::string& spec,
+                                bool is_valid,
+                                int64_t native_gurl,
+                                int64_t native_parsed) {
   GURL* gurl = reinterpret_cast<GURL*>(native_gurl);
   Parsed* parsed = reinterpret_cast<Parsed*>(native_parsed);
   *gurl = GURL(spec, *parsed, is_valid);
@@ -111,11 +111,11 @@ static void JNI_GURL_InitNative(JNIEnv* env,
 
 static void JNI_GURL_ReplaceComponents(
     JNIEnv* env,
-    GURL& gurl,
+    const GURL& gurl,
     const JavaRef<jstring>& j_username_replacement,
-    jboolean clear_username,
+    bool clear_username,
     const JavaRef<jstring>& j_password_replacement,
-    jboolean clear_password,
+    bool clear_password,
     const JavaRef<jobject>& j_result) {
   GURL::Replacements replacements;
 

@@ -26,6 +26,7 @@ import android.os.Process;
 import android.os.SystemClock;
 import android.util.TypedValue;
 import android.view.Display;
+import android.view.KeyEvent;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
@@ -39,6 +40,7 @@ import androidx.annotation.VisibleForTesting;
 import org.jni_zero.CalledByNative;
 import org.jni_zero.CalledByNativeForTesting;
 import org.jni_zero.JNINamespace;
+import org.jni_zero.JniType;
 import org.jni_zero.NativeMethods;
 
 import org.chromium.base.AconfigFlaggedApiDelegate;
@@ -54,7 +56,7 @@ import org.chromium.base.UnownedUserDataHost;
 import org.chromium.base.lifetime.Destroyable;
 import org.chromium.base.lifetime.LifetimeAssert;
 import org.chromium.base.metrics.RecordHistogram;
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.NonNullObservableSupplier;
 import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.task.PostTask;
@@ -96,6 +98,10 @@ public class WindowAndroid
     // Arbitrary error margin to account for cases where the display's refresh rate might not
     // exactly match the target rate.
     private static final float MAX_REFRESH_RATE_DELTA = 2.f;
+
+    // Constants that must be consistent with ui_controls::KeyEventType in C++.
+    private static final int KEY_EVENT_TYPE_KEY_PRESS = 1;
+    private static final int KEY_EVENT_TYPE_KEY_RELEASE = 2;
 
     private final @Nullable LifetimeAssert mLifetimeAssert;
     private @Nullable IntentRequestTrackerImpl mIntentRequestTracker;
@@ -247,9 +253,7 @@ public class WindowAndroid
         mIntentRequestTracker = (IntentRequestTrackerImpl) tracker;
         mInsetObserver = insetObserver;
         mApplicationBottomInsetSupplier.setInsetObserver(mInsetObserver);
-        if (mInsetObserver != null
-                && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-                && UiAndroidFeatureList.sAndroidUseCorrectWindowBounds.isEnabled()) {
+        if (mInsetObserver != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             mWindowInsetObserver =
                     new WindowInsetObserver() {
                         @Override
@@ -380,7 +384,7 @@ public class WindowAndroid
     }
 
     /** A supplier that returns whether the window is occluded or not. */
-    public ObservableSupplier<Boolean> getOcclusionSupplier() {
+    public NonNullObservableSupplier<Boolean> getOcclusionSupplier() {
         return mOcclusionSupplier;
     }
 
@@ -853,6 +857,56 @@ public class WindowAndroid
         mModalDialogManagerForTesting = modalDialogManager;
     }
 
+    @CalledByNativeForTesting
+    private boolean sendKeyEventsForTesting(
+            int code,
+            int keyEventTypes,
+            boolean shift,
+            boolean control,
+            boolean alt,
+            boolean meta) {
+
+        Activity activity = ContextUtils.activityFromContext(mContextRef.get());
+        if (activity == null || activity.isFinishing()) {
+            return false;
+        }
+
+        long downTime = System.currentTimeMillis();
+        int metaState =
+                (shift ? KeyEvent.META_SHIFT_ON : 0)
+                        | (control ? KeyEvent.META_CTRL_ON : 0)
+                        | (alt ? KeyEvent.META_ALT_ON : 0)
+                        | (meta ? KeyEvent.META_META_ON : 0);
+
+        if ((keyEventTypes & KEY_EVENT_TYPE_KEY_PRESS) != 0) {
+            if (!activity.dispatchKeyEvent(
+                    new KeyEvent(
+                            downTime,
+                            /* eventTime= */ downTime,
+                            KeyEvent.ACTION_DOWN,
+                            code,
+                            /* repeat= */ 0,
+                            metaState))) {
+                return false;
+            }
+        }
+
+        if ((keyEventTypes & KEY_EVENT_TYPE_KEY_RELEASE) != 0) {
+            if (!activity.dispatchKeyEvent(
+                    new KeyEvent(
+                            downTime,
+                            /* eventTime= */ System.currentTimeMillis(),
+                            KeyEvent.ACTION_UP,
+                            code,
+                            /* repeat= */ 0,
+                            metaState))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     @CalledByNative
     private long getNativeModalDialogManagerBridge() {
         ModalDialogManager manager = getModalDialogManager();
@@ -1112,11 +1166,25 @@ public class WindowAndroid
     @Override
     public void onAdaptiveRefreshRateInfoChanged(DisplayAndroid.AdaptiveRefreshRateInfo arrInfo) {
         if (mNativeWindowAndroid == 0) return;
+        int velocityArraySize =
+                arrInfo.velocityMapping == null ? 0 : arrInfo.velocityMapping.size();
+        float[] framePerSecondArray = new float[velocityArraySize];
+        float[] dpPerSecondArray = new float[velocityArraySize];
+        if (arrInfo.velocityMapping != null) {
+            int index = 0;
+            for (AconfigFlaggedApiDelegate.FrameRateVelocityPoint point : arrInfo.velocityMapping) {
+                framePerSecondArray[index] = point.getFramePerSecond();
+                dpPerSecondArray[index] = point.getDpPerSecond();
+                ++index;
+            }
+        }
         WindowAndroidJni.get()
                 .onAdaptiveRefreshRateInfoChanged(
                         mNativeWindowAndroid,
                         arrInfo.supportsAdaptiveRefreshRate,
-                        arrInfo.suggestedFrameRateHigh);
+                        arrInfo.suggestedFrameRateHigh,
+                        framePerSecondArray,
+                        dpPerSecondArray);
     }
 
     @CalledByNative
@@ -1391,10 +1459,14 @@ public class WindowAndroid
     private boolean setHasKeyboardCapture(boolean hasCapture) {
         Window window = getWindow();
         if (window == null) return false;
-        AconfigFlaggedApiDelegate aconfigFlaggedApiDelegate =
-                AconfigFlaggedApiDelegate.getInstance();
-        if (aconfigFlaggedApiDelegate == null) return false;
-        return aconfigFlaggedApiDelegate.setKeyboardCaptureEnabled(window, hasCapture);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA
+                && Build.VERSION.SDK_INT_FULL >= Build.VERSION_CODES_FULL.BAKLAVA_1) {
+            WindowManager.LayoutParams params = window.getAttributes();
+            params.setKeyboardCaptureEnabled(hasCapture);
+            window.setAttributes(params);
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -1474,7 +1546,9 @@ public class WindowAndroid
         void onAdaptiveRefreshRateInfoChanged(
                 long nativeWindowAndroid,
                 boolean supportsAdaptiveRefreshRate,
-                float suggestedFrameRateHigh);
+                float suggestedFrameRateHigh,
+                @JniType("std::vector<jfloat>") float[] framePerSecondArray,
+                @JniType("std::vector<jfloat>") float[] dpPerSecondArray);
 
         void onOverlayTransformUpdated(long nativeWindowAndroid);
 

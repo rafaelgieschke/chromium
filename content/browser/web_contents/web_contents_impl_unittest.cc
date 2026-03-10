@@ -9,7 +9,6 @@
 
 #include "base/check.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/ptr_util.h"
@@ -229,7 +228,9 @@ class MockWebContentsDelegate : public WebContentsDelegate {
   MOCK_METHOD4(RegisterProtocolHandler,
                void(RenderFrameHost*, const std::string&, const GURL&, bool));
   MOCK_METHOD(void, NavigationStateChanged, (WebContents*, InvalidateTypes));
-
+  MOCK_METHOD(bool,
+              PreHandleGestureEvent,
+              (WebContents*, const blink::WebGestureEvent&));
   blink::ProtocolHandlerSecurityLevel GetProtocolHandlerSecurityLevel(
       RenderFrameHost*) override {
     return security_level_;
@@ -308,7 +309,7 @@ class FakeImageDownloader : public blink::mojom::ImageDownloader {
                      uint32_t max_bitmap_size,
                      bool bypass_cache,
                      DownloadImageCallback callback) override {
-    if (!base::Contains(fake_response_data_per_url_, url)) {
+    if (!fake_response_data_per_url_.contains(url)) {
       // This could return a 404, but there is no test that currently relies on
       // it.
       return;
@@ -325,7 +326,7 @@ class FakeImageDownloader : public blink::mojom::ImageDownloader {
       uint32_t max_bitmap_size,
       bool bypass_cache,
       DownloadImageFromAxNodeCallback callback) override {
-    if (!base::Contains(fake_response_data_per_ax_node_id_, ax_node_id)) {
+    if (!fake_response_data_per_ax_node_id_.contains(ax_node_id)) {
       // This could return a 404, but there is no test that currently relies on
       // it.
       return;
@@ -472,8 +473,7 @@ TEST_F(WebContentsImplTest, UpdateTitle) {
   main_test_rfh()->SendNavigateWithParams(std::move(params),
                                           false /* was_within_same_document */);
 
-  contents()->UpdateTitle(main_test_rfh(), u"    Lots O' Whitespace\n",
-                          base::i18n::LEFT_TO_RIGHT);
+  contents()->UpdateTitle(main_test_rfh(), u"    Lots O' Whitespace\n");
   // Make sure that title updates get stripped of whitespace.
   EXPECT_EQ(u"Lots O' Whitespace", contents()->GetTitle());
   EXPECT_FALSE(contents()->IsWaitingForResponse());
@@ -485,7 +485,7 @@ TEST_F(WebContentsImplTest, UpdateTitle) {
 TEST_F(WebContentsImplTest, UpdateTitleBeforeFirstNavigation) {
   ASSERT_TRUE(controller().IsInitialNavigation());
   const std::u16string title = u"Initial Entry Title";
-  contents()->UpdateTitle(main_test_rfh(), title, base::i18n::LEFT_TO_RIGHT);
+  contents()->UpdateTitle(main_test_rfh(), title);
   EXPECT_EQ(title, contents()->GetTitle());
 }
 
@@ -495,7 +495,7 @@ TEST_F(WebContentsImplTest, UpdateTitleWhileFirstNavigationIsPending) {
                        std::string());
   ASSERT_TRUE(!!controller().GetPendingEntry());
   const std::u16string title = u"Initial Entry Title";
-  contents()->UpdateTitle(main_test_rfh(), title, base::i18n::LEFT_TO_RIGHT);
+  contents()->UpdateTitle(main_test_rfh(), title);
   EXPECT_EQ(title, contents()->GetTitle());
 }
 
@@ -1173,6 +1173,11 @@ TEST_F(WebContentsImplTest, CrossSiteUnloadHandlers) {
   const GURL url2("http://www.yahoo.com");
   orig_rfh->SuddenTerminationDisablerChanged(
       true, blink::mojom::SuddenTerminationDisablerType::kBeforeUnloadHandler);
+  // Put a user gesture on the frame to wait for the beforeunload event to
+  // complete.
+  orig_rfh->ActivateUserActivation(
+      blink::mojom::UserActivationNotificationType::kTest,
+      /*sticky_only=*/true);
   controller().LoadURL(url2, Referrer(), ui::PAGE_TRANSITION_TYPED,
                        std::string());
   EXPECT_TRUE(orig_rfh->is_waiting_for_beforeunload_completion());
@@ -1219,6 +1224,11 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationPreempted) {
   const GURL url2("http://www.yahoo.com");
   orig_rfh->SuddenTerminationDisablerChanged(
       true, blink::mojom::SuddenTerminationDisablerType::kBeforeUnloadHandler);
+  // Put a user gesture on the frame to wait for the beforeunload event to
+  // complete.
+  orig_rfh->ActivateUserActivation(
+      blink::mojom::UserActivationNotificationType::kTest,
+      /*sticky_only=*/true);
   controller().LoadURL(url2, Referrer(), ui::PAGE_TRANSITION_TYPED,
                        std::string());
   EXPECT_TRUE(orig_rfh->is_waiting_for_beforeunload_completion());
@@ -1370,6 +1380,11 @@ TEST_F(WebContentsImplTest, CrossSiteNavigationNotPreemptedByFrame) {
   const GURL url2("http://www.yahoo.com");
   orig_rfh->SuddenTerminationDisablerChanged(
       true, blink::mojom::SuddenTerminationDisablerType::kBeforeUnloadHandler);
+  // Put a user gesture on the frame to wait for the beforeunload event to
+  // complete.
+  orig_rfh->ActivateUserActivation(
+      blink::mojom::UserActivationNotificationType::kTest,
+      /*sticky_only=*/true);
   controller().LoadURL(url2, Referrer(), ui::PAGE_TRANSITION_TYPED,
                        std::string());
 
@@ -1413,6 +1428,11 @@ TEST_F(WebContentsImplTest, CrossSiteNotPreemptedDuringBeforeUnload) {
   // This test assumes a beforeunload handler is present.
   orig_rfh->SuddenTerminationDisablerChanged(
       true, blink::mojom::SuddenTerminationDisablerType::kBeforeUnloadHandler);
+  // Put a user gesture on the frame to wait for the beforeunload event to
+  // complete.
+  orig_rfh->ActivateUserActivation(
+      blink::mojom::UserActivationNotificationType::kTest,
+      /*sticky_only=*/true);
   auto same_site_navigation = NavigationSimulator::CreateRendererInitiated(
       kSameSiteUrl, main_test_rfh());
   same_site_navigation->SetHasUserGesture(false);
@@ -1555,6 +1575,152 @@ TEST_F(WebContentsImplTest, NavigationExitsFullscreen) {
   NavigationSimulator::NavigateAndCommitFromBrowser(contents(), url2);
 
   // Confirm fullscreen has exited.
+  EXPECT_FALSE(contents()->IsFullscreen());
+  EXPECT_FALSE(fake_delegate.IsFullscreenForTabOrPending(contents()));
+
+  contents()->SetDelegate(nullptr);
+}
+
+TEST_F(WebContentsImplTest, FullscreenNoExitOnIframeNavigate) {
+  FakeFullscreenDelegate fake_delegate;
+  contents()->SetDelegate(&fake_delegate);
+
+  // Navigate to a site.
+  NavigationSimulator::NavigateAndCommitFromBrowser(contents(),
+                                                    GURL("http://a.com"));
+  TestRenderFrameHost* main_rfh = main_test_rfh();
+
+  // Create a subframe and navigate it.
+  TestRenderFrameHost* sub_rfh = main_rfh->AppendChild("subframe");
+  sub_rfh = static_cast<TestRenderFrameHost*>(
+      NavigationSimulator::NavigateAndCommitFromDocument(GURL("http://b.com"),
+                                                         sub_rfh));
+
+  // Make the top page fullscreen.
+  EXPECT_FALSE(contents()->IsFullscreen());
+  main_rfh->frame_tree_node()->UpdateUserActivationState(
+      blink::mojom::UserActivationUpdateType::kNotifyActivation,
+      blink::mojom::UserActivationNotificationType::kTest);
+  main_rfh->EnterFullscreen(blink::mojom::FullscreenOptions::New(),
+                            base::BindOnce(&ExpectTrue));
+  EXPECT_TRUE(contents()->IsFullscreen());
+
+  // Navigate the iframe.
+  NavigationSimulator::NavigateAndCommitFromDocument(GURL("http://c.com"),
+                                                     sub_rfh);
+
+  // Fullscreen should NOT be exited.
+  EXPECT_TRUE(contents()->IsFullscreen());
+  EXPECT_TRUE(fake_delegate.IsFullscreenForTabOrPending(contents()));
+
+  contents()->SetDelegate(nullptr);
+}
+
+TEST_F(WebContentsImplTest, FullscreenNoExitOnIframeSameDocumentNavigate) {
+  FakeFullscreenDelegate fake_delegate;
+  contents()->SetDelegate(&fake_delegate);
+  TestRenderFrameHost* main_rfh = main_test_rfh();
+
+  // Navigate to a site.
+  NavigationSimulator::NavigateAndCommitFromBrowser(contents(),
+                                                    GURL("http://a.com"));
+  main_rfh = main_test_rfh();
+
+  // Create a subframe and navigate it.
+  TestRenderFrameHost* sub_rfh = main_rfh->AppendChild("subframe");
+  sub_rfh = static_cast<TestRenderFrameHost*>(
+      NavigationSimulator::NavigateAndCommitFromDocument(GURL("http://b.com"),
+                                                         sub_rfh));
+
+  // Make the top page fullscreen.
+  EXPECT_FALSE(contents()->IsFullscreen());
+  main_rfh->frame_tree_node()->UpdateUserActivationState(
+      blink::mojom::UserActivationUpdateType::kNotifyActivation,
+      blink::mojom::UserActivationNotificationType::kTest);
+  main_rfh->EnterFullscreen(blink::mojom::FullscreenOptions::New(),
+                            base::BindOnce(&ExpectTrue));
+  EXPECT_TRUE(contents()->IsFullscreen());
+
+  // Navigate the iframe same-document.
+  NavigationSimulator::CreateRendererInitiated(GURL("http://b.com/#hash"),
+                                               sub_rfh)
+      ->CommitSameDocument();
+
+  // Fullscreen should NOT be exited.
+  EXPECT_TRUE(contents()->IsFullscreen());
+  EXPECT_TRUE(fake_delegate.IsFullscreenForTabOrPending(contents()));
+
+  contents()->SetDelegate(nullptr);
+}
+
+TEST_F(WebContentsImplTest,
+       FullscreenExitOnIframeNavigateWhileIframeIsFullscreen) {
+  FakeFullscreenDelegate fake_delegate;
+  contents()->SetDelegate(&fake_delegate);
+  TestRenderFrameHost* main_rfh = main_test_rfh();
+
+  // Navigate to a site.
+  NavigationSimulator::NavigateAndCommitFromBrowser(contents(),
+                                                    GURL("http://a.com"));
+  main_rfh = main_test_rfh();
+
+  // Create a subframe and navigate it.
+  TestRenderFrameHost* sub_rfh = main_rfh->AppendChild("subframe");
+  sub_rfh = static_cast<TestRenderFrameHost*>(
+      NavigationSimulator::NavigateAndCommitFromDocument(GURL("http://b.com"),
+                                                         sub_rfh));
+
+  // Make the subframe fullscreen.
+  EXPECT_FALSE(contents()->IsFullscreen());
+  sub_rfh->frame_tree_node()->UpdateUserActivationState(
+      blink::mojom::UserActivationUpdateType::kNotifyActivation,
+      blink::mojom::UserActivationNotificationType::kTest);
+  sub_rfh->EnterFullscreen(blink::mojom::FullscreenOptions::New(),
+                           base::BindOnce(&ExpectTrue));
+  EXPECT_TRUE(contents()->IsFullscreen());
+
+  // Navigate the iframe.
+  NavigationSimulator::NavigateAndCommitFromDocument(GURL("http://c.com"),
+                                                     sub_rfh);
+
+  // Fullscreen SHOULD be exited.
+  EXPECT_FALSE(contents()->IsFullscreen());
+  EXPECT_FALSE(fake_delegate.IsFullscreenForTabOrPending(contents()));
+
+  contents()->SetDelegate(nullptr);
+}
+
+TEST_F(WebContentsImplTest,
+       FullscreenExitOnMainFrameNavigateWhileIframeIsFullscreen) {
+  FakeFullscreenDelegate fake_delegate;
+  contents()->SetDelegate(&fake_delegate);
+  TestRenderFrameHost* main_rfh = main_test_rfh();
+
+  // Navigate to a site.
+  NavigationSimulator::NavigateAndCommitFromBrowser(contents(),
+                                                    GURL("http://a.com"));
+  main_rfh = main_test_rfh();
+
+  // Create a subframe and navigate it.
+  TestRenderFrameHost* sub_rfh = main_rfh->AppendChild("subframe");
+  sub_rfh = static_cast<TestRenderFrameHost*>(
+      NavigationSimulator::NavigateAndCommitFromDocument(GURL("http://b.com"),
+                                                         sub_rfh));
+
+  // Make the subframe fullscreen.
+  EXPECT_FALSE(contents()->IsFullscreen());
+  sub_rfh->frame_tree_node()->UpdateUserActivationState(
+      blink::mojom::UserActivationUpdateType::kNotifyActivation,
+      blink::mojom::UserActivationNotificationType::kTest);
+  sub_rfh->EnterFullscreen(blink::mojom::FullscreenOptions::New(),
+                           base::BindOnce(&ExpectTrue));
+  EXPECT_TRUE(contents()->IsFullscreen());
+
+  // Navigate the main frame.
+  NavigationSimulator::NavigateAndCommitFromBrowser(contents(),
+                                                    GURL("http://c.com"));
+
+  // Fullscreen SHOULD be exited.
   EXPECT_FALSE(contents()->IsFullscreen());
   EXPECT_FALSE(fake_delegate.IsFullscreenForTabOrPending(contents()));
 
@@ -3457,22 +3623,28 @@ TEST_F(WebContentsImplTest, RequestMediaAccessPermissionNoDelegate) {
 TEST_F(WebContentsImplTest, IgnoreInputEvents) {
   // By default, input events should not be ignored.
   EXPECT_FALSE(contents()->ShouldIgnoreInputEvents());
+  EXPECT_FALSE(contents()->ShouldIgnoreA11yInputEvents());
+
   std::optional<WebContents::ScopedIgnoreInputEvents> ignore_1 =
       contents()->IgnoreInputEvents(std::nullopt);
   EXPECT_TRUE(contents()->ShouldIgnoreInputEvents());
+  EXPECT_TRUE(contents()->ShouldIgnoreA11yInputEvents());
 
   // A second request to ignore should continue to ignore events.
   WebContents::ScopedIgnoreInputEvents ignore_2 =
       contents()->IgnoreInputEvents(std::nullopt);
   EXPECT_TRUE(contents()->ShouldIgnoreInputEvents());
+  EXPECT_TRUE(contents()->ShouldIgnoreA11yInputEvents());
 
   // Releasing one of them should not change anything.
   ignore_1.reset();
   EXPECT_TRUE(contents()->ShouldIgnoreInputEvents());
+  EXPECT_TRUE(contents()->ShouldIgnoreA11yInputEvents());
 
   // Move construction should not allow input.
   WebContents::ScopedIgnoreInputEvents ignore_3(std::move(ignore_2));
   EXPECT_TRUE(contents()->ShouldIgnoreInputEvents());
+  EXPECT_TRUE(contents()->ShouldIgnoreA11yInputEvents());
 
   {
     // Cannot create an empty `ScopedIgnoreInputEvents`, so get a new one and
@@ -3481,11 +3653,13 @@ TEST_F(WebContentsImplTest, IgnoreInputEvents) {
         contents()->IgnoreInputEvents(std::nullopt);
     ignore_4 = std::move(ignore_3);
     EXPECT_TRUE(contents()->ShouldIgnoreInputEvents());
+    EXPECT_TRUE(contents()->ShouldIgnoreA11yInputEvents());
     // `ignore_4` goes out of scope.
   }
 
   // Now input should be allowed.
   EXPECT_FALSE(contents()->ShouldIgnoreInputEvents());
+  EXPECT_FALSE(contents()->ShouldIgnoreA11yInputEvents());
 }
 
 TEST_F(WebContentsImplTest, IgnoreInputEvents_IgnoreA11yInputEvents) {
@@ -3494,11 +3668,14 @@ TEST_F(WebContentsImplTest, IgnoreInputEvents_IgnoreA11yInputEvents) {
   EXPECT_FALSE(contents()->ShouldIgnoreA11yInputEvents());
 
   // Create two requests with different a11y input settings.
-  std::optional<WebContents::ScopedIgnoreInputEvents> ignore_input_only =
-      contents()->IgnoreInputEvents(std::nullopt);
+  // The default 1-argument call now ignores both regular input and a11y input.
   std::optional<WebContents::ScopedIgnoreInputEvents>
-      ignore_input_and_a11y_input = contents()->IgnoreInputEvents(
-          std::nullopt, /*should_ignore_a11y_input=*/true);
+      ignore_input_and_a11y_input = contents()->IgnoreInputEvents(std::nullopt);
+
+  // To test ignoring ONLY regular input, we must explicitly pass false.
+  std::optional<WebContents::ScopedIgnoreInputEvents> ignore_input_only =
+      contents()->IgnoreInputEvents(std::nullopt,
+                                    /*should_ignore_a11y_input=*/false);
 
   // With both requests active, both input and a11y input should be ignored.
   EXPECT_TRUE(contents()->ShouldIgnoreInputEvents());
@@ -3773,6 +3950,47 @@ TEST_F(WebContentsImplTest, IsLoadingExcludingAdFrames) {
   ad_frame_navigation->Commit();
   EXPECT_FALSE(contents()->IsLoading());
   EXPECT_FALSE(contents()->IsLoadingExcludingAdSubframes());
+}
+
+TEST_F(WebContentsImplTest, SetIgnoreZoomGestures) {
+  MockWebContentsDelegate delegate;
+  contents()->SetDelegate(&delegate);
+
+  // Setup Gesture Events
+  blink::WebGestureEvent pinch_event(
+      blink::WebInputEvent::Type::kGesturePinchUpdate,
+      blink::WebInputEvent::kNoModifiers, base::TimeTicks::Now(),
+      blink::WebGestureDevice::kTouchpad);
+
+  blink::WebGestureEvent double_tap_event(
+      blink::WebInputEvent::Type::kGestureDoubleTap,
+      blink::WebInputEvent::kNoModifiers, base::TimeTicks::Now(),
+      blink::WebGestureDevice::kTouchscreen);
+
+  blink::WebGestureEvent scroll_event(
+      blink::WebInputEvent::Type::kGestureScrollUpdate,
+      blink::WebInputEvent::kNoModifiers, base::TimeTicks::Now(),
+      blink::WebGestureDevice::kTouchscreen);
+
+  // Default case. Zoom gesture events are not ignored.
+  EXPECT_CALL(delegate, PreHandleGestureEvent(::testing::_, ::testing::_))
+      .WillRepeatedly(::testing::Return(false));
+  EXPECT_FALSE(contents()->PreHandleGestureEvent(pinch_event));
+  EXPECT_FALSE(contents()->PreHandleGestureEvent(double_tap_event));
+  testing::Mock::VerifyAndClearExpectations(&delegate);
+
+  // Only pinch and Double Tab gestures should be ignored.
+  contents()->SetIgnoreZoomGestures(true);
+  EXPECT_CALL(delegate, PreHandleGestureEvent(::testing::_, ::testing::_))
+      .Times(0);
+  EXPECT_TRUE(contents()->PreHandleGestureEvent(pinch_event));
+  EXPECT_TRUE(contents()->PreHandleGestureEvent(double_tap_event));
+
+  testing::Mock::VerifyAndClearExpectations(&delegate);
+
+  EXPECT_CALL(delegate, PreHandleGestureEvent(::testing::_, ::testing::_))
+      .WillOnce(::testing::Return(false));
+  EXPECT_FALSE(contents()->PreHandleGestureEvent(scroll_event));
 }
 
 }  // namespace content

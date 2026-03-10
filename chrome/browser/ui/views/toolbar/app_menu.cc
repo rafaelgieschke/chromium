@@ -42,6 +42,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
@@ -96,6 +97,7 @@
 #include "ui/gfx/scoped_canvas.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/gfx/text_utils.h"
+#include "ui/gfx/vector_icon_types.h"
 #include "ui/menus/simple_menu_model.h"
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/background.h"
@@ -287,8 +289,8 @@ std::u16string GetAccessibleNameForAppMenuItem(ButtonMenuItemModel* model,
                            .GetShortcutText();
   }
 
-  return MenuItemView::GetAccessibleNameForMenuItem(accessible_name,
-                                                    accelerator_text, false);
+  return MenuItemView::GetAccessibleNameForMenuItem(
+      accessible_name, accelerator_text, /*badge_type=*/std::nullopt);
 }
 
 // A button that lives inside a menu item.
@@ -335,9 +337,8 @@ class InMenuImageButton : public ImageButton {
 
   void Init(InMenuButtonBackground::ButtonType type,
             InMenuButtonBackground::ButtonShape shape,
-            const ui::ImageModel& image_model) {
+            const gfx::VectorIcon& vector_icon) {
     SetFocusBehavior(FocusBehavior::ALWAYS);
-    SetImageModel(views::Button::STATE_NORMAL, image_model);
     SetImageHorizontalAlignment(ImageButton::ALIGN_CENTER);
     SetImageVerticalAlignment(ImageButton::ALIGN_MIDDLE);
     SetBackground(std::make_unique<InMenuButtonBackground>(type, shape));
@@ -345,6 +346,15 @@ class InMenuImageButton : public ImageButton {
         gfx::Insets::TLBR(0, kHorizontalPadding, 0, kHorizontalPadding)));
 
     GetViewAccessibility().SetRole(ax::mojom::Role::kMenuItem);
+    SetImageModel(views::Button::STATE_NORMAL,
+                  ui::ImageModel::FromVectorIcon(vector_icon,
+                                                 ui::kColorMenuItemForeground));
+    SetImageModel(ImageButton::STATE_HOVERED,
+                  ui::ImageModel::FromVectorIcon(
+                      vector_icon, ui::kColorMenuItemForegroundSelected));
+    SetImageModel(ImageButton::STATE_PRESSED,
+                  ui::ImageModel::FromVectorIcon(
+                      vector_icon, ui::kColorMenuItemForegroundSelected));
   }
 };
 
@@ -449,7 +459,7 @@ void AddSignedInChipToProfileMenuItem(
   // account for the profile chip.
   item->GetViewAccessibility().SetName(
       views::MenuItemView::GetAccessibleNameForMenuItem(
-          item->title(), GetSigninStatusChipString(profile), false));
+          item->title(), GetSigninStatusChipString(profile), std::nullopt));
 }
 
 // AppMenuView is a view that can contain label buttons.
@@ -484,14 +494,14 @@ class AppMenuView : public views::View {
       int accessible_name_id,
       bool add_accelerator_text,
       bool use_accessible_name_as_tooltip_text,
-      const ui::ImageModel image_model = ui::ImageModel()) {
+      const gfx::VectorIcon& vector_icon = gfx::VectorIcon::EmptyIcon()) {
     // Should only be invoked during construction when |menu_| is valid.
     DCHECK(menu_);
 
     std::unique_ptr<views::Button> menu_button;
     auto button = std::make_unique<InMenuImageButton>(std::move(callback));
     button->Init(type, InMenuButtonBackground::ButtonShape::kCircular,
-                 image_model);
+                 vector_icon);
     menu_button = std::move(button);
     menu_button->GetViewAccessibility().SetName(GetAccessibleNameForAppMenuItem(
         menu_model_, index, accessible_name_id, add_accelerator_text));
@@ -693,15 +703,13 @@ class AppMenu::ZoomView : public AppMenuView, public views::WidgetObserver {
     const auto activate = [](ButtonMenuItemModel* menu_model, size_t index) {
       menu_model->ActivatedAt(index);
     };
-    auto image_model = ui::ImageModel::FromVectorIcon(
-        kZoomMinusMenuRefreshIcon, ui::kColorMenuItemForeground);
     decrement_button_ = CreateButtonWithAccessibleName(
         base::BindRepeating(activate, menu_model, decrement_index),
         IDS_ZOOM_MINUS2, InMenuButtonBackground::ButtonType::kNoBorder,
         decrement_index, IDS_ACCNAME_ZOOM_MINUS2,
         /*add_accelerator_text=*/false,
         /*use_accessible_name_as_tooltip_text=*/true,
-        /*image_model=*/image_model);
+        /*vector_icon=*/kZoomMinusMenuRefreshIcon);
 
     auto zoom_label = std::make_unique<Label>(base::FormatPercent(100));
     zoom_label->SetAutoColorReadabilityEnabled(false);
@@ -730,14 +738,12 @@ class AppMenu::ZoomView : public AppMenuView, public views::WidgetObserver {
 
     zoom_label_ = AddChildView(std::move(zoom_label));
 
-    image_model = ui::ImageModel::FromVectorIcon(kZoomPlusMenuRefreshIcon,
-                                                 ui::kColorMenuItemForeground);
     increment_button_ = CreateButtonWithAccessibleName(
         base::BindRepeating(activate, menu_model, increment_index),
         IDS_ZOOM_PLUS2, InMenuButtonBackground::ButtonType::kNoBorder,
         increment_index, IDS_ACCNAME_ZOOM_PLUS2, /*add_accelerator_text=*/false,
         /*use_accessible_name_as_tooltip_text=*/true,
-        /*image_model=*/image_model);
+        /*vector_icon=*/kZoomPlusMenuRefreshIcon);
 
     auto fullscreen_button = std::make_unique<FullscreenButton>(
         base::BindRepeating(
@@ -1318,10 +1324,10 @@ bool AppMenu::GetAccelerator(int command_id,
   if (command_id == IDC_CREATE_NEW_TAB_GROUP_TOP_LEVEL) {
     // Same as 'Create new tab group' except the menu item is at the top level
     // of the app menu instead of in the tab groups submenu.
-      return browser_->browser_window_features()
-          ->accelerator_provider()
-          ->GetAcceleratorForCommandId(IDC_CREATE_NEW_TAB_GROUP, accelerator);
-    }
+    return browser_->browser_window_features()
+        ->accelerator_provider()
+        ->GetAcceleratorForCommandId(IDC_CREATE_NEW_TAB_GROUP, accelerator);
+  }
 
   if (IsTabGroupsCommand(command_id)) {
     return false;

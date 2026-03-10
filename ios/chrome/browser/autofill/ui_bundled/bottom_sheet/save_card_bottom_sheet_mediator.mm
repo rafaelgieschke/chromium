@@ -13,6 +13,7 @@
 #import "base/time/time.h"
 #import "base/timer/timer.h"
 #import "components/autofill/core/browser/metrics/payments/credit_card_save_metrics.h"
+#import "components/autofill/core/common/autofill_payments_features.h"
 #import "components/autofill/ios/browser/credit_card_save_metrics_ios.h"
 #import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/autofill/model/bottom_sheet/save_card_bottom_sheet_model.h"
@@ -212,11 +213,21 @@ static constexpr base::TimeDelta kConfirmationDismissDelayIfVoiceOverRunning =
       SaveCreditCardPromptOverlayType::kBottomSheet);
 }
 
+- (SaveCardActionType)actionType {
+  if (_saveCardBottomSheetModel->save_card_delegate()->is_for_upload()) {
+    return SaveCardActionType::kUpload;
+  }
+  if (_saveCardBottomSheetModel->save_card_delegate()->is_for_local_save()) {
+    return SaveCardActionType::kLocal;
+  }
+  return SaveCardActionType::kSaveScanAndFill;
+}
+
 #pragma mark - SaveCardBottomSheetDataSource
 
 - (AboveTitleImageLogoType)logoType {
   return _saveCardBottomSheetModel->save_card_delegate()->is_for_upload()
-             ? kGooglePayLogo
+             ? kGoogleWalletLogo
              : kChromeLogo;
 }
 
@@ -224,7 +235,10 @@ static constexpr base::TimeDelta kConfirmationDismissDelayIfVoiceOverRunning =
   return base::SysUTF16ToNSString(
       _saveCardBottomSheetModel->save_card_delegate()->is_for_upload()
           ? l10n_util::GetStringUTF16(
-                IDS_AUTOFILL_GOOGLE_PAY_LOGO_ACCESSIBLE_NAME)
+                base::FeatureList::IsEnabled(
+                    autofill::features::kAutofillEnableWalletBranding)
+                    ? IDS_AUTOFILL_GOOGLE_WALLET_LOGO_ACCESSIBLE_NAME
+                    : IDS_AUTOFILL_GOOGLE_PAY_LOGO_ACCESSIBLE_NAME)
           : l10n_util::GetStringUTF16(
                 IDS_AUTOFILL_CHROME_LOGO_ACCESSIBLE_NAME));
 }
@@ -264,6 +278,14 @@ static constexpr base::TimeDelta kConfirmationDismissDelayIfVoiceOverRunning =
       SaveCreditCardPromptOverlayType::kBottomSheet);
   _dismissing = YES;
   [_autofillCommandsHandler dismissSaveCardBottomSheet];
+}
+
+- (void)onUpdatedAndAcceptedForSaveAndFill:
+    (autofill::payments::PaymentsAutofillClient::
+         UserProvidedCardSaveAndFillDetails)details {
+  // Pass the details from the View Controller down to the Model.
+  _saveCardBottomSheetModel->OnUpdatedAndAcceptedForSaveAndFill(
+      std::move(details));
 }
 
 #pragma mark - SaveCardBottomSheetModel Observer

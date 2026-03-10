@@ -19,9 +19,9 @@
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_destroyer.h"
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/dialogs/browser_dialogs.h"
 #include "chrome/browser/ui/hats/hats_service.h"
 #include "chrome/browser/ui/hats/hats_service_desktop.h"
 #include "chrome/browser/ui/hats/hats_service_factory.h"
@@ -115,6 +115,8 @@ class HatsNextWebDialog::HatsWebView : public views::WebView {
       const GURL& opener_url,
       const std::string& frame_name,
       const GURL& target_url,
+      WindowOpenDisposition disposition,
+      const blink::mojom::WindowFeatures& window_features,
       const content::StoragePartitionConfig& partition_config,
       content::SessionStorageNamespace* session_storage_namespace) override {
     // The HaTS Next WebDialog runs with a non-primary OTR profile. This profile
@@ -451,7 +453,7 @@ GURL HatsNextWebDialog::GetParameterizedHatsURL() const {
 
   // Append any Product Specific Data to the query. This will be interpreted
   // by the wrapper website and provided to the HaTS backend service.
-  base::Value::Dict dict;
+  base::DictValue dict;
   for (const auto& field_value : product_specific_bits_data_) {
     dict.Set(field_value.first, base::ToString(field_value.second));
   }
@@ -467,7 +469,7 @@ GURL HatsNextWebDialog::GetParameterizedHatsURL() const {
   // The HaTS backend service accepts a list of preferred languages, although
   // only the application locale is provided here to ensure that the survey
   // matches the native UI language.
-  base::Value::List language_list;
+  base::ListValue language_list;
   language_list.Append(g_browser_process->GetApplicationLocale());
 
   std::string language_list_json = base::WriteJson(language_list).value_or("");

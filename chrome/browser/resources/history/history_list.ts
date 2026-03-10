@@ -147,10 +147,17 @@ export class HistoryListElement extends HistoryListElementBase {
   accessor searchedTerm: string = '';
   accessor selectedItems: Set<number> = new Set();
   accessor pendingDelete: boolean = false;
-  protected accessor lastFocused_: HTMLElement|null;
-  protected accessor listBlurred_: boolean;
+  protected accessor lastFocused_: HTMLElement|null = null;
+  protected accessor listBlurred_: boolean = false;
   accessor lastSelectedIndex: number = -1;
-  accessor queryState: QueryState;
+  accessor queryState: QueryState = {
+    incremental: false,
+    querying: false,
+    searchTerm: '',
+    after: null,
+    includeUserVisits: true,
+    includeActorVisits: true,
+  };
   accessor scrollTarget: HTMLElement = document.documentElement;
   accessor scrollOffset: number = 0;
   private onHistoryDeletedListenerId_: number|null = null;
@@ -160,6 +167,22 @@ export class HistoryListElement extends HistoryListElementBase {
     this.onHistoryDeletedListenerId_ =
         this.callbackRouter_.onHistoryDeleted.addListener(
             this.onHistoryDeleted_.bind(this));
+  }
+
+  override disconnectedCallback() {
+    super.disconnectedCallback();
+    assert(this.onHistoryDeletedListenerId_);
+    this.callbackRouter_.removeListener(this.onHistoryDeletedListenerId_);
+    this.onHistoryDeletedListenerId_ = null;
+  }
+
+  override willUpdate(changedProperties: PropertyValues<this>) {
+    super.willUpdate(changedProperties);
+    const changedPrivateProperties =
+        changedProperties as Map<PropertyKey, unknown>;
+    if (changedPrivateProperties.has('historyData_')) {
+      this.isEmpty = this.historyData_.length === 0;
+    }
   }
 
   override firstUpdated() {
@@ -172,15 +195,6 @@ export class HistoryListElement extends HistoryListElementBase {
         'remove-bookmark-stars', e => this.onRemoveBookmarkStars_(e));
   }
 
-  override willUpdate(changedProperties: PropertyValues<this>) {
-    super.willUpdate(changedProperties);
-    const changedPrivateProperties =
-        changedProperties as Map<PropertyKey, unknown>;
-    if (changedPrivateProperties.has('historyData_')) {
-      this.isEmpty = this.historyData_.length === 0;
-    }
-  }
-
   override updated(changedProperties: PropertyValues<this>) {
     super.updated(changedProperties);
     if (changedProperties.has('isActive')) {
@@ -190,13 +204,6 @@ export class HistoryListElement extends HistoryListElementBase {
     if (changedProperties.has('scrollTarget')) {
       this.onScrollTargetChanged_(changedProperties.get('scrollTarget'));
     }
-  }
-
-  override disconnectedCallback() {
-    super.disconnectedCallback();
-    assert(this.onHistoryDeletedListenerId_);
-    this.callbackRouter_.removeListener(this.onHistoryDeletedListenerId_);
-    this.onHistoryDeletedListenerId_ = null;
   }
 
   /////////////////////////////////////////////////////////////////////////////
@@ -262,9 +269,7 @@ export class HistoryListElement extends HistoryListElementBase {
     this.historyData_ = [...this.historyData_, ...results];
     this.resultLoadingDisabled_ = finished;
 
-    if (loadTimeData.getBoolean('enableBrowsingHistoryActorIntegrationM1')) {
-      this.recordActorVisitShown_(results);
-    }
+    this.recordActorVisitShown_(results);
   }
 
   private recordActorVisitShown_(historyResults: HistoryEntry[]) {
@@ -473,20 +478,15 @@ export class HistoryListElement extends HistoryListElementBase {
   }
 
   private deleteItems_(items: HistoryEntry[]): Promise<void> {
-    const removalList = items.map(item => ({
-                                    url: item.url,
-                                    timestamps: item.allTimestamps,
-                                  }));
+    const removalList = items.flatMap(
+        item => Object.entries(item.allTimestamps)
+                    .map(([url, timestamps]) => ({url, timestamps})));
 
     this.pendingDelete = true;
     return this.pageHandler_.removeVisits(removalList);
   }
 
   private recordContextMenuActionsHistogram_(action: VisitContextMenuAction) {
-    if (!loadTimeData.getBoolean('enableBrowsingHistoryActorIntegrationM1')) {
-      return;
-    }
-
     this.browserService_.recordHistogram(
         this.actionMenuModel_!.item.isActorVisit ?
             'HistoryPage.ActorContextMenuActions' :
@@ -590,8 +590,8 @@ export class HistoryListElement extends HistoryListElementBase {
       return false;
     }
 
-    const currentItem = this.historyData_[index];
-    const nextItem = this.historyData_[index + 1];
+    const currentItem = this.historyData_[index]!;
+    const nextItem = this.historyData_[index + 1]!;
 
     if (this.searchedTerm) {
       return currentItem.dateShort !== nextItem.dateShort;
@@ -611,8 +611,8 @@ export class HistoryListElement extends HistoryListElementBase {
       return false;
     }
     return i === 0 ||
-        this.historyData_[i].dateRelativeDay !==
-        this.historyData_[i - 1].dateRelativeDay;
+        this.historyData_[i]!.dateRelativeDay !==
+        this.historyData_[i - 1]!.dateRelativeDay;
   }
 
   /**
@@ -621,12 +621,12 @@ export class HistoryListElement extends HistoryListElementBase {
    */
   protected isCardEnd_(_item: HistoryEntry, i: number): boolean {
     const length = this.historyData_.length;
-    if (i === undefined || length === 0 || i > length - 1) {
+    if (length === 0 || i > length - 1) {
       return false;
     }
     return i === length - 1 ||
-        this.historyData_[i].dateRelativeDay !==
-        this.historyData_[i + 1].dateRelativeDay;
+        this.historyData_[i]!.dateRelativeDay !==
+        this.historyData_[i + 1]!.dateRelativeDay;
   }
 
   protected hasResults_(): boolean {
@@ -649,27 +649,18 @@ export class HistoryListElement extends HistoryListElementBase {
       return;
     }
 
-    let currentDate = results[0].dateRelativeDay;
+    let currentDate = results[0]!.dateRelativeDay;
 
-    for (let i = 0; i < results.length; i++) {
+    for (const result of results) {
       // Sets the default values for these fields to prevent undefined types.
-      results[i].selected = false;
-      results[i].readableTimestamp =
-          info.term === '' ? results[i].dateTimeOfDay : results[i].dateShort;
+      result.selected = false;
+      result.readableTimestamp =
+          info.term === '' ? result.dateTimeOfDay : result.dateShort;
 
-      if (results[i].dateRelativeDay !== currentDate) {
-        currentDate = results[i].dateRelativeDay;
+      if (result.dateRelativeDay !== currentDate) {
+        currentDate = result.dateRelativeDay;
       }
     }
-  }
-
-  private getHistoryEmbeddingsMatches_(): HistoryEntry[] {
-    return this.historyData_.slice(0, 3);
-  }
-
-  private showHistoryEmbeddings_(): boolean {
-    return loadTimeData.getBoolean('enableHistoryEmbeddings') &&
-        !!this.searchedTerm && this.historyData_?.length > 0;
   }
 
   private onIsActiveChanged_() {
@@ -727,7 +718,7 @@ export class HistoryListElement extends HistoryListElementBase {
 
   private getSelectedEntries_(): HistoryEntry[] {
     // `selectedItems` is a Set<number> of row-indexes.
-    return Array.from(this.selectedItems, idx => this.historyData_[idx]);
+    return Array.from(this.selectedItems, idx => this.historyData_[idx]!);
   }
 }
 

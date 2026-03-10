@@ -21,7 +21,7 @@
 #include "third_party/blink/renderer/platform/text/character.h"
 #include "third_party/blink/renderer/platform/text/hyphenation/hyphenator_aosp.h"
 #include "third_party/blink/renderer/platform/text/layout_locale.h"
-#include "third_party/blink/renderer/platform/wtf/text/case_folding_hash.h"
+#include "third_party/blink/renderer/platform/wtf/text/ignoring_ascii_case_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/utf16.h"
 
 namespace blink {
@@ -194,7 +194,7 @@ struct HyphenatorLocaleData {
 
 using LocaleMap = HashMap<AtomicString,
                           const HyphenatorLocaleData*,
-                          CaseFoldingHashTraits<AtomicString>>;
+                          IgnoringAsciiCaseHashTraits<AtomicString>>;
 
 static LocaleMap CreateLocaleFallbackMap() {
   // This data is from CLDR, compiled by AOSP.
@@ -276,7 +276,7 @@ AtomicString HyphenationMinikin::MapLocale(const AtomicString& locale) {
         return AtomicString(it->value->locale_for_exact_match);
       return AtomicString(it->value->locale);
     }
-    const wtf_size_t last_hyphen = mapped_locale.ReverseFind('-');
+    const wtf_size_t last_hyphen = mapped_locale.rfind('-');
     if (last_hyphen == kNotFound || !last_hyphen)
       return mapped_locale;
     mapped_locale = AtomicString(mapped_locale.GetString().Left(last_hyphen));
@@ -286,8 +286,9 @@ AtomicString HyphenationMinikin::MapLocale(const AtomicString& locale) {
 scoped_refptr<Hyphenation> Hyphenation::PlatformGetHyphenation(
     const AtomicString& locale) {
   const AtomicString mapped_locale = HyphenationMinikin::MapLocale(locale);
-  if (!EqualIgnoringASCIICase(mapped_locale, locale))
+  if (!EqualIgnoringAsciiCase(mapped_locale, locale)) {
     return LayoutLocale::Get(mapped_locale)->GetHyphenation();
+  }
 
   scoped_refptr<HyphenationMinikin> hyphenation(
       base::AdoptRef(new HyphenationMinikin));

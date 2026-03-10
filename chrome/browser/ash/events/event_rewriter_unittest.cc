@@ -22,7 +22,6 @@
 #include "ash/system/toast/anchored_nudge_manager_impl.h"
 #include "base/command_line.h"
 #include "base/containers/adapters.h"
-#include "base/containers/contains.h"
 #include "base/containers/flat_set.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
@@ -33,6 +32,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/ash/events/event_rewriter_delegate_impl.h"
 #include "chrome/browser/ash/input_method/input_method_configuration.h"
 #include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
@@ -62,7 +62,6 @@
 #include "ui/events/ash/keyboard_device_id_event_rewriter.h"
 #include "ui/events/ash/keyboard_modifier_event_rewriter.h"
 #include "ui/events/ash/mojom/extended_fkeys_modifier.mojom-shared.h"
-#include "ui/events/ash/mojom/modifier_key.mojom-shared.h"
 #include "ui/events/ash/mojom/modifier_key.mojom.h"
 #include "ui/events/ash/mojom/simulate_right_click_modifier.mojom-shared.h"
 #include "ui/events/ash/mojom/six_pack_shortcut_modifier.mojom-shared.h"
@@ -3806,7 +3805,7 @@ TEST_P(EventRewriterTest, MouseEventMaintainNativeEvent) {
   }
 }
 
-// Tests edge cases of key event rewriting (see https://crbug.com/913209).
+// Tests edge cases of key event rewriting (see https://crbug.com/40605692).
 TEST_P(EventRewriterTest, KeyEventRewritingEdgeCases) {
   Preferences::RegisterProfilePrefs(prefs()->registry());
 

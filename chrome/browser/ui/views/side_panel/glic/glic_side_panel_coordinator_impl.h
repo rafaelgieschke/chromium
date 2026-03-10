@@ -12,9 +12,9 @@
 #include "chrome/browser/glic/public/glic_side_panel_coordinator.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_actions.h"
+#include "chrome/browser/ui/side_panel/side_panel_entry_observer.h"
+#include "chrome/browser/ui/side_panel/side_panel_entry_scope.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_coordinator.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_entry_observer.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_entry_scope.h"
 #include "components/tabs/public/tab_interface.h"
 #include "ui/actions/actions.h"
 #include "ui/views/view_tracker.h"
@@ -38,9 +38,10 @@ class GlicSidePanelCoordinatorImpl : public GlicSidePanelCoordinator,
   ~GlicSidePanelCoordinatorImpl() override;
 
   // GlicSidePanelCoordinator:
+  using GlicSidePanelCoordinator::Close;
   using GlicSidePanelCoordinator::Show;
   void Show(bool suppress_animations) override;
-  void Close() override;
+  void Close(const CloseOptions& options) override;
   bool IsShowing() const override;
   State state() override;
   base::CallbackListSubscription AddStateCallback(

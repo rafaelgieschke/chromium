@@ -45,7 +45,6 @@
 #include "chrome/browser/ash/login/demo_mode/demo_components.h"
 #include "chrome/browser/ash/login/demo_mode/demo_session.h"
 #include "chrome/browser/ash/profiles/profile_helper.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
@@ -526,8 +525,8 @@ ArcSessionManager::ArcSessionManager(
       android_management_checker_factory_(
           ArcRequirementChecker::GetDefaultAndroidManagementCheckerFactory()),
       arc_dlc_installer_(arc_dlc_installer),
-      attempt_user_exit_callback_(base::BindRepeating(chrome::AttemptUserExit)),
-      attempt_restart_callback_(base::BindRepeating(chrome::AttemptRestart)) {
+      attempt_restart_callback_(base::BindRepeating(
+          []() { session_manager::SessionManager::Get()->RequestRestart(); })) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   DCHECK(!g_arc_session_manager);
   g_arc_session_manager = this;
@@ -862,7 +861,8 @@ void ArcSessionManager::Initialize() {
   // TODO(hidehiko): Revisit to think about lazy initialization.
   if (ShouldUseErrorDialog()) {
     DCHECK(!support_host_);
-    support_host_ = std::make_unique<ArcSupportHost>(profile_);
+    support_host_ = std::make_unique<ArcSupportHost>(
+        &local_state_.get(), &application_locale_storage_.get(), profile_);
     support_host_->SetErrorDelegate(this);
   }
   auto* prefs = profile_->GetPrefs();
@@ -1979,12 +1979,6 @@ void ArcSessionManager::SetArcSessionRunnerForTesting(
 
 ArcSessionRunner* ArcSessionManager::GetArcSessionRunnerForTesting() {
   return arc_session_runner_.get();
-}
-
-void ArcSessionManager::SetAttemptUserExitCallbackForTesting(
-    const base::RepeatingClosure& callback) {
-  DCHECK(!callback.is_null());
-  attempt_user_exit_callback_ = callback;
 }
 
 void ArcSessionManager::SetAttemptRestartCallbackForTesting(

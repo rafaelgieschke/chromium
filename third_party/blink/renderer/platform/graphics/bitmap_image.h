@@ -30,9 +30,12 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/notreached.h"
 #include "third_party/blink/public/mojom/webpreferences/web_preferences.mojom-blink.h"
 #include "third_party/blink/renderer/platform/graphics/deferred_image_decoder.h"
+#include "third_party/blink/renderer/platform/graphics/dom_node_id.h"
+#include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/image-decoders/image_animation.h"
 #include "third_party/blink/renderer/platform/timer.h"
@@ -91,6 +94,7 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   bool IsLazyDecoded() override;
   size_t FrameCount() override;
   PaintImage PaintImageForCurrentFrame() override;
+  PaintImage PaintImageForCurrentFrameWithInfo(ImageNodeAnimationInfo*);
   ImageOrientation Orientation() const override;
 
   PaintImage PaintImageForTesting();
@@ -133,7 +137,7 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
             const gfx::RectF& src_rect,
             const ImageDrawOptions&) override;
 
-  PaintImage CreatePaintImage();
+  PaintImage CreatePaintImage(ImageNodeAnimationInfo*);
   void UpdateSize() const;
 
   // Called to wipe out the entire frame buffer cache and tell the image
@@ -162,7 +166,9 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
   // This caches the PaintImage created with the last updated encoded data to
   // ensure re-use of generated decodes. This is cleared each time the encoded
   // data is updated in DataChanged.
-  PaintImage cached_frame_;
+  HashMap<DOMNodeId, PaintImage> cached_frames_;
+
+  HashMap<DOMNodeId, ImageAnimationEnum> image_animation_map_;
 
   // Whether or not we can play animation.
   mojom::blink::ImageAnimationPolicy animation_policy_ =
@@ -185,6 +191,10 @@ class PLATFORM_EXPORT BitmapImage final : public Image {
                           // incapable of animation.
 
   size_t frame_count_;
+  // The paused image will produce the first frame of animated image.
+  // This would possibly change via this issue [1].
+  // [1] https://github.com/webplatformco/project-image-animation/issues/2
+  PaintImage::Id paused_image_paint_image_id_ = -1;
 
   PaintImage::AnimationSequenceId reset_animation_sequence_id_ = 0;
 };

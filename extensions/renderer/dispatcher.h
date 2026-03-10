@@ -165,14 +165,16 @@ class Dispatcher : public content::RenderThreadObserver,
   void DidStartServiceWorkerContextOnWorkerThread(
       int64_t service_worker_version_id,
       const GURL& service_worker_scope,
-      const GURL& script_url);
+      const GURL& script_url,
+      const blink::ServiceWorkerToken& service_worker_token);
 
   // Runs on a different thread and should not use any member variables.
   void WillDestroyServiceWorkerContextOnWorkerThread(
       v8::Local<v8::Context> v8_context,
       int64_t service_worker_version_id,
       const GURL& service_worker_scope,
-      const GURL& script_url);
+      const GURL& script_url,
+      const blink::ServiceWorkerToken& service_worker_token);
 
   // This method is not allowed to run JavaScript code in the frame.
   void DidCreateDocumentElement(blink::WebLocalFrame* frame);
@@ -186,7 +188,7 @@ class Dispatcher : public content::RenderThreadObserver,
   // Dispatches the event named `event_name` to all render views.
   void DispatchEventHelper(const mojom::HostID& extension_id,
                            const std::string& event_name,
-                           const base::Value::List& event_args,
+                           const base::ListValue& event_args,
                            mojom::EventFilteringInfoPtr filtering_info) const;
 
   // Shared implementation of the various MessageInvoke IPCs.
@@ -194,7 +196,7 @@ class Dispatcher : public content::RenderThreadObserver,
                                 const ExtensionId& extension_id,
                                 const std::string& module_name,
                                 const std::string& function_name,
-                                const base::Value::List& args);
+                                const base::ListValue& args);
 
   void ExecuteDeclarativeScript(content::RenderFrame* render_frame,
                                 int tab_id,
@@ -209,6 +211,10 @@ class Dispatcher : public content::RenderThreadObserver,
 
   NativeExtensionBindingsSystem* bindings_system() {
     return bindings_system_.get();
+  }
+
+  ScriptInjectionManager* script_injection_manager() {
+    return script_injection_manager_.get();
   }
 
  private:
@@ -281,7 +287,7 @@ class Dispatcher : public content::RenderThreadObserver,
 
   // mojom::EventDispatcher implementation.
   void DispatchEvent(mojom::DispatchEventParamsPtr params,
-                     base::Value::List event_args,
+                     base::ListValue event_args,
                      DispatchEventCallback callback) override;
 
   // UserScriptSetManager::Observer implementation.

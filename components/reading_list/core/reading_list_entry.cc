@@ -201,10 +201,6 @@ void ReadingListEntry::SetRead(bool read, const base::Time& now) {
   }
   if (FirstReadTime() == 0 && read) {
     int64_t time_to_us = TimeToUS(now);
-    int64_t time_since_creation =
-        (time_to_us - creation_time_us_) / base::Time::kMicrosecondsPerHour;
-    base::UmaHistogramCounts1000("ReadingList.Read.AgeOnFirstRead",
-                                 time_since_creation);
     first_read_time_us_ = time_to_us;
   }
   if (!(previous_state == UNSEEN && state_ == UNREAD)) {
@@ -613,7 +609,7 @@ ReadingListEntry::AsReadingListLocal(const base::Time& now) const {
   pb_entry->set_failed_download_counter(failed_download_counter_);
 
   if (backoff_) {
-    base::Value::List backoff =
+    base::ListValue backoff =
         net::BackoffEntrySerializer::SerializeToList(*backoff_, now);
 
     std::string output;

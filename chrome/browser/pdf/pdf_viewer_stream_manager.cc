@@ -10,7 +10,6 @@
 #include <tuple>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
@@ -97,6 +96,10 @@ static crash_reporter::CrashKeyString<32> crash_key_stream_count(
     "pdf-stream-count");
 static crash_reporter::CrashKeyString<32> crash_key_ongoing_content_navigations(
     "pdf-ongoing-content-navigations");
+
+// PDF extension navigation-specific crash key.
+static crash_reporter::CrashKeyString<256> crash_key_did_finish_navigation_url(
+    "pdf-did-finish-navigation-url");
 
 // PDF content navigation-specific crash keys.
 static crash_reporter::CrashKeyString<6> crash_key_did_start_navigation(
@@ -326,8 +329,8 @@ void PdfViewerStreamManager::SetPluginCanSave(
 
 bool PdfViewerStreamManager::ContainsUnclaimedStreamInfo(
     content::FrameTreeNodeId frame_tree_node_id) const {
-  return base::Contains(stream_infos_,
-                        GetUnclaimedEmbedderHostInfo(frame_tree_node_id));
+  return stream_infos_.contains(
+      GetUnclaimedEmbedderHostInfo(frame_tree_node_id));
 }
 
 void PdfViewerStreamManager::DeleteUnclaimedStreamInfo(
@@ -516,31 +519,36 @@ void PdfViewerStreamManager::DidFinishNavigation(
     return;
   }
 
-  // If the extension host has already started its navigation to the PDF
-  // extension URL, set the extension as finished navigating, ignoring other
-  // children of the embedder host.
+  const GURL& url = navigation_handle->GetURL();
   if (stream_info->DidPdfExtensionStartNavigation()) {
-    if (stream_info->extension_host_frame_tree_node_id() ==
-        navigation_handle->GetFrameTreeNodeId()) {
+    // If the extension host has already started its navigation to the PDF
+    // extension URL, set the extension as finished navigating. Ignore
+    // navigations in other children of the embedder host. Ignore all other
+    // URLs, which was shown to be possible in crbug.com/432497344.
+    const GURL pdf_extension_url = stream_info->stream()->handler_url();
+    if (url == pdf_extension_url &&
+        stream_info->extension_host_frame_tree_node_id() ==
+            navigation_handle->GetFrameTreeNodeId() &&
+        navigation_handle->HasCommitted() &&
+        !navigation_handle->IsErrorPage()) {
+      // TODO(crbug.com/432497344, crbug.com/479589477): Remove debugging data.
+      crash_reporter::ScopedCrashKeyString
+          scoped_crash_key_did_finish_navigation_url(
+              &crash_key_did_finish_navigation_url, url.spec());
       stream_info->SetDidExtensionFinishNavigation();
-      if (navigation_handle->HasCommitted() &&
-          !navigation_handle->IsErrorPage()) {
-        // Setup zoom level for the PDF extension. Zoom level 0 corresponds
-        // to zoom factor of 1, or 100%. This is done so the PDF viewer UI
-        // does not change if the page zoom does. This is analogous to page
-        // zoom not affecting the browser UI.
-        const GURL pdf_extension_url = stream_info->stream()->handler_url();
-        CHECK_EQ(pdf_extension_url, navigation_handle->GetURL());
-        CHECK_EQ(extensions::kExtensionScheme, pdf_extension_url.GetScheme());
-        content::HostZoomMap::Get(
-            navigation_handle->GetRenderFrameHost()->GetSiteInstance())
-            ->SetZoomLevelForHostAndScheme(pdf_extension_url.GetScheme(),
-                                           pdf_extension_url.GetHost(), 0);
-        // Set ZoomController on the extension host.
-        zoom::ZoomController::CreateForWebContentsAndRenderFrameHost(
-            web_contents(),
-            navigation_handle->GetRenderFrameHost()->GetGlobalId());
-      }
+
+      // Setup zoom level for the PDF extension. Zoom level 0 corresponds
+      // to zoom factor of 1, or 100%. This is done so the PDF viewer UI
+      // does not change if the page zoom does. This is analogous to page
+      // zoom not affecting the browser UI.
+      content::HostZoomMap::Get(
+          navigation_handle->GetRenderFrameHost()->GetSiteInstance())
+          ->SetZoomLevelForHostAndScheme(pdf_extension_url.GetScheme(),
+                                         pdf_extension_url.GetHost(), 0);
+      // Set ZoomController on the extension host.
+      zoom::ZoomController::CreateForWebContentsAndRenderFrameHost(
+          web_contents(),
+          navigation_handle->GetRenderFrameHost()->GetGlobalId());
     }
     return;
   }
@@ -549,7 +557,7 @@ void PdfViewerStreamManager::DidFinishNavigation(
   // inserted in a synthetic HTML document as a placeholder for the PDF
   // extension. Navigate the about:blank embed to the PDF extension URL to load
   // the PDF extension.
-  if (!navigation_handle->GetURL().IsAboutBlank()) {
+  if (!url.IsAboutBlank()) {
     return;
   }
 

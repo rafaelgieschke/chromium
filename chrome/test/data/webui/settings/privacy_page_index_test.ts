@@ -34,16 +34,17 @@ suite('PrivacyPageIndex', function() {
           enableHandTrackingContentSetting: false,
           enableKeyboardLockPrompt: false,
           enableLocalNetworkAccessSetting: false,
+          enableLocalNetworkAccessSplitPermissions: false,
           enablePaymentHandlerContentSetting: false,
           enablePersistentPermissions: false,
           enableSafeBrowsingSubresourceFilter: false,
           enableSecurityKeysSubpage: false,
           // <if expr="is_chromeos">
           enableSmartCardReadersContentSetting: false,
+          enableWebPrintingContentSetting: false,
           // </if>
           enableWebAppInstallation: false,
           enableWebBluetoothNewPermissionsBackend: false,
-          enableWebPrintingContentSetting: false,
           isGuest: false,
           isPrivacySandboxRestricted: false,
           isPrivacySandboxRestrictedNoticeEnabled: false,
@@ -529,12 +530,39 @@ suite('PrivacyPageIndex', function() {
 
     test('RoutingLocalNetworkAccess', async function() {
       assertFalse(loadTimeData.getBoolean('enableLocalNetworkAccessSetting'));
+      assertFalse(
+          loadTimeData.getBoolean('enableLocalNetworkAccessSplitPermissions'));
       await createPrivacyPageIndex({enableLocalNetworkAccessSetting: true});
 
       return testViewsForRoute(
           routes.SITE_SETTINGS_LOCAL_NETWORK_ACCESS,
           ['siteSettingsLocalNetworkAccess'], 'privacy');
     });
+
+    test('RoutingLocalNetwork', async function() {
+      assertFalse(loadTimeData.getBoolean('enableLocalNetworkAccessSetting'));
+      assertFalse(
+          loadTimeData.getBoolean('enableLocalNetworkAccessSplitPermissions'));
+      await createPrivacyPageIndex(
+          {enableLocalNetworkAccessSplitPermissions: true});
+
+      return testViewsForRoute(
+          routes.SITE_SETTINGS_LOCAL_NETWORK, ['siteSettingsLocalNetwork'],
+          'privacy');
+    });
+
+    test('RoutingLoopbackNetwork', async function() {
+      assertFalse(loadTimeData.getBoolean('enableLocalNetworkAccessSetting'));
+      assertFalse(
+          loadTimeData.getBoolean('enableLocalNetworkAccessSplitPermissions'));
+      await createPrivacyPageIndex(
+          {enableLocalNetworkAccessSplitPermissions: true});
+
+      return testViewsForRoute(
+          routes.SITE_SETTINGS_LOOPBACK_NETWORK,
+          ['siteSettingsLoopbackNetwork'], 'privacy');
+    });
+
 
     test('RoutingPaymentHandler', async function() {
       assertFalse(
@@ -557,6 +585,15 @@ suite('PrivacyPageIndex', function() {
           routes.SITE_SETTINGS_SMART_CARD_READERS,
           ['siteSettingsSmartCardReaders'], 'privacy');
     });
+
+    test('RoutingWebPrinting', async function() {
+      assertFalse(loadTimeData.getBoolean('enableWebPrintingContentSetting'));
+      await createPrivacyPageIndex({enableWebPrintingContentSetting: true});
+
+      return testViewsForRoute(
+          routes.SITE_SETTINGS_WEB_PRINTING, ['siteSettingsWebPrinting'],
+          'privacy');
+    });
     // </if>
 
     test('RoutingWebAppInstallation', async function() {
@@ -566,15 +603,6 @@ suite('PrivacyPageIndex', function() {
       return testViewsForRoute(
           routes.SITE_SETTINGS_WEB_APP_INSTALLATION,
           ['siteSettingsWebAppInstallation'], 'privacy');
-    });
-
-    test('RoutingWebPrinting', async function() {
-      assertFalse(loadTimeData.getBoolean('enableWebPrintingContentSetting'));
-      await createPrivacyPageIndex({enableWebPrintingContentSetting: true});
-
-      return testViewsForRoute(
-          routes.SITE_SETTINGS_WEB_PRINTING, ['siteSettingsWebPrinting'],
-          'privacy');
     });
   });
 });

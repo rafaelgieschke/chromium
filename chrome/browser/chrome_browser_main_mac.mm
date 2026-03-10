@@ -15,6 +15,7 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
+#include "base/i18n/rtl.h"
 #include "base/mac/mac_util.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/path_service.h"
@@ -49,6 +50,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/resource/resource_handle.h"
 #include "ui/native_theme/native_theme_mac.h"
+#include "ui/views/cocoa/native_widget_mac_ns_window_host.h"
 
 // ChromeBrowserMainPartsMac ---------------------------------------------------
 
@@ -131,7 +133,9 @@ void ChromeBrowserMainPartsMac::PreCreateMainMessageLoop() {
   CHECK_NE(nil, NSApp.delegate);
 
   chrome::BuildMainMenu(NSApp, app_controller,
-                        l10n_util::GetStringUTF16(IDS_PRODUCT_NAME), false);
+                        l10n_util::GetStringUTF16(IDS_PRODUCT_NAME),
+                        /*is_pwa=*/false,
+                        /*is_rtl=*/base::i18n::IsRTL());
   [app_controller mainMenuCreated];
 
   ui::WarmScreenCapture();
@@ -144,13 +148,11 @@ void ChromeBrowserMainPartsMac::PreCreateMainMessageLoop() {
 
   // AppKit only restores windows to their original spaces when relaunching
   // apps after a restart, and puts them all on the current space when an app
-  // is manually quit and relaunched. If Chrome restarted itself, ask AppKit to
-  // treat this launch like a system restart and restore everything.
-  if (local_state->GetBoolean(prefs::kWasRestarted)) {
-    [NSUserDefaults.standardUserDefaults registerDefaults:@{
-      @"NSWindowRestoresWorkspaceAtLaunch" : @YES
-    }];
-  }
+  // is manually quit and relaunched. If Chrome restarted itself, set a flag in
+  // Views to have it restore spaces.
+  views::NativeWidgetMacNSWindowHost::
+      SetMoveWindowsToOriginalSpacesUponRestoration(
+          local_state->GetBoolean(prefs::kWasRestarted));
 }
 
 void ChromeBrowserMainPartsMac::PostCreateMainMessageLoop() {

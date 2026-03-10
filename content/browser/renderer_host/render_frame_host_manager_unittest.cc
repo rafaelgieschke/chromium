@@ -263,7 +263,8 @@ void DidNavigateFrame(RenderFrameHostManager* rfh_manager,
       false /* is_same_document_navigation */,
       false /* clear_proxies_on_commit */, blink::FramePolicy(),
       true /* allow_paint_holding */, view_transition_commit_info,
-      /*navigation_request_url=*/std::nullopt);
+      /*navigation_request_url=*/std::nullopt,
+      false /* is_backward_navigation */);
 }
 
 class TestDevToolsClientHost : public DevToolsAgentHostClient {
@@ -547,9 +548,8 @@ class RenderFrameHostManagerTest
             ChildProcessHost::kInvalidUniqueID /* initiator_process_id */,
             entry->extra_headers(), frame_entry, entry, is_form_submission,
             nullptr /* navigation_ui_data */, std::nullopt /* impression */,
-            blink::mojom::NavigationInitiatorActivationAndAdStatus::
-                kDidNotStartWithTransientActivation,
-            false /* is_pdf */);
+            false /* started_with_transient_activation */,
+            false /* started_by_ad */, false /* is_pdf */);
 
     // Simulates request creation that triggers the 1st internal call to
     // GetFrameHostForNavigation.
@@ -599,14 +599,7 @@ class RenderFrameHostManagerTest
 // then do that same thing in another tab, that the two resulting pages have
 // different SiteInstances, BrowsingInstances, and RenderProcessHosts. This is
 // a regression test for bug 9364.
-// Disabled on linux due to flakiness.
-// TODO(crbug.com/448610762): Fix and re-enable the test.
-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
-#define MAYBE_ChromeSchemeProcesses DISABLED_ChromeSchemeProcesses
-#else
-#define MAYBE_ChromeSchemeProcesses ChromeSchemeProcesses
-#endif
-TEST_P(RenderFrameHostManagerTest, MAYBE_ChromeSchemeProcesses) {
+TEST_P(RenderFrameHostManagerTest, ChromeSchemeProcesses) {
   const GURL kChromeUrl(GetWebUIURL("foo"));
   const GURL kDestUrl("http://www.google.com/");
 
@@ -1643,9 +1636,10 @@ TEST_P(RenderFrameHostManagerTest, GuestNavigations) {
   std::unique_ptr<TestWebContents> web_contents(
       TestWebContents::Create(browser_context(), initial_instance));
 
-  EXPECT_TRUE(initial_instance->IsGuest());
-  EXPECT_EQ(kGuestPartitionConfig,
-            initial_instance->GetStoragePartitionConfig());
+  EXPECT_TRUE(initial_instance->GetSecurityPrincipal().IsGuest());
+  EXPECT_EQ(
+      kGuestPartitionConfig,
+      initial_instance->GetSecurityPrincipal().GetStoragePartitionConfig());
 
   RenderFrameHostManager* manager =
       web_contents->GetPrimaryFrameTree().root()->render_manager();
@@ -1665,8 +1659,9 @@ TEST_P(RenderFrameHostManagerTest, GuestNavigations) {
   // The SiteInstance of the navigating RenderFrameHost should still be a guest
   // SiteInstance in the same StoragePartition.
   scoped_refptr<SiteInstanceImpl> first_instance = host->GetSiteInstance();
-  EXPECT_EQ(first_instance->GetStoragePartitionConfig(), kGuestPartitionConfig);
-  EXPECT_TRUE(first_instance->IsGuest());
+  EXPECT_EQ(first_instance->GetSecurityPrincipal().GetStoragePartitionConfig(),
+            kGuestPartitionConfig);
+  EXPECT_TRUE(first_instance->GetSecurityPrincipal().IsGuest());
 
   // We have to swap SiteInstances and RenderFrameHosts, since the initial
   // SiteInstance (`instance`) has an empty site and process lock, whereas the
@@ -1723,7 +1718,7 @@ TEST_P(RenderFrameHostManagerTest, GuestNavigations) {
   DidNavigateFrame(manager, host);
   EXPECT_EQ(host, manager->current_frame_host());
   ASSERT_TRUE(host);
-  EXPECT_TRUE(host->GetSiteInstance()->IsGuest());
+  EXPECT_TRUE(host->GetSiteInstance()->GetSecurityPrincipal().IsGuest());
 
   if (AreStrictSiteInstancesEnabled()) {
     EXPECT_NE(host->GetSiteInstance(), first_instance);
@@ -2054,6 +2049,11 @@ TEST_P(RenderFrameHostManagerTest, CancelPendingProperlyDeletesOrSwaps) {
 
   rfh1->SuddenTerminationDisablerChanged(
       true, blink::mojom::SuddenTerminationDisablerType::kBeforeUnloadHandler);
+  // Put a user gesture on the frame to wait for the beforeunload event to
+  // complete.
+  rfh1->ActivateUserActivation(
+      blink::mojom::UserActivationNotificationType::kTest,
+      /*sticky_only=*/true);
 
   // Navigate to a new site, starting a cross-site navigation.
   controller().LoadURL(kUrl2, Referrer(), ui::PAGE_TRANSITION_LINK,

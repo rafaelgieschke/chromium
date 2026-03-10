@@ -28,6 +28,7 @@ try_.defaults.set(
     orchestrator_cores = 2,
     orchestrator_siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CQ,
     service_account = try_constants.DEFAULT_SERVICE_ACCOUNT,
+    siso_keep_going = siso.KEEP_GOING,
     siso_project = siso.project.DEFAULT_UNTRUSTED,
     siso_remote_jobs = siso.remote_jobs.LOW_JOBS_FOR_CQ,
     siso_remote_linking = True,
@@ -305,36 +306,6 @@ try_.builder(
     tryjob = try_.job(),
 )
 
-try_.builder(
-    name = "chromeos-jacuzzi-rel",
-    branch_selector = branches.selector.CROS_LTS_BRANCHES,
-    mirrors = [
-        "ci/chromeos-jacuzzi-rel",
-    ],
-    builder_config_settings = builder_config.try_settings(
-        retry_failed_shards = False,
-    ),
-    gn_args = "ci/chromeos-jacuzzi-rel",
-    contact_team_email = "chromeos-chrome-build@google.com",
-    execution_timeout = 8 * time.hour,
-    main_list_view = "try",
-)
-
-try_.builder(
-    name = "chromeos-octopus-rel",
-    branch_selector = branches.selector.CROS_LTS_BRANCHES,
-    mirrors = [
-        "ci/chromeos-octopus-rel",
-    ],
-    builder_config_settings = builder_config.try_settings(
-        retry_failed_shards = False,
-    ),
-    gn_args = "ci/chromeos-octopus-rel",
-    contact_team_email = "chromeos-chrome-build@google.com",
-    execution_timeout = 8 * time.hour,
-    main_list_view = "try",
-)
-
 try_.orchestrator_builder(
     name = "linux-chromeos-rel",
     branch_selector = branches.selector.CROS_LTS_BRANCHES,
@@ -427,4 +398,13 @@ try_.builder(
             "chrome/browser/ash/chromebox_for_meetings/.+",
         ],
     ),
+)
+
+try_.builder(
+    name = "linux-chromeos-treesinviz-enabled-rel",
+    mirrors = [
+        "ci/linux-chromeos-treesinviz-enabled-rel",
+    ],
+    gn_args = "ci/linux-chromeos-treesinviz-enabled-rel",
+    contact_team_email = "chrome-gpu-team@google.com",
 )

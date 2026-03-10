@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/functional/callback.h"
+#include "components/viz/common/resources/shared_image_format.h"
 #include "components/viz/test/test_context_support.h"
 #include "gpu/command_buffer/client/raster_interface.h"
 #include "gpu/command_buffer/common/capabilities.h"
@@ -47,9 +48,16 @@ class TestRasterInterface : public gpu::raster::RasterInterface {
   void set_max_texture_size(int max_texture_size) {
     caps_.max_texture_size = max_texture_size;
   }
+  void set_texture_format_bgra8888(bool texture_format_bgra8888) {
+    caps_.texture_format_bgra8888 = texture_format_bgra8888;
+  }
   void set_texture_rg(bool texture_rg) { caps_.texture_rg = texture_rg; }
-  void set_supports_gpu_memory_buffer_format(gfx::BufferFormat format,
-                                             bool support);
+  void set_texture_norm16(bool texture_norm16) {
+    caps_.texture_norm16 = texture_norm16;
+  }
+  void set_texture_half_float_linear(bool texture_half_float_linear) {
+    caps_.texture_half_float_linear = texture_half_float_linear;
+  }
 
   // gpu::raster::RasterInterface implementation.
   void Finish() override;
@@ -150,6 +158,7 @@ class TestRasterInterface : public gpu::raster::RasterInterface {
   gpu::Capabilities caps_;
   base::OnceClosure context_lost_callback_;
   raw_ptr<TestContextSupport> test_support_ = nullptr;
+  const uint64_t test_command_buffer_id_ = 2u;
 
   bool context_lost_ = false;
   uint64_t next_insert_fence_sync_ = 1;

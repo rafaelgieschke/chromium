@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_INFOBARS_CONFIRM_INFOBAR_H_
 #define CHROME_BROWSER_UI_VIEWS_INFOBARS_CONFIRM_INFOBAR_H_
 
+#include <memory>
+
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/views/infobars/infobar_view.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
@@ -39,6 +41,7 @@ class ConfirmInfoBar : public InfoBarView {
   const ConfirmInfoBarDelegate* GetDelegate() const;
 
   views::MdTextButton* ok_button_for_testing() { return ok_button_; }
+  views::MdTextButton* cancel_button_for_testing() { return cancel_button_; }
 
   int target_height_for_testing() const { return target_height(); }
 

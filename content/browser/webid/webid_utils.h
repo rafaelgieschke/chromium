@@ -63,7 +63,6 @@ bool IsEndpointSameOrigin(const GURL& identity_provider_config_url,
 // Returns whether FedCM should fail/skip the accounts endpoint request because
 // the user is not signed-in to the IdP.
 bool ShouldFailAccountsEndpointRequestBecauseNotSignedInWithIdp(
-    RenderFrameHost& host,
     const GURL& identity_provider_config_url,
     FederatedIdentityPermissionContextDelegate* permission_delegate);
 
@@ -74,7 +73,6 @@ bool ShouldFailAccountsEndpointRequestBecauseNotSignedInWithIdp(
 // endpoint request would have been failed/skipped had the IdP signin-status
 // been FedCmIdpSigninStatusMode::ENABLED.
 void UpdateIdpSigninStatusForAccountsEndpointResponse(
-    RenderFrameHost& host,
     const GURL& identity_provider_config_url,
     FetchStatus account_endpoint_fetch_status,
     bool does_idp_have_failing_signin_status,
@@ -91,7 +89,7 @@ CONTENT_EXPORT std::string GetDisconnectConsoleErrorMessage(
     DisconnectStatus disconnect_status_for_metrics);
 
 // Returns the eTLD+1 for a given url. For localhost, returns the host.
-std::string FormatUrlForDisplay(const GURL& url);
+std::string FormatUrlToSite(const GURL& url);
 
 // Returns true if the user has used FedCM to login to the RP via the IdP
 // account or if the IdP has third party cookies access. For the former, if

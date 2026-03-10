@@ -3,10 +3,12 @@
 // found in the LICENSE file.
 
 import {BrowserProxy, PageCallbackRouter, PageHandlerRemote} from 'chrome://omnibox-popup.top-chrome/omnibox_popup.js';
-import {assertTrue} from 'chrome://webui-test/chai_assert.js';
-import {TestMock} from 'chrome://webui-test/test_mock.js';
-import {eventToPromise, microtasksFinished} from 'chrome://webui-test/test_util.js';
 import type {PageRemote} from 'chrome://omnibox-popup.top-chrome/omnibox_popup.js';
+import {assertEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import type {MetricsTracker} from 'chrome://webui-test/metrics_test_support.js';
+import {fakeMetricsPrivate} from 'chrome://webui-test/metrics_test_support.js';
+import {TestMock} from 'chrome://webui-test/test_mock.js';
+import {microtasksFinished} from 'chrome://webui-test/test_util.js';
 
 class TestAimBrowserProxy {
   callbackRouter: PageCallbackRouter;
@@ -22,24 +24,18 @@ class TestAimBrowserProxy {
 
 suite('AimAppTest', function() {
   let testProxy: TestAimBrowserProxy;
+  let metrics: MetricsTracker;
 
   setup(() => {
     document.body.innerHTML = window.trustedTypes!.emptyHTML;
     testProxy = new TestAimBrowserProxy();
     BrowserProxy.setInstance(testProxy as unknown as BrowserProxy);
+    metrics = fakeMetricsPrivate();
   });
 
-  test('ContextMenuPrevented', async function() {
-    const app = document.createElement('omnibox-aim-app');
-    document.body.appendChild(app);
-    const whenFired = eventToPromise('contextmenu', document.documentElement);
-    document.documentElement.dispatchEvent(
-        new Event('contextmenu', {cancelable: true}));
-    const e = await whenFired;
-    assertTrue(e.defaultPrevented);
-  });
-
-  test('ClearsInputOnCloseByDefault', async function() {
+  // TODO(crbug.com/479888362): Disabled by gardener due to failure without
+  // clear culprit.
+  test.skip('ClearsInputOnCloseByDefault', async function() {
     const app = document.createElement('omnibox-aim-app');
     document.body.appendChild(app);
 
@@ -52,7 +48,7 @@ suite('AimAppTest', function() {
     assertTrue(!!app.$.composebox.getInputText());
 
     // Close without preserving context (default is false).
-    testProxy.page.onPopupHidden();
+    testProxy.page.clearPopup();
     await microtasksFinished();
     assertTrue(!app.$.composebox.getInputText());
   });
@@ -71,7 +67,7 @@ suite('AimAppTest', function() {
 
     // Close with preserving context.
     testProxy.page.setPreserveContextOnClose(true);
-    testProxy.page.onPopupHidden();
+    testProxy.page.clearPopup();
     await microtasksFinished();
     assertTrue(!!app.$.composebox.getInputText());
   });
@@ -89,7 +85,7 @@ suite('AimAppTest', function() {
 
     // Close with preserving context.
     testProxy.page.setPreserveContextOnClose(true);
-    testProxy.page.onPopupHidden();
+    testProxy.page.clearPopup();
     await microtasksFinished();
 
     // Re-open (onPopupShown) should reset preserveContextOnClose to false.
@@ -101,9 +97,16 @@ suite('AimAppTest', function() {
     await microtasksFinished();
 
     // Close again, should clear input because it was reset to false.
-    testProxy.page.onPopupHidden();
+    testProxy.page.clearPopup();
     await microtasksFinished();
     assertTrue(!app.$.composebox.getInputText());
+
+    // There's no search context being added when setting the input, therefore,
+    // no context added histogram should get recorded.
+    assertEquals(
+        0,
+        metrics.count(
+            'ContextualSearch.ContextAdded.ContextAddedMethod.Omnibox'));
   });
 
   test('PlaysGlowAnimationOnShowByDefault', async function() {
@@ -154,5 +157,22 @@ suite('AimAppTest', function() {
     });
     await microtasksFinished();
     assertTrue(glowAnimationPlayed);
+  });
+
+  test('ShowsContextMenuOnContextualEntryPointClick', async function() {
+    const app = document.createElement('omnibox-aim-app');
+    document.body.appendChild(app);
+
+    const point = {x: 10, y: 20};
+    app.$.composebox.dispatchEvent(
+        new CustomEvent('context-menu-entrypoint-click', {
+          detail: point,
+          bubbles: true,
+          composed: true,
+        }));
+
+    const result = await testProxy.handler.whenCalled('showContextMenu');
+    assertEquals(point.x, result.x);
+    assertEquals(point.y, result.y);
   });
 });

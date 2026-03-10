@@ -405,7 +405,7 @@ VideoProcessorWrapper* DCLayerTree::InitializeVideoProcessor(
   if (!video_processor_wrapper.video_device) {
     // This can fail if the D3D device is "Microsoft Basic Display Adapter".
     if (FAILED(d3d11_device_.As(&video_processor_wrapper.video_device))) {
-      DLOG(ERROR) << "Failed to retrieve video device from D3D11 device";
+      LOG(ERROR) << "Failed to retrieve video device from D3D11 device";
       DCHECK(false);
       DisableDirectCompositionOverlays();
       return nullptr;
@@ -461,8 +461,8 @@ VideoProcessorWrapper* DCLayerTree::InitializeVideoProcessor(
       video_processor_wrapper.video_device->CreateVideoProcessorEnumerator(
           &desc, &video_processor_wrapper.video_processor_enumerator);
   if (FAILED(hr)) {
-    DLOG(ERROR) << "CreateVideoProcessorEnumerator failed with error 0x"
-                << std::hex << hr;
+    LOG(ERROR) << "CreateVideoProcessorEnumerator failed:"
+               << logging::SystemErrorCodeToString(hr);
     // It might fail again next time. Disable overlay support so
     // overlay processor will stop sending down overlay frames.
     DisableDirectCompositionOverlays();
@@ -472,8 +472,8 @@ VideoProcessorWrapper* DCLayerTree::InitializeVideoProcessor(
       video_processor_wrapper.video_processor_enumerator.Get(), 0,
       &video_processor_wrapper.video_processor);
   if (FAILED(hr)) {
-    DLOG(ERROR) << "CreateVideoProcessor failed with error 0x" << std::hex
-                << hr;
+    LOG(ERROR) << "CreateVideoProcessor failed:"
+               << logging::SystemErrorCodeToString(hr);
     // It might fail again next time. Disable overlay support so
     // overlay processor will stop sending down overlay frames.
     DisableDirectCompositionOverlays();
@@ -1031,6 +1031,10 @@ base::expected<void, CommitError> DCLayerTree::VisualTree::BuildTree(
 
   if (needs_commit) {
     TRACE_EVENT0("gpu", "DCLayerTree::CommitAndClearPendingOverlays::Commit");
+    base::ScopedUmaHistogramTimer scoped_timer(
+        "GPU.DirectComposition.DCompCommitDuration",
+        base::ScopedUmaHistogramTimer::ScopedHistogramTiming::
+            kMicrosecondTimes);
     HRESULT hr = dc_layer_tree_->dcomp_device_->Commit();
     if (FAILED(hr)) {
       DLOG(ERROR) << "Commit failed with error 0x" << std::hex << hr;
@@ -1304,17 +1308,17 @@ base::expected<void, CommitError> DCLayerTree::CommitAndClearPendingOverlays(
         overlay.content_rect = gfx::RectF(overlay.overlay_image->size());
 
         if (overlay_position_adjustment) {
-          overlay.transform = overlay_position_adjustment->transform;
-          overlay.quad_rect = overlay_position_adjustment->quad_rect;
+          overlay.transform.MakeIdentity();
+          overlay.quad_rect =
+              gfx::Rect(overlay_position_adjustment->monitor_size);
           if (overlay.clip_rect) {
-            overlay.clip_rect = overlay_position_adjustment->clip_rect;
+            overlay.clip_rect =
+                gfx::Rect(overlay_position_adjustment->monitor_size);
           }
         }
 
         if (overlay.video_params.is_full_screen_video &&
-            !overlay_position_adjustment &&
-            base::FeatureList::IsEnabled(
-                features::kEarlyFullScreenVideoOptimization)) {
+            !overlay_position_adjustment) {
           // If we failed to disable the desktop plane, we need to manually add
           // a solid color layer to act as the video background mat.
           need_background_layer = true;

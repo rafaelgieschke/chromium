@@ -73,7 +73,7 @@ void TestStyleSheet::AddCSSRules(const String& css_text, bool is_empty_sheet) {
 
 CSSStyleSheet* CreateStyleSheet(Document& document) {
   return CSSStyleSheet::CreateInline(
-      document, NullURL(), TextPosition::MinimumPosition(), Utf8Encoding());
+      document, NullUrl(), TextPosition::MinimumPosition(), Utf8Encoding());
 }
 
 RuleSet* CreateRuleSet(Document& document, String text) {
@@ -199,7 +199,8 @@ const CSSValue* ParseLonghand(Document& document,
   }
 
   const auto* context = MakeGarbageCollected<CSSParserContext>(document);
-  CSSParserLocalContext local_context;
+  CSSParserLocalContext local_context =
+      CSSParserLocalContext::CreateWithoutPropertyForTest();
 
   CSSParserTokenStream stream(value);
   return longhand->ParseSingleValue(stream, *context, local_context);
@@ -223,7 +224,7 @@ StyleRuleBase* ParseNestedRule(Document& document,
                                CSSNestingType nesting_type,
                                StyleRule* parent_rule_for_nesting) {
   auto* sheet = CSSStyleSheet::CreateInline(
-      document, NullURL(), TextPosition::MinimumPosition(), Utf8Encoding());
+      document, NullUrl(), TextPosition::MinimumPosition(), Utf8Encoding());
   const auto* context = MakeGarbageCollected<CSSParserContext>(document);
   return CSSParser::ParseRule(context, sheet->Contents(), nesting_type,
                               parent_rule_for_nesting, text);
@@ -235,7 +236,9 @@ const CSSValue* ParseValue(Document& document, String syntax, String value) {
     return nullptr;
   }
   const auto* context = MakeGarbageCollected<CSSParserContext>(document);
-  return syntax_definition->Parse(value, *context,
+  CSSParserLocalContext local_context =
+      CSSParserLocalContext::CreateWithoutPropertyForTest();
+  return syntax_definition->Parse(value, *context, local_context,
                                   /* is_animation_tainted */ false);
 }
 

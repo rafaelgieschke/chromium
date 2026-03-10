@@ -8,6 +8,8 @@
 # * comments are allowed, using '#' syntax; and
 # * trailing commas are allowed.
 
+# Whitespace change #5.
+
 [
   # The following builder groups have been migrated to set their targets in the
   # builders' declarations in //infra/config/subprojects/ci/<builder-group>.star
@@ -90,12 +92,36 @@
         'os_type': 'chromeos',
         'cros_board': 'betty',
       },
+      'chromeos-betty-chrome-cqtast': {
+        'test_suites': {
+          'skylab_tests': 'chromeos_vmlab_cqtast',
+        },
+        'os_type': 'chromeos',
+        'cros_board': 'betty',
+        'cros_dut_pool': 'vmlab',
+      },
       'chromeos-betty-chrome-dchecks': {
         'additional_compile_targets': [
           'chromiumos_preflight',
         ],
         'test_suites': {
           'skylab_tests': 'chromeos_vmlab_tests',
+        },
+        'os_type': 'chromeos',
+        'cros_board': 'betty',
+        'cros_dut_pool': 'vmlab',
+      },
+      'chromeos-betty-chrome-gtest': {
+        'test_suites': {
+          'skylab_tests': 'chromeos_vmlab_gtest',
+        },
+        'os_type': 'chromeos',
+        'cros_board': 'betty',
+        'cros_dut_pool': 'vmlab',
+      },
+      'chromeos-betty-chrome-tast': {
+        'test_suites': {
+          'skylab_tests': 'chromeos_vmlab_tast',
         },
         'os_type': 'chromeos',
         'cros_board': 'betty',
@@ -731,6 +757,16 @@
           'gpu_telemetry_tests': 'gpu_fyi_linux_release_vulkan_telemetry_tests',
         },
       },
+      'Mac V8 FYI Release (Apple M2)': {
+        'browser_config': 'release',
+        'os_type': 'mac',
+        'mixins': [
+          'mac_arm64_apple_m2_retina_gpu_stable',
+        ],
+        'test_suites': {
+          'gpu_telemetry_tests': 'gpu_fyi_only_mac_release_telemetry_tests',
+        },
+      },
       'Mac V8 FYI Release (Intel)': {
         'browser_config': 'release',
         'os_type': 'mac',
@@ -1341,7 +1377,6 @@
           'capture_unittests',
           'content_browsertests',
           'content_unittests',
-          'remoting_unittests',
         ],
       },
       'linux_chromium_compile': {

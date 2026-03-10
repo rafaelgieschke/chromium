@@ -8,6 +8,7 @@
 #include "base/scoped_observation.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/bind.h"
+#include "base/test/test_future.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/sync/test/integration/apps_helper.h"
@@ -22,13 +23,14 @@
 #include "chrome/browser/web_applications/test/os_integration_test_override_impl.h"
 #include "chrome/browser/web_applications/test/web_app_install_test_utils.h"
 #include "chrome/browser/web_applications/test/web_app_test_observers.h"
+#include "chrome/browser/web_applications/web_app_command_scheduler.h"
+#include "chrome/browser/web_applications/web_app_filter.h"
 #include "chrome/browser/web_applications/web_app_icon_manager.h"
 #include "chrome/browser/web_applications/web_app_install_info.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/browser/web_applications/web_app_registrar.h"
 #include "chrome/browser/web_applications/web_app_sync_bridge.h"
 #include "chrome/browser/web_applications/web_app_utils.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
@@ -65,17 +67,11 @@ class DisplayModeChangeWaiter : public WebAppRegistrarObserver {
 
 class TwoClientWebAppsSyncTest
     : public WebAppsSyncTestBase,
-      public testing::WithParamInterface<
-          std::tuple<bool, SyncTest::SetupSyncMode>> {
+      public testing::WithParamInterface<SyncTest::SetupSyncMode> {
  public:
   TwoClientWebAppsSyncTest() : WebAppsSyncTestBase(TWO_CLIENT) {
     std::vector<base::test::FeatureRef> enabled_features;
     std::vector<base::test::FeatureRef> disabled_features;
-    if (UsePrimaryIcon()) {
-      enabled_features.push_back(features::kWebAppUsePrimaryIcon);
-    } else {
-      disabled_features.push_back(features::kWebAppUsePrimaryIcon);
-    }
     if (GetSetupSyncMode() == SetupSyncMode::kSyncTransportOnly) {
       enabled_features.push_back(syncer::kReplaceSyncPromosWithSignInPromos);
     }
@@ -104,10 +100,8 @@ class TwoClientWebAppsSyncTest
   }
 
   SyncTest::SetupSyncMode GetSetupSyncMode() const override {
-    return std::get<1>(GetParam());
+    return GetParam();
   }
-
-  bool UsePrimaryIcon() const { return std::get<0>(GetParam()); }
 
   const WebAppRegistrar& GetRegistrar(Profile* profile) {
     return WebAppProvider::GetForTest(profile)->registrar_unsafe();
@@ -140,12 +134,9 @@ class TwoClientWebAppsSyncTest
 INSTANTIATE_TEST_SUITE_P(
     ,
     TwoClientWebAppsSyncTest,
-    testing::Combine(testing::Bool(), GetSyncTestModes()),
-    [](const testing::TestParamInfo<std::tuple<bool, SyncTest::SetupSyncMode>>&
-           info) {
-      return (std::get<0>(info.param) ? "EnabledForWebAppUsePrimaryIcon_"
-                                      : "DisabledForWebAppUsePrimaryIcon_") +
-             testing::PrintToString(std::get<1>(info.param));
+    GetSyncTestModes(),
+    [](const testing::TestParamInfo<SyncTest::SetupSyncMode>& info) {
+      return testing::PrintToString(info.param);
     });
 
 IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, Basic) {
@@ -168,6 +159,45 @@ IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, Basic) {
   EXPECT_EQ(registrar.GetAppScope(app_id), GURL("http://www.chromium.org/"));
 
   EXPECT_TRUE(AllProfilesHaveSameWebAppIds());
+}
+
+IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, MigratingAppsDoNotSync) {
+  WebAppProvider* provider1 = WebAppProvider::GetForTest(GetProfile(0));
+
+  auto start_url = GURL("http://www.chromium.org/path");
+  auto info = WebAppInstallInfo::CreateWithStartUrlForTesting(start_url);
+  info->title = u"Test name";
+  info->description = u"Test description";
+  info->scope = GURL("http://www.chromium.org/");
+  info->user_display_mode = mojom::UserDisplayMode::kStandalone;
+
+  info->migration_sources.emplace_back(
+      webapps::ManifestId(GURL("http://migration.chromium.org/start.html")),
+      MigrationBehavior::kSuggest);
+
+  // Install app on first profile, mark it suggested for migration.
+  base::test::TestFuture<const webapps::AppId&, webapps::InstallResultCode>
+      install_future;
+  WebAppInstallParams params;
+  params.add_to_applications_menu = false;
+  params.add_to_desktop = false;
+  params.add_to_quick_launch_bar = false;
+  params.install_state = proto::InstallState::SUGGESTED_FROM_MIGRATION;
+  provider1->scheduler().InstallFromInfoWithParams(
+      std::move(info), /*overwrite_existing_manifest_fields=*/false,
+      webapps::WebappInstallSource::OMNIBOX_INSTALL_ICON,
+      install_future.GetCallback(), params);
+  ASSERT_TRUE(install_future.Wait());
+  webapps::AppId app_id = install_future.Get<webapps::AppId>();
+  EXPECT_EQ(proto::SUGGESTED_FROM_MIGRATION,
+            provider1->registrar_unsafe().GetInstallState(app_id));
+
+  // Wait for any syncing to complete, verify app is not synced.
+  ASSERT_TRUE(apps_helper::AwaitWebAppQuiescence(GetAllProfiles()));
+  EXPECT_FALSE(AllProfilesHaveSameWebAppIds());
+  EXPECT_FALSE(GetRegistrar(GetProfile(/*index=*/1))
+                   .GetInstallState(app_id)
+                   .has_value());
 }
 
 IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, Minimal) {
@@ -215,8 +245,10 @@ IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, IsLocallyInstalled) {
 
   webapps::AppId app_id = web_app::test::InstallDummyWebApp(
       GetProfile(0), "Test name", GURL("http://www.chromium.org/"));
-  EXPECT_EQ(GetRegistrar(GetProfile(0)).GetInstallState(app_id),
-            web_app::proto::INSTALLED_WITH_OS_INTEGRATION);
+  EXPECT_TRUE(
+      GetRegistrar(GetProfile(0))
+          .AppMatches(app_id,
+                      WebAppFilter::InstalledInOperatingSystemForTesting()));
 
   EXPECT_EQ(install_observer.Wait(), app_id);
   web_app::proto::InstallState expected_state;
@@ -305,8 +337,6 @@ IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest,
 // Tests that we don't crash when syncing an icon info with no size.
 // Context: https://crbug.com/1058283
 IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, SyncFaviconOnly) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
   Profile* sourceProfile = GetProfile(0);
   Profile* destProfile = GetProfile(1);
 
@@ -357,8 +387,6 @@ IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, SyncFaviconOnly) {
 // Tests that we don't use the manifest start_url if it differs from what came
 // through sync.
 IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, SyncUsingStartUrlFallback) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
   Profile* source_profile = GetProfile(0);
   Profile* dest_profile = GetProfile(1);
 
@@ -385,8 +413,6 @@ IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, SyncUsingStartUrlFallback) {
 // from e.g. login redirects or loading pages.
 // Context: https://crbug.com/1078286
 IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, SyncUsingNameFallback) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
   Profile* source_profile = GetProfile(0);
   Profile* dest_profile = GetProfile(1);
 
@@ -411,8 +437,6 @@ IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, SyncUsingNameFallback) {
 // if there's a name provided by the manifest during sync, except for the
 // trusted icons infrastructure.
 IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, SyncWithoutUsingNameFallback) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
   Profile* source_profile = GetProfile(0);
   Profile* dest_profile = GetProfile(1);
 
@@ -430,7 +454,7 @@ IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, SyncWithoutUsingNameFallback) {
   webapps::AppId synced_app_id = dest_install_observer.Wait();
   EXPECT_EQ(synced_app_id, app_id);
 
-  bool should_use_fallback = UsePrimaryIcon();
+  bool should_use_fallback = true;
   // ChromeOS always installs from the manifest, even when trusted icons are
   // enabled.
 #if BUILDFLAG(IS_CHROMEOS)
@@ -445,8 +469,6 @@ IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, SyncWithoutUsingNameFallback) {
 }
 
 IN_PROC_BROWSER_TEST_P(TwoClientWebAppsSyncTest, SyncUsingIconUrlFallback) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
   Profile* source_profile = GetProfile(0);
   Profile* dest_profile = GetProfile(1);
 

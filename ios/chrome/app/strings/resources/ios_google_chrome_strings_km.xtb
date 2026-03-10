@@ -1,6 +1,7 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="km">
+<translation id="1035560095760914532">ដាក់ Chrome នៅផ្នែកខាងក្រោម ដើម្បីចូលប្រើវានៅពេលណាក៏បាន</translation>
 <translation id="1076643793026027628">Chrome បើក​តំណ​ឯកជន​របស់ Youtube នៅក្នុង​មុខងារ​ឯកជន​ដោយស្វ័យប្រវត្តិ។</translation>
 <translation id="1081114897601629648">ពាក្យ​សម្ងាត់​ខាងក្រោម​មិនត្រូវបាន​នាំ​ចូលទៅ​កម្មវិធី​គ្រប់គ្រង​ពាក្យសម្ងាត់ទេ ដោយសារ​ពាក្យ​សម្ងាត់​ទាំងនោះ​មិនត្រូវតាម​លក្ខខណ្ឌ​តម្រូវ។</translation>
 <translation id="1086486568852410168">ស្វែងរក​ដោយ​ប្រើ Google Lens</translation>
@@ -86,6 +87,10 @@
 <translation id="2767464022270041271">មិនមាន​ពាក្យសម្ងាត់ដែលបានរក្សាទុកទេ។ កម្មវិធីគ្រប់គ្រងពាក្យសម្ងាត់អាចពិនិត្យមើលពាក្យសម្ងាត់របស់អ្នក នៅពេលអ្នករក្សាទុកពាក្យសម្ងាត់ទាំងនោះ។</translation>
 <translation id="2788811701191021538">បើកទំព័រ​ការកំណត់​វិធីបង់ប្រាក់​នៅក្នុង Chrome។</translation>
 <translation id="2876628302275096482">ស្វែងយល់​បន្ថែម​អំពី<ph name="BEGIN_LINK" />របៀបដែល Chrome រក្សាទិន្នន័យ​របស់អ្នក​ជាលក្ខណៈ​ឯកជន<ph name="END_LINK" /></translation>
+<translation id="288992067439702510">អ្នកបាន​ឈានដល់​ចំនួន​កំណត់​នៃចំណាំ <ph name="LIMIT" /> របស់ Google Chrome ហើយ ដូច្នេះ​ចំណាំ​មួយចំនួន​របស់អ្នក​មិនទាន់ត្រូវបាន​រក្សាទុក​នៅក្នុង​គណនី Google របស់អ្នក​ទេ។
+
+មិនអាច​រក្សាទុក​ចំណាំថ្មីៗ​នៅក្នុង​គណនី​របស់អ្នក​បានទេ រហូត​ទាល់តែ​អ្នកលុប​ចំណាំ​មួយចំនួនសិន។ ប្រសិនបើអ្នក​ចេញពីគណនី​ឥឡូវនេះ ចំណាំដែល​មិនបាន​រក្សាទុក​នឹងត្រូវបាន​លុប។</translation>
+<translation id="2901621928549457170">បើក Chrome ភ្លាមៗ នៅពេលអ្នកប្រើ iPad របស់អ្នក</translation>
 <translation id="2922914028977213693">ចុចទីនេះ ដើម្បី​ទទួលបាន​អត្ថប្រយោជន៍​ច្រើនបំផុតពី Chrome នៅលើ iPad របស់អ្នក។</translation>
 <translation id="292371311537977079">ការកំណត់ Chrome</translation>
 <translation id="2923827943290349720">ចាក់សោផ្ទាំងឯកជន នៅពេលអ្នកបិទ Chrome</translation>
@@ -170,6 +175,8 @@
 <translation id="5119391094379141756">ជ្រើសរើស Chrome</translation>
 <translation id="5123188916260706415">ស្វែងរកដោយប្រើសំឡេងនៅក្នុង Chrome</translation>
 <translation id="5162467219239570114">Chrome ហួសសម័យហើយ។ ប្រសិនបើមិនមាន​កំណែថ្មីនៅក្នុង <ph name="BEGIN_LINK" />App Store<ph name="END_LINK" /> ទេ ឧបករណ៍របស់អ្នក​អាចនឹងមិនស្គាល់​កំណែថ្មីៗរបស់ Chrome ទៀតទេ។</translation>
+<translation id="5172049865623113551">បើក Chrome ភ្លាមៗ នៅពេលអ្នកប្រើ iPhone របស់អ្នក</translation>
+<translation id="5179095426828744632">ចូលប្រើ Chrome កាន់តែលឿនពីធ្នើររបស់អ្នក</translation>
 <translation id="5184329579814168207">បើកនៅក្នុង Chrome</translation>
 <translation id="5190139289262548459">ស្ថាប័ន​របស់អ្នក <ph name="DOMAIN" /> គ្រប់គ្រង​គណនី​ដែលអ្នក​បានចូល និង​របៀបប្រើ Chrome។</translation>
 <translation id="5209238444239954363">Chrome មិនអាចពិនិត្យរក​កំណែថ្មីបានទេ។ សូមព្យាយាមម្ដងទៀតនៅពេលក្រោយ។</translation>
@@ -308,7 +315,6 @@
 <translation id="787226752901403048">ចូលគណនី Chrome ដើម្បីចែករំលែក និងចូលរួមក្រុមផ្ទាំង ព្រមទាំងធ្វើការជាមួយគ្នាដើម្បីរិះរកគំនិត</translation>
 <translation id="7897703007638178753">មើលផ្ទាំងថ្មីៗនៅក្នុង Chrome</translation>
 <translation id="7948283758957877064">អ្វីដែលថ្មីនៅក្នុង Chrome</translation>
-<translation id="7996707498590516621">បង្កើត​រូបភាព​ដោយប្រើ Gemini ក្នុង Chrome</translation>
 <translation id="8000174216052461231">គន្លឹះ Chrome៖ ទទួលបាន​សុវត្ថិភាព​ខ្លាំងបំផុត​របស់ Chrome</translation>
 <translation id="8006014511203279255">ប្រើប្រាស់ Chrome រាល់ពេល​ដែល​អ្នក​ចុច​តំណ​នៅ​ក្នុង​សារ ឬកម្មវិធី​ផ្សេង​ទៀត។</translation>
 <translation id="8014670471808569312">Chrome នឹងផ្ដល់ការរក្សាទុកពាក្យ​សម្ងាត់របស់អ្នក។</translation>
@@ -320,6 +326,7 @@
 <translation id="8136856065410661948">សកម្មភាពនេះ​នឹង​ត្រូវបាន​ប្រើ ដើម្បីបង្កើត​ព្រឹត្តិការណ៍​នៅក្នុង Apple Calendar របស់អ្នកពី Chrome និង Google Lens។</translation>
 <translation id="8154120522323162874">ទទួលបាន​អត្ថប្រយោជន៍​ច្រើនបំផុត​ពី Chrome ដោយបន្ត​រៀបចំ​កម្មវិធីរុករក​តាម​អ៊ីនធឺណិត​របស់អ្នក។</translation>
 <translation id="8160472928944011082">Chrome មិន​អាចដំឡើងកំណែ​បានទេ</translation>
+<translation id="8213550501565480896">កំណត់ Chrome ជាលំនាំដើម</translation>
 <translation id="8245080522851805544">រក្សា​ការរុករក​របស់អ្នក​ឱ្យមាន​លក្ខណៈ​ឯកជន​តាមរយៈ​ការផ្ទៀងផ្ទាត់​ឧបករណ៍ នៅពេល​ដែលអ្នក​បិទ Chrome</translation>
 <translation id="8248887045858762645">គន្លឹះ Chrome</translation>
 <translation id="8265730590513812063">បើក​ម៉ឺនុយ Chrome</translation>
@@ -351,6 +358,7 @@
 <translation id="8788269841521769222">អ្នកនឹង​មិនចាំបាច់​ចងចាំ​ពាក្យសម្ងាត់​នេះទេ។ ពាក្យសម្ងាត់​នោះ​នឹងត្រូវបានរក្សាទុក​ទៅក្នុងកម្មវិធីគ្រប់គ្រង​ពាក្យសម្ងាត់ Google សម្រាប់ <ph name="EMAIL" /></translation>
 <translation id="8796490717897731471"><ph name="EMAIL" />។ Chrome ត្រូវបាន​គ្រប់គ្រង។</translation>
 <translation id="880967149107462122">ចូលទៅកាន់​ការកំណត់ Chrome</translation>
+<translation id="8840947648682778034">ទម្រង់រចនា Chrome សម្រាប់ iPhone និង iPad</translation>
 <translation id="8842132678697187091">អ្នកអាចបើក Google Lens នៅទីនេះ។</translation>
 <translation id="8850736900032787670">ដើម្បីទទួលបានខ្លឹមសារដែលមានលក្ខណៈផ្ទាល់ខ្លួនដោយផ្អែកលើចំណាប់អារម្មណ៍របស់អ្នក សូមចូល Chrome។</translation>
 <translation id="8855781063981781621">ដើម្បីបិទ​មុខងារ​ចាក់សោ​នៅក្នុង Chrome សូមបិទ​មុខងារនេះ​នៅលើ iPad របស់អ្នក។</translation>

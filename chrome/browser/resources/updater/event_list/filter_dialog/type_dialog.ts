@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import './filter_dialog.js';
+import '//resources/cr_elements/cr_button/cr_button.js';
 
 import type {PropertyValues} from '//resources/lit/v3_0/lit.rollup.js';
 import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
@@ -10,6 +11,7 @@ import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
 import {loadTimeData} from '../../i18n_setup.js';
 import {FilterCategory, getFilterCategoryForTarget} from '../filter_bar.js';
 
+import {handleKeyboardNavigation} from './keyboard_navigation.js';
 import {getCss} from './type_dialog.css.js';
 import {getHtml} from './type_dialog.html.js';
 
@@ -22,6 +24,10 @@ export class TypeDialogElement extends CrLitElement {
     return getCss();
   }
 
+  override render() {
+    return getHtml.bind(this)();
+  }
+
   static override get properties() {
     return {
       anchorElement: {type: Object},
@@ -29,10 +35,6 @@ export class TypeDialogElement extends CrLitElement {
   }
 
   accessor anchorElement: HTMLElement|null = null;
-
-  override render() {
-    return getHtml.bind(this)();
-  }
 
   protected readonly filterMenuItems:
       Array<{filterCategory: FilterCategory, label: string}> = [
@@ -49,16 +51,23 @@ export class TypeDialogElement extends CrLitElement {
           label: loadTimeData.getString('updateOutcome'),
         },
         {
+          filterCategory: FilterCategory.SCOPE,
+          label: loadTimeData.getString('scope'),
+        },
+        {
           filterCategory: FilterCategory.DATE,
           label: loadTimeData.getString('date'),
         },
       ];
 
-  override updated(changedProperties: PropertyValues<this>) {
-    super.updated(changedProperties);
-    const focusTarget =
-        this.shadowRoot.querySelector<HTMLElement>('.filter-menu-item');
-    focusTarget?.focus();
+  override firstUpdated(changedProperties: PropertyValues<this>) {
+    super.firstUpdated(changedProperties);
+    this.shadowRoot.querySelector<HTMLElement>('.filter-menu-item')?.focus();
+  }
+
+  protected onKeydown(e: KeyboardEvent) {
+    handleKeyboardNavigation(
+        e, this.shadowRoot.querySelectorAll<HTMLElement>('.filter-menu-item'));
   }
 
   protected onClick(e: MouseEvent) {

@@ -15,11 +15,13 @@
 #include "components/update_client/configurator.h"
 #include "components/update_client/update_client.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/security_principal.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition_config.h"
 #include "extensions/browser/extension_api_frame_id_map.h"
+#include "extensions/browser/extension_assets_manager.h"
 #include "extensions/browser/extension_error.h"
-#include "extensions/browser/updater/scoped_extension_updater_keep_alive.h"
+#include "extensions/browser/scoped_extension_keep_alive.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/permissions/permission_set.h"
@@ -69,8 +71,14 @@ ExtensionsBrowserClient::CreateUpdateClientConfigurator(
   return scoped_refptr<update_client::Configurator>(nullptr);
 }
 
-std::unique_ptr<ScopedExtensionUpdaterKeepAlive>
+std::unique_ptr<ScopedBrowserContextKeepAlive>
 ExtensionsBrowserClient::CreateUpdaterKeepAlive(
+    content::BrowserContext* context) {
+  return nullptr;
+}
+
+std::unique_ptr<ScopedBrowserContextKeepAlive>
+ExtensionsBrowserClient::CreateCrxInstallerKeepAlive(
     content::BrowserContext* context) {
   return nullptr;
 }
@@ -186,21 +194,21 @@ void ExtensionsBrowserClient::AddAPIActionToActivityLog(
     content::BrowserContext* browser_context,
     const ExtensionId& extension_id,
     const std::string& call_name,
-    base::Value::List args,
+    base::ListValue args,
     const std::string& extra) {}
 
 void ExtensionsBrowserClient::AddEventToActivityLog(
     content::BrowserContext* context,
     const ExtensionId& extension_id,
     const std::string& call_name,
-    base::Value::List args,
+    base::ListValue args,
     const std::string& extra) {}
 
 void ExtensionsBrowserClient::AddDOMActionToActivityLog(
     content::BrowserContext* browser_context,
     const ExtensionId& extension_id,
     const std::string& call_name,
-    base::Value::List args,
+    base::ListValue args,
     const GURL& url,
     const std::u16string& url_title,
     int call_type) {}
@@ -217,7 +225,8 @@ void ExtensionsBrowserClient::GetWebViewStoragePartitionConfig(
       browser_context, owner_site_url.GetHost(), partition_name, in_memory);
 
   if (owner_site_url.SchemeIs(extensions::kExtensionScheme)) {
-    const auto& owner_config = owner_site_instance->GetStoragePartitionConfig();
+    const auto& owner_config =
+        owner_site_instance->GetSecurityPrincipal().GetStoragePartitionConfig();
 #if DCHECK_IS_ON()
     if (browser_context->IsOffTheRecord()) {
       DCHECK(owner_config.in_memory());
@@ -297,5 +306,31 @@ bool ExtensionsBrowserClient::HasBeenBlocked(
 void ExtensionsBrowserClient::ShowWarningMessageBox(
     const std::u16string& title,
     const std::u16string& message) {}
+
+void ExtensionsBrowserClient::RecordCommandLineMetricsOnUnpackedInstallation(
+    content::BrowserContext* context,
+    const Extension* extension) const {}
+
+ExtensionAssetsManager* ExtensionsBrowserClient::GetAssetsManager() {
+  if (!assets_manager_) {
+    assets_manager_ = ExtensionAssetsManager::CreateDefaultInstance();
+  }
+  return assets_manager_.get();
+}
+
+Blocklist* ExtensionsBrowserClient::GetBlocklist(
+    content::BrowserContext* context) {
+  return nullptr;
+}
+
+InstallStageTracker* ExtensionsBrowserClient::GetInstallStageTracker(
+    content::BrowserContext* context) {
+  return nullptr;
+}
+
+InstallTracker* ExtensionsBrowserClient::GetInstallTracker(
+    content::BrowserContext* context) {
+  return nullptr;
+}
 
 }  // namespace extensions

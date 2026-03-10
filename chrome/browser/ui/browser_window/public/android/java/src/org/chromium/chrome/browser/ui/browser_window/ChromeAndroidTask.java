@@ -12,7 +12,9 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.multiwindow.MultiInstanceManager;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.tabmodel.TabModel;
+import org.chromium.chrome.browser.tabmodel.SupportedProfileType;
+import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.components.browser_ui.desktop_windowing.DesktopWindowStateManager;
 import org.chromium.ui.base.ActivityWindowAndroid;
 
 import java.util.List;
@@ -55,20 +57,22 @@ public interface ChromeAndroidTask {
     /** Contains objects whose lifecycle is in sync with an {@code Activity}. */
     final class ActivityScopedObjects {
         final ActivityWindowAndroid mActivityWindowAndroid;
-        final TabModel mTabModel;
+        final TabModelSelector mTabModelSelector;
+        final @SupportedProfileType int mSupportedProfileType;
+        final @Nullable DesktopWindowStateManager mDesktopWindowStateManager;
         final @Nullable MultiInstanceManager mMultiInstanceManager;
 
         public ActivityScopedObjects(
-                ActivityWindowAndroid activityWindowAndroid, TabModel tabModel) {
-            this(activityWindowAndroid, tabModel, /* multiInstanceManager= */ null);
-        }
-
-        public ActivityScopedObjects(
                 ActivityWindowAndroid activityWindowAndroid,
-                TabModel tabModel,
+                TabModelSelector tabModelSelector,
+                @SupportedProfileType int supportedProfileType,
+                @Nullable DesktopWindowStateManager desktopWindowStateManager,
                 @Nullable MultiInstanceManager multiInstanceManager) {
             mActivityWindowAndroid = activityWindowAndroid;
-            mTabModel = tabModel;
+            mTabModelSelector = tabModelSelector;
+            assert supportedProfileType != SupportedProfileType.UNSET;
+            mSupportedProfileType = supportedProfileType;
+            mDesktopWindowStateManager = desktopWindowStateManager;
             mMultiInstanceManager = multiInstanceManager;
         }
     }
@@ -104,7 +108,9 @@ public interface ChromeAndroidTask {
          * Callback to notify native callers when a native {@code AndroidBrowserWindow} is created
          * and fully initialized.
          *
-         * <p>The type of the callback is the address of the native {@code AndroidBrowserWindow}.
+         * <p>The type of the callback is the address of the native {@code AndroidBrowserWindow} for
+         * the initial profile. On mobile, there may be multiple {@code AndroidBrowserWindow}s for
+         * different profiles.
          */
         final @Nullable JniOnceCallback<Long> mTaskCreationCallbackForNative;
 
@@ -188,31 +194,36 @@ public interface ChromeAndroidTask {
     @Nullable ActivityWindowAndroid getTopActivityWindowAndroid();
 
     /**
-     * Called when native initialization has finished.
-     *
-     * <p>This signals when this {@link ChromeAndroidTask} is fully initialized.
-     */
-    void onNativeInitializationFinished();
-
-    /**
      * Adds a {@link ChromeAndroidTaskFeature} to this {@link ChromeAndroidTask}.
      *
-     * <p>If an instance of the given {@code featureClazz} hasn't been added to this Task, this
-     * method will be the start of the feature's lifecycle, and {@link
+     * <p>If an instance of the given {@code featureKey} hasn't been added to this Task, this method
+     * will be the start of the feature's lifecycle, and {@link
      * ChromeAndroidTaskFeature#onAddedToTask} will be invoked.
      *
-     * <p>If an instance of the given {@code featureClazz} is already added, this method will be a
+     * <p>A feature's lifecycle is determined by its {@code featureKey} (e.g., Task-scoped,
+     * Profile-scoped, or Activity-scoped). See {@link ChromeAndroidTaskFeatureKey} for details.
+     *
+     * <p>If an instance of the given {@code featureKey} is already added, this method will be a
      * no-op and {@link ChromeAndroidTaskFeature#onAddedToTask} won't be invoked.
      *
      * <p>Production code should initialize a feature inside {@code featureSupplier}'s {@link
      * Supplier#get()} implementation to avoid unnecessarily initializing the feature if it
      * shouldn't be added.
      *
-     * @param featureClazz The class of the feature, used as the feature identifier.
+     * @param featureKey The key of the feature to add.
      * @param featureSupplier {@link Supplier} that should instantiate the feature.
      */
     <T extends ChromeAndroidTaskFeature> void addFeature(
-            Class<T> featureClazz, Supplier<@Nullable T> featureSupplier);
+            ChromeAndroidTaskFeatureKey featureKey, Supplier<@Nullable T> featureSupplier);
+
+    /**
+     * Removes all {@link ChromeAndroidTaskFeature}s associated with the given {@link
+     * ActivityWindowAndroid}.
+     *
+     * @param activityWindowAndroid The associated activity.
+     * @see #addFeature
+     */
+    void removeAllFeaturesForActivity(ActivityWindowAndroid activityWindowAndroid);
 
     /**
      * Creates the {@link Intent} to open a new window of type {@link BrowserWindowType#NORMAL}.
@@ -228,8 +239,35 @@ public interface ChromeAndroidTask {
      *
      * <p>If the native object hasn't been created, this method will create it before returning its
      * address.
+     *
+     * @param profile The profile associated with the browser window.
      */
-    long getOrCreateNativeBrowserWindowPtr();
+    long getOrCreateNativeBrowserWindowPtr(Profile profile);
+
+    /**
+     * Returns an array of the all native {@code BrowserWindowInterface} addresses.
+     *
+     * <p>If the native object hasn't been created, this method will create it before returning its
+     * address.
+     */
+    List<Long> getAllNativeBrowserWindowPtrs();
+
+    /**
+     * Adds an {@link AndroidBrowserWindowObserver} for future {@code AndroidBrowserWindow} events.
+     *
+     * @param observer The observer to add.
+     */
+    void addAndroidBrowserWindowObserver(AndroidBrowserWindowObserver observer);
+
+    /**
+     * Removes an {@link AndroidBrowserWindowObserver}.
+     *
+     * @param observer The observer to remove.
+     */
+    void removeAndroidBrowserWindowObserver(AndroidBrowserWindowObserver observer);
+
+    /** Returns whether observer is registered for {@code AndroidBrowserWindow} events. */
+    boolean hasAndroidBrowserWindowObserver(AndroidBrowserWindowObserver observer);
 
     /**
      * Destroys all objects owned by this {@link ChromeAndroidTask}, including all {@link
@@ -264,12 +302,10 @@ public interface ChromeAndroidTask {
      * when its state changed from nonexistent or inactive (minimized/unfocused), to the active
      * state (in the foreground and focused).
      *
-     * <p>The timestamp is in milliseconds since boot.
+     * <p>The timestamp is in milliseconds since boot. Returns 0 if this task has never been
+     * activated.
      */
     long getLastActivatedTimeMillis();
-
-    /** Returns the {@link Profile} associated with this task. */
-    Profile getProfile();
 
     /** Returns current bounds of the window. */
     Rect getBoundsInDp();
@@ -321,11 +357,10 @@ public interface ChromeAndroidTask {
     List<ChromeAndroidTaskFeature> getAllFeaturesForTesting();
 
     /** Returns the {@link ChromeAndroidTaskFeature} instance for the given class. */
-    @Nullable ChromeAndroidTaskFeature getFeatureForTesting(
-            Class<? extends ChromeAndroidTaskFeature> featureClazz);
+    @Nullable ChromeAndroidTaskFeature getFeatureForTesting(ChromeAndroidTaskFeatureKey featureKey);
 
     /**
      * Returns the {@code SessionID} as returned by {@code BrowserWindowInterface::GetSessionID()}.
      */
-    @Nullable Integer getSessionIdForTesting();
+    @Nullable Integer getSessionIdForTesting(Profile profile);
 }

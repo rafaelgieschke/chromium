@@ -11,7 +11,6 @@
 #include <optional>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/containers/fixed_flat_set.h"
 #include "base/dcheck_is_on.h"
 #include "base/files/file.h"
@@ -71,7 +70,7 @@ static std::unique_ptr<ui::GbmDevice> CreateGbmDevice(
         base::StrCat({drm_node_file_prefix, base::NumberToString(i)})));
 
 #if BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_V4L2_CODEC)
-    const bool is_render_node = base::Contains(drm_node_file_prefix, "render");
+    const bool is_render_node = drm_node_file_prefix.contains("render");
 
     // TODO(b/313513760): don't guard base::File::FLAG_WRITE behind
     // BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_V4L2_CODEC) once the hardware video
@@ -170,36 +169,42 @@ class GbmDeviceWrapper {
 
  private:
   GbmDeviceWrapper() {
-    if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kRenderNodeOverride)) {
-      const base::FilePath dev_path(
-          base::CommandLine::ForCurrentProcess()->GetSwitchValuePath(
-              switches::kRenderNodeOverride));
-#if BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_V4L2_CODEC)
-      const bool is_render_node = base::Contains(dev_path.value(), "render");
-
-      // TODO(b/313513760): don't guard base::File::FLAG_WRITE behind
-      // BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_V4L2_CODEC) once the hardware
-      // video decoding sandbox allows R+W access to the render nodes.
-      // base::File::FLAG_WRITE is needed on Linux for gbm_create_device().
-      const uint32_t kDrmNodeFileFlags =
-          base::File::FLAG_OPEN | base::File::FLAG_READ |
-          (is_render_node ? base::File::FLAG_WRITE : 0);
-#else
-      const uint32_t kDrmNodeFileFlags =
-          base::File::FLAG_OPEN | base::File::FLAG_READ;
+    const auto dev_paths = std::to_array<base::FilePath>({
+#if BUILDFLAG(USE_VAAPI)
+        // This switch only affects VAAPI, V4L2 does not use a unified device.
+        base::CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+            switches::kHardwareVideoDevicePath),
 #endif
-      base::File drm_node_file(dev_path, kDrmNodeFileFlags);
-      if (drm_node_file.IsValid()) {
-        // GbmDevice expects its owner to keep |drm_node_file| open during the
-        // former's lifetime. We give it away here since GbmDeviceWrapper is a
-        // singleton that fully owns |gbm_device|.
-        gbm_device_ = ui::CreateGbmDevice(drm_node_file.GetPlatformFile());
-        if (gbm_device_) {
-          drm_node_file.TakePlatformFile();
+        base::CommandLine::ForCurrentProcess()->GetSwitchValuePath(
+            switches::kRenderNodeOverride)});
+    for (const auto& dev_path : dev_paths) {
+      if (!dev_path.empty()) {
+#if BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_V4L2_CODEC)
+        const bool is_render_node = dev_path.value().contains("render");
+
+        // TODO(b/313513760): don't guard base::File::FLAG_WRITE behind
+        // BUILDFLAG(IS_LINUX) && BUILDFLAG(USE_V4L2_CODEC) once the hardware
+        // video decoding sandbox allows R+W access to the render nodes.
+        // base::File::FLAG_WRITE is needed on Linux for gbm_create_device().
+        const uint32_t kDrmNodeFileFlags =
+            base::File::FLAG_OPEN | base::File::FLAG_READ |
+            (is_render_node ? base::File::FLAG_WRITE : 0);
+#else
+        const uint32_t kDrmNodeFileFlags =
+            base::File::FLAG_OPEN | base::File::FLAG_READ;
+#endif
+        base::File drm_node_file(dev_path, kDrmNodeFileFlags);
+        if (drm_node_file.IsValid()) {
+          // GbmDevice expects its owner to keep |drm_node_file| open during the
+          // former's lifetime. We give it away here since GbmDeviceWrapper is a
+          // singleton that fully owns |gbm_device|.
+          gbm_device_ = ui::CreateGbmDevice(drm_node_file.GetPlatformFile());
+          if (gbm_device_) {
+            drm_node_file.TakePlatformFile();
+          }
         }
+        return;
       }
-      return;
     }
 
     constexpr char kRenderNodeFilePrefix[] = "/dev/dri/renderD";
@@ -364,7 +369,7 @@ void UniqueTrackingTokenHelper::SetUniqueTrackingToken(
   metadata.tracking_token = GenerateToken();
 }
 
-scoped_refptr<VideoFrame> CreateMappableVideoFrame(
+scoped_refptr<VideoFrame> CreateMappableSharedImageVideoFrame(
     VideoPixelFormat pixel_format,
     const gfx::Size& coded_size,
     const gfx::Rect& visible_rect,

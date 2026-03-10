@@ -12,6 +12,7 @@ import org.jni_zero.CalledByNative;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.profiles.ProfileManager;
+import org.chromium.ui.base.ActivityWindowAndroid;
 
 /**
  * Supports {@code android_browser_window_unittest.cc}.
@@ -38,15 +39,21 @@ final class AndroidBrowserWindowNativeUnitTestSupport {
             @BrowserWindowType int browserWindowType, Profile profile) {
         mMockChromeAndroidTask = mock(ChromeAndroidTask.class);
         when(mMockChromeAndroidTask.getBrowserWindowType()).thenReturn(browserWindowType);
-        mAndroidBrowserWindow = new AndroidBrowserWindow(mMockChromeAndroidTask);
+        mAndroidBrowserWindow =
+                new AndroidBrowserWindow(
+                        mMockChromeAndroidTask, profile, mock(ActivityWindowAndroid.class));
 
         ProfileManager.setLastUsedProfileForTesting(profile);
-        setProfileForTesting(profile);
     }
 
     @CalledByNative
     private long invokeGetOrCreateNativePtr() {
         return mAndroidBrowserWindow.getOrCreateNativePtr();
+    }
+
+    @CalledByNative
+    private long invokeGetNativePtr() {
+        return mAndroidBrowserWindow.getNativePtr();
     }
 
     @CalledByNative
@@ -65,13 +72,13 @@ final class AndroidBrowserWindowNativeUnitTestSupport {
     }
 
     @CalledByNative
-    private void invokeResetAndDestroy() {
-        mAndroidBrowserWindow.destroy();
-        ProfileManager.resetForTesting();
+    private boolean invokeIsDeleteScheduled() {
+        return mAndroidBrowserWindow.isDeleteScheduled();
     }
 
     @CalledByNative
-    private void setProfileForTesting(Profile profile) {
-        when(mMockChromeAndroidTask.getProfile()).thenReturn(profile);
+    private void invokeResetAndDestroy() {
+        mAndroidBrowserWindow.destroy();
+        ProfileManager.resetForTesting();
     }
 }

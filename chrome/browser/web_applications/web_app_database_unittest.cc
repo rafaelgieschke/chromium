@@ -28,7 +28,6 @@
 #include "chrome/browser/web_applications/generated_icon_fix_manager.h"
 #include "chrome/browser/web_applications/isolated_web_apps/isolated_web_app_integrity_block_data.h"
 #include "chrome/browser/web_applications/isolated_web_apps/isolation_data.h"
-#include "chrome/browser/web_applications/mojom/user_display_mode.mojom-shared.h"
 #include "chrome/browser/web_applications/mojom/user_display_mode.mojom.h"
 #include "chrome/browser/web_applications/proto/web_app.pb.h"
 #include "chrome/browser/web_applications/proto/web_app_database_metadata.pb.h"
@@ -53,7 +52,6 @@
 #include "chrome/browser/web_applications/web_app_registry_update.h"
 #include "chrome/browser/web_applications/web_app_sync_bridge.h"
 #include "chrome/browser/web_applications/web_app_utils.h"
-#include "chrome/common/chrome_features.h"
 #include "components/services/app_service/public/cpp/file_handler.h"
 #include "components/services/app_service/public/cpp/protocol_handler_info.h"
 #include "components/services/app_service/public/cpp/share_target.h"
@@ -65,9 +63,6 @@
 #include "components/web_package/signed_web_bundles/signed_web_bundle_signature_stack_entry.h"
 #include "components/webapps/isolated_web_apps/types/storage_location.h"
 #include "components/webapps/isolated_web_apps/types/update_channel.h"
-#include "services/network/public/cpp/permissions_policy/origin_with_possible_wildcards.h"
-#include "services/network/public/cpp/permissions_policy/permissions_policy_declaration.h"
-#include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -278,8 +273,6 @@ TEST_F(WebAppDatabaseTest, OpenDatabaseAndReadRegistry) {
   test::AwaitStartWebAppProviderAndSubsystems(profile());
   histogram_tester.ExpectBucketCount("WebApp.Database.ValidProto", true,
                                      kNumApps);
-  histogram_tester.ExpectBucketCount("WebApp.Database.AppIdMatch", true,
-                                     kNumApps);
   fake_provider().command_manager().AwaitAllCommandsCompleteForTesting();
   EXPECT_TRUE(IsRegistryEqual(mutable_registrar().registry(), registry,
                               /*exclude_current_os_integration=*/true));
@@ -310,14 +303,15 @@ TEST_F(WebAppDatabaseTest, MigrateFromMissingShortcutsSizes) {
   proto_without_shortcut_info.clear_shortcuts_menu_item_infos();
   // Fail to parse when fewer shortcut infos than downloaded sizes. No evidence
   // this happens in the wild.
-  EXPECT_EQ(ParseWebAppProto(proto_without_shortcut_info), nullptr);
+  EXPECT_EQ(ParseWebAppProto(proto_without_shortcut_info, app_id), nullptr);
 
   // If DB is missing downloaded shortcut icon sizes information, expect to pad
   // the vector with empty IconSizes structs so the vectors in WebApp have equal
   // length.
   proto::WebApp proto_without_downloaded_sizes(*base_proto);
   proto_without_downloaded_sizes.clear_downloaded_shortcuts_menu_icons_sizes();
-  auto roundtrip_app = ParseWebAppProto(proto_without_downloaded_sizes);
+  auto roundtrip_app = ParseWebAppProto(proto_without_downloaded_sizes,
+                                        /*expected_app_id=*/app_id);
 
   auto app_with_empty_downloaded_sizes = std::make_unique<WebApp>(*base_app);
   shortcut_item_info.downloaded_icon_sizes = {};

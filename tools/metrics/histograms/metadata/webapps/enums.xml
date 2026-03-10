@@ -146,7 +146,7 @@ chromium-metrics-reviews@google.com.
   <int value="6" label="Shutdown"/>
 </enum>
 
-<!-- LINT.ThenChange(/chrome/browser/web_applications/commands/fetch_install_info_from_install_url_command.h:FetchInstallInfoResult) -->
+<!-- LINT.ThenChange(//chrome/browser/web_applications/scheduler/fetch_install_info_from_install_url_result.h:FetchInstallInfoResult) -->
 
 <!-- LINT.IfChange(FetchManifestAndUpdateResult) -->
 
@@ -202,6 +202,31 @@ chromium-metrics-reviews@google.com.
   <int value="5" label="Showing ambient badge"/>
   <int value="6" label="Ambient badge dismissed"/>
 </enum>
+
+<!-- LINT.IfChange(InstallMigrateToAppResult) -->
+
+<enum name="InstallMigrateToAppResult">
+  <int value="0" label="kSuccessNewInstall"/>
+  <int value="1" label="kSuccessAlreadyInstalled"/>
+  <int value="2" label="kInstallError"/>
+  <int value="3" label="kWebContentsDestroyed"/>
+  <int value="4" label="kShutdown"/>
+  <int value="5" label="kIconDownloadFailed"/>
+  <int value="6" label="kIconReadFromDiskFailed"/>
+  <int value="7" label="kIconWriteToDiskFailed"/>
+  <int value="8" label="kInstallFinalizeFailed"/>
+  <int value="9" label="kManifestConversionFailed"/>
+  <int value="10" label="kAppNotAllowedToUpdate"/>
+  <int value="11" label="kUserNavigated"/>
+  <int value="12" label="kManifestToWebAppInstallInfoError"/>
+  <int value="13" label="kInstallFromInfoFailed"/>
+  <int value="14" label="kUpdateFailed"/>
+  <int value="15" label="kUrlLoadFailed"/>
+  <int value="16" label="kManifestIdMismatch"/>
+  <int value="17" label="kMigrateFromMismatch"/>
+</enum>
+
+<!-- LINT.ThenChange(/chrome/browser/web_applications/scheduler/install_migrate_to_app_result.h:InstallMigrateToAppResult) -->
 
 <enum name="IsolatedWebAppCleanupBundleCacheError">
   <int value="0" label="System shutdown"/>
@@ -315,6 +340,16 @@ chromium-metrics-reviews@google.com.
   <int value="0" label="Launched as standalone web app"/>
   <int value="1" label="Launched as a tab"/>
 </enum>
+
+<!-- LINT.IfChange(LaunchUrlInScopeResult) -->
+
+<enum name="LaunchUrlInScopeResult">
+  <int value="0" label="In scope"/>
+  <int value="1" label="Not in scope"/>
+  <int value="2" label="In scope but missing trailing slash"/>
+</enum>
+
+<!-- LINT.ThenChange(chrome/browser/ui/web_applications/web_app_launch_process.cc:LaunchUrlInScopeResult) -->
 
 <enum name="ManagedSessionType">
   <int value="0" label="Managed User Session"/>
@@ -465,6 +500,22 @@ chromium-metrics-reviews@google.com.
   <int value="5" label="Failed to commit update to jump list"/>
 </enum>
 
+<!-- LINT.IfChange(WebAppApplyManifestMigrationResult) -->
+
+<enum name="WebAppApplyManifestMigrationResult">
+  <int value="0" label="System was shutdown"/>
+  <int value="1" label="Source app is invalid for migration"/>
+  <int value="2" label="Destination app not found during migration"/>
+  <int value="3" label="Source app not removed during migration"/>
+  <int value="4" label="Destination app did not link to source app"/>
+  <int value="5" label="A suggested migration was successful"/>
+  <int value="6"
+      label="A forced migration failed while copying icons from source app"/>
+  <int value="7" label="A forced migration was successful"/>
+</enum>
+
+<!-- LINT.ThenChange(/chrome/browser/web_applications/scheduler/apply_manifest_migration_result.h:ApplyManifestMigrationResult) -->
+
 <!-- LINT.IfChange(WebAppApplyPendingManifestUpdateResult) -->
 
 <enum name="WebAppApplyPendingManifestUpdateResult">
@@ -478,7 +529,7 @@ chromium-metrics-reviews@google.com.
   <int value="7" label="App name and icon updated successfully"/>
 </enum>
 
-<!-- LINT.ThenChange(/chrome/browser/web_applications/commands/apply_pending_manifest_update_command.h:ApplyPendingManifestUpdateResult) -->
+<!-- LINT.ThenChange(/chrome/browser/web_applications/commands/scheduler/apply_pending_manifest_update_result.h:ApplyPendingManifestUpdateResult) -->
 
 <enum name="WebAppIconDownloaderResult">
   <int value="0" label="Success"/>
@@ -502,9 +553,26 @@ chromium-metrics-reviews@google.com.
   <int value="2" label="User chose to ignore this app's update"/>
   <int value="3" label="App was uninstalled while the dialog is being shown"/>
   <int value="4" label="Dialog terminated unexpectedly"/>
+  <int value="5" label="Dialog closed the app"/>
 </enum>
 
 <!-- LINT.ThenChange(/chrome/browser/web_applications/ui_manager/update_dialog_types.h:WebAppIdentityUpdateResult) -->
+
+<!-- LINT.IfChange(WebAppInstallFromMigrateFromFieldResult) -->
+
+<enum name="WebAppInstallFromMigrateFromFieldResult">
+  <int value="0" label="AlreadyInstalled"/>
+  <int value="1" label="SuccessInstalled"/>
+  <int value="2" label="ManifestToWebAppInstallInfoError"/>
+  <int value="3" label="InstallFromInfoFailed"/>
+  <int value="4" label="UpdateFailed"/>
+  <int value="5" label="WebContentsWasDestroyed"/>
+  <int value="6" label="NoSourceAppInstalled"/>
+  <int value="7" label="UserNavigated"/>
+  <int value="8" label="SystemShutdown"/>
+</enum>
+
+<!-- LINT.ThenChange(//chrome/browser/web_applications/commands/web_app_install_from_migrate_from_field_command.h:WebAppInstallFromMigrateFromFieldResult) -->
 
 <enum name="WebAppLauncherLaunchResult">
   <int value="0" label="Success"/>
@@ -555,9 +623,10 @@ chromium-metrics-reviews@google.com.
   <int value="15"
       label="App not allowed to update because it opened in a browser tab, or
              it is not installed."/>
+  <int value="16" label="App silently updated, icon differences were minimal"/>
 </enum>
 
-<!-- LINT.ThenChange(/chrome/browser/web_applications/commands/manifest_silent_update_command.h:ManifestSilentUpdateCheckResult) -->
+<!-- LINT.ThenChange(/chrome/browser/web_applications/scheduler/manifest_silent_update_result.h:ManifestSilentUpdateCheckResult) -->
 
 <enum name="WebAppManifestUpdateResult">
   <int value="0" label="No app in scope"/>
@@ -690,11 +759,16 @@ chromium-metrics-reviews@google.com.
   <int value="61" label="InvalidDownloadedTrustedIconForPendingUpdate"/>
   <int value="62" label="MissingWasIgnoredForPendingUpdate"/>
   <int value="63" label="InvalidParsedTrustedIcons"/>
-  <int value="64" label="InvalidBorderlessUrlPatterns"/>
+  <int value="64" label="(Obsolete) InvalidBorderlessUrlPatterns"/>
   <int value="65" label="InvalidInstalledBy"/>
   <int value="66" label="InvalidWebAppUnvalidatedMigrationSource"/>
   <int value="67" label="InvalidPendingMigrationInfo"/>
   <int value="68" label="InvalidWebAppValidatedMigrationSource"/>
+  <int value="69" label="InvalidDisplayOverrideUrlPatterns"/>
+  <int value="70" label="StartUrlNotInScope"/>
+  <int value="71" label="MigratedFromManifestIdInvalid"/>
+  <int value="72" label="AppIdMismatch"/>
+  <int value="73" label="AppIdMismatchForSubApp"/>
 </enum>
 
 <!-- LINT.ThenChange(/chrome/browser/web_applications/web_app_database_serialization.h:ProtoParseResult) -->
@@ -732,6 +806,8 @@ chromium-metrics-reviews@google.com.
   <int value="2" label="Dialog canceled"/>
 </enum>
 
+<!-- LINT.IfChange(WebappUninstallSource) -->
+
 <enum name="WebappUninstallSource">
   <int value="0" label="Unknown surface, potentially in ChromeOS"/>
   <int value="1" label="Menu item from the 3-dot menu of a WebApp window"/>
@@ -752,7 +828,16 @@ chromium-metrics-reviews@google.com.
   <int value="16" label="Incomplete uninstall cleanup on startup."/>
   <int value="17" label="Sub apps uninstall kicked off by parent app"/>
   <int value="18" label="Lock screen app infrastructure"/>
+  <int value="19" label="Cleaned up during tests"/>
+  <int value="20" label="Deduping install urls"/>
+  <int value="21" label="Healthcare app cleaning up during sessions."/>
+  <int value="22" label="IWA enterprise policy"/>
+  <int value="23" label="PWA.uninstall from devtools"/>
+  <int value="24" label="Via IWA blocklist"/>
+  <int value="25" label="source app is policy installed"/>
 </enum>
+
+<!-- LINT.ThenChange(/components/webapps/browser/installable/installable_metrics.h:WebappUninstallSource) -->
 
 <!-- LINT.IfChange(WebAppUpdateDataReadResult) -->
 
@@ -777,9 +862,9 @@ chromium-metrics-reviews@google.com.
   <int value="5" label="FailedErrorPageLoaded"/>
 </enum>
 
-<!-- LINT.IfChange(WebInstallApiResult) -->
+<!-- LINT.IfChange(WebInstallServiceResult) -->
 
-<enum name="WebInstallApiResult">
+<enum name="WebInstallServiceResult">
   <int value="0" label="Success"/>
   <int value="1" label="Success Already Installed"/>
   <int value="2" label="Unexpected failure"/>
@@ -791,16 +876,16 @@ chromium-metrics-reviews@google.com.
   <int value="8" label="Manifest id mismatch"/>
 </enum>
 
-<!-- LINT.ThenChange(/chrome/browser/web_applications/web_install_service_impl.h:WebInstallApiResult) -->
+<!-- LINT.ThenChange(/chrome/browser/web_applications/web_install_service_impl.h:WebInstallServiceResult) -->
 
-<!-- LINT.IfChange(WebInstallApiType) -->
+<!-- LINT.IfChange(WebInstallServiceType) -->
 
-<enum name="WebInstallApiType">
+<enum name="WebInstallServiceType">
   <int value="0" label="Current Document"/>
   <int value="1" label="Background Document"/>
 </enum>
 
-<!-- LINT.ThenChange(/chrome/browser/web_applications/web_install_service_impl.h:WebInstallApiType) -->
+<!-- LINT.ThenChange(/chrome/browser/web_applications/web_install_service_impl.h:WebInstallServiceType) -->
 
 <enum name="WinRegistryErrorCode">
   <int value="0" label="ERROR_OTHER"/>

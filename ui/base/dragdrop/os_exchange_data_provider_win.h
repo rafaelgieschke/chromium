@@ -21,12 +21,18 @@
 
 #include "base/component_export.h"
 #include "base/containers/span.h"
+#include "base/files/file_path.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
 #include "ui/base/dragdrop/os_exchange_data_provider.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/image/image_skia.h"
 
 namespace ui {
+
+// Placeholder path used for virtual file drag metadata on dragenter,
+// before actual temp files are created. See GetVirtualFilenames().
+inline constexpr wchar_t kVirtualFileTempPlaceholderPath[] =
+    FILE_PATH_LITERAL("temp.tmp");
 
 class DataObjectImpl : public DownloadFileObserver,
                        public IDataObject,
@@ -150,16 +156,19 @@ class COMPONENT_EXPORT(UI_BASE) OSExchangeDataProviderWin
   void MarkAsFromPrivileged() override;
   bool IsFromPrivileged() const override;
   void SetString(std::u16string_view data) override;
-  void SetURL(const GURL& url, std::u16string_view title) override;
+  void SetURLs(base::span<const ClipboardUrlInfo> url_infos) override;
   void SetFilename(const base::FilePath& path) override;
   void SetFilenames(const std::vector<FileInfo>& filenames) override;
   // Test only method for adding virtual file content to the data store. The
   // first value in the pair is the file display name, the second is a string
-  // providing the file content.
+  // providing the file content. If `show_cfhdrop_without_data` is true,
+  // CF_HDROP will be advertised via QueryGetData but GetData will fail -
+  // simulating ZIP Shell Folder behavior.
   void SetVirtualFileContentsForTesting(
       const std::vector<std::pair<base::FilePath, std::string>>&
           filenames_and_contents,
-      DWORD tymed) override;
+      DWORD tymed,
+      bool show_cfhdrop_without_data = false) override;
   void SetPickledData(const ClipboardFormatType& format,
                       const base::Pickle& data) override;
   void SetFileContents(const base::FilePath& filename,
@@ -167,9 +176,7 @@ class COMPONENT_EXPORT(UI_BASE) OSExchangeDataProviderWin
   void SetHtml(const std::u16string& html, const GURL& base_url) override;
 
   std::optional<std::u16string> GetString() const override;
-  std::optional<UrlInfo> GetURLAndTitle(
-      FilenameToURLPolicy policy) const override;
-  std::optional<std::vector<GURL>> GetURLs(
+  std::vector<ClipboardUrlInfo> GetURLs(
       FilenameToURLPolicy policy) const override;
   std::optional<std::vector<FileInfo>> GetFilenames() const override;
   bool HasVirtualFilenames() const override;

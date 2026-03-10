@@ -30,9 +30,12 @@
 #include "ui/views/painter.h"
 #include "ui/views/view_class_properties.h"
 
-DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(PermissionChipView, kElementIdForTesting);
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(PermissionChipView,
+                                      kIndicatorChipElementId);
+DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(PermissionChipView,
+                                      kPermissionRequestChipElementId);
 
-PermissionChipView::PermissionChipView(PressedCallback callback)
+PermissionChipView::PermissionChipView(Role role, PressedCallback callback)
     : MdTextButton(std::move(callback),
                    std::u16string(),
                    views::style::CONTEXT_BUTTON_MD,
@@ -43,12 +46,15 @@ PermissionChipView::PermissionChipView(PressedCallback callback)
   SetElideBehavior(gfx::ElideBehavior::FADE_TAIL);
   SetFocusBehavior(views::View::FocusBehavior::ALWAYS);
   // Equalizing padding on the left, right and between icon and label.
-  SetImageLabelSpacing(GetLayoutConstant(LOCATION_BAR_CHIP_PADDING));
+  SetImageLabelSpacing(
+      GetLayoutConstant(LayoutConstant::kLocationBarChipPadding));
   SetCustomPadding(GetPadding());
   label()->SetTextStyle(views::style::STYLE_BODY_4_EMPHASIS);
   SetCornerRadius(GetCornerRadius());
   animation_ = std::make_unique<gfx::SlideAnimation>(this);
-  SetProperty(views::kElementIdentifierKey, kElementIdForTesting);
+  SetProperty(views::kElementIdentifierKey,
+              role == Role::kIndicatorChip ? kIndicatorChipElementId
+                                           : kPermissionRequestChipElementId);
 
   UpdateIconAndColors();
 }
@@ -316,11 +322,11 @@ void PermissionChipView::OnAnimationValueMaybeChanged() {
 }
 
 int PermissionChipView::GetIconSize() const {
-  return GetLayoutConstant(LOCATION_BAR_CHIP_ICON_SIZE);
+  return GetLayoutConstant(LayoutConstant::kLocationBarChipIconSize);
 }
 
 int PermissionChipView::GetCornerRadius() const {
-  return GetLayoutConstant(LOCATION_BAR_CHILD_CORNER_RADIUS);
+  return GetLayoutConstant(LayoutConstant::kLocationBarChildCornerRadius);
 }
 
 gfx::RoundedCornersF PermissionChipView::GetCornerRadii() const {
@@ -334,7 +340,8 @@ gfx::RoundedCornersF PermissionChipView::GetCornerRadii() const {
 }
 
 gfx::Insets PermissionChipView::GetPadding() const {
-  return gfx::Insets(GetLayoutConstant(LOCATION_BAR_CHIP_PADDING));
+  return gfx::Insets(
+      GetLayoutConstant(LayoutConstant::kLocationBarChipPadding));
 }
 
 void PermissionChipView::SetChipIcon(const gfx::VectorIcon& icon) {

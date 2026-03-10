@@ -63,7 +63,7 @@ static ColorParseResult ParseColor(Color& parsed_color,
                                    mojom::blink::ColorScheme color_scheme,
                                    const ui::ColorProvider* color_provider,
                                    bool is_in_web_app_scope) {
-  if (EqualIgnoringASCIICase(color_string, "currentcolor")) {
+  if (EqualIgnoringAsciiCase(color_string, "currentcolor")) {
     return ColorParseResult::kCurrentColor;
   }
   if (CSSParser::ParseColor(parsed_color, color_string)) {
@@ -74,16 +74,19 @@ static ColorParseResult ParseColor(Color& parsed_color,
     return ColorParseResult::kColor;
   }
   CSSParserTokenStream stream(color_string);
+  CSSParserLocalContext local_context =
+      CSSParserLocalContext::CreateWithoutPropertyForCanvas();
   const CSSValue* parsed_value =
-      css_parsing_utils::ConsumeColorWithoutElementContext(
-          stream, *StrictCSSParserContext(SecureContextMode::kInsecureContext));
+      css_parsing_utils::ConsumeColorWithoutElementAndPropertyContext(
+          stream, *StrictCSSParserContext(SecureContextMode::kInsecureContext),
+          local_context);
   if (parsed_value && (parsed_value->IsColorMixValue() ||
                        parsed_value->IsRelativeColorValue() ||
                        parsed_value->IsUnresolvedColorValue())) {
     static const TextLinkColors kDefaultTextLinkColors{};
     // TODO(40946458): Don't use default length resolver here!
     const ResolveColorValueContext context{
-        .conversion_data = CSSToLengthConversionData(/*element=*/nullptr),
+        .length_resolver = CSSToLengthConversionData(/*element=*/nullptr),
         .text_link_colors = kDefaultTextLinkColors,
         .used_color_scheme = color_scheme,
         .color_provider = color_provider,

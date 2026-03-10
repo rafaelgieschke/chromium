@@ -28,7 +28,6 @@
 #include "chrome/browser/password_manager/account_password_store_factory.h"
 #include "chrome/browser/password_manager/chrome_password_change_service.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
-#include "chrome/browser/password_manager/password_change/password_change_hats.h"
 #include "chrome/browser/password_manager/password_change_service_factory.h"
 #include "chrome/browser/password_manager/profile_password_store_factory.h"
 #include "chrome/browser/signin/signin_promo_util.h"
@@ -41,20 +40,19 @@
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
-#include "chrome/browser/ui/hats/hats_service_factory.h"
-#include "chrome/browser/ui/hats/trust_safety_sentiment_service.h"
+#include "chrome/browser/ui/desktop_to_mobile_promos/ios_promo_trigger_service.h"
+#include "chrome/browser/ui/desktop_to_mobile_promos/ios_promo_trigger_service_factory.h"
+#include "chrome/browser/ui/desktop_to_mobile_promos/ios_promos_utils.h"
 #include "chrome/browser/ui/hats/trust_safety_sentiment_service_factory.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/page_action/page_action_icon_type.h"
 #include "chrome/browser/ui/passwords/credential_leak_dialog_controller_impl.h"
 #include "chrome/browser/ui/passwords/credential_manager_dialog_controller_impl.h"
+#include "chrome/browser/ui/passwords/manage_passwords_auto_signin_toast_delegate.h"
 #include "chrome/browser/ui/passwords/manage_passwords_icon_view.h"
 #include "chrome/browser/ui/passwords/password_dialog_prompts.h"
 #include "chrome/browser/ui/passwords/passwords_leak_dialog_delegate.h"
 #include "chrome/browser/ui/passwords/ui_utils.h"
-#include "chrome/browser/ui/promos/ios_promo_trigger_service.h"
-#include "chrome/browser/ui/promos/ios_promo_trigger_service_factory.h"
-#include "chrome/browser/ui/promos/ios_promos_utils.h"
 #include "chrome/browser/ui/simple_message_box.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tab_dialogs.h"
@@ -187,50 +185,6 @@ GetSaveProgressLogger(password_manager::PasswordManagerClient* client) {
 
   return std::make_optional<
       password_manager::BrowserSavePasswordProgressLogger>(log_manager);
-}
-
-// Maybe triggers a hats survey that measures the user's perception of
-// password change recovery flow.
-void MaybeTriggerPasswordChangeDelayedSurvey(
-    base::WeakPtr<content::WebContents> web_contents) {
-  if (!web_contents) {
-    return;
-  }
-
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  if (!profile) {
-    return;
-  }
-
-  auto password_change_hats = std::make_unique<PasswordChangeHats>(
-      HatsServiceFactory::GetForProfile(profile,
-                                        /*create_if_necessary=*/true),
-      ProfilePasswordStoreFactory::GetForProfile(
-          profile, ServiceAccessType::EXPLICIT_ACCESS)
-          .get(),
-      AccountPasswordStoreFactory::GetForProfile(
-          profile, ServiceAccessType::EXPLICIT_ACCESS)
-          .get());
-
-  // PasswordChangeHats fetches password store data on construction. Add a small
-  // delay so that data is available in most cases on survey launch.
-  base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
-      FROM_HERE,
-      base::BindOnce(
-          [](std::unique_ptr<PasswordChangeHats> password_change_hats,
-             base::WeakPtr<content::WebContents> web_contents) {
-            if (!web_contents) {
-              return;
-            }
-            password_change_hats->MaybeLaunchSurvey(
-                kHatsSurveyTriggerPasswordChangeDelayed,
-                /*password_change_duration=*/std::nullopt,
-                /*blocking_challenge_detected=*/std::nullopt,
-                web_contents.get());
-          },
-          std::move(password_change_hats), web_contents),
-      base::Seconds(1));
 }
 
 }  // namespace
@@ -413,8 +367,37 @@ void ManagePasswordsUIController::OnAutoSignin(
   DCHECK(!local_forms.empty());
   DestroyPopups();
   passwords_data_.OnAutoSignin(std::move(local_forms), origin);
-  bubble_status_ = BubbleStatus::SHOULD_POP_UP;
+  if (base::FeatureList::IsEnabled(
+          password_manager::features::kCredentialManagementUnifiedUi)) {
+    ShowAutoSignInToast();
+    bubble_status_ = BubbleStatus::NOT_SHOWN;
+  } else {
+    bubble_status_ = BubbleStatus::SHOULD_POP_UP;
+  }
   UpdateBubbleAndIconVisibility();
+}
+
+void ManagePasswordsUIController::OnAutoSignInToastClosed() {
+  if (GetState() == password_manager::ui::AUTO_SIGNIN_STATE) {
+    passwords_data_.TransitionToState(password_manager::ui::MANAGE_STATE);
+    UpdateBubbleAndIconVisibility();
+  }
+}
+
+void ManagePasswordsUIController::ShowAutoSignInToast() {
+  const password_manager::PasswordForm& form = GetPendingPassword();
+  if (form.username_value.empty()) {
+    return;
+  }
+  if (!auto_signin_toast_delegate_) {
+    auto_signin_toast_delegate_ =
+        std::make_unique<ManagePasswordsAutoSigninToastDelegate>(
+            web_contents());
+  }
+  auto_signin_toast_delegate_->SetOnToastClosedCallback(
+      base::BindOnce(&ManagePasswordsUIController::OnAutoSignInToastClosed,
+                     weak_ptr_factory_.GetWeakPtr()));
+  auto_signin_toast_delegate_->OnAutoSignInToast(form.username_value);
 }
 
 void ManagePasswordsUIController::OnPromptEnableAutoSignin() {
@@ -524,8 +507,7 @@ void ManagePasswordsUIController::OnCredentialLeak(
   }
 
   if (password_manager::IsPasswordChangeSupported(details.leak_type) &&
-      !password_manager::IsPasswordSavedAsBackup(details.leak_type) &&
-      !details.credentials.IsLikelySignupForm()) {
+      !password_manager::IsPasswordSavedAsBackup(details.leak_type)) {
     auto* password_change_service = GetPasswordChangeService(web_contents());
     CHECK(password_change_service);
 
@@ -989,7 +971,6 @@ void ManagePasswordsUIController::HandlePasswordRecoveryFinished(
   if (password_backup == password) {
     password_manager::metrics_util::LogPrimaryPasswordUpdatedWithBackup(
         web_contents()->GetPrimaryMainFrame()->GetPageUkmSourceId());
-    MaybeTriggerPasswordChangeDelayedSurvey(web_contents()->GetWeakPtr());
   }
 }
 
@@ -1025,7 +1006,7 @@ void ManagePasswordsUIController::SavePassword(const std::u16string& username,
 
   // If we just saved a password to the account store, notify the IPH tracker
   // about it (so it can decide not to show the IPH again).
-  if (GetPasswordFeatureManager()->IsAccountStorageEnabled()) {
+  if (GetPasswordFeatureManager()->IsAccountStorageActive()) {
     feature_engagement::TrackerFactory::GetForBrowserContext(
         Profile::FromBrowserContext(web_contents()->GetBrowserContext()))
         ->NotifyEvent("passwords_account_storage_used");
@@ -1266,7 +1247,12 @@ void ManagePasswordsUIController::UpdateBubbleAndIconVisibility() {
     return;
   }
   if (IsPageActionMigrated(PageActionIconType::kManagePasswords)) {
-    tabs::TabInterface* const tab_interface = browser->GetActiveTabInterface();
+    tabs::TabInterface* const tab_interface =
+        tabs::TabInterface::MaybeGetFromContents(web_contents());
+    // The tab interface can be null if the web contents is not a tab.
+    if (!tab_interface) {
+      return;
+    }
     auto* const tab_features = tab_interface->GetTabFeatures();
     CHECK(tab_features);
     // Retrieve the controller responsible for managing the page action's
@@ -1311,6 +1297,14 @@ void ManagePasswordsUIController::UpdatePasswordIconAndBubbleState(
       state == password_manager::ui::CREDENTIAL_REQUEST_STATE) {
     state = password_manager::ui::INACTIVE_STATE;
   }
+
+  // If the auto sign-in toast is shown (Unified UI), hide the icon.
+  if (state == password_manager::ui::AUTO_SIGNIN_STATE &&
+      base::FeatureList::IsEnabled(
+          password_manager::features::kCredentialManagementUnifiedUi)) {
+    state = password_manager::ui::INACTIVE_STATE;
+  }
+
   // Update the visibility of the page action based on the current state,
   // blocklist status, and the passwords action item.
   controller->UpdateVisibility(state, is_blocklisted, *this,
@@ -1326,7 +1320,8 @@ void ManagePasswordsUIController::UpdatePasswordIconAndBubbleState(
   }
 }
 
-AccountChooserPrompt* ManagePasswordsUIController::CreateAccountChooser(
+std::unique_ptr<AccountChooserPrompt>
+ManagePasswordsUIController::CreateAccountChooser(
     CredentialManagerDialogController* controller) {
   return CreateAccountChooserPromptView(controller, web_contents());
 }
@@ -1397,6 +1392,10 @@ void ManagePasswordsUIController::OnVisibilityChanged(
   if (visibility == content::Visibility::HIDDEN) {
     HideBubble(/*initiated_by_bubble_manager=*/false);
   }
+}
+
+bool ManagePasswordsUIController::ShouldReshowOnTabVisible() const {
+  return false;
 }
 
 PasswordChangeDelegate* ManagePasswordsUIController::GetPasswordChangeDelegate()
@@ -1563,7 +1562,8 @@ ManagePasswordsUIController::GetBubbleControllerBaseWeakPtr() {
 }
 
 bool ManagePasswordsUIController::CanBeReshown() const {
-  return GetState() != password_manager::ui::AUTO_SIGNIN_STATE;
+  return GetState() != password_manager::ui::AUTO_SIGNIN_STATE &&
+         GetState() != password_manager::ui::INACTIVE_STATE;
 }
 
 void ManagePasswordsUIController::OnMouseEntered() {

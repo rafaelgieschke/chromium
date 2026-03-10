@@ -6,7 +6,7 @@
 
 #include <tuple>
 
-#include "base/byte_count.h"
+#include "base/byte_size.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/time/time.h"
 #include "chrome/browser/profiles/profile.h"
@@ -19,7 +19,6 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/page_action/page_action_icon_controller.h"
 #include "chrome/browser/ui/views/page_action/page_action_icon_view.h"
-#include "chrome/browser/ui/views/performance_controls/memory_saver_chip_view.h"
 #include "chrome/browser/ui/views/performance_controls/memory_saver_resource_view.h"
 #include "chrome/browser/ui/views/performance_controls/test_support/memory_saver_unit_test_mixin.h"
 #include "chrome/grit/branded_strings.h"
@@ -44,7 +43,7 @@
 #include "ui/views/widget/widget.h"
 
 namespace {
-constexpr base::ByteCount kMemorySavings = base::MiB(100);
+constexpr base::ByteSize kMemorySavings = base::MiBU(100);
 }  // namespace
 
 class StubMemorySaverBubbleObserver : public MemorySaverBubbleObserver {
@@ -55,7 +54,7 @@ class StubMemorySaverBubbleObserver : public MemorySaverBubbleObserver {
 
 class MemorySaverBubbleViewTest
     : public MemorySaverUnitTestMixin<TestWithBrowserView>,
-      public testing::WithParamInterface<std::tuple<base::ByteCount, int>> {
+      public testing::WithParamInterface<std::tuple<base::ByteSize, int>> {
  public:
   // MemorySaverUnitTestMixin:
   void SetUp() override {
@@ -212,33 +211,28 @@ TEST_F(MemorySaverBubbleViewTest,
 
 // The correct label should be rendered for different memory savings amounts.
 TEST_P(MemorySaverBubbleViewTest, ShowsCorrectLabelsForDifferentSavings) {
-  LOG(ERROR) << "<<<<<<<<<<<<<<<<<< " << __func__ << " 1";
   AddNewTab(std::get<0>(GetParam()),
             ::mojom::LifecycleUnitDiscardReason::PROACTIVE);
-  LOG(ERROR) << "<<<<<<<<<<<<<<<<<< " << __func__ << " 1";
   SetTabDiscardState(0, true);
 
-  LOG(ERROR) << "<<<<<<<<<<<<<<<<<< " << __func__ << " 1";
   ClickPageActionChip();
 
-  LOG(ERROR) << "<<<<<<<<<<<<<<<<<< " << __func__ << " 1";
   views::Label* label = GetMatchingView<views::Label>(
       MemorySaverResourceView::kMemorySaverResourceViewMemoryLabelElementId);
-  LOG(ERROR) << "<<<<<<<<<<<<<<<<<< " << __func__ << " 1";
   EXPECT_EQ(label->GetText(),
             l10n_util::GetStringUTF16(std::get<1>(GetParam())));
-  LOG(ERROR) << "<<<<<<<<<<<<<<<<<< " << __func__ << " 1";
 }
 
 INSTANTIATE_TEST_SUITE_P(
     All,
     MemorySaverBubbleViewTest,
     ::testing::Values(
-        std::tuple{base::MiB(50), IDS_MEMORY_SAVER_DIALOG_SMALL_SAVINGS_LABEL},
-        std::tuple{base::MiB(100),
+        std::tuple{base::MiBU(50), IDS_MEMORY_SAVER_DIALOG_SMALL_SAVINGS_LABEL},
+        std::tuple{base::MiBU(100),
                    IDS_MEMORY_SAVER_DIALOG_MEDIUM_SAVINGS_LABEL},
-        std::tuple{base::MiB(150),
+        std::tuple{base::MiBU(150),
                    IDS_MEMORY_SAVER_DIALOG_MEDIUM_SAVINGS_LABEL},
-        std::tuple{base::MiB(600), IDS_MEMORY_SAVER_DIALOG_LARGE_SAVINGS_LABEL},
-        std::tuple{base::MiB(900),
+        std::tuple{base::MiBU(600),
+                   IDS_MEMORY_SAVER_DIALOG_LARGE_SAVINGS_LABEL},
+        std::tuple{base::MiBU(900),
                    IDS_MEMORY_SAVER_DIALOG_VERY_LARGE_SAVINGS_LABEL}));

@@ -25,6 +25,7 @@
 #include "ui/base/models/image_model.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
+#include "ui/gfx/mac/menu_text_elider_mac.h"
 
 using MenuItemCallback = base::RepeatingCallback<void(NSMenuItem*)>;
 
@@ -52,10 +53,11 @@ void UpdateItemForWebContents(NSMenuItem* item,
       emoji = u"\U0001F50A";
     }
 
-    item.title =
-        l10n_util::GetNSStringF(title_id, tab_ui_helper->GetTitle(), emoji);
+    item.title = l10n_util::GetNSStringF(
+        title_id, gfx::ElideMenuItemTitle(tab_ui_helper->GetTitle()), emoji);
   } else {
-    item.title = base::SysUTF16ToNSString(tab_ui_helper->GetTitle());
+    item.title = base::SysUTF16ToNSString(
+        gfx::ElideMenuItemTitle(tab_ui_helper->GetTitle()));
   }
 
   if (base::FeatureList::IsEnabled(features::kShowTabGroupsMacSystemMenu)) {
@@ -87,29 +89,55 @@ void RemoveMenuItems(NSArray* menu_items) {
 
 }  // namespace
 
-@interface TabMenuListener : NSObject
-- (instancetype)initWithCallback:(MenuItemCallback)callback;
+@interface TabMenuListener : NSObject <NSMenuDelegate>
+@property(nonatomic, readonly, getter=isMenuOpen) BOOL menuOpen;
+@property(nonatomic, assign) BOOL rebuildMenu;
+
+- (instancetype)initWithCallback:(MenuItemCallback)callback
+                 rebuildCallback:
+                     (base::RepeatingCallback<void()>)rebuildCallback;
 - (void)activateTab:(id)sender;
 @end
 
 @implementation TabMenuListener {
   MenuItemCallback _callback;
+  base::RepeatingCallback<void()> _rebuildCallback;
 }
 
-- (instancetype)initWithCallback:(MenuItemCallback)callback {
+@synthesize menuOpen = _menuOpen;
+@synthesize rebuildMenu = _rebuildMenu;
+
+- (instancetype)initWithCallback:(MenuItemCallback)callback
+                 rebuildCallback:
+                     (base::RepeatingCallback<void()>)rebuildCallback {
   if ((self = [super init])) {
     _callback = callback;
+    _rebuildCallback = rebuildCallback;
   }
   return self;
+}
+
+- (void)menuNeedsUpdate:(NSMenu*)menu {
+  if (_rebuildMenu) {
+    _rebuildCallback.Run();
+    _rebuildMenu = NO;
+  }
 }
 
 - (IBAction)activateTab:(id)sender {
   _callback.Run(sender);
 }
+
+- (void)menuWillOpen:(NSMenu*)menu {
+  _menuOpen = YES;
+}
+
+- (void)menuDidClose:(NSMenu*)menu {
+  _menuOpen = NO;
+}
 @end
 
-TabMenuBridge::TabMenuBridge(TabStripModel* model, NSMenuItem* menu_item)
-    : model_(model), menu_item_(menu_item) {
+TabMenuBridge::TabMenuBridge(NSMenuItem* menu_item) : menu_item_(menu_item) {
   menu_listener_ = [[TabMenuListener alloc]
       initWithCallback:base::BindRepeating(
                            &TabMenuBridge::OnDynamicItemChosen,
@@ -117,20 +145,47 @@ TabMenuBridge::TabMenuBridge(TabStripModel* model, NSMenuItem* menu_item)
                            // MenuListener, which holds the callback
                            // being constructed here, so the callback
                            // will be destructed before this class.
+                           base::Unretained(this))
+       rebuildCallback:base::BindRepeating(
+                           &TabMenuBridge::AddDynamicItemsFromModel,
+                           // Unretained is safe here: this class owns
+                           // MenuListener, which holds the callback
+                           // being constructed here, so the callback
+                           // will be destructed before this class.
                            base::Unretained(this))];
-  model_->AddObserver(this);
+  [menu_item_.submenu setDelegate:menu_listener_];
 }
 
 TabMenuBridge::~TabMenuBridge() {
+  [menu_item_.submenu setDelegate:nil];
   if (model_) {
     model_->RemoveObserver(this);
   }
   RemoveMenuItems(DynamicMenuItems());
 }
 
-void TabMenuBridge::BuildMenu() {
-  DCHECK(model_);
-  AddDynamicItemsFromModel();
+void TabMenuBridge::SetTabStripModel(TabStripModel* model) {
+  if (model_ == model) {
+    return;
+  }
+
+  if (model_) {
+    model_->RemoveObserver(this);
+  }
+
+  model_ = model;
+
+  if (model_) {
+    model_->AddObserver(this);
+    AddDynamicItemsFromModel();
+  } else {
+    RemoveMenuItems(DynamicMenuItems());
+    menu_item_to_tab_.clear();
+  }
+}
+
+void TabMenuBridge::SetForceRebuildMenuForTesting(bool force) {
+  force_rebuild_menu_ = force;
 }
 
 NSMutableArray* TabMenuBridge::DynamicMenuItems() {
@@ -148,9 +203,14 @@ NSMutableArray* TabMenuBridge::DynamicMenuItems() {
 }
 
 void TabMenuBridge::AddDynamicItemsFromModel() {
+  if (!model_) {
+    return;
+  }
+
   NSMutableArray* recyclable_items = DynamicMenuItems();
   NSMenu* tabMenu = menu_item_.submenu;
 
+  menu_item_to_tab_.clear();
   dynamic_items_start_ = tabMenu.numberOfItems - recyclable_items.count;
   for (int i = 0; i < model_->count(); ++i) {
     NSMenuItem* item;
@@ -169,7 +229,10 @@ void TabMenuBridge::AddDynamicItemsFromModel() {
     if (model_->active_index() == i) {
       [item setState:NSControlStateValueOn];
     }
-    UpdateItemForWebContents(item, model_->GetWebContentsAt(i), model_);
+
+    tabs::TabInterface* tab = model_->GetTabAtIndex(i);
+    UpdateItemForWebContents(item, tab->GetContents(), model_);
+    menu_item_to_tab_[item] = tab;
 
     if ([item menu] == nil) {
       [tabMenu addItem:item];
@@ -185,7 +248,16 @@ void TabMenuBridge::OnDynamicItemChosen(NSMenuItem* item) {
   }
 
   DCHECK_EQ(item.target, menu_listener_);
-  int index = [menu_item_.submenu indexOfItem:item] - dynamic_items_start_;
+  auto it = menu_item_to_tab_.find(item);
+  if (it == menu_item_to_tab_.end()) {
+    return;
+  }
+
+  int index = model_->GetIndexOfTab(it->second);
+  if (index == TabStripModel::kNoTab) {
+    return;
+  }
+
   model_->ActivateTabAt(index,
                         TabStripUserGestureDetails(
                             TabStripUserGestureDetails::GestureType::kTabMenu));
@@ -197,6 +269,22 @@ void TabMenuBridge::OnTabStripModelChanged(
     const TabStripSelectionChange& selection) {
   DCHECK(tab_strip_model);
   DCHECK_EQ(tab_strip_model, model_);
+
+  if (!force_rebuild_menu_ && ![menu_listener_ isMenuOpen]) {
+    [menu_listener_ setRebuildMenu:YES];
+    // When tabs are removed while the menu is not open, erase their entries
+    // from the map to release raw_ptr<TabInterface> before the tabs are freed.
+    // For other changes (moves, inserts, etc.), keep the existing map so that
+    // clicks on stale menu items can still activate the correct tab.
+    if (change.type() == TabStripModelChange::kRemoved) {
+      for (const auto& removed_tab : change.GetRemove()->contents) {
+        std::erase_if(menu_item_to_tab_, [&](const auto& pair) {
+          return pair.second == removed_tab.tab;
+        });
+      }
+    }
+    return;
+  }
 
   // If a single WebContents is being replaced, just regenerate that one menu
   // item.
@@ -219,6 +307,11 @@ void TabMenuBridge::OnTabChangedAt(tabs::TabInterface* tab,
   // Ignore loading state changes - they happen very often during page load and
   // are used to drive the load spinner, which is not interesting to this menu.
   if (change_type == TabChangeType::kLoadingOnly) {
+    return;
+  }
+
+  if (!force_rebuild_menu_ && ![menu_listener_ isMenuOpen]) {
+    [menu_listener_ setRebuildMenu:YES];
     return;
   }
 
@@ -246,6 +339,11 @@ void TabMenuBridge::OnTabChangedAt(tabs::TabInterface* tab,
 
 // If a tab group is changed, update group indicator for each tab.
 void TabMenuBridge::OnTabGroupChanged(const TabGroupChange& change) {
+  if (!force_rebuild_menu_ && ![menu_listener_ isMenuOpen]) {
+    [menu_listener_ setRebuildMenu:YES];
+    return;
+  }
+
   AddDynamicItemsFromModel();
 }
 
@@ -257,10 +355,19 @@ void TabMenuBridge::TabGroupedStateChanged(
     std::optional<tab_groups::TabGroupId> new_group,
     tabs::TabInterface* tab,
     int index) {
+  DCHECK(tab_strip_model);
+  DCHECK_EQ(tab_strip_model, model_);
+
+  if (!force_rebuild_menu_ && ![menu_listener_ isMenuOpen]) {
+    [menu_listener_ setRebuildMenu:YES];
+    return;
+  }
+
   AddDynamicItemsFromModel();
 }
 
 void TabMenuBridge::OnTabStripModelDestroyed(TabStripModel* model) {
   model_->RemoveObserver(this);
   model_ = nullptr;
+  menu_item_to_tab_.clear();
 }

@@ -4,10 +4,13 @@
 
 #include "chrome/browser/glic/media/glic_media_integration.h"
 
+#include "base/strings/string_util.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/accessibility/live_caption/live_caption_controller_factory.h"
+#include "chrome/browser/glic/glic_pref_names.h"
 #include "chrome/browser/glic/media/glic_media_context.h"
+#include "chrome/browser/glic/public/glic_keyed_service_factory.h"
 #include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
@@ -60,17 +63,30 @@ class GlicMediaIntegrationTest : public ChromeRenderViewHostTestHarness {
 
   // Get the MediaIntegration instance, after doing some work to register prefs
   GlicMediaIntegration* GetIntegration() {
+    SetFreCompleted();
+    return GetIntegrationWithoutFreConsent();
+  }
+
+  GlicMediaIntegration* GetIntegrationWithoutFreConsent() {
+    EnableHeadlessCaptionFeature();
+    // Make sure that we have installed our LiveCaptionController before this,
+    // because the integration will try to fetch it.  The test might have done
+    // this earlier, however, which is also fine.
+    /*void*/ live_caption_controller();
+    // Make sure there's a keyed service, else the FRE profile checks break.
+    return GlicMediaIntegration::GetFor(web_contents());
+  }
+
+  void EnableHeadlessCaptionFeature() {
+    // Should only happen once.
+    ASSERT_FALSE(scoped_feature_list_);
     std::vector<base::test::FeatureRef> enabled_features{
         media::kHeadlessLiveCaption};
 #if BUILDFLAG(IS_CHROMEOS)
     enabled_features.push_back(ash::features::kOnDeviceSpeechRecognition);
 #endif
-    scoped_feature_list_.InitWithFeatures(enabled_features, {});
-    // Make sure that we have installed our LiveCaptionController before this,
-    // because the integration will try to fetch it.  The test might have done
-    // this earlier, however, which is also fine.
-    /*void*/ live_caption_controller();
-    return GlicMediaIntegration::GetFor(web_contents());
+    scoped_feature_list_.emplace();
+    scoped_feature_list_->InitWithFeatures(enabled_features, {});
   }
 
   optimization_guide::MediaTranscriptProvider* GetMediaTranscriptProvider() {
@@ -102,13 +118,14 @@ class GlicMediaIntegrationTest : public ChromeRenderViewHostTestHarness {
     return live_caption_controller_;
   }
 
-  PrefService* pref_service() {
-    return Profile::FromBrowserContext(web_contents()->GetBrowserContext())
-        ->GetPrefs();
+  Profile* profile() {
+    return Profile::FromBrowserContext(web_contents()->GetBrowserContext());
   }
 
+  PrefService* pref_service() { return profile()->GetPrefs(); }
+
   bool get_headless_pref() {
-    return pref_service()->GetBoolean(prefs::kHeadlessCaptionEnabled);
+    return pref_service()->GetBoolean(::prefs::kHeadlessCaptionEnabled);
   }
 
   std::unique_ptr<captions::LiveCaptionController>
@@ -130,8 +147,14 @@ class GlicMediaIntegrationTest : public ChromeRenderViewHostTestHarness {
         });
   }
 
+  void SetFreCompleted() {
+    pref_service()->SetInteger(
+        glic::prefs::kGlicCompletedFre,
+        static_cast<int>(glic::prefs::FreStatus::kCompleted));
+  }
+
  private:
-  base::test::ScopedFeatureList scoped_feature_list_;
+  std::optional<base::test::ScopedFeatureList> scoped_feature_list_;
   raw_ptr<captions::LiveCaptionController> live_caption_controller_ = nullptr;
   raw_ptr<user_prefs::PrefRegistrySyncable> pref_registry_ = nullptr;
   speech::MockSodaInstaller soda_installer_;
@@ -139,7 +162,9 @@ class GlicMediaIntegrationTest : public ChromeRenderViewHostTestHarness {
 
 TEST_F(GlicMediaIntegrationTest, GetWithNullReturnsNull) {
   // Make sure this doesn't crash.
-  EXPECT_EQ(GlicMediaIntegration::GetFor(nullptr), nullptr);
+  EXPECT_EQ(
+      GlicMediaIntegration::GetFor(static_cast<content::WebContents*>(nullptr)),
+      nullptr);
   EXPECT_EQ(GetMediaTranscriptProvider(), nullptr);
 }
 
@@ -217,6 +242,32 @@ TEST_F(GlicMediaIntegrationTest, ContextContainsNoTranscript) {
   EXPECT_TRUE(root_node.has_content_attributes());
   EXPECT_EQ(root_node.content_attributes().text_data().text_content().length(),
             0u);
+}
+
+TEST_F(GlicMediaIntegrationTest, ContextTruncatesUTF8Correctly) {
+  auto* integration = GetIntegration();
+
+  // Create a 20002-byte string: one 4-byte character + 19998 'A's.
+  // max_size_bytes_ is 20000. 20002 - 20000 = 2.
+  // The truncation index falls in the middle of the 4-byte character.
+  std::string test_cap = "𐍈";
+  test_cap.append(19998, 'A');
+
+  live_caption_controller()->DispatchTranscription(
+      rfh(), nullptr,
+      media::SpeechRecognitionResult(test_cap, /*is_final=*/true));
+
+  optimization_guide::proto::ContentNode root_node;
+  integration->AppendContextForFrame(rfh(), &root_node);
+
+  EXPECT_EQ(root_node.children_nodes_size(), 0);
+  EXPECT_TRUE(root_node.has_content_attributes());
+
+  // The 4-byte character should be entirely removed to avoid invalid UTF-8.
+  std::string result_text =
+      root_node.content_attributes().text_data().text_content();
+  EXPECT_TRUE(base::IsStringUTF8(result_text));
+  EXPECT_EQ(result_text, std::string(19998, 'A'));
 }
 
 TEST_F(GlicMediaIntegrationTest, HeadlessPrefTurnsOnAndOff) {

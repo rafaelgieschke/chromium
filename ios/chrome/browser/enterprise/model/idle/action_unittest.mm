@@ -79,7 +79,7 @@ class IdleActionTest : public PlatformTest {
             GetApplicationContext()->GetSystemIdentityManager());
     system_identity_manager->AddIdentity(identity);
     authentication_service_->SignIn(identity,
-                                    signin_metrics::AccessPoint::kUnknown);
+                                    signin_metrics::AccessPoint::kStartPage);
   }
 
   // Inserts WebStates into `browser` each one loading a new URL from `urls`
@@ -162,7 +162,8 @@ TEST_F(IdleActionTest, ClearBrowsingHistory) {
             incognito_remover()->GetLastUsedRemovalMask());
   actions.pop();
   histogram_tester_->ExpectUniqueSample(
-      "Enterprise.IdleTimeoutPolicies.Success.ClearBrowsingData", true, 1);
+      "Enterprise.IdleTimeoutPolicies.ActionSuccess.ClearBrowsingData", true,
+      1);
 }
 
 TEST_F(IdleActionTest, ClearCookies) {
@@ -175,7 +176,8 @@ TEST_F(IdleActionTest, ClearCookies) {
             incognito_remover()->GetLastUsedRemovalMask());
   actions.pop();
   histogram_tester_->ExpectUniqueSample(
-      "Enterprise.IdleTimeoutPolicies.Success.ClearBrowsingData", true, 1);
+      "Enterprise.IdleTimeoutPolicies.ActionSuccess.ClearBrowsingData", true,
+      1);
 }
 
 TEST_F(IdleActionTest, ClearCache) {
@@ -188,7 +190,8 @@ TEST_F(IdleActionTest, ClearCache) {
             incognito_remover()->GetLastUsedRemovalMask());
   actions.pop();
   histogram_tester_->ExpectUniqueSample(
-      "Enterprise.IdleTimeoutPolicies.Success.ClearBrowsingData", true, 1);
+      "Enterprise.IdleTimeoutPolicies.ActionSuccess.ClearBrowsingData", true,
+      1);
 }
 
 TEST_F(IdleActionTest, ClearPasswordSignin) {
@@ -201,7 +204,8 @@ TEST_F(IdleActionTest, ClearPasswordSignin) {
             incognito_remover()->GetLastUsedRemovalMask());
   actions.pop();
   histogram_tester_->ExpectUniqueSample(
-      "Enterprise.IdleTimeoutPolicies.Success.ClearBrowsingData", true, 1);
+      "Enterprise.IdleTimeoutPolicies.ActionSuccess.ClearBrowsingData", true,
+      1);
 }
 
 TEST_F(IdleActionTest, ClearAutofill) {
@@ -215,7 +219,8 @@ TEST_F(IdleActionTest, ClearAutofill) {
             incognito_remover()->GetLastUsedRemovalMask());
   actions.pop();
   histogram_tester_->ExpectUniqueSample(
-      "Enterprise.IdleTimeoutPolicies.Success.ClearBrowsingData", true, 1);
+      "Enterprise.IdleTimeoutPolicies.ActionSuccess.ClearBrowsingData", true,
+      1);
 }
 
 TEST_F(IdleActionTest, MultipleTypesAndSuccess) {
@@ -231,7 +236,8 @@ TEST_F(IdleActionTest, MultipleTypesAndSuccess) {
             incognito_remover()->GetLastUsedRemovalMask());
   actions.pop();
   histogram_tester_->ExpectUniqueSample(
-      "Enterprise.IdleTimeoutPolicies.Success.ClearBrowsingData", true, 1);
+      "Enterprise.IdleTimeoutPolicies.ActionSuccess.ClearBrowsingData", true,
+      1);
 }
 
 TEST_F(IdleActionTest, MultipleTypesAndFailure) {
@@ -251,7 +257,8 @@ TEST_F(IdleActionTest, MultipleTypesAndFailure) {
   run_loop.Run();
   actions.pop();
   histogram_tester_->ExpectUniqueSample(
-      "Enterprise.IdleTimeoutPolicies.Success.ClearBrowsingData", false, 1);
+      "Enterprise.IdleTimeoutPolicies.ActionSuccess.ClearBrowsingData", false,
+      1);
 }
 
 TEST_F(IdleActionTest, SignOut) {
@@ -273,7 +280,7 @@ TEST_F(IdleActionTest, SignOut) {
       identity_manager_->HasPrimaryAccount(signin::ConsentLevel::kSignin));
   actions.pop();
   histogram_tester_->ExpectUniqueSample(
-      "Enterprise.IdleTimeoutPolicies.Success.SignOut", true, 1);
+      "Enterprise.IdleTimeoutPolicies.ActionSuccess.SignOut", true, 1);
 }
 
 TEST_F(IdleActionTest, CloseTabs) {
@@ -294,7 +301,7 @@ TEST_F(IdleActionTest, CloseTabs) {
   EXPECT_EQ(GetTabsCount(incognito_browser_.get()), 0);
   actions.pop();
   histogram_tester_->ExpectUniqueSample(
-      "Enterprise.IdleTimeoutPolicies.Success.CloseTabs", true, 1);
+      "Enterprise.IdleTimeoutPolicies.ActionSuccess.CloseTabs", true, 1);
 }
 
 }  // namespace enterprise_idle

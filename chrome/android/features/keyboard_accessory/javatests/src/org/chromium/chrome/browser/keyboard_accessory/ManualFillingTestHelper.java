@@ -11,16 +11,15 @@ import static androidx.test.espresso.matcher.ViewMatchers.isDisplayed;
 import static org.hamcrest.core.AllOf.allOf;
 
 import static org.chromium.autofill.mojom.FocusedFieldType.FILLABLE_NON_SEARCH_FIELD;
+import static org.chromium.base.test.transit.ViewFinder.waitForNoView;
 import static org.chromium.base.test.util.CriteriaHelper.pollInstrumentationThread;
 import static org.chromium.base.test.util.CriteriaHelper.pollUiThread;
+import static org.chromium.build.NullUtil.assertNonNull;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryTestHelper.accessoryStartedHiding;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryTestHelper.accessoryStartedShowing;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryTestHelper.accessoryViewFullyHidden;
 import static org.chromium.chrome.browser.keyboard_accessory.bar_component.KeyboardAccessoryTestHelper.checkThatAccessoryViewFullyShown;
 import static org.chromium.ui.base.LocalizationUtils.setRtlForTesting;
-import static org.chromium.ui.test.util.ViewUtils.VIEW_GONE;
-import static org.chromium.ui.test.util.ViewUtils.VIEW_INVISIBLE;
-import static org.chromium.ui.test.util.ViewUtils.VIEW_NULL;
 import static org.chromium.ui.test.util.ViewUtils.onViewWaiting;
 import static org.chromium.ui.test.util.ViewUtils.waitForView;
 
@@ -39,6 +38,7 @@ import androidx.test.espresso.UiController;
 import androidx.test.espresso.ViewAction;
 import androidx.test.espresso.ViewInteraction;
 import androidx.test.espresso.matcher.BoundedMatcher;
+import androidx.test.espresso.util.HumanReadables;
 import androidx.test.platform.app.InstrumentationRegistry;
 
 import org.hamcrest.Description;
@@ -74,7 +74,6 @@ import org.chromium.content_public.browser.test.util.TestInputMethodManagerWrapp
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.net.test.ServerCertificate;
 import org.chromium.ui.DropdownPopupWindowInterface;
-import org.chromium.ui.test.util.ViewUtils;
 
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
@@ -153,7 +152,9 @@ public class ManualFillingTestHelper {
                     mWebContentsRef.set(activity.getActivityTab().getWebContents());
                     // The TestInputMethodManagerWrapper intercepts showSoftInput so that a keyboard
                     // is never brought up.
-                    final ImeAdapter imeAdapter = ImeAdapter.fromWebContents(mWebContentsRef.get());
+                    WebContents webContents = mWebContentsRef.get();
+                    final ImeAdapter imeAdapter =
+                            assertNonNull(ImeAdapter.fromWebContents(webContents));
                     mInputMethodManagerWrapper = TestInputMethodManagerWrapper.create(imeAdapter);
                     imeAdapter.setInputMethodManagerWrapper(mInputMethodManagerWrapper);
                 });
@@ -279,7 +280,9 @@ public class ManualFillingTestHelper {
                             mActivityTestRule
                                     .getKeyboardDelegate()
                                     .isKeyboardShowing(
-                                            mActivityTestRule.getActivity().getTabsView());
+                                            mActivityTestRule
+                                                    .getActivity()
+                                                    .getTabsViewForTesting());
                     Criteria.checkThat(isKeyboardShowing, Matchers.is(true));
                 });
     }
@@ -294,6 +297,12 @@ public class ManualFillingTestHelper {
                     },
                     "Waited for suggestions that never appeared.");
         }
+        waitForManualFillingIconsToBeLoaded();
+    }
+
+    private void waitForManualFillingIconsToBeLoaded() {
+        pollUiThread(
+                () -> Criteria.checkThat(getKeyboardAccessoryBar().hasTabs(), Matchers.is(true)));
     }
 
     public DropdownPopupWindowInterface waitForAutofillPopup(String filterInput) {
@@ -308,7 +317,8 @@ public class ManualFillingTestHelper {
                 });
         ThreadUtils.runOnUiThreadBlocking(
                 () -> {
-                    ImeAdapter.fromWebContents(webContents).setComposingTextForTest(filterInput, 4);
+                    assertNonNull(ImeAdapter.fromWebContents(webContents))
+                            .setComposingTextForTest(filterInput, 4);
                 });
         pollUiThread(
                 () -> {
@@ -488,6 +498,8 @@ public class ManualFillingTestHelper {
                         (KeyboardAccessoryButtonGroupView) view;
                 if (tabIndex >= buttonGroupView.getButtons().size()) {
                     throw new PerformException.Builder()
+                            .withActionDescription(getDescription())
+                            .withViewDescription(HumanReadables.describe(view))
                             .withCause(new Throwable("No button at index " + tabIndex))
                             .build();
                 }
@@ -531,6 +543,8 @@ public class ManualFillingTestHelper {
                     }
                 }
                 throw new PerformException.Builder()
+                        .withActionDescription(getDescription())
+                        .withViewDescription(HumanReadables.describe(view))
                         .withCause(
                                 new Throwable("No button with description: " + descriptionToMatch))
                         .build();
@@ -560,6 +574,8 @@ public class ManualFillingTestHelper {
                 int itemCount = recyclerView.getAdapter().getItemCount();
                 if (itemCount <= 0) {
                     throw new PerformException.Builder()
+                            .withActionDescription(getDescription())
+                            .withViewDescription(HumanReadables.describe(view))
                             .withCause(new Throwable("RecyclerView has no items."))
                             .build();
                 }
@@ -615,7 +631,7 @@ public class ManualFillingTestHelper {
     }
 
     public static void waitToBeHidden(Matcher<View> matcher) {
-        ViewUtils.waitForViewCheckingState(matcher, VIEW_INVISIBLE | VIEW_NULL | VIEW_GONE);
+        waitForNoView(matcher);
     }
 
     public String getAttribute(String node, String attribute)

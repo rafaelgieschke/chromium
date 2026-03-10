@@ -15,7 +15,6 @@
 #include "base/path_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/task/single_thread_task_runner.h"
-#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_mock_time_message_loop_task_runner.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/test/values_test_util.h"
@@ -32,19 +31,18 @@
 #include "chrome/browser/profiles/profile_test_util.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/infobars/content/content_infobar_manager.h"
 #include "components/infobars/core/infobar.h"
 #include "components/infobars/core/infobar_delegate.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
-#include "components/prefs/pref_service.h"
 #include "components/security_interstitials/content/security_interstitial_controller_client.h"
 #include "components/security_interstitials/content/security_interstitial_page.h"
 #include "components/security_interstitials/content/security_interstitial_tab_helper.h"
 #include "components/security_interstitials/content/settings_page_helper.h"
 #include "components/security_interstitials/core/metrics_helper.h"
 #include "components/sessions/content/session_tab_helper.h"
+#include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/mock_navigation_handle.h"
@@ -89,7 +87,7 @@ namespace {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 // Gets all URLs from the list of targets, with the ports removed.
 std::vector<std::string> GetTargetUrlsWithoutPorts(
-    const base::Value::List& targets) {
+    const base::ListValue& targets) {
   return base::ToVector(targets, [](const base::Value& value) {
     GURL::Replacements remove_port;
     remove_port.ClearPort();
@@ -98,6 +96,29 @@ std::vector<std::string> GetTargetUrlsWithoutPorts(
                : "<missing field>";
   });
 }
+
+// Gets all targets as a list from the context.
+// This method also filters out targets with "chrome://" URLs, such as the
+// internal WebUI toolbar, to ensure tests are robust against the presence of
+// these internal targets.
+base::ListValue RunGetTargets(
+    content::BrowserContext* context,
+    api_test_utils::FunctionMode mode = api_test_utils::FunctionMode::kNone) {
+  auto get_targets_function =
+      base::MakeRefCounted<DebuggerGetTargetsFunction>();
+  std::optional<base::Value> value =
+      api_test_utils::RunFunctionAndReturnSingleResult(
+          get_targets_function.get(), "[]", context, mode);
+  EXPECT_THAT(
+      value, testing::Optional(testing::Property(&base::Value::is_list, true)));
+  base::ListValue targets = std::move(*value).TakeList();
+  targets.EraseIf([](const base::Value& target) {
+    const std::string* url = target.GetDict().FindString("url");
+    return url && GURL(*url).SchemeIs(content::kChromeUIScheme);
+  });
+  return targets;
+}
+
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 }  // namespace
@@ -323,8 +344,7 @@ class TestInterstitialPage
   void OnInterstitialClosing() override {}
 
  protected:
-  void PopulateInterstitialStrings(base::Value::Dict& load_time_data) override {
-  }
+  void PopulateInterstitialStrings(base::DictValue& load_time_data) override {}
 
   std::unique_ptr<security_interstitials::MetricsHelper>
   CreateTestMetricsHelper(content::WebContents* web_contents) {
@@ -699,28 +719,14 @@ IN_PROC_BROWSER_TEST_F(CrossProfileDebuggerApiTest, GetTargets) {
       embedded_test_server()->GetURL("/simple.html?off_the_record"));
 
   {
-    auto get_targets_function =
-        base::MakeRefCounted<DebuggerGetTargetsFunction>();
-    base::Value value =
-        std::move(*api_test_utils::RunFunctionAndReturnSingleResult(
-            get_targets_function.get(), "[]", profile()));
-
-    ASSERT_TRUE(value.is_list());
-    EXPECT_THAT(std::move(value).TakeList(),
-                ElementsAre(base::test::DictionaryHasValue(
-                    "url", base::Value("about:blank"))));
+    base::ListValue targets = RunGetTargets(profile());
+    EXPECT_THAT(targets, ElementsAre(base::test::DictionaryHasValue(
+                             "url", base::Value("about:blank"))));
   }
 
   {
-    auto get_targets_function =
-        base::MakeRefCounted<DebuggerGetTargetsFunction>();
-    base::Value value =
-        std::move(*api_test_utils::RunFunctionAndReturnSingleResult(
-            get_targets_function.get(), "[]", profile(),
-            api_test_utils::FunctionMode::kIncognito));
-
-    ASSERT_TRUE(value.is_list());
-    const base::Value::List targets = std::move(value).TakeList();
+    const base::ListValue targets =
+        RunGetTargets(profile(), api_test_utils::FunctionMode::kIncognito);
     std::vector<std::string> urls = GetTargetUrlsWithoutPorts(targets);
     EXPECT_THAT(urls, testing::UnorderedElementsAre(
                           "about:blank",
@@ -858,9 +864,7 @@ IN_PROC_BROWSER_TEST_F(DebuggerExtensionApiTest, Debugger) {
 }
 #endif
 
-// TODO(crbug.com/40276609): Reenable this test once the
-// OptimizeServiceWorkerStartRequests feature is re-enabled.
-IN_PROC_BROWSER_TEST_F(DebuggerExtensionApiTest, DISABLED_DebuggerMv3) {
+IN_PROC_BROWSER_TEST_F(DebuggerExtensionApiTest, DebuggerMv3) {
   ASSERT_TRUE(RunExtensionTest("debugger_mv3")) << message_;
 }
 
@@ -936,16 +940,10 @@ IN_PROC_BROWSER_TEST_F(DebuggerExtensionApiOopifPdfTest, GetTargets) {
       web_contents->GetPrimaryMainFrame()));
 
   // Get targets.
-  auto get_targets_function =
-      base::MakeRefCounted<DebuggerGetTargetsFunction>();
-  base::Value get_targets_result =
-      std::move(*api_test_utils::RunFunctionAndReturnSingleResult(
-          get_targets_function.get(), "[]", profile()));
-  ASSERT_TRUE(get_targets_result.is_list());
+  base::ListValue targets = RunGetTargets(profile());
 
   // Verify that the inner PDF frames aren't targets in the list. Only the PDF
   // embedder frame (the main frame) should be a target.
-  const base::Value::List targets = std::move(get_targets_result).TakeList();
   ASSERT_THAT(targets, testing::SizeIs(1));
 
   // Verify that the target is the PDF embedder frame.
@@ -993,27 +991,6 @@ IN_PROC_BROWSER_TEST_F(DebuggerExtensionApiTest, CreateTargetToUntrustedWebUI) {
       << message_;
 }
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
-
-IN_PROC_BROWSER_TEST_F(DebuggerExtensionApiTest, IsDeveloperModeTrueHistogram) {
-  profile()->GetPrefs()->SetBoolean(prefs::kExtensionsUIDeveloperMode, true);
-  base::HistogramTester histograms;
-  const char* histogram_name = "Extensions.Debugger.UserIsInDeveloperMode";
-
-  ASSERT_TRUE(RunExtensionTest("debugger_is_developer_mode")) << message_;
-
-  histograms.ExpectBucketCount(histogram_name, true, 1);
-}
-
-IN_PROC_BROWSER_TEST_F(DebuggerExtensionApiTest,
-                       IsDeveloperModeFalseHistogram) {
-  profile()->GetPrefs()->SetBoolean(prefs::kExtensionsUIDeveloperMode, false);
-  base::HistogramTester histograms;
-  const char* histogram_name = "Extensions.Debugger.UserIsInDeveloperMode";
-
-  ASSERT_TRUE(RunExtensionTest("debugger_is_developer_mode")) << message_;
-
-  histograms.ExpectBucketCount(histogram_name, false, 1);
-}
 
 class SitePerProcessDebuggerExtensionApiTest : public DebuggerExtensionApiTest {
  public:

@@ -26,7 +26,7 @@ namespace extensions {
 namespace {
 
 void AddAllSyncData(const ExtensionId& extension_id,
-                    const base::Value::Dict& src,
+                    const base::DictValue& src,
                     syncer::DataType type,
                     syncer::SyncDataList* dst) {
   for (auto it : src) {
@@ -35,8 +35,8 @@ void AddAllSyncData(const ExtensionId& extension_id,
   }
 }
 
-base::Value::Dict EmptyDict() {
-  return base::Value::Dict();
+base::DictValue EmptyDict() {
+  return base::DictValue();
 }
 
 value_store_util::ModelType ToFactoryModelType(syncer::DataType sync_type) {
@@ -78,7 +78,7 @@ value_store::ValueStore* SyncStorageBackend::GetStorage(
 
 SyncableSettingsStorage* SyncStorageBackend::GetOrCreateStorageWithSyncData(
     const ExtensionId& extension_id,
-    base::Value::Dict sync_data) const {
+    base::DictValue sync_data) const {
   DCHECK(IsOnBackendSequence());
 
   auto maybe_storage = storage_objs_.find(extension_id);
@@ -105,8 +105,9 @@ SyncableSettingsStorage* SyncStorageBackend::GetOrCreateStorageWithSyncData(
     std::optional<syncer::ModelError> error =
         raw_syncable_storage->StartSyncing(
             std::move(sync_data), CreateSettingsSyncProcessor(extension_id));
-    if (error.has_value())
+    if (error.has_value()) {
       raw_syncable_storage->StopSyncing();
+    }
   }
   return raw_syncable_storage;
 }
@@ -166,11 +167,11 @@ std::optional<syncer::ModelError> SyncStorageBackend::MergeDataAndStartSyncing(
   sync_processor_ = std::move(sync_processor);
 
   // Group the initial sync data by extension id.
-  std::map<ExtensionId, base::Value::Dict> grouped_sync_data;
+  std::map<ExtensionId, base::DictValue> grouped_sync_data;
 
   for (const syncer::SyncData& sync_data : initial_sync_data) {
     SettingSyncData data(sync_data);
-    base::Value::Dict& settings = grouped_sync_data[data.extension_id()];
+    base::DictValue& settings = grouped_sync_data[data.extension_id()];
     DCHECK(!settings.Find(data.key()))
         << "Duplicate settings for " << data.extension_id() << "/"
         << data.key();
@@ -194,8 +195,9 @@ std::optional<syncer::ModelError> SyncStorageBackend::MergeDataAndStartSyncing(
                                     CreateSettingsSyncProcessor(extension_id));
     }
 
-    if (error.has_value())
+    if (error.has_value()) {
       storage->StopSyncing();
+    }
   }
 
   // Eagerly create and init the rest of the storage areas that have sync data.
@@ -222,8 +224,9 @@ std::optional<syncer::ModelError> SyncStorageBackend::ProcessSyncChanges(
   for (const syncer::SyncChange& change : sync_changes) {
     std::unique_ptr<SettingSyncData> data(new SettingSyncData(change));
     SettingSyncDataList*& group = grouped_sync_data[data->extension_id()];
-    if (!group)
+    if (!group) {
       group = new SettingSyncDataList();
+    }
     group->push_back(std::move(data));
   }
 
@@ -233,8 +236,9 @@ std::optional<syncer::ModelError> SyncStorageBackend::ProcessSyncChanges(
         GetOrCreateStorageWithSyncData(group.first, EmptyDict());
     std::optional<syncer::ModelError> error =
         storage->ProcessSyncChanges(base::WrapUnique(group.second));
-    if (error.has_value())
+    if (error.has_value()) {
       storage->StopSyncing();
+    }
   }
 
   return std::nullopt;

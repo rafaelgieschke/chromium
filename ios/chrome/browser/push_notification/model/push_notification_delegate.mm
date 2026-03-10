@@ -16,7 +16,6 @@
 #import "base/timer/timer.h"
 #import "base/values.h"
 #import "components/prefs/pref_service.h"
-#import "components/send_tab_to_self/features.h"
 #import "components/sync_device_info/device_info_sync_service.h"
 #import "google_apis/gaia/gaia_id.h"
 #import "ios/chrome/app/application_delegate/app_state.h"
@@ -62,8 +61,8 @@
 #import "ios/chrome/browser/shared/model/profile/profile_manager_ios.h"
 #import "ios/chrome/browser/shared/model/profile/scoped_profile_keep_alive_ios.h"
 #import "ios/chrome/browser/shared/model/utils/first_run_util.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/settings_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/signin/model/account_profile_mapper.h"
@@ -95,6 +94,12 @@ enum class PushNotificationLifecycleEvent {
   kMaxValue = kNotificationInteraction
 };
 
+BASE_FEATURE_PARAM(int,
+                   kDeliveredNAUMaxPerSessionFeature,
+                   &kContentNotificationDeliveredNAU,
+                   kDeliveredNAUMaxPerSession,
+                   kDeliveredNAUMaxSendsPerSession);
+
 // Extract the notification information from `attr`, and store them into
 // `mapping`. Will also copy the notification permission from the profile's
 // pref into the `attr` if the profile is loaded.
@@ -108,13 +113,12 @@ void ExtractNotificationInformation(ProfileManagerIOS* manager,
 
   // Get the permissions from `attr` but if they are missing, check if they
   // can be found in the profile (if it is loaded).
-  const base::Value::Dict* permissions = attr.GetNotificationPermissions();
+  const base::DictValue* permissions = attr.GetNotificationPermissions();
   if (!permissions) {
     ProfileIOS* profile = manager->GetProfileWithName(attr.GetProfileName());
     if (profile) {
-      const base::Value::Dict& profile_permissions =
-          profile->GetPrefs()->GetDict(
-              prefs::kFeaturePushNotificationPermissions);
+      const base::DictValue& profile_permissions = profile->GetPrefs()->GetDict(
+          prefs::kFeaturePushNotificationPermissions);
       attr.SetNotificationPermissions(profile_permissions.Clone());
       permissions = attr.GetNotificationPermissions();
     }
@@ -723,10 +727,7 @@ void ProcessIncomingNotification(
                             !error);
   if (!error) {
     if (ProfileIOS* profile = weakProfile.get()) {
-      if (base::FeatureList::IsEnabled(
-              send_tab_to_self::kSendTabToSelfIOSPushNotifications)) {
         [self setUpAndEnableSendTabNotificationsWithProfile:profile];
-      }
     }
   }
 }
@@ -950,9 +951,7 @@ void ProcessIncomingNotification(
   if (IsContentNotificationEnabled(profile)) {
     ContentNotificationService* contentNotificationService =
         ContentNotificationServiceFactory::GetForProfile(profile);
-    int maxNauSentPerSession = base::GetFieldTrialParamByFeatureAsInt(
-        kContentNotificationDeliveredNAU, kDeliveredNAUMaxPerSession,
-        kDeliveredNAUMaxSendsPerSession);
+    int maxNauSentPerSession = kDeliveredNAUMaxPerSessionFeature.Get();
     // Check if there are notifications received in the background to send the
     // respective NAUs.
     NSUserDefaults* defaults = app_group::GetGroupUserDefaults();
@@ -1214,12 +1213,12 @@ void ProcessIncomingNotification(
       (client) ? std::make_optional(client->GetClientId()) : std::nullopt;
 
   CommandDispatcher* dispatcher = browser->GetCommandDispatcher();
-  id<ApplicationCommands> applicationHandler =
-      HandlerForProtocol(dispatcher, ApplicationCommands);
+  id<SceneCommands> sceneHandler =
+      HandlerForProtocol(dispatcher, SceneCommands);
   id<SettingsCommands> settingsHandler =
       HandlerForProtocol(dispatcher, SettingsCommands);
   __block base::OnceClosure completion2 = std::move(completion);
-  [applicationHandler
+  [sceneHandler
       prepareToPresentModalWithSnackbarDismissal:YES
                                       completion:^{
                                         [settingsHandler

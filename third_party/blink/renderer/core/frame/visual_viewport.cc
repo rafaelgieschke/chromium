@@ -248,7 +248,7 @@ PaintPropertyChangeType VisualViewport::UpdatePaintPropertyNodesIfNeeded(
   {
     ScrollPaintPropertyNode::State state;
     state.container_rect = gfx::Rect(size_);
-    state.contents_size = ContentsSize();
+    state.contents_rect = gfx::Rect(ContentsSize());
 
     state.user_scrollable_horizontal =
         UserInputScrollable(kHorizontalScrollbar);
@@ -736,7 +736,39 @@ void VisualViewport::UpdateScrollbarLayer(ScrollbarOrientation orientation) {
 }
 
 bool VisualViewport::VisualViewportSuppliesScrollbars() const {
-  return IsActiveViewport() && GetPage().GetSettings().GetViewportEnabled();
+  // Only the active viewport should supply scrollbars.
+  if (!IsActiveViewport()) {
+    return false;
+  }
+
+  const auto& settings = GetPage().GetSettings();
+
+  // If we are forcing mobile-style scrollbars (can be set by emulation of
+  // overlay scrollbars or mobile emulation), the VisualViewport must supply
+  // them regardless of other settings.
+  if (settings.GetForceAndroidOverlayScrollbar()) {
+    return true;
+  }
+
+  // The VisualViewport is distinct from the LayoutViewport only when the
+  // mobile-style viewport logic is enabled. On desktop, the LayoutViewport
+  // handles all scrollbars.
+  if (!settings.GetViewportEnabled()) {
+    return false;
+  }
+
+  // Even if the mobile viewport is enabled, on "desktop Android" (e.g.
+  // large screen optimizations), we prefer the LayoutViewport to handle
+  // scrollbars for a desktop-like experience.
+  if (ScrollbarTheme::DesktopAndroidScrollbarsEnabled()) {
+    return false;
+  }
+
+  // If none of the above conditions are met, we are in the standard mobile
+  // behavior (ViewportEnabled is true, and DesktopAndroidScrollbarsEnabled is
+  // false). In this case, the VisualViewport is distinct from the
+  // LayoutViewport and handles the "screen" scrollbars.
+  return true;
 }
 
 const Document* VisualViewport::GetDocument() const {
@@ -755,15 +787,14 @@ ChromeClient* VisualViewport::GetChromeClient() const {
   return &GetPage().GetChromeClient();
 }
 
-bool VisualViewport::SetScrollOffset(
+bool VisualViewport::SetScrollOffsetInternal(
     const ScrollOffset& offset,
     mojom::blink::ScrollType scroll_type,
     cc::ScrollSourceType source_type,
     mojom::blink::ScrollBehavior scroll_behavior,
-    ScrollCallback on_finish,
     bool targeted_scroll) {
   // We clamp the offset here, because the ScrollAnimator may otherwise be
-  // set to a non-clamped offset by ScrollableArea::setScrollOffset,
+  // set to a non-clamped offset by ScrollableArea::setScrollOffsetInternal,
   // which may lead to incorrect scrolling behavior in RootFrameViewport down
   // the line.
   // TODO(eseckler): Solve this instead by ensuring that ScrollableArea and
@@ -771,18 +802,9 @@ bool VisualViewport::SetScrollOffset(
   // stores fractional offsets and that truncation happens elsewhere, see
   // crbug.com/626315.
   ScrollOffset new_scroll_offset = ClampScrollOffset(offset);
-  return ScrollableArea::SetScrollOffset(new_scroll_offset, scroll_type,
-                                         source_type, scroll_behavior,
-                                         std::move(on_finish));
-}
-
-bool VisualViewport::SetScrollOffset(
-    const ScrollOffset& offset,
-    mojom::blink::ScrollType scroll_type,
-    cc::ScrollSourceType source_type,
-    mojom::blink::ScrollBehavior scroll_behavior) {
-  return SetScrollOffset(offset, scroll_type, source_type, scroll_behavior,
-                         ScrollCallback());
+  return ScrollableArea::SetScrollOffsetInternal(new_scroll_offset, scroll_type,
+                                                 source_type, scroll_behavior,
+                                                 /*targeted_scroll=*/false);
 }
 
 PhysicalOffset VisualViewport::LocalToScrollOriginOffset() const {
@@ -802,14 +824,8 @@ PhysicalRect VisualViewport::ScrollIntoView(
           *params->align_y.get()));
 
   if (new_scroll_offset != GetScrollOffset()) {
-    if (params->is_for_scroll_sequence) {
-      SetScrollOffset(new_scroll_offset, params->type,
-                      cc::ScrollSourceType::kAbsoluteScroll, params->behavior);
-    } else {
-      SetScrollOffset(new_scroll_offset, params->type,
-                      cc::ScrollSourceType::kAbsoluteScroll, params->behavior,
-                      ScrollCallback());
-    }
+    SetScrollOffset(new_scroll_offset, params->type,
+                    cc::ScrollSourceType::kAbsoluteScroll, params->behavior);
   }
 
   return rect_in_absolute;

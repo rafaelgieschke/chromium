@@ -54,7 +54,6 @@
 #include "chrome/browser/web_applications/web_app_registry_update.h"
 #include "chrome/browser/web_applications/web_app_sync_bridge.h"
 #include "chrome/browser/web_applications/web_app_ui_manager.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "components/keep_alive_registry/keep_alive_registry.h"
 #include "components/keep_alive_registry/keep_alive_types.h"
@@ -241,6 +240,13 @@ void OsIntegrationManager::Synchronize(
 
   CHECK(set_provider_called_);
 
+  // Do not allow apps that are suggested for migration to have OS integration.
+  if (provider_->registrar_unsafe().AppMatches(
+          app_id, WebAppFilter::IsAppSuggestedForMigration())) {
+    std::move(callback).Run();
+    return;
+  }
+
   if (sub_managers_.empty()) {
     std::move(callback).Run();
     return;
@@ -357,11 +363,6 @@ void OsIntegrationManager::GetShortcutInfoForAppFromRegistrar(
       base::BindOnce(&OsIntegrationManager::OnIconsRead,
                      weak_ptr_factory_.GetWeakPtr(), app_id,
                      std::move(callback)));
-}
-
-bool OsIntegrationManager::IsFileHandlingAPIAvailable(
-    const webapps::AppId& app_id) {
-  return true;
 }
 
 const apps::FileHandlers* OsIntegrationManager::GetEnabledFileHandlers(

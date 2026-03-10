@@ -18,6 +18,8 @@
 #import "components/autofill/core/browser/suggestions/payments/payments_suggestion_generator_util.h"
 #import "components/autofill/core/common/autofill_payments_features.h"
 #import "components/autofill/ios/browser/personal_data_manager_observer_bridge.h"
+#import "ios/chrome/browser/autofill/ui_bundled/chrome_autofill_client_ios.h"
+#import "ios/chrome/browser/autofill/ui_bundled/ios_chrome_payments_autofill_client.h"
 #import "ios/chrome/browser/autofill/ui_bundled/manual_fill/card_consumer.h"
 #import "ios/chrome/browser/autofill/ui_bundled/manual_fill/card_list_delegate.h"
 #import "ios/chrome/browser/autofill/ui_bundled/manual_fill/full_card_request_result_delegate_bridge.h"
@@ -26,12 +28,14 @@
 #import "ios/chrome/browser/autofill/ui_bundled/manual_fill/manual_fill_content_injector.h"
 #import "ios/chrome/browser/autofill/ui_bundled/manual_fill/manual_fill_credit_card+CreditCard.h"
 #import "ios/chrome/browser/autofill/ui_bundled/manual_fill/manual_fill_credit_card.h"
+#import "ios/chrome/browser/autofill/ui_bundled/manual_fill/manual_fill_virtual_card_cache.h"
 #import "ios/chrome/browser/menu/ui_bundled/browser_action_factory.h"
 #import "ios/chrome/browser/shared/ui/list_model/list_model.h"
 #import "ios/chrome/browser/shared/ui/table_view/table_view_model.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
 #import "ios/chrome/common/ui/reauthentication/reauthentication_module.h"
 #import "ios/chrome/grit/ios_strings.h"
+#import "ios/web/public/web_state.h"
 #import "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #import "ui/base/l10n/l10n_util.h"
 #import "ui/base/l10n/l10n_util_mac.h"
@@ -106,9 +110,9 @@ std::vector<CreditCard> FetchCards(
   self = [super init];
   if (self) {
     _personalDataManager = personalDataManager;
-    _personalDataManagerObserver.reset(
-        new autofill::PersonalDataManagerObserverBridge(self));
-    _personalDataManager->AddObserver(_personalDataManagerObserver.get());
+    _personalDataManagerObserver =
+        std::make_unique<autofill::PersonalDataManagerObserverBridge>(
+            _personalDataManager, self);
     _cards = FetchCards(*_personalDataManager);
     _reauthenticationModule = reauthenticationModule;
     _showAutofillFormButton = showAutofillFormButton;
@@ -136,10 +140,8 @@ std::vector<CreditCard> FetchCards(
 }
 
 - (void)disconnect {
-  if (_personalDataManager && _personalDataManagerObserver.get()) {
-    _personalDataManager->RemoveObserver(_personalDataManagerObserver.get());
-    _personalDataManagerObserver.reset();
-  }
+  _personalDataManagerObserver = nullptr;
+  _personalDataManager = nullptr;
 }
 
 #pragma mark - PersonalDataManagerObserver
@@ -316,7 +318,15 @@ std::vector<CreditCard> FetchCards(
 #pragma mark - FullCardRequestResultDelegateObserving
 
 - (void)onFullCardRequestSucceeded:(const CreditCard&)card
-                         fieldType:(manual_fill::PaymentFieldType)fieldType {
+                         fieldType:(manual_fill::PaymentFieldType)fieldType
+                       forWebState:(web::WebState*)webState {
+  // If we successfully retrieved an unmasked virtual card, cache it for this
+  // WebState.
+  if (webState && card.record_type() == CreditCard::RecordType::kVirtualCard) {
+    // CreateForWebState ensures the cache exists (lazy initialization).
+    ManualFillVirtualCardCache::CreateForWebState(webState);
+    ManualFillVirtualCardCache::FromWebState(webState)->CacheUnmaskedCard(card);
+  }
   // Credit card are not shown as 'Secure'.
   ManualFillCreditCard* manualFillCreditCard = [[ManualFillCreditCard alloc]
       initWithCreditCard:card
@@ -336,6 +346,22 @@ std::vector<CreditCard> FetchCards(
       fillValue = manualFillCreditCard.CVC;
       break;
   }
+  // The progress dialog must be dismissed before processing the fill value.
+  // Otherwise, the subsequent focus shift may trigger a month or year
+  // dropdown while the dialog is still active, resulting in multiple
+  // overlapping UI elements and therefore a UI hangs.
+  auto* client = autofill::AutofillClientIOS::FromWebState(webState);
+  CHECK(client);
+  auto* paymentsClient = client->GetPaymentsAutofillClient();
+  CHECK(paymentsClient);
+  paymentsClient->CloseAutofillProgressDialog(
+      /*show_confirmation_before_closing=*/false,
+      /*no_interactive_authentication_callback=*/base::DoNothing());
+
+  // Re-trigger the manual fallback menu now that the progress dialog is closed.
+  // This prevents the menu from disappearing if the dialog dismissal caused it
+  // to hide.
+  [self.navigationDelegate cardSelectionFinished];
 
   // Don't replace the locked card with the unlocked one, so the user will
   // have to unlock it again, if needed.

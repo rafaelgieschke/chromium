@@ -36,6 +36,7 @@
 #include "components/autofill/core/common/signatures.h"
 #include "components/autofill/core/common/unique_ids.h"
 #include "components/webauthn/android/mock_webauthn_cred_man_delegate.h"
+#include "components/webauthn/android/stub_webauthn_client_android.h"
 #include "components/webauthn/android/webauthn_cred_man_delegate_factory.h"
 #include "components/webauthn/android/webauthn_cred_man_delegate_factory_test_api.h"
 #include "content/public/test/navigation_simulator.h"
@@ -157,7 +158,8 @@ class TestAndroidAutofillManager : public AndroidAutofillManager {
 
   void SimulatePropagateAutofillPredictions(FormGlobalId form_id) {
     NotifyObservers(&Observer::OnFieldTypesDetermined, form_id,
-                    Observer::FieldTypeSource::kAutofillServer);
+                    Observer::FieldTypeSource::kAutofillServer,
+                    /*small_forms_were_parsed=*/false);
   }
 
   void SimulateOnAskForValuesToFill(const FormData& form,
@@ -813,7 +815,14 @@ class AndroidAutofillProviderWithCredManTest
     InitializeWebAuthnFactoryWithMock();
   }
 
+  void TearDown() override {
+    webauthn::WebAuthnClientAndroid::ClearClientForTesting();
+    AndroidAutofillProviderTestBase::TearDown();
+  }
+
   void InitializeWebAuthnFactoryWithMock() {
+    webauthn::WebAuthnClientAndroid::SetClient(
+        std::make_unique<webauthn::StubWebAuthnClientAndroid>());
     auto mock_cred_man_delegate =
         std::make_unique<NiceMock<webauthn::MockWebAuthnCredManDelegate>>();
     webauthn::test_api(web_authn_delegate_factory())

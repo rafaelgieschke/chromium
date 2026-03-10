@@ -64,7 +64,8 @@ class OtpFieldDetector : public AutofillManager::Observer {
   // UKNOWN_TYPE, we temporarily report the presence of an OTP.
   void OnFieldTypesDetermined(AutofillManager& manager,
                               FormGlobalId form,
-                              FieldTypeSource source) override;
+                              FieldTypeSource source,
+                              bool small_forms_were_parsed) override;
   // We use `OnAfterFormsSeen` in addition to `OnAfterFormSubmitted` to identify
   // the removal of forms because it's possible that an OTP form is removed
   // from the DOM (because it became irrelevant) w/o being submitted.
@@ -85,8 +86,8 @@ class OtpFieldDetector : public AutofillManager::Observer {
   // navigations without this event.
   void OnAutofillManagerStateChanged(
       AutofillManager& manager,
-      AutofillDriver::LifecycleState previous,
-      AutofillDriver::LifecycleState current) override;
+      AutofillDriver::LifecycleState old_state,
+      AutofillDriver::LifecycleState new_state) override;
 
  protected:
   // Protected to ensure that only derived classes can be instantiated.

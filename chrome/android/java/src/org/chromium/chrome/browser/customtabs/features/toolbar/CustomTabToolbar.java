@@ -60,7 +60,6 @@ import androidx.annotation.VisibleForTesting;
 import androidx.appcompat.content.res.AppCompatResources;
 import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.browser.customtabs.CustomTabsIntent.CloseButtonPosition;
-import androidx.browser.customtabs.ExperimentalOpenInBrowser;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.MarginLayoutParamsCompat;
 import androidx.core.widget.ImageViewCompat;
@@ -71,9 +70,10 @@ import org.chromium.base.Log;
 import org.chromium.base.ObserverList;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.base.supplier.OneshotSupplierImpl;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.task.PostTask;
 import org.chromium.base.task.TaskTraits;
 import org.chromium.build.annotations.EnsuresNonNull;
@@ -85,7 +85,6 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.app.appmenu.AppMenuPropertiesDelegateImpl;
 import org.chromium.chrome.browser.browser_controls.BrowserStateBrowserControlsVisibilityDelegate;
 import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider;
-import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider.CustomTabProfileType;
 import org.chromium.chrome.browser.browserservices.intents.CustomButtonParams.ButtonType;
 import org.chromium.chrome.browser.customtabs.CustomTabIntentDataProvider.CustomTabsButtonState;
 import org.chromium.chrome.browser.customtabs.CustomTabsConnection;
@@ -101,13 +100,13 @@ import org.chromium.chrome.browser.dom_distiller.ReaderModeManager;
 import org.chromium.chrome.browser.ephemeraltab.EphemeralTabCoordinator;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.CustomTabProfileType;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.omnibox.LocationBar;
 import org.chromium.chrome.browser.omnibox.LocationBarDataProvider;
 import org.chromium.chrome.browser.omnibox.OmniboxStub;
 import org.chromium.chrome.browser.omnibox.UrlBar;
 import org.chromium.chrome.browser.omnibox.UrlBarCoordinator;
-import org.chromium.chrome.browser.omnibox.UrlBarCoordinator.SelectionState;
 import org.chromium.chrome.browser.omnibox.UrlBarData;
 import org.chromium.chrome.browser.omnibox.status.PageInfoIphController;
 import org.chromium.chrome.browser.omnibox.styles.OmniboxResourceProvider;
@@ -675,7 +674,6 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
      * @param intentDataProvider {@link BrowserServicesIntentDataProvider} for accessing CCT intent
      *     data.
      */
-    @ExperimentalOpenInBrowser
     public void initVisibilityRule(
             Activity activity,
             Supplier<AppMenuHandler> appMenuHandler,
@@ -803,22 +801,21 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
     /**
      * Creates and returns a CustomTab-specific LocationBar. This also retains a reference to the
      * passed LocationBarModel.
-     * @param locationBarModel {@link LocationBarModel} to be used for accessing LocationBar
-     *         state.
+     *
+     * @param locationBarModel {@link LocationBarModel} to be used for accessing LocationBar state.
      * @param actionModeCallback Callback to handle changes in contextual action Modes.
      * @param modalDialogManagerSupplier Supplier of {@link ModalDialogManager}.
      * @param ephemeralTabCoordinatorSupplier Supplier of {@link EphemeralTabCoordinator}.
      * @param controlsVisibilityDelegate {@link BrowserStateBrowserControlsVisibilityDelegate} to
-     *         show / hide the browser control. Used to ensure toolbar is shown for a certain
-     *         duration.
+     *     show / hide the browser control. Used to ensure toolbar is shown for a certain duration.
      * @param tabCreator {@link TabCreator} to handle a new tab creation.
      * @return The LocationBar implementation for this CustomTabToolbar.
      */
     public LocationBar createLocationBar(
             LocationBarModel locationBarModel,
             ActionMode.Callback actionModeCallback,
-            Supplier<ModalDialogManager> modalDialogManagerSupplier,
-            Supplier<EphemeralTabCoordinator> ephemeralTabCoordinatorSupplier,
+            Supplier<@Nullable ModalDialogManager> modalDialogManagerSupplier,
+            Supplier<@Nullable EphemeralTabCoordinator> ephemeralTabCoordinatorSupplier,
             BrowserStateBrowserControlsVisibilityDelegate controlsVisibilityDelegate,
             TabCreator tabCreator) {
         mLocationBarModel = locationBarModel;
@@ -1093,7 +1090,7 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
     }
 
     @Override
-    protected int getTabStripHeightFromResource() {
+    public int getTabStripHeightFromResource() {
         return 0;
     }
 
@@ -1651,8 +1648,8 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
         private static final int TOTAL_POST_BRANDING_KEYS = 2;
 
         private LocationBarDataProvider mLocationBarDataProvider;
-        private @Nullable Supplier<EphemeralTabCoordinator> mEphemeralTabCoordinatorSupplier;
-        private Supplier<ModalDialogManager> mModalDialogManagerSupplier;
+        private Supplier<@Nullable EphemeralTabCoordinator> mEphemeralTabCoordinatorSupplier;
+        private Supplier<@Nullable ModalDialogManager> mModalDialogManagerSupplier;
         private UrlBarCoordinator mUrlCoordinator;
         private @Nullable TabCreator mTabCreator;
 
@@ -1687,8 +1684,8 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
         private @Nullable ToolbarBrandingOverlayCoordinator mBrandingOverlayCoordinator;
 
         private @Nullable OptionalButtonCoordinator mOptionalButtonCoordinator;
-        private final ObservableSupplierImpl<Tracker> mTrackerSupplier =
-                new ObservableSupplierImpl<>();
+        private final SettableMonotonicObservableSupplier<Tracker> mTrackerSupplier =
+                ObservableSuppliers.createMonotonic();
 
         /** Returns {@code true} if optional button MVC was initialized successfully. */
         private boolean initializeOptionalButton() {
@@ -2093,8 +2090,8 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
         @Initializer
         public void init(
                 LocationBarDataProvider locationBarDataProvider,
-                Supplier<ModalDialogManager> modalDialogManagerSupplier,
-                Supplier<EphemeralTabCoordinator> ephemeralTabCoordinatorSupplier,
+                Supplier<@Nullable ModalDialogManager> modalDialogManagerSupplier,
+                Supplier<@Nullable EphemeralTabCoordinator> ephemeralTabCoordinatorSupplier,
                 TabCreator tabCreator,
                 ActionMode.Callback actionModeCallback) {
             mLocationBarDataProvider = locationBarDataProvider;
@@ -2347,7 +2344,7 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
                     UrlBarData.forNonUrlText(
                             getContext().getString(R.string.twa_running_in_chrome)),
                     UrlBar.ScrollType.NO_SCROLL,
-                    SelectionState.SELECT_ALL);
+                    UrlBarData.SELECT_ALL);
         }
 
         private void runAfterBrandingRunnables() {
@@ -2477,7 +2474,7 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
             Tab tab = getCurrentTab();
             if (tab == null) {
                 mUrlCoordinator.setUrlBarData(
-                        UrlBarData.EMPTY, UrlBar.ScrollType.NO_SCROLL, SelectionState.SELECT_ALL);
+                        UrlBarData.EMPTY, UrlBar.ScrollType.NO_SCROLL, UrlBarData.SELECT_ALL);
                 return;
             }
 
@@ -2531,7 +2528,7 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
             mUrlCoordinator.setUrlBarData(
                     UrlBarData.create(url, displayText, originStart, originEnd, url.getSpec()),
                     UrlBar.ScrollType.SCROLL_TO_TLD,
-                    SelectionState.SELECT_ALL);
+                    UrlBarData.SELECT_ALL);
 
             WebContents webContents = tab.getWebContents();
             if (webContents != null) {
@@ -2566,12 +2563,7 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
         private void updateColors() {
             updateOmniboxBackground();
             updateButtonsTint();
-
-            if (mUrlCoordinator.setBrandedColorScheme(mBrandedColorScheme)) {
-                // Update the URL to make it use the new color scheme.
-                updateUrlBar();
-            }
-
+            mUrlCoordinator.setBrandedColorScheme(mBrandedColorScheme);
             mTitleBar.setTextColor(
                     OmniboxResourceProvider.getUrlBarPrimaryTextColor(
                             getContext(), mBrandedColorScheme));
@@ -2778,9 +2770,6 @@ public class CustomTabToolbar extends ToolbarLayout implements View.OnLongClickL
 
         @Override
         public void clearUrlBarCursorWithoutFocusAnimations() {}
-
-        @Override
-        public void selectAll() {}
 
         @Override
         public void revertChanges() {}

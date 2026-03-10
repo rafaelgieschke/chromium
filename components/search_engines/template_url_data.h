@@ -14,6 +14,7 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "components/search_engines/template_url_id.h"
+#include "components/search_engines/template_url_starter_pack_data.h"
 #include "third_party/search_engines_data/resources/definitions/prepopulated_engines.h"
 #include "url/gurl.h"
 
@@ -59,7 +60,7 @@ struct TemplateURLData {
                   std::string_view favicon_url,
                   std::string_view encoding,
                   std::u16string_view image_search_branding_label,
-                  const base::Value::List& alternate_urls_list,
+                  const base::ListValue& alternate_urls_list,
                   bool preconnect_to_search_url,
                   bool prefetch_likely_navigations,
                   int prepopulate_id,
@@ -112,6 +113,8 @@ struct TemplateURLData {
   // Returns whether this search engine was created by the SiteSearchSettings
   // policy.
   bool CreatedBySiteSearchPolicy() const;
+  // Returns whether this search engine was created by a regulatory program.
+  bool CreatedByRegulatoryProgram() const;
 
   // Optional additional raw URLs.
   std::string suggestions_url;
@@ -224,6 +227,11 @@ struct TemplateURLData {
 
   // If this TemplateURL comes from prepopulated data the prepopulate_id is > 0.
   int prepopulate_id;
+
+  // If this TemplateURL is subject to some migration to another prepopulated
+  // engine, this ID refers to the post-migration engine's prepopulate_id. See
+  // `TryGetMigratedEngine()` for the migration matching logic.
+  int migrate_to_id = 0;
 
   // The primary unique identifier for Sync. This set on all TemplateURLs
   // regardless of whether they have been associated with Sync.

@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "ash/constants/ash_pref_names.h"
+#include "ash/constants/chrome_webui_url_constants.h"
 #include "ash/public/cpp/new_window_delegate.h"
 #include "base/containers/flat_map.h"
 #include "base/functional/bind.h"
@@ -23,7 +24,6 @@
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/components/kiosk/kiosk_utils.h"
 #include "components/language/core/browser/pref_names.h"
@@ -101,15 +101,16 @@ void AccessibilityHandler::RegisterMessages() {
 }
 
 void AccessibilityHandler::HandleShowBrowserAppearanceSettings(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   ash::NewWindowDelegate::GetInstance()->OpenUrl(
-      GURL(chrome::kChromeUISettingsURL).Resolve(chrome::kAppearanceSubPage),
+      GURL(ash::chrome_urls::kChromeUISettingsURL)
+          .Resolve(ash::chrome_urls::kAppearanceSubPage),
       ash::NewWindowDelegate::OpenUrlFrom::kUserInteraction,
       ash::NewWindowDelegate::Disposition::kSwitchToTab);
 }
 
 void AccessibilityHandler::HandleSetStartupSoundEnabled(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   DCHECK_EQ(1U, args.size());
   bool enabled = false;
   if (args[0].is_bool()) {
@@ -121,7 +122,7 @@ void AccessibilityHandler::HandleSetStartupSoundEnabled(
 }
 
 void AccessibilityHandler::HandleRecordSelectedShowShelfNavigationButtonsValue(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   DCHECK_EQ(1U, args.size());
   bool enabled = false;
   if (args[0].is_bool()) {
@@ -134,7 +135,7 @@ void AccessibilityHandler::HandleRecordSelectedShowShelfNavigationButtonsValue(
 }
 
 void AccessibilityHandler::HandleManageA11yPageReady(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   AllowJavascript();
 }
 
@@ -153,19 +154,19 @@ void AccessibilityHandler::OnJavascriptDisallowed() {
 }
 
 void AccessibilityHandler::HandleShowChromeVoxTutorial(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   AccessibilityManager::Get()->ShowChromeVoxTutorial();
 }
 
 void AccessibilityHandler::HandleUpdateBluetoothBrailleDisplayAddress(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   CHECK_EQ(1U, args.size());
   const std::string address = args[0].GetString();
   AccessibilityManager::Get()->UpdateBluetoothBrailleDisplayAddress(address);
 }
 
 void AccessibilityHandler::HandleGetStartupSoundEnabled(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   AllowJavascript();
   FireWebUIListener(
       "startup-sound-setting-retrieved",
@@ -173,7 +174,7 @@ void AccessibilityHandler::HandleGetStartupSoundEnabled(
 }
 
 void AccessibilityHandler::HandlePreviewFlashNotification(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   AccessibilityManager::Get()->PreviewFlashNotification();
 }
 
@@ -291,9 +292,9 @@ void AccessibilityHandler::MaybeAddDictationLocales() {
     ui_languages.insert(language::SplitIntoMainAndTail(enabled_language).first);
   }
 
-  base::Value::List locales_list;
+  base::ListValue locales_list;
   for (auto& locale : locales) {
-    base::Value::Dict option;
+    base::DictValue option;
     option.Set("value", locale.first);
     option.Set("name",
                l10n_util::GetDisplayNameForLocale(
@@ -305,7 +306,7 @@ void AccessibilityHandler::MaybeAddDictationLocales() {
     // locale, IME languages or enabled preferred languages.
     std::pair<std::string_view, std::string_view> lang_and_locale =
         language::SplitIntoMainAndTail(locale.first);
-    bool is_recommended = base::Contains(ui_languages, lang_and_locale.first);
+    bool is_recommended = ui_languages.contains(lang_and_locale.first);
 
     option.Set("recommended", is_recommended);
     locales_list.Append(std::move(option));

@@ -8,24 +8,33 @@
 #import <vector>
 
 #import "base/apple/foundation_util.h"
+#import "base/feature_list.h"
 #import "base/functional/callback.h"
 #import "base/functional/callback_helpers.h"
 #import "base/ios/block_types.h"
+#import "base/not_fatal_until.h"
 #import "base/notimplemented.h"
+#import "base/scoped_multi_source_observation.h"
 #import "base/strings/sys_string_conversions.h"
 #import "base/values.h"
 #import "components/autofill/core/browser/autofill_field.h"
 #import "components/autofill/core/browser/form_structure.h"
+#import "components/autofill/core/browser/foundations/autofill_manager.h"
 #import "components/autofill/core/browser/foundations/browser_autofill_manager.h"
 #import "components/autofill/core/browser/payments/card_unmask_challenge_option.h"
+#import "components/autofill/core/browser/payments/credit_card_access_manager.h"
 #import "components/autofill/core/browser/payments/legal_message_line.h"
 #import "components/autofill/core/browser/payments/payments_autofill_client.h"
 #import "components/autofill/core/browser/payments/virtual_card_enrollment_manager.h"
 #import "components/autofill/core/browser/suggestions/suggestion_type.h"
+#import "components/autofill/core/browser/ui/payments/autofill_progress_ui_type.h"
+#import "components/autofill/core/common/autofill_features.h"
+#import "components/autofill/core/common/autofill_util.h"
 #import "components/autofill/ios/browser/autofill_agent.h"
 #import "components/autofill/ios/browser/autofill_driver_ios.h"
 #import "components/autofill/ios/browser/autofill_driver_ios_factory.h"
 #import "components/autofill/ios/browser/autofill_java_script_feature.h"
+#import "components/autofill/ios/browser/autofill_manager_observer_bridge.h"
 #import "components/autofill/ios/browser/autofill_util.h"
 #import "components/autofill/ios/browser/suggestion_controller_java_script_feature.h"
 #import "components/autofill/ios/form_util/form_activity_params.h"
@@ -36,6 +45,7 @@
 #import "components/sync/service/sync_service.h"
 #import "ios/web/public/js_messaging/web_frame.h"
 #import "ios/web/public/js_messaging/web_frames_manager.h"
+#import "ios/web/public/js_messaging/web_frames_manager_observer_bridge.h"
 #import "ios/web/public/web_state.h"
 #import "ios/web_view/internal/app/application_context.h"
 #import "ios/web_view/internal/autofill/cwv_autofill_controller+testing.h"
@@ -68,27 +78,45 @@ using autofill::FormData;
 using autofill::FormRendererId;
 using UserDecision = autofill::AutofillClient::AddressPromptUserDecision;
 
+NSErrorDomain const CWVAutofillErrorDomain =
+    @"org.chromium.chromewebview.AutofillErrorDomain";
+
+@interface CWVAutofillController () <AutofillManagerObserver,
+                                     CRWWebFramesManagerObserver>
+
+- (void)onAfterFormSubmitted:(autofill::AutofillManager&)manager
+                    formData:(const autofill::FormData&)form;
+
+- (void)
+    onAutofillManagerStateChanged:(autofill::AutofillManager&)manager
+                             from:(autofill::AutofillManager::LifecycleState)
+                                      oldState
+                               to:(autofill::AutofillManager::LifecycleState)
+                                      newState;
+
+@end
+
 namespace {
 // Helper function to map C++ enum to Objective-C enum
 CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
-    autofill::AutofillProgressDialogType type) {
+    autofill::AutofillProgressUiType type) {
   switch (type) {
-    case autofill::AutofillProgressDialogType::kUnspecified:
+    case autofill::AutofillProgressUiType::kUnspecified:
       return CWVAutofillProgressDialogTypeUnspecified;
-    case autofill::AutofillProgressDialogType::kVirtualCardUnmaskProgressDialog:
+    case autofill::AutofillProgressUiType::kVirtualCardUnmaskProgressUi:
       return CWVAutofillProgressDialogTypeVirtualCardUnmask;
-    case autofill::AutofillProgressDialogType::kServerCardUnmaskProgressDialog:
+    case autofill::AutofillProgressUiType::kServerCardUnmaskProgressUi:
       return CWVAutofillProgressDialogTypeServerCardUnmask;
-    case autofill::AutofillProgressDialogType::kServerIbanUnmaskProgressDialog:
+    case autofill::AutofillProgressUiType::kServerIbanUnmaskProgressUi:
       return CWVAutofillProgressDialogTypeIbanUnmask;
-    case autofill::AutofillProgressDialogType::k3dsFetchVcnProgressDialog:
+    case autofill::AutofillProgressUiType::k3dsFetchVcnProgressUi:
       return CWVAutofillProgressDialogType3DSFetchVCN;
-    case autofill::AutofillProgressDialogType::
-        kCardInfoRetrievalEnrolledUnmaskProgressDialog:
+    case autofill::AutofillProgressUiType::
+        kCardInfoRetrievalEnrolledUnmaskProgressUi:
       return CWVAutofillProgressDialogTypeCardInfoRetrievalEnrolledUnmask;
-    case autofill::AutofillProgressDialogType::kBnplFetchVcnProgressDialog:
+    case autofill::AutofillProgressUiType::kBnplFetchVcnProgressUi:
       return CWVAutofillProgressDialogTypeBNPLFetchVCN;
-    case autofill::AutofillProgressDialogType::kBnplAmountExtractionProgressUi:
+    case autofill::AutofillProgressUiType::kBnplAmountExtractionProgressUi:
       return CWVAutofillProgressDialogTypeBNPLAmountExtraction;
   }
   return CWVAutofillProgressDialogTypeUnspecified;
@@ -98,6 +126,20 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
 @implementation CWVAutofillController {
   // Bridge to observe the |webState|.
   std::unique_ptr<web::WebStateObserverBridge> _webStateObserverBridge;
+
+  // Bridge to observe the `WebFramesManager`.
+  std::unique_ptr<web::WebFramesManagerObserverBridge>
+      _webFramesManagerObserverBridge;
+
+  // Bridge to observe `AutofillManager` events.
+  std::unique_ptr<autofill::AutofillManagerObserverBridge>
+      _autofillManagerObserverBridge;
+
+  // Tracks observations for all AutofillManagers (one per frame).
+  std::unique_ptr<
+      base::ScopedMultiSourceObservation<autofill::AutofillManager,
+                                         autofill::AutofillManager::Observer>>
+      _autofillManagerObservations;
 
   // Autofill agent associated with |webState|.
   AutofillAgent* _autofillAgent;
@@ -142,6 +184,10 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
   NSString* _lastFormActivityType;
   FormRendererId _lastFormActivityFormRendererID;
   FieldRendererId _lastFormActivityFieldRendererID;
+
+  // YES to support xframe submission to correctly handle form submission when
+  // autofill across iframes is enabled.
+  BOOL _supportXframeSubmission;
 }
 
 @synthesize delegate = _delegate;
@@ -179,12 +225,36 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
   if (self) {
     DCHECK(webState);
     _webState = webState;
+    _supportXframeSubmission = base::FeatureList::IsEnabled(
+        autofill::features::kAutofillAcrossIframesIos);
 
     _autofillAgent = autofillAgent;
 
     _webStateObserverBridge =
         std::make_unique<web::WebStateObserverBridge>(self);
     _webState->AddObserver(_webStateObserverBridge.get());
+
+    _autofillManagerObserverBridge =
+        std::make_unique<autofill::AutofillManagerObserverBridge>(self);
+
+    if (_supportXframeSubmission) {
+      _autofillManagerObservations =
+          std::make_unique<base::ScopedMultiSourceObservation<
+              autofill::AutofillManager, autofill::AutofillManager::Observer>>(
+              _autofillManagerObserverBridge.get());
+
+      _webFramesManagerObserverBridge =
+          std::make_unique<web::WebFramesManagerObserverBridge>(self);
+      web::WebFramesManager* framesManager =
+          autofill::AutofillJavaScriptFeature::GetInstance()
+              ->GetWebFramesManager(_webState);
+      framesManager->AddObserver(_webFramesManagerObserverBridge.get());
+
+      // Observe existing frames.
+      for (web::WebFrame* frame : framesManager->GetAllWebFrames()) {
+        [self webFramesManager:framesManager frameBecameAvailable:frame];
+      }
+    }
 
     _formActivityObserverBridge =
         std::make_unique<autofill::FormActivityObserverBridge>(webState, self);
@@ -205,6 +275,12 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
 
 - (void)dealloc {
   if (_webState) {
+    if (_supportXframeSubmission) {
+      autofill::AutofillJavaScriptFeature::GetInstance()
+          ->GetWebFramesManager(_webState)
+          ->RemoveObserver(_webFramesManagerObserverBridge.get());
+      _autofillManagerObservations->RemoveAllObservations();
+    }
     _formActivityObserverBridge.reset();
     _webState->RemoveObserver(_webStateObserverBridge.get());
     _webStateObserverBridge.reset();
@@ -371,6 +447,52 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
                         completionHandler();
                       }
                     }];
+}
+
+- (void)fetchFullCardDetailsForCard:(CWVCreditCard*)card
+                  completionHandler:(CWVFetchFullCardDetailsCompletionHandler)
+                                        completionHandler {
+  web::WebFrame* frame = autofill::AutofillJavaScriptFeature::GetInstance()
+                             ->GetWebFramesManager(_webState)
+                             ->GetFrameWithId(_lastFormActivityWebFrameID);
+
+  if (!frame) {
+    if (completionHandler) {
+      NSError* error = [NSError errorWithDomain:CWVAutofillErrorDomain
+                                           code:CWVAutofillErrorNoWebFrame
+                                       userInfo:nil];
+      completionHandler(/*fullCard=*/nil, error);
+    }
+    return;
+  }
+
+  autofill::AutofillDriverIOS* driver =
+      autofill::AutofillDriverIOS::FromWebStateAndWebFrame(_webState, frame);
+  if (!driver) {
+    if (completionHandler) {
+      NSError* error = [NSError errorWithDomain:CWVAutofillErrorDomain
+                                           code:CWVAutofillErrorNoAutofillDriver
+                                       userInfo:nil];
+      completionHandler(/*fullCard=*/nil, error);
+    }
+    return;
+  }
+
+  autofill::BrowserAutofillManager& manager = driver->GetAutofillManager();
+  autofill::CreditCardAccessManager* accessManager =
+      manager.GetCreditCardAccessManager();
+
+  accessManager->FetchCreditCard(
+      card.internalCard, base::BindOnce(
+                             ^(CWVFetchFullCardDetailsCompletionHandler handler,
+                               const autofill::CreditCard& fetchedCard) {
+                               CWVCreditCard* fullCard = [[CWVCreditCard alloc]
+                                   initWithCreditCard:fetchedCard];
+                               if (handler) {
+                                 handler(fullCard, /*error=*/nil);
+                               }
+                             },
+                             completionHandler));
 }
 
 - (void)focusPreviousField {
@@ -629,8 +751,7 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
   }
 }
 
-- (void)showAutofillProgressDialogOfType:
-            (autofill::AutofillProgressDialogType)type
+- (void)showAutofillProgressDialogOfType:(autofill::AutofillProgressUiType)type
                           cancelCallback:(base::OnceClosure)cancelCallback {
   if ([_delegate respondsToSelector:@selector
                  (autofillController:showProgressDialogOfType:cancelAction:)]) {
@@ -671,10 +792,10 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
     autofill::LegalMessageLines allLegalMessages;
 
     std::ranges::copy(enrollmentFields.google_legal_message,
-        std::back_inserter(allLegalMessages));
+                      std::back_inserter(allLegalMessages));
 
     std::ranges::copy(enrollmentFields.issuer_legal_message,
-        std::back_inserter(allLegalMessages));
+                      std::back_inserter(allLegalMessages));
 
     CWVVCNEnrollmentManager* enrollmentManager =
         [[CWVVCNEnrollmentManager alloc]
@@ -724,9 +845,13 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
 #pragma mark - AutofillDriverIOSBridge
 
 - (void)fillData:(const std::vector<autofill::FormFieldData::FillData>&)fields
-         section:(const autofill::Section&)section
-         inFrame:(web::WebFrame*)frame {
-  [_autofillAgent fillData:fields section:section inFrame:frame];
+           section:(const autofill::Section&)section
+           inFrame:(web::WebFrame*)frame
+    withActionType:(autofill::mojom::FormActionType)actionType {
+  [_autofillAgent fillData:fields
+                   section:section
+                   inFrame:frame
+            withActionType:(autofill::mojom::FormActionType::kFill)];
 }
 
 - (void)fillSpecificFormField:(const autofill::FieldRendererId&)field
@@ -765,12 +890,10 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
   [_autofillAgent notifyFormsSeen:updatedForms inFrame:frame];
 }
 
-- (void)fetchFormsFiltered:(BOOL)filtered
-                  withName:(const std::u16string&)formName
+- (void)fetchFormsFiltered:(std::optional<std::u16string>)formNameFilter
                    inFrame:(web::WebFrame*)frame
          completionHandler:(FormFetchCompletion)completionHandler {
-  [_autofillAgent fetchFormsFiltered:filtered
-                            withName:formName
+  [_autofillAgent fetchFormsFiltered:std::move(formNameFilter)
                              inFrame:frame
                    completionHandler:std::move(completionHandler)];
 }
@@ -847,6 +970,18 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
                    hasUserGesture:(BOOL)userInitiated
                           inFrame:(web::WebFrame*)frame
                    perfectFilling:(BOOL)perfectFilling {
+  if (_supportXframeSubmission) {
+    return;
+  }
+  if ([_delegate respondsToSelector:@selector
+                 (autofillController:
+                     didSubmitFormWithName:frameID:perfectFilling:)]) {
+    [_delegate autofillController:self
+            didSubmitFormWithName:base::SysUTF16ToNSString(formData.name())
+                          frameID:base::SysUTF8ToNSString(frame->GetFrameId())
+                   perfectFilling:perfectFilling];
+  }
+
   if ([_delegate
           respondsToSelector:@selector
           (autofillController:
@@ -859,8 +994,99 @@ CWVAutofillProgressDialogType ToCWVAutofillProgressDialogType(
   }
 }
 
+#pragma mark - CRWWebFramesManagerObserver
+
+- (void)webFramesManager:(web::WebFramesManager*)webFramesManager
+    frameBecameAvailable:(web::WebFrame*)webFrame {
+  CHECK(_webState);
+  CHECK(_autofillManagerObservations);
+  if (autofill::AutofillDriverIOS* driver =
+          autofill::AutofillDriverIOS::FromWebStateAndWebFrame(_webState,
+                                                               webFrame)) {
+    autofill::AutofillManager& manager = driver->GetAutofillManager();
+    bool observed = _autofillManagerObservations->IsObservingSource(&manager);
+    // TODO(crbug.com/477633290): Cleanup check milestone.
+    // Expect -frameBecameAvailable to be only called once during the frame
+    // lifecyle.
+    CHECK(!observed, base::NotFatalUntil::M147);
+    if (!observed) {
+      _autofillManagerObservations->AddObservation(&manager);
+    }
+  }
+}
+
+#pragma mark - Callbacks from AutofillManagerObserverBridge
+
+- (void)onAfterFormSubmitted:(autofill::AutofillManager&)manager
+                    formData:(const autofill::FormData&)form {
+  // Skip immediately if the delegate doesn't handle submission to save
+  // computation.
+  if (![_delegate respondsToSelector:@selector
+                  (autofillController:
+                      didSubmitFormWithName:frameID:perfectFilling:)] &&
+      ![_delegate
+          respondsToSelector:@selector
+          (autofillController:
+              didSubmitFormWithName:frameID:userInitiated:perfectFilling:)]) {
+    return;
+  }
+
+  // Cast to AutofillDriverIOS to access the web frame which is safe because
+  // this code is exclusive to ios.
+  web::WebFrame* frame =
+      static_cast<autofill::AutofillDriverIOS&>(manager.driver()).web_frame();
+  NSString* nsFrameID =
+      frame ? base::SysUTF8ToNSString(frame->GetFrameId()) : @"";
+
+  BOOL perfectFilling = autofill::IsFormDataPerfectlyFilled(form);
+
+  if ([_delegate respondsToSelector:@selector
+                 (autofillController:
+                     didSubmitFormWithName:frameID:perfectFilling:)]) {
+    [_delegate autofillController:self
+            didSubmitFormWithName:base::SysUTF16ToNSString(form.name())
+                          frameID:nsFrameID
+                   perfectFilling:perfectFilling];
+  }
+
+  // Use YES as a dummy value for `userInitiated` since that bit
+  // isn't supported by the _delegate implementations and we can't get that
+  // information on -onAfterFormSubmitted. Also, a value of YES should cover
+  // most of the submission cases that probably consist of user initiated
+  // submissions, and note that computing that bit is based on a best guess so
+  // it isn't that reliable.
+  if ([_delegate
+          respondsToSelector:@selector
+          (autofillController:
+              didSubmitFormWithName:frameID:userInitiated:perfectFilling:)]) {
+    [_delegate autofillController:self
+            didSubmitFormWithName:base::SysUTF16ToNSString(form.name())
+                          frameID:nsFrameID
+                    userInitiated:YES
+                   perfectFilling:perfectFilling];
+  }
+}
+
+- (void)
+    onAutofillManagerStateChanged:(autofill::AutofillManager&)manager
+                             from:(autofill::AutofillManager::LifecycleState)
+                                      oldState
+                               to:(autofill::AutofillManager::LifecycleState)
+                                      newState {
+  if (newState == autofill::AutofillManager::LifecycleState::kPendingDeletion) {
+    // Stop observation when the manager is about to be deleted.
+    _autofillManagerObservations->RemoveObservation(&manager);
+  }
+}
+
 - (void)webStateDestroyed:(web::WebState*)webState {
   DCHECK_EQ(_webState, webState);
+  if (_supportXframeSubmission) {
+    autofill::AutofillJavaScriptFeature::GetInstance()
+        ->GetWebFramesManager(_webState)
+        ->RemoveObserver(_webFramesManagerObserverBridge.get());
+    _autofillManagerObservations->RemoveAllObservations();
+  }
   _formActivityObserverBridge.reset();
   _autofillClient.reset();
   _webState->RemoveObserver(_webStateObserverBridge.get());

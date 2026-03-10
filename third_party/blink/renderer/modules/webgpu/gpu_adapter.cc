@@ -282,16 +282,14 @@ ScriptPromise<GPUDevice> GPUAdapter::requestDevice(
       // If the feature is not a valid feature reject with a type error.
       if (!features_->Has(f.AsEnum())) {
         resolver->RejectWithTypeError(
-            String::Format("Unsupported feature: %s", f.AsCStr()));
+            UNSAFE_TODO(String::Format("Unsupported feature: %s", f.AsCStr())));
         return promise;
       }
       required_features_set.insert(AsDawnEnum(f));
     }
   }
 
-  Vector<wgpu::FeatureName> required_features;
-  required_features.AppendRange(required_features_set.begin(),
-                                required_features_set.end());
+  Vector<wgpu::FeatureName> required_features(required_features_set);
   dawn_desc.requiredFeatures = required_features.data();
   dawn_desc.requiredFeatureCount = required_features.size();
 

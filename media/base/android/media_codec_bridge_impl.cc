@@ -424,7 +424,7 @@ std::unique_ptr<MediaCodecBridge> MediaCodecBridgeImpl::CreateAudioDecoder(
       Java_MediaCodecBridgeBuilder_createAudioDecoder(
           env, j_mime, media_crypto, config.samples_per_second(), channel_count,
           j_csd0, j_csd1, j_csd2, output_frame_has_adts_header,
-          !!on_buffers_available_cb));
+          !on_buffers_available_cb.is_null()));
 
   if (j_bridge.is_null()) {
     return nullptr;
@@ -462,7 +462,7 @@ std::unique_ptr<MediaCodecBridge> MediaCodecBridgeImpl::CreateVideoDecoder(
           config.initial_expected_coded_size.width(),
           config.initial_expected_coded_size.height(), config.surface, j_csd0,
           j_csd1, j_hdr_metadata, /*allowAdaptivePlayback=*/true,
-          /*useAsyncApi=*/!!config.on_buffers_available_cb,
+          /*useAsyncApi=*/!config.on_buffers_available_cb.is_null(),
           /*useBlockModel=*/config.use_block_model,
           /*useLowLatencyMode=*/config.use_low_latency_mode, j_decoder_name,
           config.profile));
@@ -698,17 +698,17 @@ MediaCodecResult MediaCodecBridgeImpl::QueueSecureInputBuffer(
   const auto num_subsamples =
       std::max(static_cast<size_t>(1), decrypt_config.subsamples().size());
 
-  // Decompose SubsampleEntry objects into two jint arrays since there's no way
-  // to set the values directly into a jintArray :|
-  auto native_clear_array = base::HeapArray<jint>::Uninit(num_subsamples);
-  auto native_cypher_array = base::HeapArray<jint>::Uninit(num_subsamples);
+  // Decompose SubsampleEntry objects into two int32_t arrays since there's no
+  // way to set the values directly into a jintArray :|
+  auto native_clear_array = base::HeapArray<int32_t>::Uninit(num_subsamples);
+  auto native_cypher_array = base::HeapArray<int32_t>::Uninit(num_subsamples);
   if (decrypt_config.subsamples().empty()) {
     native_clear_array[0] = 0;
     native_cypher_array[0] = data.size();
   } else {
     for (size_t i = 0; i < decrypt_config.subsamples().size(); ++i) {
       const auto& subsamples = decrypt_config.subsamples()[i];
-      if (subsamples.cypher_bytes > std::numeric_limits<jint>::max()) {
+      if (subsamples.cypher_bytes > std::numeric_limits<int32_t>::max()) {
         return {MediaCodecResult::Codes::kError,
                 "Subsample size is too large."};
       }

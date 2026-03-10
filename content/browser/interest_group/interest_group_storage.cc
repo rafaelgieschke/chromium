@@ -59,6 +59,7 @@
 #include "sql/statement.h"
 #include "sql/statement_id.h"
 #include "sql/transaction.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/interest_group/ad_auction_constants.h"
 #include "third_party/blink/public/common/interest_group/interest_group.h"
@@ -80,15 +81,8 @@ using blink::mojom::ViewOrClickCountsPtr;
 using SellerCapabilitiesType = blink::SellerCapabilitiesType;
 using network::AdAuctionEventRecord;
 
-// Allow lookups using `std::string_view`.
-struct StringViewHasher : public std::hash<std::string_view> {
-  using is_transparent = void;
-};
-
-using InterestGroupsByName = std::unordered_map<std::string,
-                                                StorageInterestGroup,
-                                                StringViewHasher,
-                                                std::equal_to<>>;
+using InterestGroupsByName =
+    absl::flat_hash_map<std::string, StorageInterestGroup>;
 
 // The raw view and click data for a given (provider_origin, eligible_origin)
 // tuple.
@@ -275,7 +269,7 @@ std::optional<GURL> DeserializeURL(std::string_view serialized_url) {
 }
 
 blink::InterestGroup::Ad FromInterestGroupAdValue(const PassKey& passkey,
-                                                  const base::Value::Dict& dict,
+                                                  const base::DictValue& dict,
                                                   bool for_components) {
   const std::string* maybe_url = dict.FindString("url");
   if (!maybe_url) {
@@ -344,7 +338,7 @@ std::string Serialize(
   if (!flat_map) {
     return std::string();
   }
-  base::Value::Dict dict;
+  base::DictValue dict;
   for (const auto& key_value_pair : *flat_map) {
     dict.Set(key_value_pair.first, key_value_pair.second);
   }
@@ -465,7 +459,7 @@ DeserializeInterestGroupAdVectorJson(const PassKey& passkey,
   }
   std::vector<blink::InterestGroup::Ad> result;
   for (const auto& ad_value : ads_value->GetList()) {
-    const base::Value::Dict* dict = ad_value.GetIfDict();
+    const base::DictValue* dict = ad_value.GetIfDict();
     if (dict) {
       result.emplace_back(
           FromInterestGroupAdValue(passkey, *dict, for_components));
@@ -578,9 +572,9 @@ std::string Serialize(
   if (!ad_sizes) {
     return std::string();
   }
-  base::Value::Dict dict;
+  base::DictValue dict;
   for (const auto& key_value_pair : *ad_sizes) {
-    base::Value::Dict size_dict;
+    base::DictValue size_dict;
     size_dict.Set("width", key_value_pair.second.width);
     size_dict.Set("width_units",
                   static_cast<int>(key_value_pair.second.width_units));
@@ -601,7 +595,7 @@ DeserializeStringSizeMap(std::string_view serialized_sizes) {
   for (std::pair<const std::string&, base::Value&> entry : dict->GetDict()) {
     std::optional<base::Value> ads_size =
         DeserializeValue(entry.second.GetString());
-    const base::Value::Dict* size_dict = ads_size->GetIfDict();
+    const base::DictValue* size_dict = ads_size->GetIfDict();
     DCHECK(size_dict);
     const base::Value* width_val = size_dict->Find("width");
     const base::Value* width_units_val = size_dict->Find("width_units");
@@ -627,9 +621,9 @@ std::string Serialize(
   if (!size_groups) {
     return std::string();
   }
-  base::Value::Dict dict;
+  base::DictValue dict;
   for (const auto& key_value_pair : *size_groups) {
-    base::Value::List list;
+    base::ListValue list;
     for (const auto& s : key_value_pair.second) {
       list.Append(s);
     }
@@ -661,7 +655,7 @@ std::string Serialize(const std::optional<std::vector<std::string>>& strings) {
   if (!strings) {
     return std::string();
   }
-  base::Value::List list;
+  base::ListValue list;
   for (const auto& s : strings.value()) {
     list.Append(s);
   }
@@ -749,7 +743,7 @@ std::string Serialize(
   if (!flat_map) {
     return std::string();
   }
-  base::Value::Dict dict;
+  base::DictValue dict;
   for (const auto& key_value_pair : *flat_map) {
     dict.Set(Serialize(key_value_pair.first),
              base::NumberToString(Serialize(key_value_pair.second)));
@@ -4375,9 +4369,9 @@ bool DoRecordDebugReportLockout(sql::Database& db,
 
   debug_lockout.Reset(true);
   // Ceil to nearest hour to be stored in DB.
-  debug_lockout.BindInt64(0, starting_time.ToDeltaSinceWindowsEpoch()
-                                 .CeilToMultiple(base::Hours(1))
-                                 .InMicroseconds());
+  base::Time starting_time_ceil = base::Time::FromDeltaSinceWindowsEpoch(
+      starting_time.ToDeltaSinceWindowsEpoch().CeilToMultiple(base::Hours(1)));
+  debug_lockout.BindTime(0, starting_time_ceil);
   debug_lockout.BindTimeDelta(1, duration);
   return debug_lockout.Run();
 }
@@ -4467,9 +4461,9 @@ bool DoRecordDebugReportCooldown(sql::Database& db,
   debug_cooldown.Reset(true);
   debug_cooldown.BindString(0, Serialize(origin));
   // Ceil to nearest hour to be stored in DB.
-  debug_cooldown.BindInt64(1, cooldown_start.ToDeltaSinceWindowsEpoch()
-                                  .CeilToMultiple(base::Hours(1))
-                                  .InMicroseconds());
+  base::Time cooldown_start_ceil = base::Time::FromDeltaSinceWindowsEpoch(
+      cooldown_start.ToDeltaSinceWindowsEpoch().CeilToMultiple(base::Hours(1)));
+  debug_cooldown.BindTime(1, cooldown_start_ceil);
   debug_cooldown.BindInt(2, static_cast<int>(cooldown_type));
 
   return debug_cooldown.Run();

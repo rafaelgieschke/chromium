@@ -17,11 +17,9 @@
 #include "chrome/browser/optimization_guide/browser_test_util.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
+#include "chrome/browser/page_content_annotations/multi_source_page_context_fetcher.h"
 #include "chrome/browser/page_content_annotations/page_content_annotations_service_factory.h"
-#include "chrome/browser/page_content_annotations/page_content_annotations_web_contents_observer.h"
-#include "chrome/browser/page_content_annotations/page_content_extraction_service.h"
 #include "chrome/browser/page_content_annotations/page_content_extraction_service_factory.h"
-#include "chrome/browser/page_content_annotations/page_content_extraction_types.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
@@ -40,12 +38,15 @@
 #include "components/optimization_guide/core/optimization_guide_proto_util.h"
 #include "components/optimization_guide/machine_learning_tflite_buildflags.h"
 #include "components/optimization_guide/proto/page_entities_metadata.pb.h"
+#include "components/page_content_annotations/content/page_content_annotations_web_contents_observer.h"
+#include "components/page_content_annotations/content/page_content_extraction_service.h"
 #include "components/page_content_annotations/core/page_content_annotations_enums.h"
 #include "components/page_content_annotations/core/page_content_annotations_features.h"
 #include "components/page_content_annotations/core/page_content_annotations_switches.h"
+#include "components/page_content_annotations/core/page_content_extraction_types.h"
 #include "components/page_content_annotations/core/test_page_content_annotations_service.h"
 #include "components/page_content_annotations/core/test_page_content_annotator.h"
-#include "components/passage_embeddings/passage_embeddings_test_util.h"
+#include "components/passage_embeddings/core/passage_embeddings_test_util.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -87,6 +88,15 @@ class TestPageContentAnnotationsObserver
 };
 
 #endif
+
+// Generates a unique id for tab's WebContents that's sufficient for test
+// purposes.
+// TODO(crbug.com/440643544): Update if/when a usable tab ID is implemented in
+// production for all platforms.
+
+std::optional<int64_t> MakeTabId(content::WebContents* web_contents) {
+  return reinterpret_cast<int64_t>(web_contents);
+}
 
 }  // namespace
 
@@ -664,7 +674,13 @@ IN_PROC_BROWSER_TEST_F(PageContentAnnotationsServiceBrowserTest,
                       ->GetContentVisibilityScore());
   EXPECT_TRUE(
       PageContentAnnotationsWebContentsObserver::GetOrCreateForWebContents(
-          browser()->tab_strip_model()->GetActiveWebContents())
+          browser()->tab_strip_model()->GetActiveWebContents(),
+          *PageContentAnnotationsServiceFactory::GetForProfile(
+              browser()->profile()),
+          PageContentExtractionServiceFactory::GetForProfile(
+              browser()->profile()),
+          base::BindRepeating(&page_content_annotations::FetchPageContext),
+          base::BindRepeating(&MakeTabId))
           ->content_visibility_score()
           .has_value());
 }
@@ -1258,21 +1274,14 @@ class PageContentAnnotationsServiceOnDeviceCategoryClassifierTest
     PageContentAnnotationsServiceFactory::GetInstance()
         ->SetTestingFactoryAndUse(
             browser_context,
-            base::BindRepeating(
-                [](passage_embeddings::EmbedderMetadataProvider*
-                       embedder_metadata_provider,
-                   passage_embeddings::Embedder* embedder,
-                   content::BrowserContext* context)
-                    -> std::unique_ptr<KeyedService> {
-                  Profile* profile = Profile::FromBrowserContext(context);
-                  return TestPageContentAnnotationsService::Create(
-                      OptimizationGuideKeyedServiceFactory::GetForProfile(
-                          profile),
-                      HistoryServiceFactory::GetForProfile(
-                          profile, ServiceAccessType::IMPLICIT_ACCESS),
-                      embedder_metadata_provider, embedder);
-                },
-                &embedder_metadata_provider_, &embedder_));
+            base::BindRepeating([](content::BrowserContext* context)
+                                    -> std::unique_ptr<KeyedService> {
+              Profile* profile = Profile::FromBrowserContext(context);
+              return TestPageContentAnnotationsService::Create(
+                  OptimizationGuideKeyedServiceFactory::GetForProfile(profile),
+                  HistoryServiceFactory::GetForProfile(
+                      profile, ServiceAccessType::IMPLICIT_ACCESS));
+            }));
   }
 
   PageContentAnnotationsService* service() {
@@ -1309,55 +1318,7 @@ class PageContentAnnotationsServiceOnDeviceCategoryClassifierTest
   FakeEmbedder embedder_;
 };
 
-IN_PROC_BROWSER_TEST_F(
-    PageContentAnnotationsServiceOnDeviceCategoryClassifierTest,
-    EmbedderButNoRegression) {
-  NotifyEmbedderMetadata();
-
-  base::test::TestFuture<std::vector<Category>> future;
-  service()->ClassifyCategoriesForText("some text", future.GetCallback());
-  EXPECT_TRUE(future.Get().empty());
-}
-
-IN_PROC_BROWSER_TEST_F(
-    PageContentAnnotationsServiceOnDeviceCategoryClassifierTest,
-    RegressionButNoEmbedder) {
-  PushClassifierModel(
-      optimization_guide::proto::OPTIMIZATION_TARGET_EDU_CLASSIFIER);
-
-  base::test::TestFuture<std::vector<Category>> future;
-  service()->ClassifyCategoriesForText("some text", future.GetCallback());
-  EXPECT_TRUE(future.Get().empty());
-}
-
-IN_PROC_BROWSER_TEST_F(
-    PageContentAnnotationsServiceOnDeviceCategoryClassifierTest,
-    EmbedderFailed) {
-  NotifyEmbedderMetadata();
-  UpdateEmbedderStatus(
-      passage_embeddings::ComputeEmbeddingsStatus::kExecutionFailure);
-  PushClassifierModel(
-      optimization_guide::proto::OPTIMIZATION_TARGET_EDU_CLASSIFIER);
-
-  base::test::TestFuture<std::vector<Category>> future;
-  service()->ClassifyCategoriesForText("some text", future.GetCallback());
-  EXPECT_TRUE(future.Get().empty());
-}
-
-IN_PROC_BROWSER_TEST_F(
-    PageContentAnnotationsServiceOnDeviceCategoryClassifierTest,
-    Success) {
-  NotifyEmbedderMetadata();
-  PushClassifierModel(
-      optimization_guide::proto::OPTIMIZATION_TARGET_EDU_CLASSIFIER);
-
-  base::test::TestFuture<std::vector<Category>> future;
-  service()->ClassifyCategoriesForText("some text", future.GetCallback());
-  ASSERT_EQ(1u, future.Get().size());
-  EXPECT_EQ(CategoryType::kEducation, future.Get()[0].category_type);
-}
-
-#endif
+#endif  // BUILDFLAG(BUILD_WITH_TFLITE_LIB)
 
 class PageContentAnnotationsServiceContentExtractionTest
     : public InProcessBrowserTest {
@@ -1676,9 +1637,10 @@ class FakeExtractionServiceObserver
  public:
   void OnPageContentExtracted(
       content::Page& page,
-      const optimization_guide::proto::AnnotatedPageContent& page_content)
-      override {
-    page_content_future_.SetValue(page_content);
+      scoped_refptr<
+          const page_content_annotations::RefCountedAnnotatedPageContent>
+          page_content) override {
+    page_content_future_.SetValue(page_content->data);
   }
   void Wait() { EXPECT_TRUE(page_content_future_.Wait()); }
   base::test::TestFuture<optimization_guide::proto::AnnotatedPageContent>
@@ -1706,6 +1668,8 @@ IN_PROC_BROWSER_TEST_F(
   // Should have cached data for page since there was an observer registered.
   ASSERT_TRUE(service->GetExtractedPageContentAndEligibilityForPage(
       web_contents->GetPrimaryPage()));
+  ASSERT_TRUE(service->GetServerUploadEligibilityForPage(
+      web_contents->GetPrimaryPage()));
 
   service->RemoveObserver(&observer);
 
@@ -1715,6 +1679,8 @@ IN_PROC_BROWSER_TEST_F(
 
   // Make sure cached content is cleared with a new navigation.
   ASSERT_FALSE(service->GetExtractedPageContentAndEligibilityForPage(
+      web_contents->GetPrimaryPage()));
+  ASSERT_FALSE(service->GetServerUploadEligibilityForPage(
       web_contents->GetPrimaryPage()));
 }
 

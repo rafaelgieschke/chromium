@@ -13,6 +13,7 @@
 #include "base/uuid.h"
 #include "build/build_config.h"
 #include "components/signin/internal/identity_manager/account_fetcher_service.h"
+#include "components/signin/internal/identity_manager/account_info_util.h"
 #include "components/signin/internal/identity_manager/account_tracker_service.h"
 #include "components/signin/internal/identity_manager/fake_profile_oauth2_token_service.h"
 #include "components/signin/internal/identity_manager/gaia_cookie_manager_service.h"
@@ -697,7 +698,7 @@ void SimulateSuccessfulFetchOfAccountInfo(IdentityManager* identity_manager,
                                           const std::string& given_name,
                                           const std::string& locale,
                                           const std::string& picture_url) {
-  base::Value::Dict user_info;
+  base::DictValue user_info;
   user_info.Set("id", gaia.ToString());
   user_info.Set("email", email);
   user_info.Set("hd", hosted_domain);
@@ -708,7 +709,11 @@ void SimulateSuccessfulFetchOfAccountInfo(IdentityManager* identity_manager,
 
   AccountTrackerService* account_tracker_service =
       identity_manager->GetAccountTrackerService();
-  account_tracker_service->SetAccountInfoFromUserInfo(account_id, user_info);
+  std::optional<AccountInfo> account_info =
+      signin::AccountInfoFromUserInfo(user_info);
+  CHECK(account_info);
+  account_tracker_service->SetAccountInfoFromUserInfo(account_id,
+                                                      *account_info);
 
   bool managed =
       !hosted_domain.empty() && hosted_domain != kNoHostedDomainFound;

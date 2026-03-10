@@ -4,8 +4,8 @@
 
 #include "chrome/browser/ui/browser_window/public/create_browser_window.h"
 
+#include "base/android/callback_android.h"
 #include "base/android/jni_android.h"
-#include "base/android/jni_callback.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/notimplemented.h"
@@ -46,9 +46,9 @@ void CreateBrowserWindow(
           static_cast<int>(create_params.initial_show_state));
 
   // The callback will be invoked with the native pointer of the created browser
-  // window. The pointer is represented as a jlong in Java.
-  base::OnceCallback<void(jlong)> jlong_callback = base::BindOnce(
-      [](base::OnceCallback<void(BrowserWindowInterface*)> cb, jlong ptr) {
+  // window. The pointer is represented as a int64_t in Java.
+  base::OnceCallback<void(int64_t)> jlong_callback = base::BindOnce(
+      [](base::OnceCallback<void(BrowserWindowInterface*)> cb, int64_t ptr) {
         std::move(cb).Run(reinterpret_cast<BrowserWindowInterface*>(ptr));
       },
       std::move(callback));

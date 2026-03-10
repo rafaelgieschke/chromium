@@ -12,12 +12,11 @@
 #import "ios/chrome/browser/shared/ui/util/dynamic_type_util.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/banner_promo_view.h"
-#import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/toolbar_button.h"
-#import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/toolbar_button_factory.h"
+#import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/legacy_toolbar_button.h"
+#import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/legacy_toolbar_button_factory.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/toolbar_configuration.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/toolbar_tab_grid_button.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/toolbar_tab_group_state.h"
-#import "ios/chrome/browser/toolbar/legacy/ui_bundled/public/omnibox_position_util.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/public/toolbar_constants.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/public/toolbar_utils.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/toolbar_progress_bar.h"
@@ -31,14 +30,12 @@
 namespace {
 // Extra vertical spacing when the banner promo is active.
 const CGFloat kBannerPromoVerticalSpacing = 8;
-// The padding required for the X shaped cancel icon.
-const CGFloat kPaddingForXCircleCancelIcon = 20;
 }  // namespace
 
 @interface PrimaryToolbarView () <TabGroupIndicatorViewDelegate>
 
 // Factory used to create the buttons.
-@property(nonatomic, strong) ToolbarButtonFactory* buttonFactory;
+@property(nonatomic, strong) LegacyToolbarButtonFactory* buttonFactory;
 
 // ContentView of the vibrancy effect if there is one, self otherwise.
 @property(nonatomic, strong) UIView* contentView;
@@ -47,12 +44,14 @@ const CGFloat kPaddingForXCircleCancelIcon = 20;
 // should only contain ToolbarButtons. Redefined as readwrite.
 @property(nonatomic, strong, readwrite) UIStackView* leadingStackView;
 // Buttons from the leading stack view.
-@property(nonatomic, strong) NSArray<ToolbarButton*>* leadingStackViewButtons;
+@property(nonatomic, strong)
+    NSArray<LegacyToolbarButton*>* leadingStackViewButtons;
 // StackView containing the trailing buttons (relative to the location bar). It
 // should only contain ToolbarButtons. Redefined as readwrite.
 @property(nonatomic, strong, readwrite) UIStackView* trailingStackView;
 // Buttons from the trailing stack view.
-@property(nonatomic, strong) NSArray<ToolbarButton*>* trailingStackViewButtons;
+@property(nonatomic, strong)
+    NSArray<LegacyToolbarButton*>* trailingStackViewButtons;
 
 // Progress bar displayed below the toolbar, redefined as readwrite.
 @property(nonatomic, strong, readwrite) ToolbarProgressBar* progressBar;
@@ -62,21 +61,21 @@ const CGFloat kPaddingForXCircleCancelIcon = 20;
 
 #pragma mark** Buttons in the leading stack view. **
 // Button to navigate back, redefined as readwrite.
-@property(nonatomic, strong, readwrite) ToolbarButton* backButton;
+@property(nonatomic, strong, readwrite) LegacyToolbarButton* backButton;
 // Button to navigate forward, redefined as readwrite.
-@property(nonatomic, strong, readwrite) ToolbarButton* forwardButton;
+@property(nonatomic, strong, readwrite) LegacyToolbarButton* forwardButton;
 // Button to display the TabGrid, redefined as readwrite.
 @property(nonatomic, strong, readwrite) ToolbarTabGridButton* tabGridButton;
 // Button to stop the loading of the page, redefined as readwrite.
-@property(nonatomic, strong, readwrite) ToolbarButton* stopButton;
+@property(nonatomic, strong, readwrite) LegacyToolbarButton* stopButton;
 // Button to reload the page, redefined as readwrite.
-@property(nonatomic, strong, readwrite) ToolbarButton* reloadButton;
+@property(nonatomic, strong, readwrite) LegacyToolbarButton* reloadButton;
 
 #pragma mark** Buttons in the trailing stack view. **
 // Button to display the share menu, redefined as readwrite.
-@property(nonatomic, strong, readwrite) ToolbarButton* shareButton;
+@property(nonatomic, strong, readwrite) LegacyToolbarButton* shareButton;
 // Button to display the tools menu, redefined as readwrite.
-@property(nonatomic, strong, readwrite) ToolbarButton* toolsMenuButton;
+@property(nonatomic, strong, readwrite) LegacyToolbarButton* toolsMenuButton;
 
 // Button to cancel the edit of the location bar, redefined as readwrite.
 @property(nonatomic, strong, readwrite) UIButton* cancelButton;
@@ -183,7 +182,7 @@ const CGFloat kPaddingForXCircleCancelIcon = 20;
 
 #pragma mark - Public
 
-- (instancetype)initWithButtonFactory:(ToolbarButtonFactory*)factory {
+- (instancetype)initWithButtonFactory:(LegacyToolbarButtonFactory*)factory {
   self = [super initWithFrame:CGRectZero];
   if (self) {
     _buttonFactory = factory;
@@ -327,30 +326,6 @@ const CGFloat kPaddingForXCircleCancelIcon = 20;
   return _bannerPromo.intrinsicContentSize.height * progress;
 }
 
-- (void)setLocationBarHeight:(CGFloat)locationBarHeight {
-  /// Location bar height is only handled by this property in multiline omnibox.
-  CHECK(IsMultilineBrowserOmniboxEnabled(), base::NotFatalUntil::M200);
-  if (locationBarHeight == _locationBarHeight) {
-    return;
-  }
-  _locationBarHeight = locationBarHeight;
-  self.locationBarContainerHeight.constant = locationBarHeight;
-  [self invalidateIntrinsicContentSize];
-}
-
-- (void)setCancelButtonStyle:(ToolbarCancelButtonStyle)cancelButtonStyle {
-  if (cancelButtonStyle == _cancelButtonStyle) {
-    return;
-  }
-  _cancelButtonStyle = cancelButtonStyle;
-
-  if ([self initialSetUpExecuted]) {
-    [self setUpCancelButton];
-    [self setupCancelButtonConstraints];
-    [self setNeedsUpdateConstraints];
-  }
-}
-
 - (void)setExpanded:(BOOL)expanded {
   _expanded = expanded;
   [self setNeedsUpdateConstraints];
@@ -418,10 +393,6 @@ const CGFloat kPaddingForXCircleCancelIcon = 20;
   if (isTopOmnibox) {
     if (self.matchNTPHeight) {
       height += content_suggestions::FakeToolbarHeight();
-    } else if (IsMultilineBrowserOmniboxEnabled()) {
-      height += self.locationBarHeight +
-                LocationBarVerticalMargins(
-                    self.traitCollection.preferredContentSizeCategory);
     } else {
       height += ToolbarExpandedHeight(
           self.traitCollection.preferredContentSizeCategory);
@@ -465,19 +436,10 @@ const CGFloat kPaddingForXCircleCancelIcon = 20;
   self.contentView = self;
 }
 
-- (CGFloat)paddingForCancelButton {
-  if (self.cancelButtonStyle == ToolbarCancelButtonStyle::kXCircle) {
-    return kPaddingForXCircleCancelIcon;
-  }
-
-  return 0;
-}
-
 // Sets the cancel button to stop editing the location bar.
 - (void)setUpCancelButton {
   [self.cancelButton removeFromSuperview];
-  self.cancelButton =
-      [self.buttonFactory cancelButtonWithStyle:self.cancelButtonStyle];
+  self.cancelButton = [self.buttonFactory cancelButton];
   self.cancelButton.translatesAutoresizingMaskIntoConstraints = NO;
   [self addSubview:self.cancelButton];
 }
@@ -761,8 +723,7 @@ const CGFloat kPaddingForXCircleCancelIcon = 20;
       constraintEqualToAnchor:self.trailingAnchor];
   NSLayoutConstraint* lateralPaddingConstraint =
       [self.locationBarContainer.trailingAnchor
-          constraintEqualToAnchor:self.cancelButton.leadingAnchor
-                         constant:-[self paddingForCancelButton]];
+          constraintEqualToAnchor:self.cancelButton.leadingAnchor];
   // As the cancel button can dinamically be replaced, all constraints that
   // depend on it should be removed once it's no longer available.
   [_cancelButtonConstraints addObjectsFromArray:@[
@@ -816,7 +777,7 @@ const CGFloat kPaddingForXCircleCancelIcon = 20;
   self.tabGridButton.tabGroupState = tabGroupState;
 }
 
-- (NSArray<ToolbarButton*>*)allButtons {
+- (NSArray<LegacyToolbarButton*>*)allButtons {
   if (!_allButtons) {
     _allButtons = [self.leadingStackViewButtons
         arrayByAddingObjectsFromArray:self.trailingStackViewButtons];
@@ -824,7 +785,7 @@ const CGFloat kPaddingForXCircleCancelIcon = 20;
   return _allButtons;
 }
 
-- (ToolbarButton*)openNewTabButton {
+- (LegacyToolbarButton*)openNewTabButton {
   return nil;
 }
 

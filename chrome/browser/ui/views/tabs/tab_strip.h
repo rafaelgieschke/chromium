@@ -38,6 +38,7 @@
 #include "ui/views/view_model.h"
 #include "ui/views/widget/widget_observer.h"
 
+class BrowserWindowInterface;
 class Tab;
 class TabGroup;
 class TabHoverCardController;
@@ -57,9 +58,11 @@ namespace ui {
 class ListSelectionModel;
 }
 
+#include "chrome/browser/ui/tabs/tab_data.h"
+
 namespace tabs {
-enum class TabAlert;
-}  // namespace tabs
+struct TabData;
+}
 
 // A View that represents the TabStripModel. The TabStrip has the
 // following responsibilities:
@@ -71,7 +74,6 @@ enum class TabAlert;
 //    DraggedTab, focusing on tasks that require reshuffling other tabs
 //    in response to dragged tabs.
 class TabStrip : public views::View,
-                 public views::ViewObserver,
                  public views::WidgetObserver,
                  public TabContainerController,
                  public TabSlotController,
@@ -79,10 +81,18 @@ class TabStrip : public views::View,
   METADATA_HEADER(TabStrip, views::View)
 
  public:
-  explicit TabStrip(std::unique_ptr<TabStripController> controller);
+  TabStrip(std::unique_ptr<TabStripController> tab_strip_controller,
+           std::unique_ptr<TabHoverCardController> hover_card_controller);
+
   TabStrip(const TabStrip&) = delete;
   TabStrip& operator=(const TabStrip&) = delete;
   ~TabStrip() override;
+
+  // Initializes the `tab_container_` so tabs can be added to it.
+  void Initialize();
+
+  // Resets the tab strip by removing the tabs in `tab_container_` .
+  void Reset();
 
   void SetAvailableWidthCallback(
       base::RepeatingCallback<int()> available_width_callback);
@@ -125,12 +135,12 @@ class TabStrip : public views::View,
   struct AddTabData {
     int index;
     tabs::TabHandle handle;
-    TabRendererData data;
+    tabs::TabData data;
   };
   void AddTabsAt(const std::vector<AddTabData>& tabs_datas);
 
   // Moves a tab.
-  void MoveTab(int from_model_index, int to_model_index, TabRendererData data);
+  void MoveTab(int from_model_index, int to_model_index, tabs::TabData data);
 
   // Removes a tab at the specified index. If the tab with `contents` is being
   // dragged then the drag is completed.
@@ -141,7 +151,7 @@ class TabStrip : public views::View,
   void OnTabWillBeRemoved(content::WebContents* contents, int model_index);
 
   // Sets the tab data at the specified model index.
-  void SetTabData(int model_index, TabRendererData data);
+  void SetTabData(int model_index, tabs::TabData data);
 
   // Sets the tab group at the specified model index.
   void AddTabToGroup(std::optional<tab_groups::TabGroupId> group,
@@ -179,7 +189,8 @@ class TabStrip : public views::View,
   void OnGroupClosed(const tab_groups::TabGroupId& group);
 
   void OnTabGroupFocusChanged(
-      std::optional<tab_groups::TabGroupId> new_focused_group);
+      std::optional<tab_groups::TabGroupId> new_focused_group,
+      std::optional<tab_groups::TabGroupId> old_focused_group);
 
   // Updates the tab slot view split state and animates to bounds.
   void OnSplitCreated(const std::vector<int>& split_indices,
@@ -191,19 +202,8 @@ class TabStrip : public views::View,
   // Updates the tab slot view split state and animates to bounds.
   void OnSplitContentsChanged(const std::vector<int>& split_indices);
 
-  // Returns whether or not strokes should be drawn around and under the tabs.
-  bool ShouldDrawStrokes() const;
-
   // Invoked when the selection is updated.
   void SetSelection(const ui::ListSelectionModel& new_selection);
-
-  // Invoked when a tab needs to show UI that it needs the user's attention.
-  void SetTabNeedsAttention(int model_index, bool attention);
-
-  // Invoked when a tab group needs to show UI that it needs the user's
-  // attention.
-  void SetTabGroupNeedsAttention(const tab_groups::TabGroupId& id,
-                                 bool attention);
 
   // Returns the TabGroupHeader with ID `id`.
   TabGroupHeader* group_header(const tab_groups::TabGroupId& id) const {
@@ -217,9 +217,6 @@ class TabStrip : public views::View,
   // std::nullopt if view is closing not a tab, or is not in this tabstrip.
   // TODO(tbergquist): This should return an optional<size_t>.
   std::optional<int> GetModelIndexOf(const TabSlotView* view) const;
-
-  // Gets the number of Tabs in the tab strip.
-  int GetTabCount() const;
 
   // Cover method for TabStripController::GetCount.
   int GetModelCount() const;
@@ -240,7 +237,7 @@ class TabStrip : public views::View,
   views::View* GetDefaultFocusableChild();
 
   // The browser window interface for the hosting browser.
-  BrowserWindowInterface* GetBrowserWindowInterface();
+  BrowserWindowInterface* GetBrowserWindowInterface() const;
 
   // TabContainerController:
   bool IsValidModelIndex(int index) const override;
@@ -285,10 +282,10 @@ class TabStrip : public views::View,
   void ShowContextMenuForTab(Tab* tab,
                              const gfx::Point& p,
                              ui::mojom::MenuSourceType source_type) override;
+  void TabKeyboardFocusChangedTo(const tabs::TabInterface* tab) override;
+  int GetTabCount() const override;
   bool IsActiveTab(const TabSlotView* tab) const override;
   bool IsTabSelected(const TabSlotView* tab) const override;
-  bool IsTabPinned(const TabSlotView* tab) const override;
-  bool IsTabFirst(const TabSlotView* tab) const override;
   bool IsFocusInTabs() const override;
   bool ShouldCompactLeadingEdge() const override;
 
@@ -309,11 +306,8 @@ class TabStrip : public views::View,
   void HideHover(Tab* tab, TabStyle::HideHoverStyle style) override;
   int GetStrokeThickness() const override;
   bool CanPaintThrobberToLayer() const override;
-  bool HasVisibleBackgroundTabShapes() const override;
   SkColor GetTabSeparatorColor() const override;
   std::u16string GetAccessibleTabName(const Tab* tab) const override;
-  std::optional<int> GetCustomBackgroundId(
-      BrowserFrameActiveState active_state) const override;
   float GetHoverOpacityForTab(float range_parameter) const override;
   float GetHoverOpacityForRadialHighlight() const override;
   std::u16string GetGroupTitle(
@@ -327,10 +321,7 @@ class TabStrip : public views::View,
   void ShiftGroupLeft(const tab_groups::TabGroupId& group) override;
   void ShiftGroupRight(const tab_groups::TabGroupId& group) override;
   Browser* GetBrowser() override;
-  bool IsFrameCondensed() const override;
-#if BUILDFLAG(IS_CHROMEOS)
-  bool IsLockedForOnTask() override;
-#endif
+  BrowserWindowInterface* GetBrowserWindowInterface() override;
 
   // views::View:
   views::SizeBounds GetAvailableSize(const View* child) const override;
@@ -417,10 +408,6 @@ class TabStrip : public views::View,
   // ui::EventHandler:
   void OnGestureEvent(ui::GestureEvent* event) override;
 
-  // views::ViewObserver:
-  void OnViewFocused(views::View* observed_view) override;
-  void OnViewBlurred(views::View* observed_view) override;
-
   // views::WidgetObserver:
   void OnWidgetActivationChanged(views::Widget* widget, bool active) override;
 
@@ -441,7 +428,7 @@ class TabStrip : public views::View,
   raw_ref<TabDragContextImpl, AcrossTasksDanglingUntriaged> drag_context_;
 
   // The View parent for the tabs and the various group views.
-  raw_ref<TabContainer, AcrossTasksDanglingUntriaged> tab_container_;
+  raw_ptr<TabContainer, AcrossTasksDanglingUntriaged> tab_container_;
 
   // Location of the mouse at the time of the last move.
   gfx::Point last_mouse_move_location_;
@@ -455,19 +442,6 @@ class TabStrip : public views::View,
   // Used to track if the time from mouse entered to tab switch has been
   // reported.
   bool has_reported_time_mouse_entered_to_switch_ = false;
-
-  // Used to track if the tab dragging metrics have been reported.
-  bool has_reported_tab_drag_metrics_ = false;
-
-  // Used to track the time of last tab dragging.
-  std::optional<base::TimeTicks> last_tab_drag_time_;
-
-  // Used to count the number of tab dragging in the last 30 minutes and 5
-  // minutes.
-  int tab_drag_count_30min_ = 0;
-  int tab_drag_count_5min_ = 0;
-  std::unique_ptr<base::RepeatingTimer> tab_drag_count_timer_30min_;
-  std::unique_ptr<base::RepeatingTimer> tab_drag_count_timer_5min_;
 
   const raw_ptr<const TabStyle> style_;
 

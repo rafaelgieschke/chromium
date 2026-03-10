@@ -6,7 +6,7 @@
 
 #import "base/strings/sys_string_conversions.h"
 #import "build/branding_buildflags.h"
-#import "ios/chrome/browser/intelligence/bwg/utils/bwg_constants.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/intelligence/page_action_menu/ui/page_action_menu_feature.h"
 #import "ios/chrome/browser/intelligence/page_action_menu/ui/page_action_menu_mutator.h"
@@ -77,7 +77,7 @@ const CGFloat kIconContainerSize = 32;
 const CGFloat kReaderModeContentStackHorizontalPadding = 16;
 
 // The vertical padding for the reader mode content stack.
-const CGFloat kReaderModeContentStackVerticalPadding = 10;
+const CGFloat kReaderModeContentStackVerticalPadding = 12;
 
 // The minimum height for feature rows in the Page Action Menu.
 const CGFloat kFeatureRowHeight = 56;
@@ -182,7 +182,8 @@ const CGFloat kDividerWidth = 1.0;
       IDS_IOS_AI_HUB_READER_MODE_OPTIONS_FONT_LABEL, fontFamilyString);
 }
 
-- (void)setSelectedTheme:(dom_distiller::mojom::Theme)theme {
+- (void)setSelectedTheme:(dom_distiller::mojom::Theme)theme
+              fromSource:(dom_distiller::ThemeSettingsUpdateSource)source {
   // Nothing to do.
 }
 
@@ -290,9 +291,9 @@ const CGFloat kDividerWidth = 1.0;
   titleLabel.text = l10n_util::GetNSString(IDS_IOS_AI_HUB_READER_MODE_LABEL);
   titleLabel.font = PreferredFontForTextStyle(UIFontTextStyleSubheadline,
                                               UIFontWeightRegular);
-  titleLabel.adjustsFontForContentSizeCategory = YES;
-  titleLabel.maximumContentSizeCategory = UIContentSizeCategoryExtraExtraLarge;
   titleLabel.textColor = [UIColor colorNamed:kTextPrimaryColor];
+  titleLabel.adjustsFontForContentSizeCategory = YES;
+  titleLabel.numberOfLines = 0;
   UIStackView* labelStack = [[UIStackView alloc] initWithArrangedSubviews:@[
     titleLabel, self.readerModeOptionsButtonSubtitleLabel
   ]];
@@ -301,11 +302,7 @@ const CGFloat kDividerWidth = 1.0;
   [buttonContentStack addArrangedSubview:labelStack];
 
   // Add trailing icon.
-  UIImageView* trailingIcon = [[UIImageView alloc]
-      initWithImage:DefaultSymbolWithPointSize(kChevronRightSymbol,
-                                               kSmallButtonIconSize)];
-  trailingIcon.translatesAutoresizingMaskIntoConstraints = NO;
-  trailingIcon.tintColor = [UIColor colorNamed:kTextSecondaryColor];
+  UIImageView* trailingIcon = [self createNavigationChevron];
   [buttonContentStack addArrangedSubview:trailingIcon];
 
   // Create button with `buttonContentStack` as content.
@@ -340,9 +337,8 @@ const CGFloat kDividerWidth = 1.0;
       PreferredFontForTextStyle(UIFontTextStyleFootnote, UIFontWeightRegular);
   label.textColor = [UIColor colorNamed:kTextSecondaryColor];
   label.lineBreakMode = NSLineBreakByWordWrapping;
-  label.numberOfLines = 0;
   label.adjustsFontForContentSizeCategory = YES;
-  label.maximumContentSizeCategory = UIContentSizeCategoryExtraExtraLarge;
+  label.numberOfLines = 0;
 
   _readerModeOptionsButtonSubtitleLabel = label;
   return _readerModeOptionsButtonSubtitleLabel;
@@ -461,6 +457,11 @@ const CGFloat kDividerWidth = 1.0;
   ChromeButton* button =
       [[ChromeButton alloc] initWithStyle:ChromeButtonStylePrimary];
 
+  // Override glassButtonConfiguration/prominentGlassButtonConfiguration
+  // to prevent wrong icon tinting.
+  if (@available(iOS 26.1, *)) {
+    button.configuration = [UIButtonConfiguration filledButtonConfiguration];
+  }
   // Create the background config.
   UIBackgroundConfiguration* backgroundConfig = button.configuration.background;
   backgroundConfig.backgroundColor = [UIColor colorNamed:kBlue600Color];
@@ -484,6 +485,8 @@ const CGFloat kDividerWidth = 1.0;
   [string addAttributes:titleAttributes range:NSMakeRange(0, string.length)];
   buttonConfiguration.attributedTitle = string;
   button.configuration = buttonConfiguration;
+  button.titleLabel.adjustsFontForContentSizeCategory = YES;
+  button.titleLabel.numberOfLines = 0;
 
   button.translatesAutoresizingMaskIntoConstraints = NO;
   button.accessibilityIdentifier = kAIHubAskGeminiButtonAccessibilityIdentifier;
@@ -572,8 +575,9 @@ const CGFloat kDividerWidth = 1.0;
   RecordAIHubAction(IOSAIHubAction::kGemini);
   PageActionMenuViewController* __weak weakSelf = self;
   [self.pageActionMenuHandler dismissPageActionMenuWithCompletion:^{
-    [weakSelf.BWGHandler
-        startGeminiFlowWithEntryPoint:gemini::EntryPoint::AIHub];
+    [weakSelf.BWGHandler startGeminiFlowWithStartupState:
+                             [[GeminiStartupState alloc]
+                                 initWithEntryPoint:gemini::EntryPoint::AIHub]];
   }];
 }
 
@@ -680,7 +684,7 @@ const CGFloat kDividerWidth = 1.0;
   if ([self.mutator isReaderModeActive]) {
     UIView* originalReaderModeSection = [self createReaderModeActiveSection];
     [_contentStackView addArrangedSubview:originalReaderModeSection];
-    [_contentStackView setCustomSpacing:kStackViewMargins
+    [_contentStackView setCustomSpacing:kFeatureRowVerticalPadding
                               afterView:originalReaderModeSection];
   }
 
@@ -695,29 +699,31 @@ const CGFloat kDividerWidth = 1.0;
   }
 
   // Horizontal stack view for the side-by-side buttons.
-  _smallButtonsStackView = [self createSmallButtonsStackView];
-  [_contentStackView addArrangedSubview:_smallButtonsStackView];
-  [_contentStackView setCustomSpacing:kStackViewMargins
-                            afterView:_smallButtonsStackView];
+  if ([self.mutator shouldShowFeatureEntryPoints]) {
+    _smallButtonsStackView = [self createSmallButtonsStackView];
+    [_contentStackView addArrangedSubview:_smallButtonsStackView];
+    [_contentStackView setCustomSpacing:kStackViewMargins
+                              afterView:_smallButtonsStackView];
 
-  // If Reader Mode is available but inactive, we use a 3-button UI. Otherwise,
-  // we just show the `buttonsStackView`, with an additional Reader mode section
-  // (above) if Reader mode is available and active.
-  if (IsReaderModeAvailable() && ![self.mutator isReaderModeActive]) {
-    // Adds the large Gemini entry point button.
-    _BWGButton = [self createBWGButton];
-    [_contentStackView addArrangedSubview:_BWGButton];
+    // If Reader Mode is available but inactive, we use a 3-button UI.
+    // Otherwise, we just show the `buttonsStackView`, with an additional Reader
+    // mode section (above) if Reader mode is available and active.
+    if (IsReaderModeAvailable() && ![self.mutator isReaderModeActive]) {
+      // Adds the large Gemini entry point button.
+      _BWGButton = [self createBWGButton];
+      [_contentStackView addArrangedSubview:_BWGButton];
 
-    [NSLayoutConstraint activateConstraints:@[
-      [_BWGButton.heightAnchor
-          constraintGreaterThanOrEqualToConstant:kLargeButtonHeight],
-    ]];
+      [NSLayoutConstraint activateConstraints:@[
+        [_BWGButton.heightAnchor
+            constraintGreaterThanOrEqualToConstant:kLargeButtonHeight],
+      ]];
+    }
   }
 }
 
 // Sets up Auto Layout constraints for scroll view and content stack.
 - (void)setupConstraints {
-  [NSLayoutConstraint activateConstraints:@[
+  NSMutableArray* constraints = [NSMutableArray arrayWithArray:@[
     // Scroll view constraints.
     [_scrollView.topAnchor
         constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor
@@ -741,9 +747,15 @@ const CGFloat kDividerWidth = 1.0;
         constraintEqualToAnchor:_scrollView.bottomAnchor],
     [_contentStackView.widthAnchor
         constraintEqualToAnchor:_scrollView.widthAnchor],
-    [_smallButtonsStackView.heightAnchor
-        constraintGreaterThanOrEqualToConstant:kSmallButtonHeight],
   ]];
+
+  if (_smallButtonsStackView) {
+    [constraints addObject:[_smallButtonsStackView.heightAnchor
+                               constraintGreaterThanOrEqualToConstant:
+                                   kSmallButtonHeight]];
+  }
+
+  [NSLayoutConstraint activateConstraints:constraints];
 }
 
 // Rebuilds feature rows based on current availability state.
@@ -777,7 +789,7 @@ const CGFloat kDividerWidth = 1.0;
     lastView = explanation;
   }
 
-  if (lastView) {
+  if (lastView && [self.mutator shouldShowFeatureEntryPoints]) {
     UIView* divider =
         [self createDividerWithOrientation:UILayoutConstraintAxisHorizontal];
     [_featureRowsStackView addArrangedSubview:divider];
@@ -813,7 +825,7 @@ const CGFloat kDividerWidth = 1.0;
 // Creates a navigation chevron icon.
 - (UIImageView*)createNavigationChevron {
   UIImageView* chevronIcon = [[UIImageView alloc]
-      initWithImage:DefaultSymbolWithPointSize(kChevronRightSymbol,
+      initWithImage:DefaultSymbolWithPointSize(kChevronForwardSymbol,
                                                kSmallButtonIconSize)];
   chevronIcon.translatesAutoresizingMaskIntoConstraints = NO;
   chevronIcon.tintColor = [UIColor colorNamed:kTextQuaternaryColor];
@@ -823,14 +835,14 @@ const CGFloat kDividerWidth = 1.0;
 // Registers for trait collection changes to handle device orientation updates.
 - (void)setupTraitChangeHandling {
   __weak PageActionMenuViewController* weakSelf = self;
-  NSArray<UITrait>* traits = TraitCollectionSetForTraits(
-      @[ UITraitHorizontalSizeClass.class, UITraitVerticalSizeClass.class ]);
-  [self registerForTraitChanges:traits
-                    withHandler:^(id<UITraitEnvironment> traitEnvironment,
-                                  UITraitCollection* previousCollection) {
-                      [weakSelf updateLensAvailability:traitEnvironment
-                                                           .traitCollection];
-                    }];
+  [self
+      registerForTraitChanges:
+          @[ UITraitHorizontalSizeClass.class, UITraitVerticalSizeClass.class ]
+                  withHandler:^(id<UITraitEnvironment> traitEnvironment,
+                                UITraitCollection* previousCollection) {
+                    [weakSelf updateLensAvailability:traitEnvironment
+                                                         .traitCollection];
+                  }];
 }
 
 // Creates UI view for a single feature row based on the provided feature data.
@@ -866,6 +878,8 @@ const CGFloat kDividerWidth = 1.0;
   titleLabel.font = PreferredFontForTextStyle(UIFontTextStyleSubheadline,
                                               UIFontWeightRegular);
   titleLabel.textColor = [UIColor colorNamed:kTextPrimaryColor];
+  titleLabel.adjustsFontForContentSizeCategory = YES;
+  titleLabel.numberOfLines = 0;
   [labelsStack addArrangedSubview:titleLabel];
 
   if (feature.subtitle && feature.subtitle.length > 0) {
@@ -874,6 +888,8 @@ const CGFloat kDividerWidth = 1.0;
     subtitleLabel.font =
         PreferredFontForTextStyle(UIFontTextStyleFootnote, UIFontWeightRegular);
     subtitleLabel.textColor = [UIColor colorNamed:kTextSecondaryColor];
+    subtitleLabel.adjustsFontForContentSizeCategory = YES;
+    subtitleLabel.numberOfLines = 0;
     [labelsStack addArrangedSubview:subtitleLabel];
   }
 
@@ -898,29 +914,87 @@ const CGFloat kDividerWidth = 1.0;
       break;
     }
     case PageActionMenuButtonAction: {
-      if (feature.actionText && feature.actionText.length > 0) {
-        UIButton* actionButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        [actionButton setTitle:feature.actionText
-                      forState:UIControlStateNormal];
-        actionButton.titleLabel.font = PreferredFontForTextStyle(
-            UIFontTextStyleSubheadline, UIFontWeightMedium);
-        [actionButton setTitleColor:[UIColor colorNamed:kBlue600Color]
-                           forState:UIControlStateNormal];
-        actionButton.tag = feature.featureType;
-        [actionButton addTarget:self
-                         action:@selector(handleFeatureButton:)
-               forControlEvents:UIControlEventTouchUpInside];
-        [stackView addArrangedSubview:actionButton];
+      if (feature.featureType == PageActionMenuPriceTracking) {
+        UIStackView* accessoryStack = [[UIStackView alloc] init];
+        accessoryStack.translatesAutoresizingMaskIntoConstraints = NO;
+        accessoryStack.axis = UILayoutConstraintAxisHorizontal;
+        accessoryStack.alignment = UIStackViewAlignmentCenter;
+        accessoryStack.spacing = 8.0;
+        [accessoryStack
+            setContentHuggingPriority:UILayoutPriorityDefaultHigh + 1
+                              forAxis:UILayoutConstraintAxisHorizontal];
 
-        // Add chevron for price tracking.
-        if (feature.featureType == PageActionMenuPriceTracking) {
-          UIImageView* chevronIcon = [self createNavigationChevron];
-          [stackView addArrangedSubview:chevronIcon];
-          actionButton.accessibilityLabel = l10n_util::GetNSString(
-              IDS_IOS_AI_HUB_OPEN_PRICE_TRACKING_ACCESSIBILITY_LABEL);
-        } else if (feature.featureType == PageActionMenuPopupBlocker) {
-          actionButton.accessibilityLabel = l10n_util::GetNSString(
-              IDS_IOS_AI_HUB_ALWAYS_SHOW_POPUPS_ACCESSIBILITY_LABEL);
+        if (feature.actionText && feature.actionText.length > 0) {
+          UILabel* trackingLabel = [[UILabel alloc] init];
+          trackingLabel.text = feature.actionText;
+          trackingLabel.font = PreferredFontForTextStyle(
+              UIFontTextStyleSubheadline, UIFontWeightMedium);
+          trackingLabel.textColor = [UIColor colorNamed:kTextSecondaryColor];
+          trackingLabel.adjustsFontForContentSizeCategory = YES;
+          trackingLabel.numberOfLines = 0;
+          trackingLabel.textAlignment = NSTextAlignmentRight;
+          [trackingLabel
+              setContentHuggingPriority:UILayoutPriorityRequired
+                                forAxis:UILayoutConstraintAxisHorizontal];
+          [accessoryStack addArrangedSubview:trackingLabel];
+        }
+
+        UIImageView* chevronIcon = [self createNavigationChevron];
+        UIButton* chevronButton = [UIButton buttonWithType:UIButtonTypeCustom];
+        chevronButton.translatesAutoresizingMaskIntoConstraints = NO;
+        [chevronButton addSubview:chevronIcon];
+
+        [NSLayoutConstraint activateConstraints:@[
+          [chevronIcon.centerXAnchor
+              constraintEqualToAnchor:chevronButton.centerXAnchor],
+          [chevronIcon.centerYAnchor
+              constraintEqualToAnchor:chevronButton.centerYAnchor],
+          [chevronButton.widthAnchor
+              constraintEqualToConstant:chevronIcon.intrinsicContentSize.width],
+          [chevronButton.heightAnchor
+              constraintEqualToConstant:chevronIcon.intrinsicContentSize.height]
+        ]];
+
+        [chevronButton
+            setContentHuggingPriority:UILayoutPriorityRequired
+                              forAxis:UILayoutConstraintAxisHorizontal];
+        [chevronButton
+            setContentHuggingPriority:UILayoutPriorityRequired
+                              forAxis:UILayoutConstraintAxisVertical];
+
+        // Set accessibility label based on subscription status.
+        chevronButton.accessibilityLabel =
+            feature.actionText
+                ? l10n_util::GetNSString(
+                      IDS_IOS_AI_HUB_OPEN_PRICE_TRACKING_ACCESSIBILITY_LABEL)
+                : l10n_util::GetNSString(
+                      IDS_IOS_AI_HUB_OPEN_PRICE_TRACK_ACCESSIBILITY_LABEL);
+
+        chevronButton.tag = feature.featureType;
+        [chevronButton addTarget:self
+                          action:@selector(handleFeatureButton:)
+                forControlEvents:UIControlEventTouchUpInside];
+        [accessoryStack addArrangedSubview:chevronButton];
+        [stackView addArrangedSubview:accessoryStack];
+      } else {
+        if (feature.actionText && feature.actionText.length > 0) {
+          UIButton* actionButton = [UIButton buttonWithType:UIButtonTypeSystem];
+          [actionButton setTitle:feature.actionText
+                        forState:UIControlStateNormal];
+          actionButton.titleLabel.font = PreferredFontForTextStyle(
+              UIFontTextStyleSubheadline, UIFontWeightMedium);
+          [actionButton setTitleColor:[UIColor colorNamed:kBlue600Color]
+                             forState:UIControlStateNormal];
+          actionButton.tag = feature.featureType;
+          [actionButton addTarget:self
+                           action:@selector(handleFeatureButton:)
+                 forControlEvents:UIControlEventTouchUpInside];
+          [stackView addArrangedSubview:actionButton];
+
+          if (feature.featureType == PageActionMenuPopupBlocker) {
+            actionButton.accessibilityLabel = l10n_util::GetNSString(
+                IDS_IOS_AI_HUB_ALWAYS_SHOW_POPUPS_ACCESSIBILITY_LABEL);
+          }
         }
       }
       break;
@@ -968,6 +1042,7 @@ const CGFloat kDividerWidth = 1.0;
   label.font =
       PreferredFontForTextStyle(UIFontTextStyleFootnote, UIFontWeightRegular);
   label.textColor = [UIColor colorNamed:kTextSecondaryColor];
+  label.adjustsFontForContentSizeCategory = YES;
   label.numberOfLines = 0;
   label.textAlignment = NSTextAlignmentLeft;
   return label;
@@ -1096,6 +1171,8 @@ const CGFloat kDividerWidth = 1.0;
   titleLabel.font = PreferredFontForTextStyle(UIFontTextStyleSubheadline,
                                               UIFontWeightRegular);
   titleLabel.textColor = [UIColor colorNamed:kTextPrimaryColor];
+  titleLabel.adjustsFontForContentSizeCategory = YES;
+  titleLabel.numberOfLines = 0;
   [labelsStack addArrangedSubview:titleLabel];
 
   if (feature.subtitle && feature.subtitle.length > 0) {
@@ -1104,6 +1181,8 @@ const CGFloat kDividerWidth = 1.0;
     subtitleLabel.font =
         PreferredFontForTextStyle(UIFontTextStyleFootnote, UIFontWeightRegular);
     subtitleLabel.textColor = [UIColor colorNamed:kTextSecondaryColor];
+    subtitleLabel.adjustsFontForContentSizeCategory = YES;
+    subtitleLabel.numberOfLines = 0;
     [labelsStack addArrangedSubview:subtitleLabel];
   }
 

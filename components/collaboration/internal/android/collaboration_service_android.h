@@ -9,6 +9,7 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/memory/raw_ptr.h"
 #include "base/supports_user_data.h"
+#include "components/collaboration/internal/core_jni_headers/CollaborationServiceImpl_shared_jni.h"
 #include "components/collaboration/public/collaboration_service.h"
 
 namespace collaboration {
@@ -24,22 +25,22 @@ class CollaborationServiceAndroid : public base::SupportsUserData::Data,
   // CollaborationService Java API methods, implemented by native service:
   bool IsEmptyService(JNIEnv* env);
   void StartJoinFlow(JNIEnv* env,
-                     jlong delegate,
+                     int64_t delegate,
                      const base::android::JavaRef<jobject>& j_url);
   void StartShareOrManageFlow(
       JNIEnv* env,
-      jlong delegate,
+      int64_t delegate,
       const base::android::JavaRef<jstring>& j_sync_group_id,
       const base::android::JavaRef<jobject>& j_local_group_id,
-      jint entry);
+      int32_t entry);
   void StartLeaveOrDeleteFlow(
       JNIEnv* env,
-      jlong delegate,
+      int64_t delegate,
       const base::android::JavaRef<jstring>& j_sync_group_id,
       const base::android::JavaRef<jobject>& j_local_group_id,
-      jint entry);
+      int32_t entry);
   base::android::ScopedJavaLocalRef<jobject> GetServiceStatus(JNIEnv* env);
-  jint GetCurrentUserRoleForGroup(
+  int32_t GetCurrentUserRoleForGroup(
       JNIEnv* env,
       const base::android::JavaRef<jstring>& group_id);
   jni_zero::ScopedJavaLocalRef<jobject> GetGroupData(
@@ -61,7 +62,7 @@ class CollaborationServiceAndroid : public base::SupportsUserData::Data,
  private:
   // A reference to the Java counterpart of this class.  See
   // CollaborationServiceImpl.java.
-  base::android::ScopedJavaGlobalRef<jobject> java_obj_;
+  base::android::ScopedJavaGlobalRef<JCollaborationServiceImpl> java_obj_;
 
   // Not owned.
   raw_ptr<CollaborationService> collaboration_service_;

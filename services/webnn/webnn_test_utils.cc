@@ -6,8 +6,6 @@
 
 #include <limits.h>
 
-#include "base/check_is_test.h"
-#include "base/command_line.h"
 #include "base/test/test_future.h"
 #include "base/unguessable_token.h"
 #include "services/webnn/public/cpp/context_properties.h"
@@ -595,7 +593,6 @@ ContextProperties GetContextPropertiesForTesting() {
        /*cumulative_sum_input=*/{DataTypeConstraint::kFloat16To32, kMaxRank},
        /*dequantize_linear_input=*/{SupportedDataTypes::All(), kMaxRank},
        /*dequantize_linear_scale=*/{SupportedDataTypes::All(), kMaxRank},
-       /*dequantize_linear_zero_point=*/{SupportedDataTypes::All(), kMaxRank},
        /*add_input=*/{SupportedDataTypes::All(), kMaxRank},
        /*sub_input=*/{SupportedDataTypes::All(), kMaxRank},
        /*mul_input=*/{SupportedDataTypes::All(), kMaxRank},
@@ -714,11 +711,6 @@ ContextProperties GetContextPropertiesForTesting() {
        {SupportedDataTypes::All(), kMaxRank},
        /*where_condition=*/{SupportedDataTypes::All(), kMaxRank},
        /*where_value=*/{SupportedDataTypes::All(), kMaxRank}}));
-}
-
-bool UseGPUInTests() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kUseGpuInTests);
 }
 
 }  // namespace webnn

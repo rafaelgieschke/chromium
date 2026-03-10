@@ -6,10 +6,12 @@ import 'chrome://updater/event_list/event_list.js';
 
 import type {CrButtonElement} from '//resources/cr_elements/cr_button/cr_button.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
+import {PluralStringProxyImpl} from 'chrome://resources/js/plural_string_proxy.js';
 import type {EventListElement} from 'chrome://updater/event_list/event_list.js';
 import type {EventListItemElement} from 'chrome://updater/event_list/event_list_item.js';
-import {assertEquals, assertFalse, assertStringContains, assertTrue} from 'chrome://webui-test/chai_assert.js';
-import {microtasksFinished} from 'chrome://webui-test/test_util.js';
+import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {TestPluralStringProxy} from 'chrome://webui-test/test_plural_string_proxy.js';
+import {microtasksFinished, whenCheck} from 'chrome://webui-test/test_util.js';
 
 suite('EventListElement', () => {
   let element: EventListElement;
@@ -26,6 +28,7 @@ suite('EventListElement', () => {
 
   setup(async () => {
     document.body.innerHTML = window.trustedTypes!.emptyHTML;
+    PluralStringProxyImpl.setInstance(new TestPluralStringProxy());
     element = document.createElement('event-list');
     clearFilters();
     document.body.appendChild(element);
@@ -88,6 +91,11 @@ suite('EventListElement', () => {
     const items = element.shadowRoot.querySelectorAll('event-list-item');
     assertEquals(2, items.length);
     assertEquals('INSTALL', items[0]!.event?.eventType);
+
+    assertFalse(
+        !!element.shadowRoot.querySelector('.events-without-dates-label'));
+    assertFalse(
+        !!element.shadowRoot.querySelector('.events-with-parse-errors-label'));
   });
 
   test('handles parse errors', async () => {
@@ -98,8 +106,10 @@ suite('EventListElement', () => {
     element.messages = messages;
     await microtasksFinished();
 
-    assertEquals(
-        1, element.shadowRoot.querySelectorAll('raw-event-details').length);
+    return whenCheck(
+        element,
+        () => element.shadowRoot.querySelector(
+                  '.events-with-parse-errors-label') !== null);
   });
 
   test('handles events without dates', async () => {
@@ -117,8 +127,10 @@ suite('EventListElement', () => {
     element.messages = messages;
     await microtasksFinished();
 
-    assertEquals(
-        1, element.shadowRoot.querySelectorAll('raw-event-details').length);
+    return whenCheck(
+        element,
+        () => element.shadowRoot.querySelector(
+                  '.events-without-dates-label') !== null);
   });
 
   test('filters events', async () => {
@@ -276,97 +288,5 @@ suite('EventListElement', () => {
             .every(item => item.expanded));
     assertEquals(
         loadTimeData.getString('expandAll'), expandButton.textContent.trim());
-  });
-
-  test('displays list breaks', async () => {
-    const messages = [
-      {
-        'eventType': 'UPDATER_PROCESS',
-        'eventId': 'p1',
-        'deviceUptime': '0',
-        'pid': '100',
-        'processToken': 'token1',
-        'bound': 'START',
-        'timestamp': '13410446400000000',  // '2025-12-17T12:00:00Z'
-      },
-      {
-        'eventType': 'UPDATER_PROCESS',
-        'eventId': 'p1',
-        'deviceUptime': '182165200000',
-        'pid': '100',
-        'processToken': 'token1',
-        'bound': 'END',
-        'exitCode': '0',
-      },
-      {
-        'eventType': 'INSTALL',
-        'eventId': '1',
-        'deviceUptime': '1000',
-        'pid': '100',
-        'processToken': 'token1',
-        'bound': 'START',
-        'appId': '{app1}',
-      },
-      {
-        'eventType': 'INSTALL',
-        'eventId': '1',
-        'deviceUptime': '2000',
-        'pid': '100',
-        'processToken': 'token1',
-        'bound': 'END',
-        'version': '1.0',
-      },
-      // Second process more than 1 hour later
-      {
-        'eventType': 'UPDATER_PROCESS',
-        'eventId': 'p2',
-        'deviceUptime': '0',
-        'pid': '200',
-        'processToken': 'token2',
-        'bound': 'START',
-        'timestamp': '13410453600000000',  // 2025-12-17T14:00:00Z
-      },
-      {
-        'eventType': 'UPDATER_PROCESS',
-        'eventId': 'p2',
-        'deviceUptime': '182165200000',
-        'pid': '200',
-        'processToken': 'token2',
-        'bound': 'END',
-        'exitCode': '0',
-      },
-      {
-        'eventType': 'INSTALL',
-        'eventId': '2',
-        'deviceUptime': '1000',
-        'pid': '200',
-        'processToken': 'token2',
-        'bound': 'START',
-        'appId': '{app2}',
-      },
-      {
-        'eventType': 'INSTALL',
-        'eventId': '2',
-        'deviceUptime': '2000',
-        'pid': '200',
-        'processToken': 'token2',
-        'bound': 'END',
-        'version': '2.0',
-      },
-    ];
-
-    element.messages = messages;
-    await microtasksFinished();
-
-    const items = element.shadowRoot.querySelectorAll('event-list-item');
-    assertEquals(4, items.length);
-
-    const listBreaks = element.shadowRoot.querySelectorAll('.event-list-break');
-    assertEquals(1, listBreaks.length);
-
-    const label =
-        listBreaks[0]!.querySelector('.event-list-break-label')!.textContent;
-    const p1Date = new Date('2025-12-17T12:00:00Z');
-    assertStringContains(label, p1Date.toLocaleString());
   });
 });

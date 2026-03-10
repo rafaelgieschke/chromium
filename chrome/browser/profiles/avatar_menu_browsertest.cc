@@ -9,6 +9,8 @@
 
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
+#include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_test_util.h"
 #include "chrome/browser/profiles/profile_window.h"
@@ -86,11 +88,15 @@ IN_PROC_BROWSER_TEST_F(AvatarMenuBrowserTest, EditProfile) {
 // Click on "Edit" will open a new browser if none exists for a profile.
 IN_PROC_BROWSER_TEST_F(AvatarMenuBrowserTest, EditProfile_NoBrowser) {
   // Keep the browser process running while browsers are closed.
+  Profile* profile = browser()->profile();
   ScopedKeepAlive keep_alive(KeepAliveOrigin::BROWSER,
                              KeepAliveRestartOption::DISABLED);
-  Profile* profile = browser()->profile();
+  ScopedProfileKeepAlive profile_keep_alive(
+      profile, ProfileKeepAliveOrigin::kBrowserWindow);
+
+  ui_test_utils::BrowserDestroyedObserver observer(browser());
   chrome::CloseAllBrowsersWithProfile(profile);
-  ui_test_utils::WaitForBrowserToClose(browser());
+  observer.Wait();
   EXPECT_EQ(chrome::GetBrowserCount(profile), 0U);
 
   std::optional<size_t> active_profile_index = menu()->GetActiveProfileIndex();
@@ -124,8 +130,11 @@ IN_PROC_BROWSER_TEST_F(AvatarMenuBrowserTest, EditProfile_SigninRequired) {
   // Keep the browser process running while browsers are closed.
   ScopedKeepAlive keep_alive(KeepAliveOrigin::BROWSER,
                              KeepAliveRestartOption::DISABLED);
+  ScopedProfileKeepAlive profile_keep_alive(
+      profile, ProfileKeepAliveOrigin::kBrowserWindow);
+  ui_test_utils::BrowserDestroyedObserver observer(browser());
   chrome::CloseAllBrowsersWithProfile(profile);
-  ui_test_utils::WaitForBrowserToClose(browser());
+  observer.Wait();
   EXPECT_EQ(chrome::GetBrowserCount(profile), 0U);
 
   std::optional<size_t> active_profile_index = menu()->GetActiveProfileIndex();
@@ -177,10 +186,15 @@ IN_PROC_BROWSER_TEST_F(AvatarMenuBrowserTest, MAYBE_EditProfile_NotLoaded) {
 // Regression test for https://crbug.com/1382509
 IN_PROC_BROWSER_TEST_F(AvatarMenuBrowserTest, Guest) {
   // Keep the browser process running while browsers are closed.
+  Profile* profile = browser()->profile();
   ScopedKeepAlive keep_alive(KeepAliveOrigin::BROWSER,
                              KeepAliveRestartOption::DISABLED);
+  ScopedProfileKeepAlive profile_keep_alive(
+      profile, ProfileKeepAliveOrigin::kBrowserWindow);
+
+  ui_test_utils::BrowserDestroyedObserver observer(browser());
   CloseAllBrowsers();
-  ui_test_utils::WaitForBrowserToClose(browser());
+  observer.Wait();
   EXPECT_EQ(chrome::GetTotalBrowserCount(), 0U);
 
   profiles::SwitchToGuestProfile();

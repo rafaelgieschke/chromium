@@ -26,7 +26,8 @@ import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.annotation.Config;
 
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.homepage.HomepageManager;
@@ -71,7 +72,6 @@ public class ToolbarTabControllerImplTest {
     @Mock private Supplier<Tab> mTabSupplier;
     @Mock private Tab mTab;
     @Mock private Tab mTab2;
-    @Mock private ObservableSupplier<BottomControlsCoordinator> mBottomControlsCoordinatorSupplier;
     @Mock private BottomControlsCoordinator mBottomControlsCoordinator;
     @Mock private Tracker mTracker;
     @Mock private Supplier<Tracker> mTrackerSupplier;
@@ -83,6 +83,8 @@ public class ToolbarTabControllerImplTest {
     @Mock private TabCreator mTabCreator;
     @Mock private MultiInstanceManager mMultiInstanceManager;
 
+    private final SettableMonotonicObservableSupplier<BottomControlsCoordinator>
+            mBottomControlsCoordinatorSupplier = ObservableSuppliers.createMonotonic();
     private final GURL mGURL = new GURL("https://example.com");
     private ToolbarTabControllerImpl mToolbarTabController;
 
@@ -122,7 +124,7 @@ public class ToolbarTabControllerImplTest {
 
     @Test
     public void back_handledByBottomControls() {
-        doReturn(mBottomControlsCoordinator).when(mBottomControlsCoordinatorSupplier).get();
+        mBottomControlsCoordinatorSupplier.set(mBottomControlsCoordinator);
         doReturn(true).when(mBottomControlsCoordinator).onBackPressed();
         Assert.assertTrue(mToolbarTabController.back());
 
@@ -133,7 +135,6 @@ public class ToolbarTabControllerImplTest {
 
     @Test
     public void back_notifyNativePageHiding() {
-        doReturn(null).when(mBottomControlsCoordinatorSupplier).get();
         doReturn(true).when(mTab).canGoBack();
 
         mToolbarTabController.back();
@@ -243,7 +244,9 @@ public class ToolbarTabControllerImplTest {
         inOrder.verify(mTab2).goBack();
         inOrder.verify(mMultiInstanceManager)
                 .moveTabsToNewWindow(
-                        Collections.singletonList(mTab2), NewWindowAppSource.KEYBOARD_SHORTCUT);
+                        Collections.singletonList(mTab2),
+                        /* finalizeCallback= */ null,
+                        NewWindowAppSource.KEYBOARD_SHORTCUT);
         inOrder.verifyNoMoreInteractions();
     }
 
@@ -303,7 +306,9 @@ public class ToolbarTabControllerImplTest {
         inOrder.verify(mTab2).goForward();
         inOrder.verify(mMultiInstanceManager)
                 .moveTabsToNewWindow(
-                        Collections.singletonList(mTab2), NewWindowAppSource.KEYBOARD_SHORTCUT);
+                        Collections.singletonList(mTab2),
+                        /* finalizeCallback= */ null,
+                        NewWindowAppSource.KEYBOARD_SHORTCUT);
         inOrder.verifyNoMoreInteractions();
     }
 

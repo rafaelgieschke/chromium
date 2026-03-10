@@ -29,9 +29,23 @@
 
 <script>
 promise_test(async () => {
+  await new Promise(requestAnimationFrame);
+  await new Promise(setTimeout);
+
   assert_throws_js(TypeError,
     () => canvas.getContext("2d").drawElementImage(grandchild, 20, 30),
     "Can't draw non-direct children.");
+
+  canvas.toggleAttribute("layoutsubtree"); // Remove attribute.
+  assert_throws_js(TypeError,
+    () => canvas.getContext("2d").drawElementImage(child, 20, 30),
+    "Can't draw canvas children if layoutsubtree is not specified.");
+
+  canvas.toggleAttribute("layoutsubtree"); // Add attribute.
+  await new Promise(requestAnimationFrame);
+  await new Promise(setTimeout);
+  // Should not throw an exception.
+  canvas.getContext("2d").drawElementImage(child, 20, 30);
 
   canvaswithoutlayout.removeAttribute("layoutsubtree");
   assert_throws_js(TypeError,

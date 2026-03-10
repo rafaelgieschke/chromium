@@ -4,6 +4,8 @@
 
 #include "ui/base/models/menu_model.h"
 
+#include <optional>
+
 #include "ui/base/models/image_model.h"
 #include "ui/base/resource/resource_bundle.h"
 
@@ -26,6 +28,10 @@ bool MenuModel::IsAlertedAt(size_t index) const {
 
 bool MenuModel::IsNewFeatureAt(size_t index) const {
   return false;
+}
+
+std::optional<NewBadgeType> MenuModel::GetNewBadgeTypeAt(size_t index) const {
+  return std::nullopt;
 }
 
 bool MenuModel::GetForceShowAcceleratorForItemAt(size_t index) const {
@@ -67,6 +73,10 @@ bool MenuModel::GetModelAndIndexForCommandId(int command_id,
 
 std::u16string MenuModel::GetMinorTextAt(size_t index) const {
   return std::u16string();
+}
+
+bool MenuModel::GetMinorTextIsUrlAt(size_t index) const {
+  return false;
 }
 
 std::u16string MenuModel::GetSecondaryLabelAt(size_t index) const {

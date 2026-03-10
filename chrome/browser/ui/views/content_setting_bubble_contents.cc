@@ -20,6 +20,7 @@
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/content_setting_site_row_view.h"
 #include "chrome/browser/ui/views/controls/rich_hover_button.h"
+#include "chrome/browser/ui/views/sub_apps_permission_explanation.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
@@ -69,13 +70,13 @@ std::u16string GetCancelButtonText(
 ui::ImageModel GetSiteSettingsIcon() {
   return ui::ImageModel::FromVectorIcon(
       vector_icons::kSettingsChromeRefreshIcon, ui::kColorIcon,
-      GetLayoutConstant(PAGE_INFO_ICON_SIZE));
+      GetLayoutConstant(LayoutConstant::kPageInfoIconSize));
 }
 
 ui::ImageModel GetLaunchIcon() {
-  return ui::ImageModel::FromVectorIcon(vector_icons::kLaunchChromeRefreshIcon,
-                                        ui::kColorIcon,
-                                        GetLayoutConstant(PAGE_INFO_ICON_SIZE));
+  return ui::ImageModel::FromVectorIcon(
+      vector_icons::kLaunchChromeRefreshIcon, ui::kColorIcon,
+      GetLayoutConstant(LayoutConstant::kPageInfoIconSize));
 }
 
 bool ShouldShowManageButton(
@@ -151,7 +152,7 @@ void ContentSettingBubbleContents::ListItemContainer::AddItem(
         views::CreateEmptyBorder(kTitleDescriptionListItemInset));
     item_icon->SetImage(ui::ImageModel::FromVectorIcon(
         *item.image, ui::kColorLabelForeground,
-        GetLayoutConstant(LOCATION_BAR_ICON_SIZE),
+        GetLayoutConstant(LayoutConstant::kLocationBarIconSize),
         item.has_blocked_badge ? &vector_icons::kBlockedBadgeIcon
                                : &gfx::VectorIcon::EmptyIcon()));
   }
@@ -272,10 +273,10 @@ DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(ContentSettingBubbleContents,
 ContentSettingBubbleContents::ContentSettingBubbleContents(
     std::unique_ptr<ContentSettingBubbleModel> content_setting_bubble_model,
     content::WebContents* web_contents,
-    views::View* anchor_view,
+    views::BubbleAnchor anchor,
     views::BubbleBorder::Arrow arrow)
     : content::WebContentsObserver(web_contents),
-      BubbleDialogDelegateView(anchor_view,
+      BubbleDialogDelegateView(anchor,
                                arrow,
                                views::BubbleBorder::DIALOG_SHADOW,
                                true),
@@ -469,6 +470,21 @@ void ContentSettingBubbleContents::Init() {
             base::Unretained(this)));
     manage_checkbox_ = manage_checkbox.get();
     rows.push_back({std::move(manage_checkbox), LayoutRowType::DEFAULT});
+  }
+
+  if (std::optional<std::u16string> explanation =
+          GetSubAppsPermissionExplanation(web_contents())) {
+    auto custom_label = std::make_unique<views::Label>(
+        *explanation, views::style::CONTEXT_DIALOG_BODY_TEXT,
+        views::style::STYLE_BODY_4);
+    custom_label->SetMultiLine(true);
+    custom_label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    custom_label->SetProperty(
+        views::kMarginsKey,
+        gfx::Insets::VH(provider->GetDistanceMetric(
+                            views::DISTANCE_RELATED_CONTROL_VERTICAL),
+                        0));
+    rows.push_back({std::move(custom_label), LayoutRowType::DEFAULT});
   }
 
   if (bubble_content.manage_text_style == ManageTextStyle::kHoverButton) {

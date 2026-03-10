@@ -7,7 +7,9 @@
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/test_future.h"
+#include "chrome/browser/password_manager/actor_login/internal/actor_login_metrics_helper.h"
 #include "chrome/browser/ui/bookmarks/bookmark_bar_controller.h"
 #include "chrome/browser/ui/browser_window/test/mock_browser_window_interface.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -30,12 +32,15 @@
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
 #include "components/password_manager/core/browser/stub_password_manager_driver.h"
 #include "components/tabs/public/mock_tab_interface.h"
+#include "components/ukm/test_ukm_recorder.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/webid/federated_embedder_login_request.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_renderer_host.h"
 #include "content/public/test/test_web_contents_factory.h"
 #include "content/public/test/web_contents_tester.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/unowned_user_data/unowned_user_data_host.h"
@@ -312,7 +317,7 @@ TEST_F(ActorLoginDelegateImplTest, AttemptLogin_FeatureOff) {
 
   base::test::TestFuture<LoginStatusResultOrError> future;
   delegate_->AttemptLogin(credential, false, mqls_logger(),
-                          future.GetCallback());
+                          base::TimeTicks::Now(), future.GetCallback());
 
   ASSERT_FALSE(future.Get().has_value());
   EXPECT_EQ(future.Get().error(), ActorLoginError::kFeatureDisabled);
@@ -330,7 +335,7 @@ TEST_F(ActorLoginDelegateImplTest, AttemptLogin_FeatureOn) {
 
   base::test::TestFuture<LoginStatusResultOrError> future;
   delegate_->AttemptLogin(credential, false, mqls_logger(),
-                          future.GetCallback());
+                          base::TimeTicks::Now(), future.GetCallback());
 
   ASSERT_TRUE(future.Get().has_value());
   EXPECT_EQ(future.Get().value(), LoginStatusResult::kErrorNoSigninForm);
@@ -351,7 +356,8 @@ TEST_F(ActorLoginDelegateImplTest, AttemptLoginLogsDomainAndLanguage) {
       content::WebContentsTester::For(web_contents());
   web_contents_tester->NavigateAndCommit(url);
   EXPECT_CALL(*mqls_logger(), SetDomainAndLanguage(_, Eq(url)));
-  delegate_->AttemptLogin(credential, false, mqls_logger(), base::DoNothing());
+  delegate_->AttemptLogin(credential, false, mqls_logger(),
+                          base::TimeTicks::Now(), base::DoNothing());
 }
 
 TEST_F(ActorLoginDelegateImplTest, AttemptLoginServiceBusy_FeatureOn) {
@@ -367,11 +373,11 @@ TEST_F(ActorLoginDelegateImplTest, AttemptLoginServiceBusy_FeatureOn) {
   // Start the first request (`AttemptLogin`).
   base::test::TestFuture<LoginStatusResultOrError> first_future;
   delegate_->AttemptLogin(credential, false, mqls_logger(),
-                          first_future.GetCallback());
+                          base::TimeTicks::Now(), first_future.GetCallback());
   // Immediately try to start a second request of the same type.
   base::test::TestFuture<LoginStatusResultOrError> second_future;
   delegate_->AttemptLogin(credential, false, mqls_logger(),
-                          second_future.GetCallback());
+                          base::TimeTicks::Now(), second_future.GetCallback());
 
   // Immediately try to start a `GetCredentials` request (different type).
   base::test::TestFuture<CredentialsOrError> third_future;
@@ -413,13 +419,13 @@ TEST_F(ActorLoginDelegateImplTest, CallbacksAreResetAfterCompletion_FeatureOn) {
   // First `AttemptLogin` call.
   base::test::TestFuture<LoginStatusResultOrError> future3;
   delegate_->AttemptLogin(credential, false, mqls_logger(),
-                          future3.GetCallback());
+                          base::TimeTicks::Now(), future3.GetCallback());
   ASSERT_TRUE(future3.Get().has_value());
 
   // Second `AttemptLogin` call should now be possible.
   base::test::TestFuture<LoginStatusResultOrError> future4;
   delegate_->AttemptLogin(credential, false, mqls_logger(),
-                          future4.GetCallback());
+                          base::TimeTicks::Now(), future4.GetCallback());
   ASSERT_TRUE(future4.Get().has_value());
 }
 
@@ -437,7 +443,7 @@ TEST_F(ActorLoginDelegateImplTest, GetCredentialsAndAttemptLogin) {
       base::BindLambdaForTesting([&](CredentialsOrError result) {
         ASSERT_TRUE(result.has_value());
         delegate_->AttemptLogin(credential, false, mqls_logger(),
-                                future.GetCallback());
+                                base::TimeTicks::Now(), future.GetCallback());
       });
 
   delegate_->GetCredentials(mqls_logger(), get_credentials_callback);
@@ -458,7 +464,7 @@ TEST_F(ActorLoginDelegateImplTest,
 
   base::test::TestFuture<CredentialsOrError> future;
   delegate_->AttemptLogin(
-      credential, false, mqls_logger(),
+      credential, false, mqls_logger(), base::TimeTicks::Now(),
       base::BindLambdaForTesting([&](LoginStatusResultOrError result) {
         ASSERT_TRUE(result.has_value());
         delegate_->GetCredentials(mqls_logger(), future.GetCallback());
@@ -478,7 +484,7 @@ TEST_F(ActorLoginDelegateImplTest, WebContentsDestroyedDuringAttemptLogin) {
 
   base::test::TestFuture<LoginStatusResultOrError> future;
   delegate_->AttemptLogin(credential, false, mqls_logger(),
-                          future.GetCallback());
+                          base::TimeTicks::Now(), future.GetCallback());
 
   delegate_ = nullptr;
   // This should invoke `WebContentsDestroyed`.
@@ -529,11 +535,214 @@ TEST_F(ActorLoginDelegateImplTest, FillingReauthRequiredWindowNotActive) {
 
   base::test::TestFuture<LoginStatusResultOrError> future;
   delegate_->AttemptLogin(credential, false, mqls_logger(),
-                          future.GetCallback());
+                          base::TimeTicks::Now(), future.GetCallback());
 
   ASSERT_TRUE(future.Get().has_value());
   EXPECT_EQ(future.Get().value(),
             LoginStatusResult::kErrorDeviceReauthRequired);
+}
+
+TEST_F(ActorLoginDelegateImplTest, RecordActorLoginMetricsNoCredentials) {
+  base::test::ScopedFeatureList feature_list(
+      password_manager::features::kActorLogin);
+  base::HistogramTester histogram_tester;
+  ukm::TestAutoSetUkmRecorder ukm_recorder;
+
+  SetUpActorCredentialFillerDeps();
+
+  base::test::TestFuture<CredentialsOrError> get_creds_future;
+  delegate_->GetCredentials(mqls_logger(), get_creds_future.GetCallback());
+  ASSERT_TRUE(get_creds_future.Get().has_value());
+
+  histogram_tester.ExpectUniqueSample(
+      "Actor.Login.AccountTypesShown",
+      static_cast<int>(ActorLoginAccountTypes::kNone), 1);
+  histogram_tester.ExpectUniqueSample("Actor.Login.NumAccountsShown", 0, 1);
+  histogram_tester.ExpectTotalCount("Actor.Login.GetCredentialsLatency", 1);
+
+  // UKM should be recorded because no credentials were returned and the
+  // delegate resets metrics_helper_ in that case.
+  auto entries =
+      ukm_recorder.GetEntriesByName(ukm::builders::Actor_Login::kEntryName);
+  ASSERT_EQ(1u, entries.size());
+  ukm_recorder.ExpectEntryMetric(
+      entries[0], ukm::builders::Actor_Login::kAccountTypesShownName,
+      static_cast<int>(ActorLoginAccountTypes::kNone));
+  ukm_recorder.ExpectEntryMetric(
+      entries[0], ukm::builders::Actor_Login::kNumAccountsShownName, 0);
+}
+
+TEST_F(ActorLoginDelegateImplTest,
+       RecordActorLoginMetricsWithCredentialsNotShown) {
+  base::test::ScopedFeatureList feature_list(
+      password_manager::features::kActorLogin);
+  base::HistogramTester histogram_tester;
+  ukm::TestAutoSetUkmRecorder ukm_recorder;
+
+  GURL url = GURL(kTestUrl);
+  url::Origin origin = url::Origin::Create(url);
+  Credential credential = CreateTestCredential(u"username", url, origin);
+
+  SetUpActorCredentialFillerDeps();
+
+  base::test::TestFuture<CredentialsOrError> future;
+  delegate_->GetCredentials(mqls_logger(), future.GetCallback());
+
+  ASSERT_TRUE(future.Get().has_value());
+
+  // Currently no sign in form means the account is not displayed.
+  histogram_tester.ExpectBucketCount(
+      "Actor.Login.AccountTypesShown",
+      static_cast<int>(ActorLoginAccountTypes::kNone), 1);
+  histogram_tester.ExpectBucketCount("Actor.Login.NumAccountsShown", 0, 1);
+
+  // UKM should be recorded because no credentials were could be displayed.
+  auto entries =
+      ukm_recorder.GetEntriesByName(ukm::builders::Actor_Login::kEntryName);
+  ASSERT_EQ(1u, entries.size());
+  ukm_recorder.ExpectEntryMetric(
+      entries[0], ukm::builders::Actor_Login::kAccountTypesShownName,
+      static_cast<int>(ActorLoginAccountTypes::kNone));
+  ukm_recorder.ExpectEntryMetric(
+      entries[0], ukm::builders::Actor_Login::kNumAccountsShownName, 0);
+}
+
+TEST_F(ActorLoginDelegateImplTest, RecordActorLoginMetricsOnAttemptLogin) {
+  base::test::ScopedFeatureList feature_list(
+      password_manager::features::kActorLogin);
+  base::HistogramTester histogram_tester;
+  ukm::TestAutoSetUkmRecorder ukm_recorder;
+
+  GURL url = GURL(kTestUrl);
+  url::Origin origin = url::Origin::Create(url);
+  Credential credential = CreateTestCredential(u"username", url, origin);
+  credential.type = CredentialType::kPassword;
+  credential.has_persistent_permission = true;
+
+  SetUpActorCredentialFillerDeps();
+  EXPECT_CALL(mock_form_cache_, GetFormManagers()).Times(1);
+
+  base::test::TestFuture<LoginStatusResultOrError> future;
+  delegate_->AttemptLogin(credential, false, mqls_logger(),
+                          base::TimeTicks::Now(), future.GetCallback());
+
+  ASSERT_TRUE(future.Get().has_value());
+
+  histogram_tester.ExpectUniqueSample(
+      "Actor.Login.SelectedAccountType",
+      static_cast<int>(ActorLoginSelectedAccountType::kPassword), 1);
+  histogram_tester.ExpectUniqueSample("Actor.Login.AccountAutoSelected", true,
+                                      1);
+
+  auto entries =
+      ukm_recorder.GetEntriesByName(ukm::builders::Actor_Login::kEntryName);
+  ASSERT_EQ(1u, entries.size());
+  ukm_recorder.ExpectEntryMetric(
+      entries[0], ukm::builders::Actor_Login::kSelectedAccountTypeName,
+      static_cast<int>(ActorLoginSelectedAccountType::kPassword));
+  ukm_recorder.ExpectEntryMetric(
+      entries[0], ukm::builders::Actor_Login::kAccountAutoSelectedName, true);
+}
+
+TEST_F(ActorLoginDelegateImplTest,
+       RecordActorLoginMetricsOnFederatedAttemptLogin) {
+  base::test::ScopedFeatureList feature_list(
+      password_manager::features::kActorLogin);
+  base::HistogramTester histogram_tester;
+  ukm::TestAutoSetUkmRecorder ukm_recorder;
+
+  content::WebContents* test_contents = tab_strip_model_->GetWebContentsAt(0);
+  GURL url = GURL(kTestUrl);
+  url::Origin origin = url::Origin::Create(url);
+  Credential credential = CreateTestCredential(u"username", url, origin);
+  credential.type = CredentialType::kFederated;
+  FederationDetail& federation_detail = credential.federation_detail.emplace();
+  federation_detail.idp_origin =
+      url::Origin::Create(GURL("https://accounts.google.com"));
+  federation_detail.account_id = "12345";
+
+  SetUpActorCredentialFillerDeps();
+
+  base::test::TestFuture<LoginStatusResultOrError> future;
+  delegate_->AttemptLogin(credential, false, mqls_logger(),
+                          base::TimeTicks::Now(), future.GetCallback());
+
+  // Trigger completion for federated login.
+  auto* request =
+      content::webid::FederatedEmbedderLoginRequest::Get(test_contents);
+  ASSERT_TRUE(request);
+  request->OnFederatedResultReceived(
+      content::webid::FederatedLoginResult::kSuccess);
+
+  ASSERT_TRUE(future.Get().has_value());
+
+  histogram_tester.ExpectUniqueSample(
+      "Actor.Login.SelectedAccountType",
+      static_cast<int>(ActorLoginSelectedAccountType::kFederated), 1);
+
+  auto entries =
+      ukm_recorder.GetEntriesByName(ukm::builders::Actor_Login::kEntryName);
+  ASSERT_EQ(1u, entries.size());
+  ukm_recorder.ExpectEntryMetric(
+      entries[0], ukm::builders::Actor_Login::kSelectedAccountTypeName,
+      static_cast<int>(ActorLoginSelectedAccountType::kFederated));
+}
+
+TEST_F(ActorLoginDelegateImplTest,
+       RecordActorLoginMetricsGetCredentialsAndAttemptLogin) {
+  base::test::ScopedFeatureList feature_list(
+      password_manager::features::kActorLogin);
+  base::HistogramTester histogram_tester;
+  ukm::TestAutoSetUkmRecorder ukm_recorder;
+
+  SetUpActorCredentialFillerDeps();
+  EXPECT_CALL(mock_form_cache_, GetFormManagers())
+      .WillRepeatedly(Return(base::span(form_managers_)));
+
+  base::test::TestFuture<CredentialsOrError> get_creds_future;
+  delegate_->GetCredentials(mqls_logger(), get_creds_future.GetCallback());
+  ASSERT_TRUE(get_creds_future.Get().has_value());
+
+  histogram_tester.ExpectUniqueSample(
+      "Actor.Login.AccountTypesShown",
+      static_cast<int>(ActorLoginAccountTypes::kNone), 1);
+  histogram_tester.ExpectUniqueSample("Actor.Login.NumAccountsShown", 0, 1);
+  histogram_tester.ExpectTotalCount("Actor.Login.GetCredentialsLatency", 1);
+
+  // UKM should be recorded because no credentials were returned.
+  auto entries =
+      ukm_recorder.GetEntriesByName(ukm::builders::Actor_Login::kEntryName);
+  ASSERT_EQ(1u, entries.size());
+  ukm_recorder.ExpectEntryMetric(
+      entries[0], ukm::builders::Actor_Login::kAccountTypesShownName,
+      static_cast<int>(ActorLoginAccountTypes::kNone));
+  ukm_recorder.ExpectEntryMetric(
+      entries[0], ukm::builders::Actor_Login::kNumAccountsShownName, 0);
+
+  GURL url = GURL(kTestUrl);
+  url::Origin origin = url::Origin::Create(url);
+  Credential credential = CreateTestCredential(u"username", url, origin);
+  credential.has_persistent_permission = true;
+
+  base::test::TestFuture<LoginStatusResultOrError> attempt_login_future;
+  delegate_->AttemptLogin(credential, false, mqls_logger(),
+                          base::TimeTicks::Now(),
+                          attempt_login_future.GetCallback());
+  ASSERT_TRUE(attempt_login_future.Wait());
+
+  histogram_tester.ExpectUniqueSample(
+      "Actor.Login.SelectedAccountType",
+      static_cast<int>(ActorLoginSelectedAccountType::kPassword), 1);
+  histogram_tester.ExpectUniqueSample("Actor.Login.AccountAutoSelected", 1, 1);
+
+  entries =
+      ukm_recorder.GetEntriesByName(ukm::builders::Actor_Login::kEntryName);
+  ASSERT_EQ(2u, entries.size());
+  ukm_recorder.ExpectEntryMetric(
+      entries[1], ukm::builders::Actor_Login::kSelectedAccountTypeName,
+      static_cast<int>(ActorLoginSelectedAccountType::kPassword));
+  ukm_recorder.ExpectEntryMetric(
+      entries[1], ukm::builders::Actor_Login::kAccountAutoSelectedName, true);
 }
 
 }  // namespace actor_login

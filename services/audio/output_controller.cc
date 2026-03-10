@@ -12,7 +12,6 @@
 #include <utility>
 
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
@@ -24,6 +23,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "media/audio/audio_device_description.h"
 #include "media/base/audio_timestamp_helper.h"
 #include "media/base/media_switches.h"
 #include "media/media_buildflags.h"
@@ -41,6 +41,9 @@ BASE_FEATURE(kAudioOutputControllerRequestBeforeRead,
 
 // Time in seconds between two successive measurements of audio power levels.
 constexpr base::TimeDelta kPowerMonitorLogInterval = base::Seconds(15);
+
+// Time in seconds between two successive glitch stat logs.
+constexpr base::TimeDelta kGlitchStatsLogInterval = base::Seconds(15);
 
 const char* StateToString(OutputController::State state) {
   switch (state) {
@@ -88,6 +91,7 @@ OutputController::ErrorStatisticsTracker::ErrorStatisticsTracker(
     OutputController* controller)
     : controller_(controller),
       start_time_(base::TimeTicks::Now()),
+      last_periodic_log_time_(start_time_),
       on_more_io_data_called_(0) {
   // WedgeCheck() will look to see if |on_more_io_data_called_| is true after
   // the timeout expires and log this as a UMA stat. If the stream is
@@ -97,22 +101,16 @@ OutputController::ErrorStatisticsTracker::ErrorStatisticsTracker(
 }
 
 OutputController::ErrorStatisticsTracker::~ErrorStatisticsTracker() {
-  const base::TimeDelta duration = base::TimeTicks::Now() - start_time_;
+  base::TimeTicks now = base::TimeTicks::Now();
+  const base::TimeDelta duration = now - start_time_;
   UMA_HISTOGRAM_LONG_TIMES("Media.OutputStreamDuration", duration);
   UMA_HISTOGRAM_BOOLEAN("Media.AudioOutputController.CallbackError",
                         error_during_callback_);
   if (controller_) {
-    controller_->SendLogMessage("StopStream => (duration=%" PRId64 " sec)",
-                                duration.InSeconds());
-    const double glitch_percentage =
-        duration.is_zero()
-            ? 0
-            : glitch_info_.duration.InSecondsF() / duration.InSecondsF();
+    LogGlitchStats("StopStream", now);
     controller_->SendLogMessage(
-        "StopStream => (glitches=[%s], glitch_percentage=%.3f%%)",
-        glitch_info_.ToString().c_str(), glitch_percentage * 100);
-    controller_->SendLogMessage("StopStream => (error_during_callback=%s)",
-                                base::ToString(error_during_callback_).c_str());
+        base::StringPrintf("StopStream => (error_during_callback=%s)",
+                           base::ToString(error_during_callback_).c_str()));
   }
 }
 
@@ -129,6 +127,12 @@ void OutputController::ErrorStatisticsTracker::OnMoreDataCalled(
   // thread starts, it's safe to compare and then increment.
   if (on_more_io_data_called_.IsZero())
     on_more_io_data_called_.Increment();
+
+  base::TimeTicks now = base::TimeTicks::Now();
+  if (controller_ && now - last_periodic_log_time_ >= kGlitchStatsLogInterval) {
+    last_periodic_log_time_ = now;
+    LogGlitchStats("OnMoreData", now);
+  }
 }
 
 void OutputController::ErrorStatisticsTracker::WedgeCheck() {
@@ -138,6 +142,21 @@ void OutputController::ErrorStatisticsTracker::WedgeCheck() {
     if (controller_)
       controller_->SendLogMessage("WedgeCheck => (stream is alive)");
   }
+}
+void OutputController::ErrorStatisticsTracker::LogGlitchStats(
+    const std::string& call_name,
+    base::TimeTicks now) {
+  const base::TimeDelta total_duration = now - start_time_;
+  const double glitch_percentage =
+      total_duration.is_zero()
+          ? 0
+          : glitch_info_.duration.InSecondsF() / total_duration.InSecondsF();
+  controller_->SendLogMessage(
+      base::StringPrintf("%s => (duration=%" PRId64 " sec)", call_name.c_str(),
+                         total_duration.InSeconds()));
+  controller_->SendLogMessage(base::StringPrintf(
+      "%s => (glitches=[%s], glitch_percentage=%.3f%%)", call_name.c_str(),
+      glitch_info_.ToString().c_str(), glitch_percentage * 100));
 }
 
 OutputController::OutputController(
@@ -162,7 +181,8 @@ OutputController::OutputController(
       state_(kEmpty),
       sync_reader_(sync_reader),
       power_monitor_(params.sample_rate(),
-                     base::Milliseconds(kPowerMeasurementTimeConstantMillis)),
+                     base::Milliseconds(std::to_underlying(
+                         kPowerMeasurementTimeConstantMillis))),
       request_before_read_(base::FeatureList::IsEnabled(
           kAudioOutputControllerRequestBeforeRead)),
       will_monitor_audio_levels_(ShouldMonitorAudioLevels()) {
@@ -183,9 +203,11 @@ OutputController::~OutputController() {
 
 bool OutputController::CreateStream() {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  SendLogMessage("%s([state=%s])", __func__, StateToString(state_));
+  SendLogMessage(
+      base::StringPrintf("%s([state=%s])", __func__, StateToString(state_)));
   RecreateStream(RecreateReason::INITIAL_STREAM);
-  SendLogMessage("%s => (state=%s)", __func__, StateToString(state_));
+  SendLogMessage(
+      base::StringPrintf("%s => (state=%s)", __func__, StateToString(state_)));
   return state_ == kCreated;
 }
 
@@ -229,10 +251,13 @@ void OutputController::RecreateStream(OutputController::RecreateReason reason) {
   TRACE_EVENT1("audio", "OutputController::RecreateStream", "reason",
                RecreateReasonToString(reason));
 
-  SendLogMessage("RecreateStream({reason = %s}, {params = [%s]}, [state = %s])",
-                 RecreateReasonToString(reason),
-                 params_.AsHumanReadableString().c_str(),
-                 StateToString(state_));
+  std::string device_name = audio_manager_->GetDeviceNameFromCache(
+      output_device_id_, /*is_input=*/false);
+  SendLogMessage(base::StringPrintf(
+      "RecreateStream({reason=%s}, {device_name=%s}, "
+      "{params=[%s]}, [state=%s])",
+      RecreateReasonToString(reason), device_name.c_str(),
+      params_.AsHumanReadableString().c_str(), StateToString(state_)));
 
   // Close() can be called before Create() is executed.
   if (state_ == kClosed)
@@ -242,8 +267,9 @@ void OutputController::RecreateStream(OutputController::RecreateReason reason) {
   DCHECK_EQ(kEmpty, state_);
 
   if (disable_local_output_) {
-    SendLogMessage("%s => (WARNING: local output disabed, using a fake stream)",
-                   __func__);
+    SendLogMessage(base::StringPrintf(
+        "%s => (WARNING: local output disabed, using a fake stream)",
+        __func__));
     // Create a fake AudioOutputStream that will continue pumping the audio
     // data, but does not play it out anywhere. Pumping the audio data is
     // necessary because video playback is synchronized to the audio stream and
@@ -271,7 +297,8 @@ void OutputController::RecreateStream(OutputController::RecreateReason reason) {
   }
 
   if (!stream_) {
-    SendLogMessage("%s => (ERROR: failed to create output stream)", __func__);
+    SendLogMessage(base::StringPrintf(
+        "%s => (ERROR: failed to create output stream)", __func__));
     state_ = kError;
     ReportStreamCreationUma(reason, StreamCreationResult::kCreateFailed);
     handler_->OnControllerError();
@@ -279,8 +306,8 @@ void OutputController::RecreateStream(OutputController::RecreateReason reason) {
   }
 
   if (!stream_->Open()) {
-    SendLogMessage("%s => (ERROR: failed to open the created output stream)",
-                   __func__);
+    SendLogMessage(base::StringPrintf(
+        "%s => (ERROR: failed to open the created output stream)", __func__));
     StopCloseAndClearStream();
     state_ = kError;
     ReportStreamCreationUma(reason, StreamCreationResult::kOpenFailed);
@@ -302,7 +329,8 @@ void OutputController::RecreateStream(OutputController::RecreateReason reason) {
 void OutputController::Play() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   TRACE_EVENT0("audio", "OutputController::Play");
-  SendLogMessage("%s([state=%s])", __func__, StateToString(state_));
+  SendLogMessage(
+      base::StringPrintf("%s([state=%s])", __func__, StateToString(state_)));
 
   // We can start from created or paused state.
   if (state_ != kCreated && state_ != kPaused)
@@ -321,7 +349,8 @@ void OutputController::StartStream() {
   }
 
   state_ = kPlaying;
-  SendLogMessage("%s => (state=%s)", __func__, StateToString(state_));
+  SendLogMessage(
+      base::StringPrintf("%s => (state=%s)", __func__, StateToString(state_)));
 
   if (will_monitor_audio_levels_) {
     last_audio_level_log_time_ = base::TimeTicks::Now();
@@ -357,26 +386,25 @@ void OutputController::StopStream() {
 void OutputController::Pause() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   TRACE_EVENT0("audio", "OutputController::Pause");
-  SendLogMessage("%s([state=%s])", __func__, StateToString(state_));
+  SendLogMessage(
+      base::StringPrintf("%s([state=%s])", __func__, StateToString(state_)));
 
   StopStream();
 
-  if (state_ != kPaused)
+  if (state_ != kPaused) {
     return;
-
-  // Let the renderer know we've stopped.  Necessary to let PPAPI clients know
-  // audio has been shutdown.  TODO(dalecurtis): This stinks.  PPAPI should have
-  // a better way to know when it should exit PPB_Audio_Shared::Run().
-  sync_reader_->RequestMoreData(base::TimeDelta::Max(), base::TimeTicks(), {});
+  }
 
   handler_->OnControllerPaused();
-  SendLogMessage("%s => (state=%s)", __func__, StateToString(state_));
+  SendLogMessage(
+      base::StringPrintf("%s => (state=%s)", __func__, StateToString(state_)));
 }
 
 void OutputController::Flush() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   TRACE_EVENT0("audio", "OutputController::Flush");
-  SendLogMessage("%s([state=%s])", __func__, StateToString(state_));
+  SendLogMessage(
+      base::StringPrintf("%s([state=%s])", __func__, StateToString(state_)));
 
   if (state_ == kPlaying) {
     handler_->OnControllerError();
@@ -386,26 +414,29 @@ void OutputController::Flush() {
   if (stream_) {
     stream_->Flush();
   }
-  SendLogMessage("%s => (state=%s)", __func__, StateToString(state_));
+  SendLogMessage(
+      base::StringPrintf("%s => (state=%s)", __func__, StateToString(state_)));
 }
 
 void OutputController::Close() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   TRACE_EVENT0("audio", "OutputController::Close");
-  SendLogMessage("%s([state=%s])", __func__, StateToString(state_));
+  SendLogMessage(
+      base::StringPrintf("%s([state=%s])", __func__, StateToString(state_)));
 
   if (state_ != kClosed) {
     StopCloseAndClearStream();
     sync_reader_->Close();
     state_ = kClosed;
   }
-  SendLogMessage("%s => (state=%s)", __func__, StateToString(state_));
+  SendLogMessage(
+      base::StringPrintf("%s => (state=%s)", __func__, StateToString(state_)));
 }
 
 void OutputController::SetVolume(double volume) {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  SendLogMessage("%s({volume=%.2f} [state=%s])", __func__, volume,
-                 StateToString(state_));
+  SendLogMessage(base::StringPrintf("%s({volume=%.2f} [state=%s])", __func__,
+                                    volume, StateToString(state_)));
 
   // Saves the volume to a member first. We may not be able to set the volume
   // right away but when the stream is created we'll set the volume.
@@ -471,7 +502,7 @@ int OutputController::OnMoreData(base::TimeDelta delay,
     sync_reader_->RequestMoreData(delay, delay_timestamp, glitch_info);
   }
 
-#if !BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
+#if !BUILDFLAG(ENABLE_PASSTHROUGH_AUDIO_CODECS)
   constexpr bool is_bitstream = false;
 #else
   const bool is_bitstream = params_.IsBitstreamFormat();
@@ -496,28 +527,26 @@ int OutputController::OnMoreData(base::TimeDelta delay,
   return frames;
 }
 
-void OutputController::SendLogMessage(const char* format, ...) {
+void OutputController::SendLogMessage(const std::string& message) {
   if (!handler_)
     return;
-  va_list args;
-  va_start(args, format);
-  handler_->OnLog("AOC::" + base::StringPrintV(format, args) +
-                  base::StringPrintf(" [this=0x%" PRIXPTR "]",
+  handler_->OnLog(base::StringPrintf("AOC::%s [this=0x%" PRIXPTR "]",
+                                     message.c_str(),
                                      reinterpret_cast<uintptr_t>(this)));
-  va_end(args);
 }
 
 void OutputController::LogAudioPowerLevel(const char* call_name) {
   std::pair<float, bool> power_and_clip =
       power_monitor_.ReadCurrentPowerAndClip();
-  SendLogMessage("%s => (average audio level=%.2f dBFS)", call_name,
-                 power_and_clip.first);
+  SendLogMessage(base::StringPrintf("%s => (average audio level=%.2f dBFS)",
+                                    call_name, power_and_clip.first));
 }
 
 void OutputController::OnError(ErrorType type) {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  SendLogMessage("%s({type=%s} [state=%s])", __func__, ErrorTypeToString(type),
-                 StateToString(state_));
+  SendLogMessage(base::StringPrintf("%s({type=%s} [state=%s])", __func__,
+                                    ErrorTypeToString(type),
+                                    StateToString(state_)));
   TRACE_EVENT0("audio", "OutputController::OnError");
   DLOG(ERROR) << "OutputController::OnError";
   if (state_ != kClosed) {
@@ -550,7 +579,7 @@ void OutputController::StartSnooping(Snooper* snooper) {
 
   // The list will only update on this thread, and only be read on the realtime
   // audio thread.
-  DCHECK(!base::Contains(snoopers_, snooper));
+  DCHECK(!std::ranges::contains(snoopers_, snooper));
   base::AutoLock lock(snooper_lock_);
   snoopers_.push_back(snooper);
 }
@@ -570,7 +599,8 @@ void OutputController::StopSnooping(Snooper* snooper) {
 
 void OutputController::StartMuting() {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  SendLogMessage("%s([state=%s])", __func__, StateToString(state_));
+  SendLogMessage(
+      base::StringPrintf("%s([state=%s])", __func__, StateToString(state_)));
 
   if (!disable_local_output_) {
     ToggleLocalOutput();
@@ -579,7 +609,8 @@ void OutputController::StartMuting() {
 
 void OutputController::StopMuting() {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  SendLogMessage("%s([state=%s])", __func__, StateToString(state_));
+  SendLogMessage(
+      base::StringPrintf("%s([state=%s])", __func__, StateToString(state_)));
 
   if (disable_local_output_) {
     ToggleLocalOutput();
@@ -591,9 +622,9 @@ void OutputController::ToggleLocalOutput() {
 
   disable_local_output_ = !disable_local_output_;
 
-  SendLogMessage("%s({disable_local_output=%s} [state=%s])", __func__,
-                 base::ToString(disable_local_output_).c_str(),
-                 StateToString(state_));
+  SendLogMessage(base::StringPrintf(
+      "%s({disable_local_output=%s} [state=%s])", __func__,
+      base::ToString(disable_local_output_).c_str(), StateToString(state_)));
 
   // If there is an active |stream_|, close it and re-create either: 1) a fake
   // stream to prevent local audio output, or 2) a normal AudioOutputStream.
@@ -607,7 +638,8 @@ void OutputController::ToggleLocalOutput() {
 
 void OutputController::ProcessDeviceChange() {
   DCHECK(task_runner_->BelongsToCurrentThread());
-  SendLogMessage("%s([state=%s])", __func__, StateToString(state_));
+  SendLogMessage(
+      base::StringPrintf("%s([state=%s])", __func__, StateToString(state_)));
   TRACE_EVENT0("audio", "OutputController::ProcessDeviceChange");
 
   DCHECK(!disable_local_output_);

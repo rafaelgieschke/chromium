@@ -20,6 +20,7 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.content.IntentSender;
 import android.content.IntentSender.SendIntentException;
+import android.os.Build;
 
 import androidx.annotation.Nullable;
 import androidx.lifecycle.Lifecycle.State;
@@ -34,10 +35,10 @@ import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowActivity;
 import org.robolectric.shadows.ShadowActivity.IntentForResult;
-import org.robolectric.shadows.ShadowLooper;
 import org.robolectric.shadows.ShadowPendingIntent;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
 import org.chromium.components.browser_ui.share.ShareParams;
@@ -69,6 +70,7 @@ public class ShareHelperMultiInstanceUnitTest {
 
     @After
     public void tearDown() {
+        RobolectricUtil.runAllBackgroundAndUi();
         mWindowBar.closeWindow();
         mWindowFoo.closeWindow();
         ChromeSharedPreferences.getInstance()
@@ -211,7 +213,7 @@ public class ShareHelperMultiInstanceUnitTest {
 
         public SingleWindowTestInstance startShare() {
             ShareHelper.shareWithSystemShareSheetUi(getTextParams(), null, true);
-            ShadowLooper.idleMainLooper();
+            RobolectricUtil.runAllBackgroundAndUi();
 
             mShareIntent = Shadows.shadowOf(mActivity).peekNextStartedActivityForResult();
             assertNotNull("Share activity is not launched.", mShareIntent);
@@ -223,16 +225,18 @@ public class ShareHelperMultiInstanceUnitTest {
             assertThat(mShareIntent).isNotNull();
             Intent sendBackIntent =
                     new Intent().putExtra(Intent.EXTRA_CHOSEN_COMPONENT, componentName);
-            IntentSender sender =
-                    mShareIntent.intent.getParcelableExtra(
-                            Intent.EXTRA_CHOSEN_COMPONENT_INTENT_SENDER);
+            String extraKey =
+                    Build.VERSION.SDK_INT >= 35
+                            ? Intent.EXTRA_CHOOSER_RESULT_INTENT_SENDER
+                            : Intent.EXTRA_CHOSEN_COMPONENT_INTENT_SENDER;
+            IntentSender sender = mShareIntent.intent.getParcelableExtra(extraKey);
             sender.sendIntent(
                     mActivity.getApplicationContext(),
                     Activity.RESULT_OK,
                     sendBackIntent,
                     null,
                     null);
-            ShadowLooper.idleMainLooper();
+            RobolectricUtil.runAllBackgroundAndUi();
             return this;
         }
 
@@ -241,7 +245,7 @@ public class ShareHelperMultiInstanceUnitTest {
 
             mIntentRequestTracker.onActivityResult(
                     mShareIntent.requestCode, Activity.RESULT_CANCELED, null);
-            ShadowLooper.idleMainLooper();
+            RobolectricUtil.runAllBackgroundAndUi();
             return this;
         }
 

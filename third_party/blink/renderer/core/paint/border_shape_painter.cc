@@ -5,9 +5,11 @@
 #include "third_party/blink/renderer/core/paint/border_shape_painter.h"
 
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
+#include "third_party/blink/renderer/core/paint/border_shape_utils.h"
 #include "third_party/blink/renderer/core/paint/paint_auto_dark_mode.h"
 #include "third_party/blink/renderer/core/style/border_edge.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/core/style/shadow_list.h"
 #include "third_party/blink/renderer/core/style/style_border_shape.h"
 #include "third_party/blink/renderer/platform/geometry/stroke_data.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
@@ -22,42 +24,6 @@
 
 namespace blink {
 namespace {
-
-struct DerivedStroke {
-  float thickness;
-  Color color;
-};
-
-// https://drafts.csswg.org/css-borders-4/#relevant-side-for-border-shape
-DerivedStroke RelevantSideForBorderShape(const ComputedStyle& style) {
-  DCHECK(style.HasBorderShape());
-
-  BorderEdgeArray edges;
-  style.GetBorderEdgeInfo(edges);
-  style.BorderBlockStartWidth();
-  PhysicalToLogical<BorderEdge> logical_edges(
-      style.GetWritingDirection(), edges[static_cast<unsigned>(BoxSide::kTop)],
-      edges[static_cast<unsigned>(BoxSide::kRight)],
-      edges[static_cast<unsigned>(BoxSide::kBottom)],
-      edges[static_cast<unsigned>(BoxSide::kLeft)]);
-
-  const BorderEdge block_start_edge = logical_edges.BlockStart();
-  const BorderEdge inline_start_edge = logical_edges.InlineStart();
-  const BorderEdge block_end_edge = logical_edges.BlockEnd();
-  const BorderEdge inline_end_edge = logical_edges.InlineEnd();
-
-  const BorderEdge edges_in_order[4] = {block_start_edge, inline_start_edge,
-                                        block_end_edge, inline_end_edge};
-  for (const BorderEdge& edge : edges_in_order) {
-    if (edge.BorderStyle() == EBorderStyle::kNone) {
-      continue;
-    }
-    return DerivedStroke{static_cast<float>(edge.UsedWidth()), edge.GetColor()};
-  }
-  // Return block-start.
-  return DerivedStroke{static_cast<float>(edges_in_order[0].UsedWidth()),
-                       edges_in_order[0].GetColor()};
-}
 
 Path OuterPathWithoutStroke(const ComputedStyle& style,
                             const PhysicalRect& outer_reference_rect) {
@@ -103,6 +69,83 @@ Path BorderShapePainter::InnerPath(const ComputedStyle& style,
   const StyleBorderShape& border_shape = *style.BorderShape();
   return border_shape.InnerShape().GetPath(gfx::RectF(inner_reference_rect),
                                            style.EffectiveZoom(), 1);
+}
+
+Path BorderShapePainter::OverflowClipInnerPath(
+    const ComputedStyle& style,
+    const PhysicalRect& inner_reference_rect) {
+  CHECK(style.HasBorderShape());
+  Path inner_path = InnerPath(style, inner_reference_rect);
+
+  // For single-shape border-shape, the border is drawn as a stroke centered on
+  // the path with the border width as the stroke thickness. The inner edge of
+  // the border is therefore at path - border_width/2. Contract the path inward
+  // by half the border width so that overflow-clipped children do not paint
+  // over the inner half of the border stroke.
+  const StyleBorderShape& border_shape = *style.BorderShape();
+  if (!border_shape.HasSeparateInnerShape()) {
+    DerivedStroke derived_stroke = RelevantSideForBorderShape(style);
+    if (derived_stroke.thickness > 0) {
+      StrokeData stroke_data;
+      stroke_data.SetThickness(derived_stroke.thickness);
+      Path stroke_path = inner_path.StrokePath(stroke_data, AffineTransform());
+      SkOpBuilder builder;
+      builder.add(inner_path.GetSkPath(), SkPathOp::kUnion_SkPathOp);
+      builder.add(stroke_path.GetSkPath(), SkPathOp::kDifference_SkPathOp);
+      SkPath result;
+      if (builder.resolve(&result)) {
+        return Path(result);
+      }
+    }
+  }
+  return inner_path;
+}
+
+// static
+Path BorderShapePainter::ExpandPathWithStroke(const Path& path,
+                                              float stroke_thickness) {
+  if (stroke_thickness <= 0) {
+    return path;
+  }
+  StrokeData stroke_data;
+  stroke_data.SetThickness(stroke_thickness);
+  Path stroke_path = path.StrokePath(stroke_data, AffineTransform());
+  SkOpBuilder builder;
+  builder.add(path.GetSkPath(), SkPathOp::kUnion_SkPathOp);
+  builder.add(stroke_path.GetSkPath(), SkPathOp::kUnion_SkPathOp);
+  SkPath result;
+  if (builder.resolve(&result)) {
+    return Path(result);
+  }
+  return path;
+}
+
+Path BorderShapePainter::OuterPathWithOffset(
+    const ComputedStyle& style,
+    const PhysicalRect& outer_reference_rect,
+    float offset) {
+  CHECK(style.HasBorderShape());
+  Path outer_path = OuterPath(style, outer_reference_rect);
+
+  if (offset == 0) {
+    return outer_path;
+  }
+
+  StrokeData stroke_data;
+  stroke_data.SetThickness(std::abs(offset) * 2);
+  Path stroke_path = outer_path.StrokePath(stroke_data, AffineTransform());
+
+  SkOpBuilder builder;
+  builder.add(outer_path.GetSkPath(), SkPathOp::kUnion_SkPathOp);
+  if (offset > 0) {
+    // Expand: union the path with its stroke
+    builder.add(stroke_path.GetSkPath(), SkPathOp::kUnion_SkPathOp);
+  } else {
+    // Contract: intersect the path with inverted stroke
+    builder.add(stroke_path.GetSkPath(), SkPathOp::kDifference_SkPathOp);
+  }
+  SkPath result;
+  return builder.resolve(&result) ? Path(result) : outer_path;
 }
 
 bool BorderShapePainter::Paint(GraphicsContext& context,
@@ -152,6 +195,96 @@ bool BorderShapePainter::Paint(GraphicsContext& context,
   return true;
 }
 
+bool BorderShapePainter::PaintOutline(GraphicsContext& context,
+                                      const ComputedStyle& style,
+                                      const PhysicalRect& outer_reference_rect,
+                                      int outline_width,
+                                      int outline_offset) {
+  const StyleBorderShape* border_shape = style.BorderShape();
+  if (!border_shape || outline_width <= 0) {
+    return false;
+  }
+
+  // Calculate the offset from the outer_path to the center of the outline
+  // stroke.
+  //
+  // When border-shape uses a single shape, the border is drawn as a stroke
+  // centered on the outer_path. The outer edge of the border is at
+  // border_width/2 from the path. The outline starts from there.
+  //
+  // When border-shape uses double shapes (outer + inner), the border fills the
+  // area between them. The outline starts from the outer_path directly
+  // (border_stroke_offset = 0).
+  float border_stroke_offset = 0;
+  if (!border_shape->HasSeparateInnerShape()) {
+    DerivedStroke derived_stroke = RelevantSideForBorderShape(style);
+    border_stroke_offset = derived_stroke.thickness / 2.0f;
+  }
+
+  const float center_offset = border_stroke_offset +
+                              static_cast<float>(outline_offset) +
+                              static_cast<float>(outline_width) / 2.0f;
+  Path center_path =
+      OuterPathWithOffset(style, outer_reference_rect, center_offset);
+
+  const Color outline_color =
+      style.VisitedDependentColor(GetCSSPropertyOutlineColor());
+  const AutoDarkMode auto_dark_mode(
+      PaintAutoDarkMode(style, DarkModeFilter::ElementRole::kBorder));
+
+  context.SetShouldAntialias(true);
+
+  EBorderStyle outline_style = style.OutlineStyle();
+
+  // For solid outline, stroke the center path with the outline width.
+  if (outline_style == EBorderStyle::kSolid) {
+    StrokeData stroke_data;
+    stroke_data.SetThickness(static_cast<float>(outline_width));
+    context.SetStrokeColor(outline_color);
+    context.SetStroke(stroke_data);
+    context.StrokePath(center_path, auto_dark_mode);
+    return true;
+  } else if (outline_style == EBorderStyle::kDouble) {
+    // For double outline, draw two strokes.
+    const float stroke_width =
+        std::round(static_cast<float>(outline_width) / 3.0f);
+    if (stroke_width < 1) {
+      // Fall back to solid if too thin.
+      StrokeData stroke_data;
+      stroke_data.SetThickness(static_cast<float>(outline_width));
+      context.SetStrokeColor(outline_color);
+      context.SetStroke(stroke_data);
+      context.StrokePath(center_path, auto_dark_mode);
+      return true;
+    }
+
+    // Outer stroke
+    const float outer_offset = center_offset +
+                               static_cast<float>(outline_width) / 2.0f -
+                               stroke_width / 2.0f;
+    Path outer_stroke_path =
+        OuterPathWithOffset(style, outer_reference_rect, outer_offset);
+    StrokeData outer_stroke_data;
+    outer_stroke_data.SetThickness(stroke_width);
+    context.SetStrokeColor(outline_color);
+    context.SetStroke(outer_stroke_data);
+    context.StrokePath(outer_stroke_path, auto_dark_mode);
+
+    // Inner stroke
+    const float inner_offset = center_offset -
+                               static_cast<float>(outline_width) / 2.0f +
+                               stroke_width / 2.0f;
+    Path inner_stroke_path =
+        OuterPathWithOffset(style, outer_reference_rect, inner_offset);
+    context.StrokePath(inner_stroke_path, auto_dark_mode);
+    return true;
+  }
+
+  // For other styles (dotted, dashed, groove, ridge, etc.), fall back to
+  // standard outline painting by returning false.
+  return false;
+}
+
 // static
 PhysicalBoxStrut BorderShapePainter::VisualOutsets(
     const ComputedStyle& style,
@@ -160,24 +293,66 @@ PhysicalBoxStrut BorderShapePainter::VisualOutsets(
     const PhysicalRect& inner_reference_rect) {
   CHECK(style.HasBorderShape());
 
+  const gfx::RectF border_gfx = gfx::RectF(border_rect);
+
+  // Border path visual bounds: where the border stroke/fill draws.
   const Path outer_path = OuterPath(style, outer_reference_rect);
   gfx::RectF visual_bounds = outer_path.BoundingRect();
   const Path inner_path = InnerPath(style, inner_reference_rect);
   visual_bounds.Union(inner_path.BoundingRect());
 
-  const float top_outset = std::max(0.0f, border_rect.Y() - visual_bounds.y());
-  const float left_outset = std::max(0.0f, border_rect.X() - visual_bounds.x());
-  const float right_outset =
-      std::max(0.0f, visual_bounds.right() - border_rect.Right());
-  const float bottom_outset =
-      std::max(0.0f, visual_bounds.bottom() - border_rect.Bottom());
+  PhysicalBoxStrut outsets = PhysicalBoxStrut::Enclosing(gfx::OutsetsF::TLBR(
+      std::max(0.0f, border_gfx.y() - visual_bounds.y()),
+      std::max(0.0f, border_gfx.x() - visual_bounds.x()),
+      std::max(0.0f, visual_bounds.bottom() - border_gfx.bottom()),
+      std::max(0.0f, visual_bounds.right() - border_gfx.right())));
 
-  if (!top_outset && !right_outset && !bottom_outset && !left_outset) {
-    return PhysicalBoxStrut();
+  // Box-shadow visual bounds. BoxDecorationOutsets() uses (spread + sigma_3)
+  // for shadows, but for border-shape the shadow path is built via:
+  //   ExpandPathWithStroke(outer_path, (spread + blur) * 2)
+  // giving a total visual extent of (spread + blur + sigma_3). Replicate the
+  // exact path the painter builds so the overflow bounds match the pixels
+  // actually drawn.
+  if (const ShadowList* box_shadow = style.BoxShadow()) {
+    for (const ShadowData& shadow : box_shadow->Shadows()) {
+      if (shadow.Style() == ShadowStyle::kInset) {
+        continue;
+      }
+      const float spread = shadow.Spread();
+      const float blur = shadow.BlurRadius();
+      // 3 * sigma is how Skia computes the box blur extent.
+      // See ShadowData::RectOutsets().
+      const float sigma_3 = std::ceil(3.0f * shadow.BlurAsSigma());
+
+      // Mirror BoxPainterBase::PaintNormalBoxShadow exactly.
+      Path shadow_path;
+      if (spread < 0) {
+        gfx::RectF adjusted_ref_rect = gfx::RectF(outer_reference_rect);
+        adjusted_ref_rect.Outset(spread);  // negative outset shrinks
+        if (adjusted_ref_rect.IsEmpty()) {
+          continue;
+        }
+        const Path adjusted_outer_path = OuterPath(
+            style, PhysicalRect::FastAndLossyFromRectF(adjusted_ref_rect));
+        shadow_path = ExpandPathWithStroke(adjusted_outer_path, blur * 2);
+      } else {
+        shadow_path = ExpandPathWithStroke(outer_path, (spread + blur) * 2);
+      }
+
+      // The draw looper blurs shadow_path by sigma_3, then offsets by (X, Y).
+      gfx::RectF shadow_visual_rect = shadow_path.BoundingRect();
+      shadow_visual_rect.Outset(sigma_3);
+      shadow_visual_rect.Offset(shadow.X(), shadow.Y());
+
+      outsets.Unite(PhysicalBoxStrut::Enclosing(gfx::OutsetsF::TLBR(
+          std::max(0.0f, border_gfx.y() - shadow_visual_rect.y()),
+          std::max(0.0f, border_gfx.x() - shadow_visual_rect.x()),
+          std::max(0.0f, shadow_visual_rect.bottom() - border_gfx.bottom()),
+          std::max(0.0f, shadow_visual_rect.right() - border_gfx.right()))));
+    }
   }
 
-  return PhysicalBoxStrut::Enclosing(gfx::OutsetsF::TLBR(
-      top_outset, left_outset, bottom_outset, right_outset));
+  return outsets;
 }
 
 }  // namespace blink

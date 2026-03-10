@@ -41,9 +41,6 @@ const base::FeatureParam<bool>
     kPrefetchStateContaminationSwapsBrowsingContextGroup{
         &kPrefetchStateContaminationMitigation, "swaps_bcg", true};
 
-BASE_FEATURE(kPrefetchServiceWorkerNoFetchHandlerFix,
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 BASE_FEATURE(kPrefetchNetworkPriorityForEmbedders,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -54,13 +51,10 @@ BASE_FEATURE(kPrefetchServiceWorker, base::FEATURE_ENABLED_BY_DEFAULT);
 
 bool IsPrefetchServiceWorkerEnabled(content::BrowserContext* browser_context) {
   return base::FeatureList::IsEnabled(kPrefetchServiceWorker) &&
-         content::GetContentClient()->browser()->IsPrefetchWithServiceWorkerAllowed(
-             browser_context);
+         content::GetContentClient()
+             ->browser()
+             ->IsPrefetchWithServiceWorkerAllowed(browser_context);
 }
-
-BASE_FEATURE(kPrefetchScheduler, base::FEATURE_ENABLED_BY_DEFAULT);
-const base::FeatureParam<bool> kPrefetchSchedulerProgressSyncBestEffort{
-    &kPrefetchScheduler, "kPrefetchSchedulerProgressSyncBestEffort", true};
 
 BASE_FEATURE(kPrefetchSchedulerTesting, base::FEATURE_DISABLED_BY_DEFAULT);
 const base::FeatureParam<size_t>
@@ -81,11 +75,10 @@ const base::FeatureParam<size_t>
         &kPrefetchMultipleActiveSetSizeLimitForBase,
         "prefetch_multiple_active_set_size_limit_for_base_value", 2};
 
-BASE_FEATURE(kPreloadServingMetrics, base::FEATURE_ENABLED_BY_DEFAULT);
-
-BASE_FEATURE(kPrefetchGracefulNotification, base::FEATURE_ENABLED_BY_DEFAULT);
-
-BASE_FEATURE(kPrefetchAsyncCancelOnCookiesChange,
+BASE_FEATURE(kPrefetchFixHeaderUpdatesOnRedirect,
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kPrefetchOffTheMainThread,
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace features

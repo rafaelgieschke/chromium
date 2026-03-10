@@ -6,13 +6,13 @@
 
 #include <memory>
 
+#include "ash/constants/chrome_webui_url_constants.h"
 #include "base/command_line.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
-#include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/apps/app_service/browser_app_launcher.h"
@@ -41,6 +41,7 @@
 #include "chromeos/ash/components/network/network_state_handler.h"
 #include "chromeos/ash/components/settings/cros_settings.h"
 #include "chromeos/dbus/power/power_manager_client.h"
+#include "components/services/app_service/public/cpp/app_launch_params.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_names.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
@@ -313,7 +314,7 @@ void ErrorScreen::HideImpl() {
   }
 }
 
-void ErrorScreen::OnUserAction(const base::Value::List& args) {
+void ErrorScreen::OnUserAction(const base::ListValue& args) {
   const std::string& action_id = args[0].GetString();
   if (action_id == kUserActionShowCaptivePortalClicked) {
     ShowCaptivePortal();
@@ -365,7 +366,7 @@ void ErrorScreen::OnConfigureCerts() {
   LoginWebDialog* dialog = new LoginWebDialog(
       GetAppProfile(), native_window,
       l10n_util::GetStringUTF16(IDS_CERTIFICATE_MANAGER_TITLE),
-      GURL(chrome::kChromeUICertificateManagerDialogURL));
+      GURL(ash::chrome_urls::kChromeUICertificateManagerDialogURL));
   // The width matches the Settings UI width.
   dialog->set_dialog_size(gfx::Size{640, 480});
   dialog->Show();

@@ -30,11 +30,11 @@
 
 #include <stdint.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "net/base/url_util.h"
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "third_party/blink/public/common/features.h"
@@ -83,8 +83,9 @@ bool SecurityOrigin::ShouldUseInnerURL(const KURL& url) {
 // that all the URL schemes we currently support that use inner URLs for their
 // security origin can be parsed using this algorithm.
 KURL SecurityOrigin::ExtractInnerURL(const KURL& url) {
-  if (url.InnerURL())
-    return *url.InnerURL();
+  if (url.InnerUrl()) {
+    return *url.InnerUrl();
+  }
   // FIXME: Update this callsite to use the innerURL member function when
   // we finish implementing it.
   return KURL(url.GetPath().ToString());
@@ -113,12 +114,12 @@ static bool ShouldTreatAsOpaqueOrigin(const KURL& url) {
   // URLs with schemes that require an authority, but which don't have one,
   // will have failed the isValid() test; e.g. valid HTTP URLs must have a
   // host.
-  DCHECK(!((relevant_url.ProtocolIsInHTTPFamily() ||
+  DCHECK(!((relevant_url.ProtocolIsInHttpFamily() ||
             relevant_url.ProtocolIs("ftp")) &&
            relevant_url.Host().empty()));
 
-  if (base::Contains(url::GetNoAccessSchemes(),
-                     relevant_url.Protocol().Ascii()))
+  if (std::ranges::contains(url::GetNoAccessSchemes(),
+                            relevant_url.Protocol().Ascii()))
     return true;
 
   // Nonstandard schemes and unregistered schemes are placed in opaque origins.
@@ -126,7 +127,8 @@ static bool ShouldTreatAsOpaqueOrigin(const KURL& url) {
     // A temporary exception is made for non-standard local schemes.
     // TODO: Migrate "content:" and "externalfile:" to be standard schemes, and
     // remove the local scheme exception.
-    if (base::Contains(url::GetLocalSchemes(), relevant_url.Protocol().Ascii()))
+    if (std::ranges::contains(url::GetLocalSchemes(),
+                              relevant_url.Protocol().Ascii()))
       return false;
 
     // Otherwise, treat non-standard origins as opaque, unless the Android
@@ -223,7 +225,7 @@ scoped_refptr<SecurityOrigin> SecurityOrigin::CreateWithReferenceOrigin(
       return origin;
   }
 
-  if (url.IsAboutBlankURL()) {
+  if (url.IsAboutBlankUrl()) {
     if (!reference_origin)
       return CreateUniqueOpaque();
     return reference_origin->IsolatedCopy();
@@ -265,8 +267,8 @@ scoped_refptr<SecurityOrigin> SecurityOrigin::CreateOpaque(
 scoped_refptr<SecurityOrigin> SecurityOrigin::CreateFromUrlOrigin(
     const url::Origin& origin) {
   const url::SchemeHostPort& tuple = origin.GetTupleOrPrecursorTupleIfOpaque();
-  DCHECK(String::FromUTF8(tuple.scheme()).ContainsOnlyASCIIOrEmpty());
-  DCHECK(String::FromUTF8(tuple.host()).ContainsOnlyASCIIOrEmpty());
+  DCHECK(String::FromUTF8(tuple.scheme()).ContainsOnlyAsciiOrEmpty());
+  DCHECK(String::FromUTF8(tuple.host()).ContainsOnlyAsciiOrEmpty());
 
   scoped_refptr<SecurityOrigin> tuple_origin;
   if (tuple.IsValid()) {
@@ -300,6 +302,21 @@ url::Origin SecurityOrigin::ToUrlOrigin() const {
       std::move(scheme), std::move(host), port);
   CHECK(!result.opaque());
   return result;
+}
+
+scoped_refptr<SecurityOrigin> SecurityOrigin::CreateWithNonce(
+    base::PassKey<SandboxedOpaqueSecurityOriginCreator>,
+    const base::UnguessableToken& nonce,
+    const SecurityOrigin* origin) {
+  CHECK(origin);
+  const SecurityOrigin* tuple_origin =
+      origin->GetOriginOrPrecursorOriginIfOpaque();
+
+  // Only use a non-opaque tuple origin as precursor. An opaque precursor
+  // provides no useful derivation information.
+  return CreateOpaque(
+      url::Origin::Nonce(nonce),
+      tuple_origin->IsOpaque() ? nullptr : tuple_origin->IsolatedCopy().get());
 }
 
 scoped_refptr<SecurityOrigin> SecurityOrigin::IsolatedCopy() const {
@@ -426,7 +443,7 @@ bool SecurityOrigin::CanDisplay(const KURL& url) const {
            SecurityPolicy::IsOriginAccessToURLAllowed(this, url);
   }
 
-  if (base::Contains(url::GetLocalSchemes(), protocol.Ascii())) {
+  if (std::ranges::contains(url::GetLocalSchemes(), protocol.Ascii())) {
     return CanLoadLocalResources() ||
            SecurityPolicy::IsOriginAccessToURLAllowed(this, url);
   }
@@ -472,7 +489,7 @@ void SecurityOrigin::BlockLocalAccessFromLocalOrigin() {
 }
 
 bool SecurityOrigin::IsLocal() const {
-  return base::Contains(url::GetLocalSchemes(), protocol_.Ascii());
+  return std::ranges::contains(url::GetLocalSchemes(), protocol_.Ascii());
 }
 
 bool SecurityOrigin::IsLocalhost() const {
@@ -537,7 +554,7 @@ String SecurityOrigin::ToTokenForFastCheck() const {
 
 scoped_refptr<SecurityOrigin> SecurityOrigin::CreateFromString(
     const String& origin_string) {
-  return SecurityOrigin::Create(KURL(NullURL(), origin_string));
+  return SecurityOrigin::Create(KURL(NullUrl(), origin_string));
 }
 
 scoped_refptr<SecurityOrigin> SecurityOrigin::CreateFromValidTuple(

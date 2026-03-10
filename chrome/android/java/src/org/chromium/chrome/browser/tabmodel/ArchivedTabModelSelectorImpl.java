@@ -87,6 +87,7 @@ public class ArchivedTabModelSelectorImpl extends TabModelSelectorBase implement
                 TabModelHolderFactory.createTabModelHolder(
                         mProfile,
                         ActivityType.TABBED,
+                        /* customTabProfileType= */ null,
                         tabCreator,
                         // Never used.
                         /* incognitoTabCreator= */ assumeNonNull(null),
@@ -97,7 +98,7 @@ public class ArchivedTabModelSelectorImpl extends TabModelSelectorBase implement
                         this,
                         tabRemover,
                         /* supportUndo= */ true,
-                        /* isArchivedTabModel= */ true,
+                        TabModelType.ARCHIVED,
                         ArchivedTabModelSelectorImpl::createTabUngrouper);
         if (tabCreator instanceof NeedsTabModel needsTabModel) {
             needsTabModel.setTabModel(normalModelHolder.tabModel);

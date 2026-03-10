@@ -573,20 +573,21 @@ SAFEARRAY* AXPlatformNodeWin::CreateUIAElementsArrayForReverseRelation(
 }
 
 SAFEARRAY* AXPlatformNodeWin::CreateClickablePointArray() {
-  SAFEARRAY* clickable_point_array = SafeArrayCreateVector(VT_R8, 0, 2);
+  base::win::ScopedSafearray clickable_point_array(
+      ::SafeArrayCreateVector(VT_R8, 0, 2));
   gfx::Point center = GetDelegate()
                           ->GetBoundsRect(AXCoordinateSystem::kScreenDIPs,
                                           AXClippingBehavior::kUnclipped)
                           .CenterPoint();
+  auto locked_array = clickable_point_array.CreateLockScope<VT_R8>();
+  if (!locked_array) {
+    return nullptr;
+  }
+  auto double_span = base::span(*locked_array);
+  double_span[0] = center.x();
+  double_span[1] = center.y();
 
-  double* double_array;
-  SafeArrayAccessData(clickable_point_array,
-                      reinterpret_cast<void**>(&double_array));
-  double_array[0] = center.x();
-  UNSAFE_TODO(double_array[1]) = center.y();
-  SafeArrayUnaccessData(clickable_point_array);
-
-  return clickable_point_array;
+  return clickable_point_array.Release();
 }
 
 gfx::Vector2d AXPlatformNodeWin::CalculateUIAScrollPoint(
@@ -1228,11 +1229,6 @@ AXPlatformNodeWin::UIARoleProperties AXPlatformNodeWin::GetUIARoleProperties() {
 
     case ax::mojom::Role::kMath:
     case ax::mojom::Role::kMathMLMath:
-      return {UIALocalizationStrategy::kSupply, UIA_GroupControlTypeId,
-              L"group"};
-
-    // TODO(http://crbug.com/1260585): Refine this if/when a UIA API exists for
-    // properly exposing MathML content.
     case ax::mojom::Role::kMathMLFraction:
     case ax::mojom::Role::kMathMLIdentifier:
     case ax::mojom::Role::kMathMLMultiscripts:
@@ -1254,8 +1250,11 @@ AXPlatformNodeWin::UIARoleProperties AXPlatformNodeWin::GetUIARoleProperties() {
     case ax::mojom::Role::kMathMLText:
     case ax::mojom::Role::kMathMLUnder:
     case ax::mojom::Role::kMathMLUnderOver:
-      return {UIALocalizationStrategy::kSupply, UIA_GroupControlTypeId,
-              L"group"};
+      return features::IsUiaMathMlSupportEnabled()
+                 ? UIARoleProperties{UIALocalizationStrategy::kSupply,
+                                     UIA_CustomControlTypeId, L"math"}
+                 : UIARoleProperties{UIALocalizationStrategy::kSupply,
+                                     UIA_GroupControlTypeId, L"group"};
 
     case ax::mojom::Role::kMenu:
       return {UIALocalizationStrategy::kDeferToControlType,
@@ -2137,10 +2136,14 @@ IFACEMETHODIMP AXPlatformNodeWin::get_relationTargetsOfType(BSTR type_bstr,
 
     // Allocate COM memory for the result array and populate it.
     *targets =
-        static_cast<IUnknown**>(CoTaskMemAlloc(count * sizeof(IUnknown*)));
+        static_cast<IUnknown**>(::CoTaskMemAlloc(count * sizeof(IUnknown*)));
+    // SAFETY: Trust CoTaskMemAlloc allocated space for `count` IUnknown*'s.
+    auto target_span =
+        UNSAFE_BUFFERS(base::span(*targets, static_cast<size_t>(count)));
     for (LONG i = 0; i < count; ++i) {
-      UNSAFE_TODO((*targets)[i]) = static_cast<IAccessible*>(alert_targets[i]);
-      UNSAFE_TODO((*targets)[i]->AddRef());
+      IAccessible* accessible = alert_targets[i];
+      accessible->AddRef();
+      target_span[i] = accessible;
     }
     return S_OK;
   }
@@ -2159,13 +2162,18 @@ IFACEMETHODIMP AXPlatformNodeWin::get_relationTargetsOfType(BSTR type_bstr,
     count = max_targets;
 
   // Allocate COM memory for the result array and populate it.
-  *targets = static_cast<IUnknown**>(CoTaskMemAlloc(count * sizeof(IUnknown*)));
+  *targets =
+      static_cast<IUnknown**>(::CoTaskMemAlloc(count * sizeof(IUnknown*)));
+  // SAFETY: Trust CoTaskMemAlloc allocated space for `count` IUnknown*'s.
+  auto target_span =
+      UNSAFE_BUFFERS(base::span(*targets, static_cast<size_t>(count)));
   int index = 0;
   for (AXPlatformNode* target : enumerated_targets) {
     if (target) {
       AXPlatformNodeWin* win_target = static_cast<AXPlatformNodeWin*>(target);
-      UNSAFE_TODO((*targets)[index]) = static_cast<IAccessible*>(win_target);
-      UNSAFE_TODO((*targets)[index]->AddRef());
+      IAccessible* accessible = win_target;
+      accessible->AddRef();
+      target_span[index] = accessible;
       if (++index >= count) {
         break;
       }
@@ -2260,9 +2268,12 @@ IFACEMETHODIMP AXPlatformNodeWin::get_relations(LONG max_relations,
   if (!SUCCEEDED(hr))
     return hr;
   count = std::min(count, max_relations);
+  // SAFETY: Trust that get_nRelations returns the right count.
+  auto relations_span =
+      UNSAFE_BUFFERS(base::span(relations, base::checked_cast<size_t>(count)));
   *n_relations = count;
   for (LONG i = 0; i < count; i++) {
-    hr = get_relation(i, &UNSAFE_TODO(relations[i]));
+    hr = get_relation(i, &relations_span[i]);
     if (!SUCCEEDED(hr))
       return hr;
   }
@@ -4198,11 +4209,12 @@ IFACEMETHODIMP AXPlatformNodeWin::get_selectedCells(IUnknown*** cells,
 
   *n_selected_cells = static_cast<LONG>(selected.size());
   *cells = static_cast<IUnknown**>(
-      CoTaskMemAlloc(selected.size() * sizeof(IUnknown*)));
-
+      ::CoTaskMemAlloc(selected.size() * sizeof(IUnknown*)));
+  // Safety: Trust CoTaskMemAlloc allocated the requested number of bytes.
+  auto cell_span = UNSAFE_BUFFERS(base::span(*cells, selected.size()));
   for (size_t i = 0; i < selected.size(); ++i) {
     auto* node_win = static_cast<AXPlatformNodeWin*>(selected[i]);
-    node_win->QueryInterface(IID_PPV_ARGS(&UNSAFE_TODO((*cells)[i])));
+    node_win->QueryInterface(IID_PPV_ARGS(&cell_span[i]));
   }
   return S_OK;
 }
@@ -4248,14 +4260,16 @@ IFACEMETHODIMP AXPlatformNodeWin::get_columnHeaderCells(
   std::vector<int32_t> column_header_ids =
       GetDelegate()->GetColHeaderNodeIds(*column);
   *cell_accessibles = static_cast<IUnknown**>(
-      CoTaskMemAlloc(column_header_ids.size() * sizeof(IUnknown*)));
+      ::CoTaskMemAlloc(column_header_ids.size() * sizeof(IUnknown*)));
+  // SAFETY: Trust CoTaskMemAlloc allocated the requested number of bytes.
+  auto cell_span =
+      UNSAFE_BUFFERS(base::span(*cell_accessibles, column_header_ids.size()));
   int index = 0;
   for (int32_t node_id : column_header_ids) {
     AXPlatformNodeWin* node_win =
         static_cast<AXPlatformNodeWin*>(GetDelegate()->GetFromNodeID(node_id));
     if (node_win) {
-      node_win->QueryInterface(
-          IID_PPV_ARGS(&UNSAFE_TODO((*cell_accessibles)[index])));
+      node_win->QueryInterface(IID_PPV_ARGS(&cell_span[index]));
       ++index;
     }
   }
@@ -4302,14 +4316,16 @@ IFACEMETHODIMP AXPlatformNodeWin::get_rowHeaderCells(
   std::vector<int32_t> row_header_ids =
       GetDelegate()->GetRowHeaderNodeIds(*row);
   *cell_accessibles = static_cast<IUnknown**>(
-      CoTaskMemAlloc(row_header_ids.size() * sizeof(IUnknown*)));
+      ::CoTaskMemAlloc(row_header_ids.size() * sizeof(IUnknown*)));
+  // SAFETY: Trust CoTaskMemAlloc allocated the requested number of bytes.
+  auto cell_span =
+      UNSAFE_BUFFERS(base::span(*cell_accessibles, row_header_ids.size()));
   int index = 0;
   for (int32_t node_id : row_header_ids) {
     AXPlatformNodeWin* node_win =
         static_cast<AXPlatformNodeWin*>(GetDelegate()->GetFromNodeID(node_id));
     if (node_win) {
-      node_win->QueryInterface(
-          IID_PPV_ARGS(&UNSAFE_TODO((*cell_accessibles)[index])));
+      node_win->QueryInterface(IID_PPV_ARGS(&(cell_span[index])));
       ++index;
     }
   }
@@ -5786,6 +5802,21 @@ HRESULT AXPlatformNodeWin::GetPropertyValueImpl(PROPERTYID property_id,
           GetStringAttributeAsBstr(ax::mojom::StringAttribute::kVirtualContent,
                                    &V_BSTR(result));
         }
+      } else if (features::IsUiaMathMlSupportEnabled() &&
+                 property_id ==
+                     UiaRegistrarWin::GetInstance().GetMathMLPropertyId()) {
+        // Provide MathML markup for math elements.
+        if (HasStringAttribute(ax::mojom::StringAttribute::kMathContent)) {
+          std::wstring inner_html;
+          inner_html = base::UTF8ToWide(
+              GetStringAttribute(ax::mojom::StringAttribute::kMathContent));
+          if (!inner_html.empty()) {
+            // Wrap innerHTML with <math> tags to form complete MathML.
+            std::wstring outer_math = L"<math>" + inner_html + L"</math>";
+            V_VT(result) = VT_BSTR;
+            V_BSTR(result) = SysAllocString(outer_math.c_str());
+          }
+        }
       }
       break;
   }
@@ -5856,7 +5887,7 @@ IFACEMETHODIMP AXPlatformNodeWin::get_bulkFetch(
   // a stub that calls PostTask so that it's async, but it doesn't
   // actually parse the input.
 
-  base::Value::Dict result;
+  base::DictValue result;
   result.Set("role", base::Value(ui::ToString(GetRole())));
 
   gfx::Rect bounds = GetDelegate()->GetBoundsRect(
@@ -6164,6 +6195,18 @@ HRESULT AXPlatformNodeWin::GetAnnotationTypesAttribute(
     result->Insert<VT_I4>(AnnotationType_GrammarError);
   if (highlight_result == MarkerTypeRangeResult::kMatch)
     result->Insert<VT_I4>(AnnotationType_Highlighted);
+
+  if (features::IsUiaMathMlSupportEnabled()) {
+    // Math or text children of math nodes are considered to have the
+    // annotation type: `AnnotationType_Mathematics`.
+    if (IsMath(GetRole())) {
+      result->Insert<VT_I4>(AnnotationType_Mathematics);
+    } else if (auto* platform_ancestor = GetLowestAccessibleElementForUIA()) {
+      if (IsMath(platform_ancestor->GetRole())) {
+        result->Insert<VT_I4>(AnnotationType_Mathematics);
+      }
+    }
+  }
 
   return S_OK;
 }
@@ -7536,8 +7579,9 @@ bool AXPlatformNodeWin::IsUIAControl() const {
       // text to be effectively repeated.
       auto* ancestor = FromNativeViewAccessible(GetParent());
       while (ancestor) {
-        if (IsUIACellOrTableHeader(ancestor->GetRole()))
+        if (IsUIACellOrTableHeader(ancestor->GetRole())) {
           return false;
+        }
         switch (ancestor->GetRole()) {
           // There are elements inside the `kColorWell` element that we want
           // exposed as UIA Control even if they are inside other elements that
@@ -7617,7 +7661,8 @@ bool AXPlatformNodeWin::IsUIAControl() const {
       case ax::mojom::Role::kListItem:
       // Treat the root of a MathML tree as content/control so that it is seen
       // by UIA clients. The remainder of the tree remains as text for now until
-      // UIA mappings for MathML are defined (https://crbug.com/1260585).
+      // fine tuned UIA mappings for MathML are defined
+      // (https://crbug.com/1260585).
       case ax::mojom::Role::kMathMLMath:
       case ax::mojom::Role::kMeter:
       case ax::mojom::Role::kProgressIndicator:
@@ -7632,6 +7677,12 @@ bool AXPlatformNodeWin::IsUIAControl() const {
       default:
         break;
     }
+    // All other math elements are not controls when MathML UIA support is
+    // enabled.
+    if (features::IsUiaMathMlSupportEnabled() && IsMath(GetRole())) {
+      return false;
+    }
+
     // Classify generic containers that are not clickable or focusable and have
     // no name, description, landmark type, and is not the root of editable
     // content as not controls.
@@ -7720,6 +7771,15 @@ bool AXPlatformNodeWin::ShouldHideChildrenForUIA() const {
     return true;
 
   auto role = GetRole();
+
+  // Do not expose children of Math elements when MathML UIA support is
+  // enabled. This ensures that text ranges within math content return the
+  // parent Math container as the enclosing element, not intermediate text
+  // nodes or non-root math elements.
+  if (features::IsUiaMathMlSupportEnabled() && IsMath(role)) {
+    return true;
+  }
+
   switch (role) {
     // Even though a node with  role kButton has presentational children, it
     // should only hide its children from UIA when it has a single text node
@@ -8054,6 +8114,8 @@ std::optional<EVENTID> AXPlatformNodeWin::MojoEventToUIAEvent(
   switch (event) {
     case ax::mojom::Event::kAlert:
       return UIA_SystemAlertEventId;
+    case ax::mojom::Event::kEndOfTest:
+      return UiaRegistrarWin::GetInstance().GetTestCompleteEventId();
     case ax::mojom::Event::kFocus:
     case ax::mojom::Event::kFocusContext:
     case ax::mojom::Event::kFocusAfterMenuClose:
@@ -8096,8 +8158,6 @@ std::optional<PROPERTYID> AXPlatformNodeWin::MojoEventToUIAProperty(
     case ax::mojom::Event::kCheckedStateChanged:
       return UIA_ToggleToggleStatePropertyId;
     case ax::mojom::Event::kExpandedChanged:
-    case ax::mojom::Event::kRowCollapsed:
-    case ax::mojom::Event::kRowExpanded:
       return UIA_ExpandCollapseExpandCollapseStatePropertyId;
     case ax::mojom::Event::kSelection:
     case ax::mojom::Event::kSelectionAdd:
@@ -8215,6 +8275,31 @@ LONG AXPlatformNodeWin::FindBoundary(IA2TextBoundaryType ia2_boundary,
                                      ax::mojom::MoveDirection direction) {
   HandleSpecialTextOffset(&start_offset);
 
+  const std::u16string& text_str = GetHypertext();
+  if (ia2_boundary == IA2_TEXT_BOUNDARY_WORD && start_offset >= 0 &&
+      start_offset < static_cast<LONG>(text_str.length()) &&
+      text_str[start_offset] == '\n') {
+    // The IAccessible2 spec for IA2_TEXT_BOUNDARY_WORD states that behavior
+    // should match Ctrl+Arrow navigation, but acknowledges that handling of the
+    // end of a line varies across applications.
+    // Reference:
+    // https://accessibility.linuxfoundation.org/a11yspecs/ia2/docs/html/_accessible_text_8idl.html
+    //
+    // In standard Windows controls (e.g. Notepad), the newline character is
+    // treated as a distinct word boundary. Without this explicit check,
+    // FindBoundary logic often merges the newline with the preceding token,
+    // causing screen readers to incorrectly re-announce the previous word /
+    // punctuation. This check enforces native-like behavior at line ends.
+    switch (direction) {
+      case ax::mojom::MoveDirection::kForward:
+        return start_offset + 1;
+      case ax::mojom::MoveDirection::kBackward:
+        return start_offset;
+      default:
+        break;
+    }
+  }
+
   // If the |start_offset| is equal to the location of the caret, then use the
   // focus affinity, otherwise default to downstream affinity.
   ax::mojom::TextAffinity affinity = ax::mojom::TextAffinity::kDownstream;
@@ -8285,10 +8370,12 @@ HRESULT AXPlatformNodeWin::AllocateComArrayFromVector(
 
   auto count = std::min((LONG)results.size(), max);
   *n_selected = count;
-  *selected = static_cast<LONG*>(CoTaskMemAlloc(sizeof(LONG) * count));
+  *selected = static_cast<LONG*>(::CoTaskMemAlloc(sizeof(LONG) * count));
 
-  for (LONG i = 0; i < count; i++)
-    UNSAFE_TODO((*selected)[i]) = results[i];
+  // SAFETY: Trust that CoTaskMemAlloc allocated `count` LONGs.
+  auto selected_span =
+      UNSAFE_BUFFERS(base::span(*selected, static_cast<size_t>(count)));
+  std::ranges::copy_n(results.begin(), count, selected_span.begin());
   return S_OK;
 }
 

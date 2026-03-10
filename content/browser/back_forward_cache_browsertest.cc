@@ -4,13 +4,13 @@
 
 #include "content/browser/back_forward_cache_browsertest.h"
 
+#include <algorithm>
 #include <climits>
 #include <optional>
 #include <string_view>
 #include <unordered_map>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/memory/raw_ptr.h"
@@ -317,8 +317,8 @@ std::string BackForwardCacheBrowserTest::DepictFrameTree(FrameTreeNode* node) {
 bool BackForwardCacheBrowserTest::HistogramContainsIntValue(
     base::HistogramBase::Sample32 sample,
     std::vector<base::Bucket> histogram_values) {
-  return base::Contains(histogram_values, static_cast<int>(sample),
-                        &base::Bucket::min);
+  return std::ranges::contains(histogram_values, static_cast<int>(sample),
+                               &base::Bucket::min);
 }
 
 void BackForwardCacheBrowserTest::EvictByJavaScript(RenderFrameHostImpl* rfh) {
@@ -1855,8 +1855,7 @@ IN_PROC_BROWSER_TEST_F(BackForwardCacheBrowserTest,
     TextInputManagerValueObserver value_observer(web_contents(), "A");
     // 3) Press the "A" key to change the text input value. This should notify
     // the browser that the text input value has changed.
-    SimulateKeyPress(web_contents(), ui::DomKey::FromCharacter('A'),
-                     ui::DomCode::US_A, ui::VKEY_A, false, false, false, false);
+    SimulateCharTyped(web_contents(), 'A');
     value_observer.Wait();
 
     EXPECT_EQ(rfh_1, web_contents()->GetFocusedFrame());
@@ -1958,8 +1957,7 @@ IN_PROC_BROWSER_TEST_F(BackForwardCacheBrowserTest,
     TextInputManagerValueObserver value_observer(web_contents(), "A");
     // 3) Press the "A" key to change the text input value. This should notify
     // the browser that the text input value has changed.
-    SimulateKeyPress(web_contents(), ui::DomKey::FromCharacter('A'),
-                     ui::DomCode::US_A, ui::VKEY_A, false, false, false, false);
+    SimulateCharTyped(web_contents(), 'A');
     value_observer.Wait();
 
     EXPECT_EQ(rfh_subframe_a, web_contents()->GetFocusedFrame());
@@ -2481,7 +2479,8 @@ IN_PROC_BROWSER_TEST_F(BackForwardCacheBrowserTest, TreeResultFeatureUsage) {
       web_contents()
           ->GetController()
           .GetBackForwardCache()
-          .GetCurrentBackForwardCacheEligibility(rfh.get());
+          .GetCurrentBackForwardCacheEligibility(
+              rfh.get(), /*is_becoming_forward_entry=*/false);
   ASSERT_TRUE(NavigateToURL(shell(), url_b));
   ASSERT_TRUE(rfh.WaitUntilRenderFrameDeleted());
 
@@ -2960,7 +2959,8 @@ IN_PROC_BROWSER_TEST_P(
                 ->GetController()
                 .GetBackForwardCache()
                 .GetCurrentBackForwardCacheEligibility(
-                    static_cast<RenderFrameHostImpl*>(main_frame));
+                    static_cast<RenderFrameHostImpl*>(main_frame),
+                    /*is_becoming_forward_entry=*/false);
         EXPECT_TRUE(can_store_result.flattened_reasons.HasNotRestoredReason(
             BackForwardCacheMetrics::NotRestoredReason::kSubframeIsNavigating));
       }));

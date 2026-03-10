@@ -20,7 +20,6 @@
 #include "base/check.h"
 #include "base/check_deref.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/debug/crash_logging.h"
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
@@ -975,7 +974,7 @@ bool PaymentsAutofillTable::GetServerCreditCards(
     std::string card_network = s.ColumnString(index++);
     // The issuer network must be set after setting the number to override the
     // autodetected issuer network.
-    card->SetNetworkForMaskedCard(card_network.c_str());
+    card->SetNetworkForMaskedCard(card_network);
 
     card->SetRawInfo(CREDIT_CARD_NAME_FULL, s.ColumnString16(index++));
     card->SetRawInfo(CREDIT_CARD_EXP_MONTH, s.ColumnString16(index++));

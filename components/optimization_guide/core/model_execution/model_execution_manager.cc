@@ -75,6 +75,14 @@ void RecordModelExecutionResultHistogram(ModelBasedCapabilityKey feature,
       result);
 }
 
+void RecordModelExecutionLatency(ModelBasedCapabilityKey feature,
+                                 base::TimeDelta latency) {
+  base::UmaHistogramMediumTimes(
+      base::StrCat({"OptimizationGuide.ModelExecution.FetchLatency2.",
+                    GetStringNameForModelExecutionFeature(feature)}),
+      latency);
+}
+
 // The maximum number of parallel `ExecuteModel()` calls allowed for the
 // `feature`. Must be at least 1.
 // If a new model execution request exceeds this limited, the oldest pending
@@ -93,7 +101,10 @@ size_t GetMaxParallelFeatureExecutions(ModelBasedCapabilityKey feature) {
     case ModelBasedCapabilityKey::kWalletablePassExtraction:
     case ModelBasedCapabilityKey::kAmountExtraction:
     case ModelBasedCapabilityKey::kIosSmartTabGrouping:
+    case ModelBasedCapabilityKey::kSkills:
     case ModelBasedCapabilityKey::kScamDetection:
+    case ModelBasedCapabilityKey::kGeminiAntiscamProtection:
+    case ModelBasedCapabilityKey::kContentAnnotation:
       return 1;
     case ModelBasedCapabilityKey::kFormsClassifications:
       // Since there can be multiple forms on a single page, multiple parallel
@@ -204,18 +215,22 @@ void ModelExecutionManager::ExecuteModel(
     fetchers_for_feature.erase(fetchers_for_feature.begin());
   }
   FetcherId fetcher_id = next_model_execution_fetcher_id++;
-  // Currently only ZSS is supported by legion. Update or remove this CHECK when
-  // other features are supported too.
-  CHECK(service_type != ModelExecutionServiceType::kLegion ||
+  // Currently only ZSS is supported by PrivateAI. Update or remove this CHECK
+  // when other features are supported too.
+  CHECK(service_type != ModelExecutionServiceType::kPrivateAi ||
         feature == ModelBasedCapabilityKey::kZeroStateSuggestions)
       << feature;
-  auto fetcher_it = fetchers_for_feature.emplace(
-      fetcher_id, CreateModelExecutionFetcher(service_type));
+  base::TimeTicks start_time = base::TimeTicks::Now();
+  auto fetcher = CreateModelExecutionFetcher(service_type);
+  CHECK(fetcher);
+  auto fetcher_it =
+      fetchers_for_feature.emplace(fetcher_id, std::move(fetcher));
   fetcher_it.first->second->ExecuteModel(
       feature, identity_manager_, request_metadata, timeout,
       base::BindOnce(&ModelExecutionManager::OnModelExecuteResponse,
                      weak_ptr_factory_.GetWeakPtr(), feature, fetcher_id,
-                     std::move(log_ai_data_request), std::move(callback)));
+                     std::move(log_ai_data_request), std::move(callback),
+                     start_time));
 }
 
 std::unique_ptr<ModelExecutionFetcher>
@@ -226,9 +241,9 @@ ModelExecutionManager::CreateModelExecutionFetcher(
       return std::make_unique<ModelExecutionFetcherImpl>(
           url_loader_factory_, model_execution_service_url_,
           optimization_guide_logger_);
-    case ModelExecutionServiceType::kLegion:
+    case ModelExecutionServiceType::kPrivateAi:
       CHECK(delegate_);
-      return delegate_->CreateLegionFetcher();
+      return delegate_->CreatePrivateAiFetcher();
   }
 }
 
@@ -237,8 +252,10 @@ void ModelExecutionManager::OnModelExecuteResponse(
     FetcherId fetcher_id,
     std::unique_ptr<proto::LogAiDataRequest> log_ai_data_request,
     OptimizationGuideModelExecutionResultCallback callback,
+    base::TimeTicks start_time,
     base::expected<const proto::ExecuteResponse,
                    OptimizationGuideModelExecutionError> execute_response) {
+  RecordModelExecutionLatency(feature, base::TimeTicks::Now() - start_time);
   active_model_execution_fetchers_[feature].erase(fetcher_id);
   ScopedModelExecutionResponseLogger scoped_logger(feature,
                                                    optimization_guide_logger_);

@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "media/capture/video/win/video_capture_device_factory_win.h"
 
 #include <objbase.h>
@@ -28,7 +23,7 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
+#include "base/compiler_specific.h"
 #include "base/containers/fixed_flat_set.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
@@ -54,7 +49,6 @@
 #include "media/base/win/mf_initializer.h"
 #include "media/capture/capture_switches.h"
 #include "media/capture/video/video_capture_device_descriptor.h"
-#include "media/capture/video/video_capture_metrics.h"
 #include "media/capture/video/win/metrics.h"
 #include "media/capture/video/win/video_capture_device_mf_win.h"
 #include "media/capture/video/win/video_capture_device_win.h"
@@ -284,8 +278,8 @@ bool PrepareVideoCaptureAttributesMediaFoundation(
 bool IsDeviceBlocked(const std::string& name) {
   DCHECK_EQ(BLOCKED_CAMERA_MAX + 1,
             static_cast<int>(std::size(kBlockedCameraNames)));
-  for (size_t i = 0; i < std::size(kBlockedCameraNames); ++i) {
-    if (base::StartsWith(name, kBlockedCameraNames[i],
+  for (const char* blocked_camera_name : kBlockedCameraNames) {
+    if (base::StartsWith(name, blocked_camera_name,
                          base::CompareCase::INSENSITIVE_ASCII)) {
       DVLOG(1) << "Enumerated blocked device: " << name;
       return true;
@@ -316,10 +310,10 @@ std::string GetDeviceModelId(const std::string& device_id) {
 
 bool DevicesInfoContainsDeviceId(const DevicesInfo& devices_info,
                                  const std::string& device_id) {
-  return base::Contains(devices_info, device_id,
-                        [](const VideoCaptureDeviceInfo& device_info) {
-                          return device_info.descriptor.device_id;
-                        });
+  return std::ranges::contains(devices_info, device_id,
+                               [](const VideoCaptureDeviceInfo& device_info) {
+                                 return device_info.descriptor.device_id;
+                               });
 }
 
 // Returns a non DirectShow descriptor DevicesInfo with the provided name and
@@ -512,7 +506,8 @@ class VideoCaptureDeviceFactoryWin::UsageReportHandler
   void UpdateDevicesInfoAvailability(
       std::vector<VideoCaptureDeviceInfo>* devices_info) {
     base::AutoLock lock(cache_lock_);
-    std::set<std::string_view> device_ids;
+    absl::flat_hash_set<std::string_view> device_ids;
+    device_ids.reserve(devices_info->size());
     for (auto& info : *devices_info) {
       device_ids.emplace(info.descriptor.device_id);
       auto it = availability_cache_.find(info.descriptor.device_id);
@@ -521,7 +516,7 @@ class VideoCaptureDeviceFactoryWin::UsageReportHandler
       }
     }
     std::erase_if(availability_cache_, [&device_ids](const auto& entry) {
-      return !base::Contains(device_ids, entry.first);
+      return !device_ids.contains(entry.first);
     });
   }
 
@@ -623,7 +618,6 @@ VideoCaptureErrorOrDevice VideoCaptureDeviceFactoryWin::CreateDevice(
           DVLOG(1) << " MediaFoundation Device: "
                    << device_descriptor.display_name();
           if (device->Init()) {
-            LogCaptureDeviceHashedModelId(device_descriptor);
             return VideoCaptureErrorOrDevice(std::move(device));
           }
           return VideoCaptureErrorOrDevice(
@@ -649,7 +643,6 @@ VideoCaptureErrorOrDevice VideoCaptureDeviceFactoryWin::CreateDevice(
           device_descriptor, std::move(capture_filter));
       DVLOG(1) << " DirectShow Device: " << device_descriptor.display_name();
       if (device->Init()) {
-        LogCaptureDeviceHashedModelId(device_descriptor);
         return VideoCaptureErrorOrDevice(std::move(device));
       }
       return VideoCaptureErrorOrDevice(
@@ -1029,14 +1022,17 @@ DevicesInfo VideoCaptureDeviceFactoryWin::GetDevicesInfoMediaFoundation() {
     for (UINT32 i = 0; i < count; ++i) {
       ScopedCoMem<wchar_t> name;
       UINT32 name_size;
-      HRESULT hr = devices[i]->GetAllocatedString(
-          MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &name, &name_size);
+      HRESULT hr =
+          UNSAFE_TODO(devices[i])
+              ->GetAllocatedString(MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &name,
+                                   &name_size);
       if (SUCCEEDED(hr)) {
         ScopedCoMem<wchar_t> id;
         UINT32 id_size;
-        hr = devices[i]->GetAllocatedString(
-            MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, &id,
-            &id_size);
+        hr = UNSAFE_TODO(devices[i])
+                 ->GetAllocatedString(
+                     MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
+                     &id, &id_size);
         if (SUCCEEDED(hr)) {
           const std::string device_id =
               base::SysWideToUTF8(std::wstring(id, id_size));
@@ -1072,7 +1068,7 @@ DevicesInfo VideoCaptureDeviceFactoryWin::GetDevicesInfoMediaFoundation() {
       }
       DLOG_IF(ERROR, FAILED(hr)) << "GetAllocatedString failed: "
                                  << logging::SystemErrorCodeToString(hr);
-      devices[i]->Release();
+      UNSAFE_TODO(devices[i])->Release();
     }
   }
 

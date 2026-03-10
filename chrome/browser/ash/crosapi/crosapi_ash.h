@@ -13,9 +13,6 @@
 #include "chrome/browser/ash/crosapi/crosapi_id.h"
 #include "chromeos/crosapi/mojom/cros_display_config.mojom.h"
 #include "chromeos/crosapi/mojom/crosapi.mojom.h"
-#include "chromeos/crosapi/mojom/magic_boost.mojom-forward.h"
-#include "chromeos/crosapi/mojom/mahi.mojom-forward.h"
-#include "chromeos/crosapi/mojom/print_preview_cros.mojom-forward.h"
 #include "chromeos/crosapi/mojom/telemetry_diagnostic_routine_service.mojom.h"
 #include "media/gpu/buildflags.h"
 #include "mojo/public/cpp/bindings/generic_pending_receiver.h"
@@ -24,7 +21,6 @@
 #include "printing/buildflags/buildflags.h"
 
 namespace ash {
-class DiagnosticsServiceAsh;
 class ProbeServiceAsh;
 class TelemetryDiagnosticsRoutineServiceAsh;
 class TelemetryManagementServiceAsh;
@@ -33,18 +29,12 @@ namespace auth {
 class InSessionAuth;
 }  // namespace auth
 
-namespace printing {
-class PrintPreviewWebcontentsAdapterAsh;
-}  // namespace printing
-
 }  // namespace ash
 
 namespace crosapi {
 
 class DocumentScanAsh;
-class KeystoreServiceAsh;
 class LocalPrinterAsh;
-class VpnServiceAsh;
 
 // Implementation of Crosapi in Ash. It provides a set of APIs that
 // crosapi clients, such as lacros-chrome, can call into.
@@ -69,8 +59,6 @@ class CrosapiAsh : public mojom::Crosapi {
   void BindCrosDisplayConfigController(
       mojo::PendingReceiver<mojom::CrosDisplayConfigController> receiver)
       override;
-  void BindDiagnosticsService(
-      mojo::PendingReceiver<mojom::DiagnosticsService> receiver) override;
   void BindDocumentScan(
       mojo::PendingReceiver<mojom::DocumentScan> receiver) override;
   void BindHidManager(
@@ -78,8 +66,6 @@ class CrosapiAsh : public mojom::Crosapi {
   void BindInSessionAuth(
       mojo::PendingReceiver<chromeos::auth::mojom::InSessionAuth> receiver)
       override;
-  void BindKeystoreService(
-      mojo::PendingReceiver<mojom::KeystoreService> receiver) override;
   void BindLocalPrinter(
       mojo::PendingReceiver<mojom::LocalPrinter> receiver) override;
   void BindMachineLearningService(
@@ -106,48 +92,24 @@ class CrosapiAsh : public mojom::Crosapi {
       override;
   void BindTelemetryProbeService(
       mojo::PendingReceiver<mojom::TelemetryProbeService> receiver) override;
-  void BindVideoCaptureDeviceFactory(
-      mojo::PendingReceiver<mojom::VideoCaptureDeviceFactory> receiver)
-      override;
-  void BindVpnService(
-      mojo::PendingReceiver<mojom::VpnService> receiver) override;
-  void BindGuestOsSkForwarderFactory(
-      mojo::PendingReceiver<mojom::GuestOsSkForwarderFactory> receiver)
-      override;
 
   DocumentScanAsh* document_scan_ash() { return document_scan_ash_.get(); }
 
-  KeystoreServiceAsh* keystore_service_ash() {
-    return keystore_service_ash_.get();
-  }
-
   LocalPrinterAsh* local_printer_ash() { return local_printer_ash_.get(); }
 
-  ash::printing::PrintPreviewWebcontentsAdapterAsh*
-  print_preview_webcontents_adapter_ash() {
-    return print_preview_webcontents_adapter_ash_.get();
-  }
-
   ash::ProbeServiceAsh* probe_service_ash() { return probe_service_ash_.get(); }
-
-  VpnServiceAsh* vpn_service_ash() { return vpn_service_ash_.get(); }
 
  private:
   // Called when a connection is lost.
   void OnDisconnected();
 
-  std::unique_ptr<ash::DiagnosticsServiceAsh> diagnostics_service_ash_;
   std::unique_ptr<DocumentScanAsh> document_scan_ash_;
-  std::unique_ptr<KeystoreServiceAsh> keystore_service_ash_;
   std::unique_ptr<LocalPrinterAsh> local_printer_ash_;
   std::unique_ptr<ash::TelemetryDiagnosticsRoutineServiceAsh>
       telemetry_diagnostic_routine_service_ash_;
   std::unique_ptr<ash::TelemetryManagementServiceAsh>
       telemetry_management_service_ash_;
   std::unique_ptr<ash::ProbeServiceAsh> probe_service_ash_;
-  std::unique_ptr<ash::printing::PrintPreviewWebcontentsAdapterAsh>
-      print_preview_webcontents_adapter_ash_;
-  std::unique_ptr<VpnServiceAsh> vpn_service_ash_;
 
   mojo::ReceiverSet<mojom::Crosapi, CrosapiId> receiver_set_;
   std::map<mojo::ReceiverId, base::OnceClosure> disconnect_handler_map_;

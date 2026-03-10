@@ -5,12 +5,14 @@
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_presenter.h"
 
 #include <optional>
+#include <string_view>
 
 #include "base/feature_list.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_state_manager.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
+#include "chrome/browser/ui/views/omnibox/omnibox_popup_presenter_base.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_webui_content.h"
 #include "chrome/common/webui_url_constants.h"
 #include "ui/views/view_utils.h"
@@ -30,10 +32,11 @@ OmniboxPopupPresenter::~OmniboxPopupPresenter() = default;
 
 void OmniboxPopupPresenter::Hide() {
   OmniboxPopupPresenterBase::Hide();
-  // Note: This makes the widget and webview have heights that are not synced.
-  // So if the webview content height does not change (No resize event happens)
-  // we need to manually call OnContentHeightChanged to update this value.
   content_height_ = 1;
+}
+
+std::string_view OmniboxPopupPresenter::GetPopupMetricPrefix() const {
+  return "Omnibox.Popup.WebUI";
 }
 
 void OmniboxPopupPresenter::WidgetDestroyed() {

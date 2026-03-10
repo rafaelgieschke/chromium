@@ -12,7 +12,7 @@
 namespace autofill::payments {
 
 namespace {
-using Dict = base::Value::Dict;
+using Dict = base::DictValue;
 
 const char kGetBnplPaymentInstrumentForFetchingVcnRequestPath[] =
     "payments/apis-secure/chromepaymentsservice/"
@@ -70,8 +70,7 @@ std::string GetBnplPaymentInstrumentForFetchingVcnRequest::GetRequestContent() {
   return base::StringPrintf(
       kGetBnplPaymentInstrumentForFetchingVcnRequestFormat,
       base::EscapeUrlEncodedData(base::WriteJson(request_dict).value(),
-                                 /*use_plus=*/true)
-          .c_str());
+                                 /*use_plus=*/true));
 }
 
 void GetBnplPaymentInstrumentForFetchingVcnRequest::ParseResponse(

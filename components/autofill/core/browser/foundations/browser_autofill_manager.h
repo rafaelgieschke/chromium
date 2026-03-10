@@ -35,7 +35,6 @@
 #include "components/autofill/core/browser/foundations/autofill_manager.h"
 #include "components/autofill/core/browser/integrators/address_on_typing/address_on_typing_manager.h"
 #include "components/autofill/core/browser/integrators/autofill_ai/autofill_ai_manager.h"
-#include "components/autofill/core/browser/integrators/fast_checkout/fast_checkout_delegate.h"
 #include "components/autofill/core/browser/integrators/one_time_tokens/metrics/otp_form_event_logger.h"
 #include "components/autofill/core/browser/integrators/one_time_tokens/otp_manager.h"
 #include "components/autofill/core/browser/integrators/password_form_classification.h"
@@ -139,7 +138,7 @@ class BrowserAutofillManager : public AutofillManager {
     base::TimeTicks form_submitted_timestamp;
   };
 
-  // Triggered when `GenerateSuggestionsAndMaybeShowUIPhase2` is complete.
+  // Triggered when `GenerateFooter` is complete.
   // `show_suggestions` indicates whether or not the list of `suggestions`
   // should be displayed (via the `external_delegate_`).
   using OnGenerateSuggestionsCallback =
@@ -164,16 +163,29 @@ class BrowserAutofillManager : public AutofillManager {
                                  const FillingPayload& filling_payload,
                                  AutofillTriggerSource trigger_source);
 
+  // Fills or previews `form` with the information in `filling_payload`.
+  // `blocked_fields` are fields which must not be filled because another
+  // filling product of higher priority claims them.
+  //
+  // TODO(crbug.com/489959284): Add blocked_fields to the signature of
+  // FillOrPreviewForm and remove this method.
+  virtual void FillOrPreviewFields(
+      mojom::ActionPersistence action_persistence,
+      const FormData& form,
+      const FieldGlobalId& field_id,
+      const FillingPayload& filling_payload,
+      AutofillTriggerSource trigger_source,
+      const base::flat_set<FieldGlobalId>& blocked_fields);
+
   // Routes calls from external components to FormFiller::FillOrPreviewField.
-  // Virtual for testing.
   // TODO(crbug.com/40227496): Replace FormFieldData parameter by FieldGlobalId.
-  virtual void FillOrPreviewField(mojom::ActionPersistence action_persistence,
-                                  mojom::FieldActionType action_type,
-                                  const FormData& form,
-                                  const FormFieldData& field,
-                                  const std::u16string& value,
-                                  SuggestionType type,
-                                  std::optional<FieldType> field_type_used);
+  void FillOrPreviewField(mojom::ActionPersistence action_persistence,
+                          mojom::FieldActionType action_type,
+                          const FormData& form,
+                          const FormFieldData& field,
+                          const std::u16string& value,
+                          SuggestionType type,
+                          std::optional<FieldType> field_type_used) override;
 
   // Logs metrics when the user accepts address form filling suggestion. This
   // happens only for already parsed forms (`FormStructure` and `AutofillField`
@@ -311,10 +323,6 @@ class BrowserAutofillManager : public AutofillManager {
   //   2. there is no form and WebOTP is not used
   void ReportAutofillWebOTPMetrics(bool used_web_otp) override;
 
-  // Set Fast Checkout run ID on the corresponding form event logger.
-  virtual void SetFastCheckoutRunId(FieldTypeGroup field_type_group,
-                                    int64_t run_id);
-
   TouchToFillDelegate* touch_to_fill_delegate() {
     return touch_to_fill_delegate_.get();
   }
@@ -322,15 +330,6 @@ class BrowserAutofillManager : public AutofillManager {
   void set_touch_to_fill_delegate(
       std::unique_ptr<TouchToFillDelegate> touch_to_fill_delegate) {
     touch_to_fill_delegate_ = std::move(touch_to_fill_delegate);
-  }
-
-  FastCheckoutDelegate* fast_checkout_delegate() {
-    return fast_checkout_delegate_.get();
-  }
-
-  void set_fast_checkout_delegate(
-      std::unique_ptr<FastCheckoutDelegate> fast_checkout_delegate) {
-    fast_checkout_delegate_ = std::move(fast_checkout_delegate);
   }
 
   // This reference is not stable over the lifetime of BrowserAutofillManager.
@@ -423,18 +422,8 @@ class BrowserAutofillManager : public AutofillManager {
       const FormStructure& form_structure,
       const FormFieldData& trigger_field,
       const AutofillField& trigger_autofill_field,
-      std::optional<std::string> plus_address_email_override);
-
-  // Returns a list of values from the stored credit cards that match
-  // the type and value of `trigger_field` and returns the labels of the
-  // matching credit cards.
-  // TODO(crbug.com/40227496): Keep only one of `form` or `form_structure` and
-  // `trigger_field` or `autofill_trigger_field`.
-  std::vector<Suggestion> GetCreditCardSuggestions(
-      const FormData& form,
-      const FormStructure& form_structure,
-      const FormFieldData& trigger_field,
-      const AutofillField& autofill_trigger_field);
+      std::optional<std::string> plus_address_email_override,
+      AutofillSuggestionTriggerSource trigger_source);
 
   // Returns a list of suggestions from the stored loyalty cards for the given
   // last committed primary main frame URL obtained from `client()` and the
@@ -452,21 +441,21 @@ class BrowserAutofillManager : public AutofillManager {
   // `trigger_source` is the reason for triggering the filling operation.
   // `action_persistence` denotes whether the operation is a filling or preview
   // operation.
-  void FillOrPreviewCreditCardForm(mojom::ActionPersistence action_persistence,
-                                   const FormData& form,
-                                   const FormStructure& form_structure,
-                                   const AutofillField& autofill_field,
-                                   const CreditCard& credit_card,
-                                   AutofillTriggerSource trigger_source);
+  // `blocked_fields` are fields which must not be filled because another
+  // filling product of higher priority claims them.
+  void FillOrPreviewCreditCardForm(
+      mojom::ActionPersistence action_persistence,
+      const FormData& form,
+      const FormStructure& form_structure,
+      const AutofillField& autofill_field,
+      const CreditCard& credit_card,
+      AutofillTriggerSource trigger_source,
+      const base::flat_set<FieldGlobalId>& blocked_fields);
 
   // If `metrics_->initial_interaction_timestamp` is unset or is set to a later
   // time than `interaction_timestamp`, updates the cached timestamp.  The
   // latter check is needed because IPC messages can arrive out of order.
   void UpdateInitialInteractionTimestamp(base::TimeTicks interaction_timestamp);
-
-  // Whether the `trigger_field` should show an entry to scan a credit card.
-  bool ShouldShowScanCreditCard(const FormStructure& form,
-                                const AutofillField& trigger_field);
 
   // Checks whether JavaScript cleared an autofilled value within
   // kLimitBeforeRefill after the filling and records metrics for this. This
@@ -525,24 +514,25 @@ class BrowserAutofillManager : public AutofillManager {
           returned_suggestions);
 
   // Generates and prioritizes different kinds of suggestions and
-  // suggestion surfaces accordingly (e.g. Fast Checkout, Autofill AI,
-  // SingleFieldFiller(s), address and credit card popups, OTP suggestions).
-  // Suggestion flows that handle their own UI flow (e.g. FastCheckout, TTF,
+  // suggestion surfaces accordingly (Autofill AI, SingleFieldFiller(s), address
+  // and credit card popups, OTP suggestions).
+  // Suggestion flows that handle their own UI flow (e.g. TTF,
   // SingleFieldFiller) are triggered from within these functions.
   //
-  // This process is split into phrases 1, 2 and 3 to support asynchronous
-  // operations (fetching affiliated plus addresses during phase 1, and
-  // OTP values fetching) in the middle.
+  // This process is split into phases 1, 2, 3 to support asynchronous
+  // operations:
+  // - Between Phase 1 and 2, BAM may fetch plus addresses.
+  // - Between Phase 2 and 3, BAM may fetch OTPs.
   //
   // Phase 3 requires the list of `plus_addresses` as these can influence how
   // address profile suggestions are shown. If `plus_addresses` is std::nullopt
   // it means that plus addresses are irrelevant for the current suggestion
   // context.
   //
-  // Other flows that rely on the
-  // `external_delegate_` to show their suggestions, pass the suggestions list
-  // to the delegate via `OnGenerateSuggestionsComplete` and request them to be
-  // shown (via `show_suggestions`).
+  // Other flows that rely on the `external_delegate_` to show their
+  // suggestions, pass the suggestions list to the delegate via `GenerateFooter`
+  // and `OnGenerateSuggestionsComplete` and request them to be shown (via
+  // `show_suggestions`).
   void GenerateSuggestionsAndMaybeShowUIPhase1(
       const FormData& form,
       const FormFieldData& field,
@@ -563,6 +553,13 @@ class BrowserAutofillManager : public AutofillManager {
       base::TimeTicks suggestion_generator_start_time,
       std::vector<std::string> plus_addresses,
       std::vector<std::string> one_time_passwords);
+  void GenerateFooter(const FormData& form,
+                      const FormFieldData& field,
+                      AutofillSuggestionTriggerSource trigger_source,
+                      const SuggestionsContext& context,
+                      base::TimeTicks suggestion_generation_start_time,
+                      bool show_suggestions,
+                      std::vector<Suggestion> suggestions);
 
   // Receives the lists of plus address and single field form fill suggestions
   // and combines them. It gives priority to the plus address suggestions,
@@ -583,10 +580,9 @@ class BrowserAutofillManager : public AutofillManager {
                              const FieldGlobalId& field_id);
 
   // The function receives a the list of `suggestions` from
-  // `GenerateSuggestionsAndMaybeShowUIPhase2` and displays them if
-  // `show_suggestions` is true (via the `external_delegate_`). It also logs
-  // whether there is a suggestion for the user and whether the suggestion is
-  // shown.
+  // `GenerateFooter` and displays them if `show_suggestions` is true (via the
+  // `external_delegate_`). It also logs whether there is a suggestion for the
+  // user and whether the suggestion is shown.
   void OnGenerateSuggestionsComplete(
       const FormGlobalId& form_id,
       const FieldGlobalId& field_id,
@@ -596,16 +592,43 @@ class BrowserAutofillManager : public AutofillManager {
       bool show_suggestions,
       std::vector<Suggestion> suggestions);
 
+  // Combines passkey suggestion and existing suggestions into a single list,
+  // prioritizing existing suggestions first.
+  void MergePasskeysAndExistingSuggestions(std::vector<Suggestion>& suggestions,
+                                           Suggestion passkey_suggestions);
+
+  // Creates passkey suggestion that will be used in
+  // MergePasskeysIntoExistingSuggestions.
+  // TODO(crbug.com/409962888): Remove after new suggestion generation logic is
+  // launched.
+  std::optional<Suggestion> CreatePasskeySuggestionForMerge(
+      const FormFieldData& field);
+
+  // Combines autocomplete suggestions and plus address suggestions into a
+  // single list, prioritizing plus address suggestions first.
+  // Note: out of all single field suggestions, only autocomplete suggestions
+  // are mergeable with plus address suggestions. Other (IBAN, Merchant codes)
+  // are incompatible with plus addresses.
+  void MergeAutocompleteAndPlusAddressSuggestions(
+      std::vector<Suggestion>& plus_address_suggestions,
+      std::vector<Suggestion> single_field_suggestions,
+      AutofillPlusAddressDelegate::SuggestionContext suggestions_context);
+
+  // Combines identity credential suggestions and existing suggestions into a
+  // single list, prioritizing identity credential suggestions first.
+  void MergeIdentityCredentialsAndAddressSuggestions(
+      std::vector<Suggestion>& suggestion,
+      std::vector<Suggestion> identity_credential_suggestions);
+
   // Combines plus address and address profile suggestions into a single list,
   // prioritizing plus address suggestions first. Runs `callback` with the
   // resulting list of suggestions.
-  void MixPlusAddressAndAddressSuggestions(
-      std::vector<Suggestion> plus_address_suggestions,
-      std::vector<Suggestion> address_suggestions,
-      AutofillPlusAddressDelegate::SuggestionContext suggestions_context,
+  void MergeAddressAndPlusAddressSuggestions(
+      std::vector<Suggestion>& plus_address_suggestions,
+      std::vector<Suggestion> suggestions,
+      AutofillSuggestionTriggerSource trigger_source,
       const FormGlobalId& form_id,
-      const FieldGlobalId& field_id,
-      OnGenerateSuggestionsCallback callback);
+      const FieldGlobalId& field_id);
 
   // Iterate through all the fields in the form to process the log events for
   // each field and record into FieldInfo UKM event.
@@ -646,6 +669,11 @@ class BrowserAutofillManager : public AutofillManager {
   void HandleLoadedServerPredictionsForAutofillAi(
       base::span<const raw_ref<FormStructure>> forms);
 
+  // Retrieves the Autofill AI predictions for `form` in `cache` and adds them
+  // to `form`'s fields, then runs rationalization and sectioning.
+  void AddCachedAutofillAiPredictions(const AutofillAiModelCache& cache,
+                                      FormStructure& form);
+
   // Calls `OnDidIdentifyForms()` on all appropriate form event loggers,
   // depending on the form types of the `form_structure`.
   void OnDidIdentifyFormForMetrics(
@@ -654,9 +682,10 @@ class BrowserAutofillManager : public AutofillManager {
           identification_time);
 
   // Populates `suggestion_generators_` with those capable of producing
-  // suggestions for field with `field_id` given `trigger_source`.
+  // suggestions for field.
   void InitializeSuggestionGenerators(
       AutofillSuggestionTriggerSource trigger_source,
+      FormGlobalId form_id,
       FieldGlobalId field_id);
 
   // Delegates to perform external processing (display, selection) on
@@ -664,7 +693,6 @@ class BrowserAutofillManager : public AutofillManager {
   std::unique_ptr<AutofillExternalDelegate> external_delegate_ =
       std::make_unique<AutofillExternalDelegate>(this);
   std::unique_ptr<TouchToFillDelegate> touch_to_fill_delegate_;
-  std::unique_ptr<FastCheckoutDelegate> fast_checkout_delegate_;
 
   // This is always non-nullopt except very briefly during Reset().
   std::optional<MetricsState> metrics_ = std::make_optional<MetricsState>(this);

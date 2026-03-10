@@ -7,7 +7,6 @@
 #include "base/auto_reset.h"
 #include "base/feature_list.h"
 #include "chrome/browser/web_applications/web_app_callback_app_identity.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 
 namespace web_app {
@@ -53,8 +52,7 @@ apps::AppLaunchParams WebAppUiManager::CreateAppLaunchParamsWithoutWindowConfig(
     launch_source = apps::LaunchSource::kFromFileManager;
   }
 
-  if (base::FeatureList::IsEnabled(features::kDesktopPWAsRunOnOsLogin) &&
-      command_line.HasSwitch(switches::kAppRunOnOsLoginMode)) {
+  if (command_line.HasSwitch(switches::kAppRunOnOsLoginMode)) {
     launch_source = apps::LaunchSource::kFromOsLogin;
   } else if (protocol_handler_launch_url.has_value()) {
     launch_source = apps::LaunchSource::kFromProtocolHandler;

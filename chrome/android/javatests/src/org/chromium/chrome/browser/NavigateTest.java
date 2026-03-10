@@ -54,7 +54,7 @@ import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.R;
 import org.chromium.chrome.test.transit.ChromeTransitTestRules;
 import org.chromium.chrome.test.transit.FreshCtaTransitTestRule;
-import org.chromium.chrome.test.transit.ntp.RegularNewTabPageStation;
+import org.chromium.chrome.test.transit.page.WebPageStation;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.OmniboxTestUtils;
 import org.chromium.chrome.test.util.browser.TabLoadObserver;
@@ -91,11 +91,11 @@ public class NavigateTest {
 
     private OmniboxTestUtils mOmnibox;
     private EmbeddedTestServer mTestServer;
-    private RegularNewTabPageStation mStartingNtp;
+    private WebPageStation mStartingPage;
 
     @Before
     public void setUp() {
-        mStartingNtp = mActivityTestRule.startOnNtp();
+        mStartingPage = mActivityTestRule.startOnBlankPage();
         mTestServer =
                 EmbeddedTestServer.createAndStartHTTPSServer(
                         ApplicationProvider.getApplicationContext(), ServerCertificate.CERT_OK);
@@ -227,8 +227,8 @@ public class NavigateTest {
     @Test
     @MediumTest
     @Feature({"Navigation"})
-    @DisableIf.Device(DeviceFormFactor.ONLY_TABLET) // https://crbug.com/339299609
-    public void testOpenLink() throws Exception {
+        @DisableIf.Device(DeviceFormFactor.TABLET_OR_DESKTOP) // https://crbug.com/339299609, https://crbug.com/376375165
+        public void testOpenLink() throws Exception {
         String url1 = mTestServer.getURL("/chrome/test/data/android/google.html");
         String url2 = mTestServer.getURL("/chrome/test/data/android/about.html");
 
@@ -314,6 +314,24 @@ public class NavigateTest {
                 userAgentString);
     }
 
+    /** Test 'AndroidDesktopUAPlatform' feature properly affects UA client hints */
+    @Test
+    @MediumTest
+    @Feature({"Navigation"})
+    @CommandLineFlags.Add({"enable-features=AndroidDesktopUAPlatform"})
+    @Restriction(DeviceFormFactor.DESKTOP)
+    public void testAndroidDesktopUAPlatformClientHint() throws Exception {
+        final Tab tab =
+                navigateUrlToEchoClientHintHeaders(
+                        "/set-header?Accept-CH: sec-ch-ua-platform",
+                        "/echoheader?sec-ch-ua-platform",
+                        /* overrideUserAgent= */ false);
+        String content =
+                JavaScriptUtils.executeJavaScriptAndWaitForResult(
+                        tab.getWebContents(), "document.body.textContent");
+        Assert.assertEquals("Proper headers", "\"\\\"Android\\\"\"", content);
+    }
+
     private Tab navigateUrlToEchoClientHintHeaders(
             String setHeaderString, String echoHeaderString, boolean overrideUserAgent)
             throws Exception {
@@ -362,7 +380,8 @@ public class NavigateTest {
     @Test
     @MediumTest
     @Feature({"Navigation"})
-    @DisableIf.Device(DeviceFormFactor.ONLY_TABLET) // https://crbug.com/339299609
+    @DisableIf.Device(
+            DeviceFormFactor.TABLET_OR_DESKTOP) // https://crbug.com/339299609, https://crbug.com/376375165
     public void testTabObserverOnPageLoadStarted() throws Exception {
         final String url1 = mTestServer.getURL("/chrome/test/data/android/google.html");
         final String url2 = mTestServer.getURL("/chrome/test/data/android/about.html");
@@ -745,6 +764,7 @@ public class NavigateTest {
 
     @Test
     @DisableIf.Build(hardware_is = "sprout", message = "fails on android-one: crbug.com/540723")
+    @DisableIf.Device(DeviceFormFactor.DESKTOP) // https://crbug.com/376375165
     @MediumTest
     @Feature({"Navigation"})
     @CommandLineFlags.Add({"ip-address-space-overrides=[::1]:0=public"})
@@ -784,7 +804,7 @@ public class NavigateTest {
                             checkAction);
 
             // Navigate to the spoofable URL
-            mStartingNtp.loadWebPageProgrammatically(
+            mStartingPage.loadWebPageProgrammatically(
                     UrlUtils.encodeHtmlDataUri(
                             "<head>  <meta name=\"viewport\"     "
                                 + " content=\"initial-scale=0.5,maximum-scale=0.5,user-scalable=no\"></head><script>"

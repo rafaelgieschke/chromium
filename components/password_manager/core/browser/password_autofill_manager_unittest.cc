@@ -275,7 +275,8 @@ class MockAutofillClient : public autofill::TestAutofillClient {
               UpdateAutofillSuggestions,
               (const std::vector<Suggestion>&,
                FillingProduct,
-               autofill::AutofillSuggestionTriggerSource),
+               autofill::AutofillSuggestionTriggerSource,
+               autofill::AutofillSuggestionsIgnoreFocusLoss),
               (override));
   MOCK_METHOD(void,
               HideAutofillSuggestions,
@@ -293,10 +294,11 @@ class MockAutofillClient : public autofill::TestAutofillClient {
       std::optional<size_t> loading_index = std::nullopt) {
     autofill_suggestions_.clear();
     autofill_suggestions_.emplace_back(
-        /*value=*/"User1", /*label=*/"PW1", /*icon=*/Suggestion::Icon::kNoIcon,
+        /*value=*/u"User1", /*label=*/u"PW1",
+        /*icon=*/Suggestion::Icon::kNoIcon,
         /*type=*/autofill::SuggestionType::kPasswordEntry);
     autofill_suggestions_.emplace_back(
-        /*value=*/"Show all pwds", /*label=*/"",
+        /*value=*/u"Show all pwds", /*label=*/u"",
         /*icon=*/Suggestion::Icon::kNoIcon,
         /*type=*/
         autofill::SuggestionType::kAllSavedPasswordsEntry);
@@ -411,14 +413,12 @@ class PasswordAutofillManagerTest : public testing::Test {
     features_.Reset();
     if (move_to_context_menu) {
       features_.InitWithFeatures(
-          {features::kPasswordManualFallbackAvailable,
-           features::kAutofillReintroduceHybridPasskeyDropdownItem,
+          {features::kAutofillReintroduceHybridPasskeyDropdownItem,
            features::kWebAuthnUsePasskeyFromAnotherDeviceInContextMenu},
           {});
     } else {
       features_.InitWithFeatures(
-          {features::kPasswordManualFallbackAvailable,
-           features::kAutofillReintroduceHybridPasskeyDropdownItem},
+          {features::kAutofillReintroduceHybridPasskeyDropdownItem},
           {features::kWebAuthnUsePasskeyFromAnotherDeviceInContextMenu});
     }
 #endif

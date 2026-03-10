@@ -8,6 +8,7 @@
 #include <cmath>
 #include <utility>
 
+#include "base/check_is_test.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/raw_ptr.h"
 #include "base/numerics/safe_conversions.h"
@@ -17,6 +18,7 @@
 #include "cc/paint/paint_record.h"
 #include "cc/paint/paint_shader.h"
 #include "chrome/browser/themes/theme_properties.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/tabs/tab_style.h"
@@ -24,10 +26,10 @@
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/frame/browser_frame_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/frame/top_container_background.h"
-#include "chrome/browser/ui/views/tabs/glow_hover_controller.h"
+#include "chrome/browser/ui/views/frame/themed_background.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
-#include "chrome/browser/ui/views/tabs/tab_close_button.h"
+#include "chrome/browser/ui/views/tabs/tab/glow_hover_controller.h"
+#include "chrome/browser/ui/views/tabs/tab/tab_close_button.h"
 #include "chrome/browser/ui/views/tabs/tab_group_underline.h"
 #include "chrome/browser/ui/views/tabs/tab_slot_controller.h"
 #include "chrome/browser/ui/views/tabs/tab_slot_view.h"
@@ -49,15 +51,6 @@
 #include "ui/views/widget/widget.h"
 
 namespace {
-
-Tab* GetLeftTab(const Tab* tab) {
-  return tab->controller()->GetAdjacentTab(tab, base::i18n::IsRTL() ? 1 : -1);
-}
-
-Tab* GetRightTab(const Tab* tab) {
-  return tab->controller()->GetAdjacentTab(tab, base::i18n::IsRTL() ? -1 : 1);
-}
-
 class TabStyleViewsImpl : public TabStyleViews {
  public:
   explicit TabStyleViewsImpl(Tab* tab);
@@ -72,12 +65,12 @@ class TabStyleViewsImpl : public TabStyleViews {
   SkPath GetPath(TabStyle::PathType path_type,
                  float scale,
                  const TabPathFlags& flags) const override;
+  void PaintTab(gfx::Canvas* canvas) const override;
   gfx::Insets GetContentsInsets() const override;
   float GetZValue() const override;
-  float GetCurrentActiveOpacity() const override;
   bool IsApparentlyActive() const override;
+  float GetCurrentActiveOpacity() const override;
   TabStyle::TabColors CalculateTargetColors() const override;
-  void PaintTab(gfx::Canvas* canvas) const override;
   void ShowHover(TabStyle::ShowHoverStyle style) override;
   void HideHover(TabStyle::HideHoverStyle style) override;
 
@@ -183,6 +176,8 @@ class TabStyleViewsImpl : public TabStyleViews {
   // left/right insets and positioning.
   bool IsRightSplitTab(const Tab* tab) const;
 
+  BrowserFrameView* GetBrowserFrameView() const;
+
   const raw_ptr<const Tab> tab_;
 
   std::unique_ptr<GlowHoverController> hover_controller_;
@@ -226,7 +221,10 @@ SkPath TabStyleViewsImpl::GetPath(TabStyle::PathType path_type,
                                   scale;
 
   // Selected, hover, and inactive tab fills are a detached squarcle tab.
-  if ((path_type == TabStyle::PathType::kFill &&
+  // If kDetachedTabs is enabled, the active tab fill and border are also a
+  // detached tab.
+  if (base::FeatureList::IsEnabled(features::kDetachedTabs) ||
+      (path_type == TabStyle::PathType::kFill &&
        state != TabStyle::TabSelectionState::kActive) ||
       path_type == TabStyle::PathType::kHighlight ||
       path_type == TabStyle::PathType::kInteriorClip ||
@@ -235,15 +233,16 @@ SkPath TabStyleViewsImpl::GetPath(TabStyle::PathType path_type,
     float top_right_corner_radius = content_corner_radius;
     float bottom_left_corner_radius = content_corner_radius;
     float bottom_right_corner_radius = content_corner_radius;
-    float tab_height = GetLayoutConstant(TAB_HEIGHT) * scale;
+    float tab_height = GetLayoutConstant(LayoutConstant::kTabHeight) * scale;
 
     // The tab displays favicon animations that can emerge from the toolbar. The
     // interior clip needs to extend the entire height of the toolbar to support
     // this. Detached tab shapes do not need to respect this.
     if (path_type != TabStyle::PathType::kInteriorClip &&
         path_type != TabStyle::PathType::kHitTest) {
-      tab_height -= GetLayoutConstant(TAB_STRIP_PADDING) * scale;
-      tab_height -= GetLayoutConstant(TABSTRIP_TOOLBAR_OVERLAP) * scale;
+      tab_height -= GetLayoutConstant(LayoutConstant::kTabStripPadding) * scale;
+      tab_height -=
+          GetLayoutConstant(LayoutConstant::kTabstripToolbarOverlap) * scale;
     }
 
     // Don't round the bottom corners to avoid creating dead space between tabs.
@@ -253,42 +252,43 @@ SkPath TabStyleViewsImpl::GetPath(TabStyle::PathType path_type,
     }
 
     float left = aligned_bounds.x() + extension_corner_radius;
-    int top = aligned_bounds.y() + GetLayoutConstant(TAB_STRIP_PADDING) * scale;
+    int top = aligned_bounds.y() +
+              GetLayoutConstant(LayoutConstant::kTabStripPadding) * scale;
     float right = aligned_bounds.right() - extension_corner_radius;
     const int bottom = top + tab_height;
 
+    BrowserFrameView* const browser_frame_view = GetBrowserFrameView();
+    const bool is_frame_condensed =
+        browser_frame_view ? browser_frame_view->IsFrameCondensed() : false;
     // For maximized and full screen windows, extend the tab hit test to the top
     // of the tab, encompassing the top padding. This makes it easy to click on
     // tabs by moving the mouse to the top of the screen.
-    if (path_type == TabStyle::PathType::kHitTest &&
-        tab()->controller()->IsFrameCondensed()) {
-      top -= GetLayoutConstant(TAB_STRIP_PADDING) * scale;
+    if (path_type == TabStyle::PathType::kHitTest && is_frame_condensed) {
+      top -= GetLayoutConstant(LayoutConstant::kTabStripPadding) * scale;
       // Don't round the top corners to avoid creating dead space between tabs.
       top_left_corner_radius = 0;
       top_right_corner_radius = 0;
     }
 
-    // If the size of the space for the path is smaller than the size of a
-    // favicon, if we are building a path for the hit test, or if we are
-    // building a path for a split tab, expand to take the entire width of the
-    // separator margins AND the separator.
-    const bool limited_tab_space = (right - left) < (gfx::kFaviconSize * scale);
-    const bool expand_into_previous_separator =
-        limited_tab_space || path_type == TabStyle::PathType::kHitTest ||
-        IsRightSplitTab(tab());
-    const bool expand_into_next_separator =
-        limited_tab_space || path_type == TabStyle::PathType::kHitTest ||
-        IsLeftSplitTab(tab());
-    if (expand_into_previous_separator || expand_into_next_separator) {
-      // If there is a tab before this one, then expand into its overlap.
-      const Tab* const previous_tab = GetLeftTab(tab());
-      if (expand_into_previous_separator && previous_tab) {
+    // While the tab is closing do not add extra space as it degrades the close
+    // tab annimation.
+    if (!tab()->closing()) {
+      // If the size of the space for the path is smaller than the size of a
+      // favicon, if we are building a path for the hit test, or if we are
+      // building a path for a split tab, expand to take the entire width of the
+      // separator margins AND the separator.
+      const bool limited_tab_space =
+          (right - left) < (gfx::kFaviconSize * scale);
+      const bool expand_into_left_separator =
+          limited_tab_space || path_type == TabStyle::PathType::kHitTest ||
+          IsRightSplitTab(tab());
+      const bool expand_into_right_separator =
+          limited_tab_space || path_type == TabStyle::PathType::kHitTest ||
+          IsLeftSplitTab(tab());
+      if (expand_into_left_separator) {
         left -= separator_overlap / 2.0;
       }
-
-      // If there is a tab after this one, then expand into its overlap.
-      const Tab* const next_tab = GetRightTab(tab());
-      if (expand_into_next_separator && next_tab) {
+      if (expand_into_right_separator) {
         right += separator_overlap / 2.0;
       }
     }
@@ -336,8 +336,8 @@ SkPath TabStyleViewsImpl::GetPath(TabStyle::PathType path_type,
   // Calculate the bounds of the actual path.
   const float left = aligned_bounds.x();
   const float right = aligned_bounds.right();
-  float tab_top =
-      aligned_bounds.y() + GetLayoutConstant(TAB_STRIP_PADDING) * scale;
+  float tab_top = aligned_bounds.y() +
+                  GetLayoutConstant(LayoutConstant::kTabStripPadding) * scale;
   float tab_left = left + extension;
   float tab_right = right - extension;
 
@@ -345,7 +345,7 @@ SkPath TabStyleViewsImpl::GetPath(TabStyle::PathType path_type,
   // non-integral display scale factors.
   const float extended_bottom = aligned_bounds.bottom();
   const float bottom_extension =
-      GetLayoutConstant(TABSTRIP_TOOLBAR_OVERLAP) * scale;
+      GetLayoutConstant(LayoutConstant::kTabstripToolbarOverlap) * scale;
   float tab_bottom = extended_bottom - bottom_extension;
 
   // Path-specific adjustments:
@@ -367,9 +367,10 @@ SkPath TabStyleViewsImpl::GetPath(TabStyle::PathType path_type,
 
   float left_extension_corner_radius = extension_corner_radius;
   if (compact_left_to_bottom) {
-    left_extension_corner_radius = (tab_style()->GetBottomCornerRadius() -
-                                    GetLayoutConstant(TOOLBAR_CORNER_RADIUS)) *
-                                   scale;
+    left_extension_corner_radius =
+        (tab_style()->GetBottomCornerRadius() -
+         GetLayoutConstant(LayoutConstant::kToolbarCornerRadius)) *
+        scale;
   }
 
   if (IsLeftSplitTab(tab())) {
@@ -495,104 +496,16 @@ SkPath TabStyleViewsImpl::GetPath(TabStyle::PathType path_type,
   return path.detach();
 }
 
-gfx::Insets TabStyleViewsImpl::GetContentsInsets() const {
-  gfx::Insets base_style_insets = tab_style()->GetContentsInsets();
-  gfx::Insets split_insets = gfx::Insets(0);
-
-  // For split tabs, remove insets equal to the total separator width between
-  // them.
-  const float total_separator_width =
-      tab_style()->GetSeparatorMargins().left() +
-      tab_style()->GetSeparatorSize().width() +
-      tab_style()->GetSeparatorMargins().right();
-  if (IsRightSplitTab(tab())) {
-    split_insets.set_left(total_separator_width / -2);
-  }
-  if (IsLeftSplitTab(tab())) {
-    split_insets.set_right(total_separator_width / -2);
-  }
-
-  return gfx::Insets::TLBR(0, 0, GetLayoutConstant(TABSTRIP_TOOLBAR_OVERLAP),
-                           0) +
-         base_style_insets + split_insets;
-}
-
-float TabStyleViewsImpl::GetZValue() const {
-  // This will return values so that inactive tabs can be sorted in the
-  // following order:
-  //
-  // o Unselected tabs, in ascending hover animation value order.
-  // o The single unselected tab being hovered by the mouse, if present.
-  // o Selected tabs, in ascending hover animation value order.
-  // o The single selected tab being hovered by the mouse, if present.
-  //
-  // Representing the above groupings is accomplished by adding a "weight" to
-  // the current hover animation value.
-  //
-  // 0.0 == z-value         Unselected/non hover animating.
-  // 0.0 <  z-value <= 1.0  Unselected/hover animating.
-  // 2.0 <= z-value <= 3.0  Unselected/mouse hovered tab.
-  // 4.0 == z-value         Selected/non hover animating.
-  // 4.0 <  z-value <= 5.0  Selected/hover animating.
-  // 6.0 <= z-value <= 7.0  Selected/mouse hovered tab.
-  //
-  // This function doesn't handle active tabs, as they are normally painted by a
-  // different code path (with z-value infinity).
-  float sort_value = GetHoverAnimationValue();
-  if (tab_->IsSelected()) {
-    sort_value += 4.f;
-  }
-  if (IsHovering()) {
-    sort_value += 2.f;
-  }
-
-  DCHECK_GE(sort_value, 0.0f);
-  DCHECK_LE(sort_value, TabStyle::kMaximumZValue);
-
-  return sort_value;
-}
-
-float TabStyleViewsImpl::GetCurrentActiveOpacity() const {
-  const TabStyle::TabSelectionState selection_state = GetSelectionState();
-  if (selection_state == TabStyle::TabSelectionState::kActive) {
-    return 1.0f;
-  }
-  const float base_opacity =
-      selection_state == TabStyle::TabSelectionState::kSelected
-          ? tab_style()->GetSelectedTabOpacity()
-          : 0.0f;
-  if (!IsHoverAnimationActive()) {
-    return base_opacity;
-  }
-  return std::lerp(base_opacity, GetHoverOpacity(), GetHoverAnimationValue());
-}
-
-bool TabStyleViewsImpl::IsApparentlyActive() const {
-  const TabStyle::TabSelectionState selection_state = GetSelectionState();
-  if (selection_state == TabStyle::TabSelectionState::kActive) {
-    return true;
-  }
-  if (IsHovering()) {
-    return GetHoverOpacity() > 0.5f;
-  }
-  return selection_state == TabStyle::TabSelectionState::kSelected;
-}
-
-TabStyle::TabColors TabStyleViewsImpl::CalculateTargetColors() const {
-  return tab_style()->CalculateTargetColors(
-      GetSelectionState(), IsApparentlyActive(), IsHovering(),
-      tab()->GetWidget() ? tab()->GetWidget()->ShouldPaintAsActive() : true,
-      tab()->GetColorProvider());
-}
-
 void TabStyleViewsImpl::PaintTab(gfx::Canvas* canvas) const {
   std::optional<int> active_tab_fill_id;
   if (tab_->GetThemeProvider()->HasCustomImage(IDR_THEME_TOOLBAR)) {
     active_tab_fill_id = IDR_THEME_TOOLBAR;
   }
+  BrowserFrameView* const browser_frame_view = GetBrowserFrameView();
   const std::optional<int> inactive_tab_fill_id =
-      tab_->controller()->GetCustomBackgroundId(
-          BrowserFrameActiveState::kUseCurrent);
+      browser_frame_view ? browser_frame_view->GetCustomBackgroundId(
+                               BrowserFrameActiveState::kUseCurrent)
+                         : std::nullopt;
 
   if (active_tab_fill_id.has_value() || inactive_tab_fill_id.has_value()) {
     PaintTabBackgroundWithImages(canvas, active_tab_fill_id,
@@ -634,6 +547,97 @@ void TabStyleViewsImpl::PaintTabBackgroundWithImages(
   }
 }
 
+gfx::Insets TabStyleViewsImpl::GetContentsInsets() const {
+  gfx::Insets base_style_insets = tab_style()->GetContentsInsets();
+  gfx::Insets split_insets = gfx::Insets(0);
+
+  // For split tabs, remove insets equal to the total separator width between
+  // them.
+  const float total_separator_width =
+      tab_style()->GetSeparatorMargins().left() +
+      tab_style()->GetSeparatorSize().width() +
+      tab_style()->GetSeparatorMargins().right();
+  if (IsRightSplitTab(tab())) {
+    split_insets.set_left(total_separator_width / -2);
+  }
+  if (IsLeftSplitTab(tab())) {
+    split_insets.set_right(total_separator_width / -2);
+  }
+
+  return gfx::Insets::TLBR(
+             0, 0, GetLayoutConstant(LayoutConstant::kTabstripToolbarOverlap),
+             0) +
+         base_style_insets + split_insets;
+}
+
+float TabStyleViewsImpl::GetZValue() const {
+  // This will return values so that inactive tabs can be sorted in the
+  // following order:
+  //
+  // o Unselected tabs, in ascending hover animation value order.
+  // o The single unselected tab being hovered by the mouse, if present.
+  // o Selected tabs, in ascending hover animation value order.
+  // o The single selected tab being hovered by the mouse, if present.
+  //
+  // Representing the above groupings is accomplished by adding a "weight" to
+  // the current hover animation value.
+  //
+  // 0.0 == z-value         Unselected/non hover animating.
+  // 0.0 <  z-value <= 1.0  Unselected/hover animating.
+  // 2.0 <= z-value <= 3.0  Unselected/mouse hovered tab.
+  // 4.0 == z-value         Selected/non hover animating.
+  // 4.0 <  z-value <= 5.0  Selected/hover animating.
+  // 6.0 <= z-value <= 7.0  Selected/mouse hovered tab.
+  //
+  // This function doesn't handle active tabs, as they are normally painted by a
+  // different code path (with z-value infinity).
+  float sort_value = GetHoverAnimationValue();
+  if (tab_->IsSelected()) {
+    sort_value += 4.f;
+  }
+  if (IsHovering()) {
+    sort_value += 2.f;
+  }
+
+  DCHECK_GE(sort_value, 0.0f);
+  DCHECK_LE(sort_value, TabStyle::kMaximumZValue);
+
+  return sort_value;
+}
+
+bool TabStyleViewsImpl::IsApparentlyActive() const {
+  const TabStyle::TabSelectionState selection_state = GetSelectionState();
+  if (selection_state == TabStyle::TabSelectionState::kActive) {
+    return true;
+  }
+  if (IsHovering()) {
+    return GetHoverOpacity() > 0.5f;
+  }
+  return selection_state == TabStyle::TabSelectionState::kSelected;
+}
+
+float TabStyleViewsImpl::GetCurrentActiveOpacity() const {
+  const TabStyle::TabSelectionState selection_state = GetSelectionState();
+  if (selection_state == TabStyle::TabSelectionState::kActive) {
+    return 1.0f;
+  }
+  const float base_opacity =
+      selection_state == TabStyle::TabSelectionState::kSelected
+          ? tab_style()->GetSelectedTabOpacity()
+          : 0.0f;
+  if (!IsHoverAnimationActive()) {
+    return base_opacity;
+  }
+  return std::lerp(base_opacity, GetHoverOpacity(), GetHoverAnimationValue());
+}
+
+TabStyle::TabColors TabStyleViewsImpl::CalculateTargetColors() const {
+  return tab_style()->CalculateTargetColors(
+      GetSelectionState(), IsApparentlyActive(), IsHovering(),
+      tab()->GetWidget() ? tab()->GetWidget()->ShouldPaintAsActive() : true,
+      tab()->GetColorProvider());
+}
+
 void TabStyleViewsImpl::ShowHover(TabStyle::ShowHoverStyle style) {
   if (!hover_controller_) {
     return;
@@ -658,7 +662,8 @@ TabStyle::SeparatorBounds TabStyleViewsImpl::GetSeparatorBounds(
   // Factor out the amount of the tab strip that is overlapped by the toolbar.
   const gfx::Rect visible_bounds = gfx::Rect(
       original_bounds.x(), original_bounds.y(), original_bounds.width(),
-      original_bounds.height() - GetLayoutConstant(TABSTRIP_TOOLBAR_OVERLAP));
+      original_bounds.height() -
+          GetLayoutConstant(LayoutConstant::kTabstripToolbarOverlap));
   const gfx::RectF aligned_bounds =
       ScaleAndAlignBounds(visible_bounds, scale, GetStrokeThickness(false));
   const int corner_radius = tab_style()->GetBottomCornerRadius() * scale;
@@ -721,6 +726,13 @@ TabStyle::SeparatorOpacities TabStyleViewsImpl::GetSeparatorOpacities(
 
 float TabStyleViewsImpl::GetSeparatorOpacity(bool for_layout,
                                              bool leading) const {
+  // Do not show separators if the tab strip is in a decluttered state.
+  if (base::FeatureList::IsEnabled(features::kTabStripDeclutter) &&
+      tab()->controller()->GetTabCount() >=
+          TabStyle::kTabStripDeclutterMinTabsForSeparatorHide) {
+    return 0.0f;
+  }
+
   const auto has_visible_background = [](const Tab* const tab) {
     return tab->IsActive() || tab->IsSelected() || tab->IsMouseHovered();
   };
@@ -835,7 +847,8 @@ float TabStyleViewsImpl::GetHoverOpacity() const {
 
 int TabStyleViewsImpl::GetStrokeThickness(bool should_paint_as_active) const {
   std::optional<tab_groups::TabGroupId> group = tab_->group();
-  if (group.has_value() && tab_->IsActive()) {
+  if (group.has_value() && tab_->IsActive() &&
+      !base::FeatureList::IsEnabled(features::kDetachedTabs)) {
     return TabGroupUnderline::kStrokeThickness;
   }
 
@@ -959,7 +972,7 @@ void TabStyleViewsImpl::PaintTabBackgroundFill(
     canvas->sk_canvas()->scale(scale, scale);
     gfx::ImageSkia* image =
         tab_->GetThemeProvider()->GetImageSkiaNamed(fill_id.value());
-    TopContainerBackground::PaintThemeAlignedImage(
+    ThemedBackground::PaintThemeAlignedImage(
         canvas, tab_,
         BrowserView::GetBrowserViewForBrowser(tab_->controller()->GetBrowser()),
         image);
@@ -1065,6 +1078,20 @@ bool TabStyleViewsImpl::IsRightSplitTab(const Tab* tab) const {
          tabs_in_split[base::i18n::IsRTL() ? 0 : tabs_in_split.size() - 1];
 }
 
+BrowserFrameView* TabStyleViewsImpl::GetBrowserFrameView() const {
+  BrowserWindowInterface* browser_window_interface =
+      tab()->controller()->GetBrowserWindowInterface();
+  // BrowserWindowInterface can be null during unit tests
+  if (!browser_window_interface) {
+    CHECK_IS_TEST();
+    return nullptr;
+  }
+
+  return BrowserView::GetBrowserViewForBrowser(browser_window_interface)
+      ->browser_widget()
+      ->GetFrameView();
+}
+
 float TabStyleViewsImpl::GetTopCornerRadiusForWidth(int width) const {
   // Get the width of the top of the tab by subtracting the width of the outer
   // corners.
@@ -1085,9 +1112,10 @@ gfx::RectF TabStyleViewsImpl::ScaleAndAlignBounds(const gfx::Rect& bounds,
   // this way the two tabs' separators will be drawn at the same coordinate.
   gfx::RectF aligned_bounds(bounds);
   const int bottom_corner_radius = tab_style()->GetBottomCornerRadius();
-  // Note: This intentionally doesn't subtract TABSTRIP_TOOLBAR_OVERLAP from the
-  // bottom inset, because we want to pixel-align the bottom of the stroke, not
-  // the bottom of the overlap.
+  // Note: This intentionally doesn't subtract
+  // LayoutConstant::kTabstripToolbarOverlap from the bottom inset, because we
+  // want to pixel-align the bottom of the stroke, not the bottom of the
+  // overlap.
   auto layout_insets = gfx::InsetsF::TLBR(
       stroke_thickness, bottom_corner_radius, stroke_thickness,
       bottom_corner_radius + tab_style()->GetSeparatorSize().width());
@@ -1157,11 +1185,11 @@ ui::metadata::TypeConverter<TabStyle::TabColors>::GetValidStrings() {
 
 // TabStyleViews ---------------------------------------------------------------
 
-TabStyleViews::TabStyleViews() : tab_style_(TabStyle::Get()) {}
-
-TabStyleViews::~TabStyleViews() = default;
-
 // static
 std::unique_ptr<TabStyleViews> TabStyleViews::CreateForTab(Tab* tab) {
   return std::make_unique<TabStyleViewsImpl>(tab);
 }
+
+TabStyleViews::TabStyleViews() : tab_style_(TabStyle::Get()) {}
+
+TabStyleViews::~TabStyleViews() = default;

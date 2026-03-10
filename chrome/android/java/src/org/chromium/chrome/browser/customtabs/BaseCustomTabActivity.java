@@ -51,7 +51,6 @@ import org.chromium.chrome.browser.app.tabmodel.TabModelOrchestrator;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsUtils;
 import org.chromium.chrome.browser.browserservices.InstalledWebappDataRegister;
 import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider;
-import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider.CustomTabProfileType;
 import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider.CustomTabsUiType;
 import org.chromium.chrome.browser.browserservices.intents.WebappExtras;
 import org.chromium.chrome.browser.browserservices.trustedwebactivityui.TwaFinishHandler;
@@ -102,6 +101,7 @@ import org.chromium.chrome.browser.customtabs.features.toolbar.CustomTabToolbarC
 import org.chromium.chrome.browser.customtabs.features.toolbar.CustomTabToolbarCoordinator;
 import org.chromium.chrome.browser.flags.ActivityType;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.flags.CustomTabProfileType;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager.Observer;
 import org.chromium.chrome.browser.fullscreen.FullscreenOptions;
@@ -115,6 +115,7 @@ import org.chromium.chrome.browser.profiles.ProfileProvider;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabState;
 import org.chromium.chrome.browser.tabmodel.ChromeTabCreator;
+import org.chromium.chrome.browser.tabmodel.SupportedProfileType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorImpl;
 import org.chromium.chrome.browser.theme.ThemeColorProvider;
 import org.chromium.chrome.browser.theme.TopUiThemeColorProvider;
@@ -392,12 +393,13 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
                         getTabModelSelectorSupplier(),
                         getBrowserControlsManager(),
                         getWindowAndroid(),
+                        getActivityResultTracker(),
                         getChromeAndroidTaskSupplier(),
                         getLifecycleDispatcher(),
                         getLayoutManagerSupplier(),
                         /* menuOrKeyboardActionController= */ this,
                         this::getActivityThemeColor,
-                        getModalDialogManagerSupplier(),
+                        getModalDialogManagerSupplier().asNonNull(),
                         /* appMenuBlocker= */ this,
                         this::supportsAppMenu,
                         this::supportsFindInPage,
@@ -405,7 +407,7 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
                         getFullscreenManager(),
                         getCompositorViewHolderSupplier(),
                         getTabContentManagerSupplier(),
-                        this::getSnackbarManager,
+                        getSnackbarManagerSupplier(),
                         mEdgeToEdgeControllerSupplier,
                         getActivityType(),
                         this::isInOverviewMode,
@@ -1004,15 +1006,22 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
         var tabModelOrchestrator = getCustomTabActivityTabFactory().getTabModelOrchestrator();
         tabModelOrchestrator.onNativeLibraryReady(getTabContentManager());
         // This ensures that an off-the-record TabModel is the current model before it is needed.
-        tabModelOrchestrator
-                .getTabModelSelector()
-                .selectModel(mIntentDataProvider.isOffTheRecord());
+        boolean isOffTheRecord = mIntentDataProvider.isOffTheRecord();
+        tabModelOrchestrator.getTabModelSelector().selectModel(isOffTheRecord);
 
         @BrowserWindowType Integer browserWindowType = getSupportedBrowserWindowType();
         if (browserWindowType != null) {
+            // Custom tabs don't mix OTR and normal tabs in the same window, so it is fine to
+            // not pass MIXED as the supported profile type even on non-desktop form factors.
+            @SupportedProfileType
+            int supportedProfileType =
+                    isOffTheRecord
+                            ? SupportedProfileType.OFF_THE_RECORD
+                            : SupportedProfileType.REGULAR;
             initializeChromeAndroidTask(
                     browserWindowType,
-                    assumeNonNull(tabModelOrchestrator.getTabModelSelector()).getCurrentModel(),
+                    assumeNonNull(tabModelOrchestrator.getTabModelSelector()),
+                    supportedProfileType,
                     /* multiInstanceManager= */ null);
         }
     }
@@ -1053,7 +1062,8 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
                 isMenuIconAtStart,
                 mBaseCustomTabRootUiCoordinator.getReadAloudControllerSupplier(),
                 mBaseCustomTabRootUiCoordinator::getContextualPageActionController,
-                mIntentDataProvider.getClientPackageNameIdentitySharing() != null);
+                mIntentDataProvider.getClientPackageNameIdentitySharing() != null,
+                mBaseCustomTabRootUiCoordinator.getOpenInAppMenuItemProvider());
     }
 
     @Override
@@ -1526,6 +1536,7 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
             mTabFactory =
                     new CustomTabActivityTabFactory(
                             this,
+
                             getCustomTabTabPersistencePolicy(),
                             getWindowAndroid(),
                             getProfileProviderSupplier(),
@@ -1644,7 +1655,8 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
                         getLifecycleDispatcher(),
                         getSavedInstanceState(),
                         null,
-                        getEdgeToEdgeManager().getEdgeToEdgeStateProvider());
+                        getEdgeToEdgeManager().getEdgeToEdgeStateProvider(),
+                        null);
 
         return mAppHeaderCoordinator;
     }
@@ -1705,12 +1717,24 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
     @Nullable
     @BrowserWindowType
     Integer getSupportedBrowserWindowType() {
-        if (mIntentDataProvider.getUiType() == CustomTabsUiType.POPUP) {
-            return BrowserWindowType.POPUP;
+        final boolean customTabsEnabled =
+                ChromeFeatureList.sEnableBrowserWindowInterfaceForCustomTabActivity.isEnabled();
+        // Progressive web apps.
+        if (customTabsEnabled && mIntentDataProvider.getActivityType() == ActivityType.WEBAPP) {
+            return BrowserWindowType.APP;
         }
-
-        if (mIntentDataProvider.getActivityType() == ActivityType.WEBAPP) {
-            return BrowserWindowType.APP_POPUP;
+        @CustomTabsUiType int type = mIntentDataProvider.getUiType();
+        switch (type) {
+            // Popups.
+            case CustomTabsUiType.POPUP:
+                return BrowserWindowType.POPUP;
+            // Progressive web apps.
+            case CustomTabsUiType.MINIMAL_UI_WEBAPP:
+            /* Fallthrough */
+            case CustomTabsUiType.TRUSTED_WEB_ACTIVITY:
+                return customTabsEnabled ? BrowserWindowType.APP : null;
+            default:
+                break;
         }
 
         return null;

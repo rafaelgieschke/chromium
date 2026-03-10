@@ -25,14 +25,15 @@ static_library("browser_sync") {
 
   deps = [
     "//base",
+    "//components/accessibility_annotator/core/storage",
     "//components/autofill/core/browser",
     "//components/autofill/core/common",
     "//components/bookmarks/browser",
     "//components/collaboration/public",
     "//components/collaboration/public:data_type_controller",
     "//components/commerce/core:feature_list",
-    "//components/commerce/core/product_specifications",
     "//components/consent_auditor",
+    "//components/contextual_tasks/public",
     "//components/data_sharing/public",
     "//components/data_sharing/public:personal_collaboration_data",
     "//components/history/core/browser",
@@ -48,6 +49,8 @@ static_library("browser_sync") {
     "//components/search_engines",
     "//components/send_tab_to_self",
     "//components/sharing_message",
+    "//components/skills:features",
+    "//components/skills/public",
     "//components/supervised_user/core/common:buildflags",
     "//components/sync/invalidations",
     "//components/sync_bookmarks",
@@ -60,6 +63,7 @@ static_library("browser_sync") {
     "//components/version_info:generate_version_info",
     "//components/webauthn/core/browser",
     "//components/webauthn/core/browser:passkey_model",
+    "//extensions/buildflags",
     "//ui/base",
   ]
 
@@ -118,6 +122,7 @@ source_set("unit_tests") {
     "//components/version_info",
     "//components/version_info:generate_version_info",
     "//components/webdata/common",
+    "//extensions/buildflags",
     "//services/network:test_support",
     "//testing/gmock",
     "//testing/gtest",

@@ -8,9 +8,11 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 
 #include "components/contextual_search/contextual_search_types.h"
+#include "components/omnibox/composebox/composebox_query.mojom.h"
 
 namespace base {
 class ElapsedTimer;
@@ -37,7 +39,7 @@ enum class ContextualSearchSource {
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
 // Describes the query submission details.
-enum class MultimodalState {
+enum class ContextualSearchMultimodalState {
   kTextOnly = 0,
   kFileOnly = 1,
   kTextAndFile = 2,
@@ -64,12 +66,25 @@ struct SessionMetrics {
   // Number of file upload failures per file type.
   std::map<lens::MimeType, int> file_upload_failure_count_per_type;
   // Number of file validation errors per file type.
-  std::map<lens::MimeType, std::map<FileUploadErrorType, int>>
+  std::map<lens::MimeType, std::map<ContextUploadErrorType, int>>
       file_validation_failure_count_per_type;
   // In most cases `num_query_submissions` will equal 1 except in the case
   // where a user navigates to the AIM page on a new window or tab and the
   // composebox remains open.
   int num_query_submissions = 0;
+  // The number of times a tab is added as context to the session.
+  int tab_context_added_count = 0;
+  // The number of times a tab is added as context to the session via the tab
+  // suggestion chip.
+  int tab_context_added_from_tab_suggestion_chip_count = 0;
+  // The number of time a tab is added as context to the session via the plus
+  // button (i.e. not via the tab suggestion chip).
+  int tab_context_added_from_plus_button_count = 0;
+  // The number of times a tab with a duplicate title is added as context to the
+  // session.
+  int tab_with_duplicate_title_clicked_count = 0;
+  // The set of active funnels for this session.
+  std::set<std::string> active_funnels;
 };
 
 class ContextualSearchMetricsRecorder {
@@ -79,23 +94,32 @@ class ContextualSearchMetricsRecorder {
 
   // Should be called when there are session state changes to keep track of
   // session state metrics. Virtual for testing.
+  // TODO(crbug.com/458086158): Make this private and instead make
+  // NotifySessionStarted, NotifyQuerySubmitted, RecordSessionAbandonedMetrics,
+  // and a new NotifyNavigationOccurred method public so that the session state
+  // can be managed internally by the metrics recorder.
   virtual void NotifySessionStateChanged(SessionState session_state);
+
+  // Notifies the metrics recorder that a query was submitted.
+  virtual void NotifyQuerySubmitted(bool has_tab_context,
+                                    bool has_non_tab_context);
+
+  // Activates a funnel for metrics logging.
+  virtual void ActivateMetricsFunnel(const std::string& funnel_name);
 
   virtual void OnFileUploadStatusChanged(
       lens::MimeType file_mime_type,
-      FileUploadStatus file_upload_status,
-      const std::optional<FileUploadErrorType>& error_type);
+      ContextUploadStatus file_upload_status,
+      const std::optional<ContextUploadErrorType>& error_type);
 
   // Maps file errors to its string version for histogram naming.
-  std::string FileErrorToString(FileUploadErrorType error);
+  std::string FileErrorToString(ContextUploadErrorType error);
   // Maps mime types to its string version for histogram naming.
   std::string MimeTypeToString(lens::MimeType mime_type);
   // Maps contextual search sources to its string version for histogram naming.
   static std::string ContextualSearchSourceToString(
       ContextualSearchSource source);
   ContextualSearchSource source() const { return source_; }
-  // Maps submission types to its string version for histogram naming.
-  std::string SubmissionTypeToString(SubmissionType submission_type);
 
   // Records several metrics about the query, such the number of characters
   // found in the query.
@@ -106,29 +130,38 @@ class ContextualSearchMetricsRecorder {
   // Should be called when a file has been deleted.
   void RecordFileDeletedMetrics(bool success,
                                 lens::MimeType file_type,
-                                FileUploadStatus file_status);
+                                ContextUploadStatus file_status);
 
-  void RecordTabClickedMetrics(bool has_duplicate_title,
-                               std::optional<int> recency_ranking);
+  void RecordTabAddedMetrics(bool has_duplicate_title,
+                               std::optional<int> recency_ranking,
+                               bool is_tab_suggestion_chip);
 
+  // If `duplicate_title_count` < 0 then it won't be recorded.
   void RecordTabContextMenuMetrics(int total_tab_count,
                                    int duplicate_title_count);
-
-  void RecordToolsSubmissionType(SubmissionType submission_type);
-
-  void RecordToolState(SubmissionType submission_type, AimToolState tool_state);
 
   // Records whether the config was parsed successfully.
   static void RecordConfigParseSuccess(ContextualSearchSource source,
                                        bool success);
 
+  // Records the tool mode (i.e. Deep Search, Create Images, etc.).
+  virtual void RecordToolMode(composebox_query::mojom::ToolMode tool_mode);
+
+  // Records the model mode (i.e. Gemini Pro, Gemini Pro Autoroute, etc.).
+  virtual void RecordModelMode(composebox_query::mojom::ModelMode model_mode);
+
+  // Records tool mode and model mode on query submission.
+  virtual void RecordModesOnSubmission(
+      composebox_query::mojom::ToolMode tool_mode,
+      composebox_query::mojom::ModelMode model_mode);
+
+  // Records when a zero-suggest suggestion is clicked.
+  virtual void RecordZeroSuggestClick(bool is_contextual);
+
  private:
   // Called when the session starts to correctly track session
   // durations.
   void NotifySessionStarted();
-  // Called when a query is submitted to correctly track the time from
-  // the session starting to query submission.
-  void NotifyQuerySubmitted();
   // Should only be called when a session has been abandoned.
   void RecordSessionAbandonedMetrics();
   // Should only be called if a query was submitted and navigation to the AIM
@@ -141,6 +174,7 @@ class ContextualSearchMetricsRecorder {
   void FinalizeSessionMetrics();
   // Resets all session metrics at the end of a session.
   void ResetSessionMetrics();
+
   ContextualSearchSource source_;
   std::string metrics_suffix_;
   std::unique_ptr<SessionMetrics> session_metrics_;

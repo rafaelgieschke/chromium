@@ -280,13 +280,13 @@ public class AwPrefetchTest extends AwParameterizedTest {
                 () -> {
                     // Updating with negative values shouldn't be applied
                     prefetchManager.updatePrefetchConfiguration(-1, -1);
-                    Assert.assertTrue(prefetchManager.getTTlInSec() > 0);
-                    Assert.assertTrue(prefetchManager.getMaxPrefetches() > 0);
+                    Assert.assertTrue(prefetchManager.getTtlInSecForTesting() > 0);
+                    Assert.assertTrue(prefetchManager.getMaxPrefetchesForTesting() > 0);
 
                     // Updating with 0 shouldn't be applied as well.
                     prefetchManager.updatePrefetchConfiguration(0, 0);
-                    Assert.assertTrue(prefetchManager.getTTlInSec() > 0);
-                    Assert.assertTrue(prefetchManager.getMaxPrefetches() > 0);
+                    Assert.assertTrue(prefetchManager.getTtlInSecForTesting() > 0);
+                    Assert.assertTrue(prefetchManager.getMaxPrefetchesForTesting() > 0);
                 });
     }
 
@@ -299,8 +299,8 @@ public class AwPrefetchTest extends AwParameterizedTest {
         ThreadUtils.runOnUiThreadBlocking(
                 () -> {
                     prefetchManager.updatePrefetchConfiguration(60, 5);
-                    Assert.assertEquals(60, prefetchManager.getTTlInSec());
-                    Assert.assertEquals(5, prefetchManager.getMaxPrefetches());
+                    Assert.assertEquals(60, prefetchManager.getTtlInSecForTesting());
+                    Assert.assertEquals(5, prefetchManager.getMaxPrefetchesForTesting());
                 });
     }
 
@@ -675,6 +675,38 @@ public class AwPrefetchTest extends AwParameterizedTest {
                 "Server should NOT have received a second request.",
                 1,
                 mTestServer.getRequestCountForUrl(testPath));
+    }
+
+    @Test
+    @LargeTest
+    @Feature({"AndroidWebView"})
+    @CommandLineFlags.Add({
+        ContentSwitches.HOST_RESOLVER_RULES + "=MAP * 127.0.0.1",
+        "enable-features=ExternalExperimentAllowlist:123/PrefetchStudy,Group1"
+    })
+    public void testPrefetchRequestWithVariationsId() throws Throwable {
+        // The Variations ID (123) must match the entry in the ExternalExperimentAllowlist
+        // defined in the @CommandLineFlags above. The metrics service will only register
+        // IDs that have been explicitly allowlisted for privacy and security reasons.
+        AwPrefetchParameters prefetchParameters =
+                new AwPrefetchParameters(new HashMap<>(), null, true, 123);
+
+        // We expect 1 group to be registered.
+        var histogramWatcher =
+                HistogramWatcher.newBuilder()
+                        .expectIntRecord("UMA.ExternalExperiment.GroupCount", 1)
+                        .build();
+
+        // Do the prefetch request.
+        TestAwPrefetchCallback callback = startPrefetchingAndWait(mPrefetchUrl, prefetchParameters);
+
+        // wait then do the checks
+        callback.mOnStatusUpdatedHelper.waitForNext();
+        Assert.assertEquals(
+                AwPrefetchCallback.StatusCode.PREFETCH_RESPONSE_COMPLETED,
+                callback.getOnStatusUpdatedHelper().getStatusCode());
+
+        histogramWatcher.pollInstrumentationThreadUntilSatisfied();
     }
 
     private String getUrl(final String relativePath) {

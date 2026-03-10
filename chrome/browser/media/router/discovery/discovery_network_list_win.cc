@@ -19,6 +19,7 @@
 #include "base/check.h"
 #include "base/compiler_specific.h"
 #include "base/containers/heap_array.h"
+#include "base/containers/span.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/no_destructor.h"
@@ -55,7 +56,10 @@ void IfTable2Deleter(PMIB_IF_TABLE2 interface_table) {
 }  // namespace
 
 bool GuidOperatorLess::operator()(const GUID& guid1, const GUID& guid2) const {
-  return UNSAFE_TODO(memcmp(&guid1, &guid2, sizeof(GUID))) < 0;
+  return std::lexicographical_compare(base::byte_span_from_ref(guid1).begin(),
+                                      base::byte_span_from_ref(guid1).end(),
+                                      base::byte_span_from_ref(guid2).begin(),
+                                      base::byte_span_from_ref(guid2).end());
 }
 
 typedef DWORD(WINAPI* WlanOpenHandleFunction)(DWORD dwClientVersion,
@@ -307,7 +311,7 @@ HRESULT GetProfileNetworkAdapterId(
     // INetworkAdapter::get_NetworkAdapter() may load the module
     // Windows.Networking.HostName.dll. Temporarily boost the priority of this
     // background thread to avoid causing jank by blocking the UI thread from
-    // loading modules. For more details, see https://crbug.com/973868.
+    // loading modules. For more details, see https://crbug.com/41464781.
     SCOPED_MAY_LOAD_LIBRARY_AT_BACKGROUND_PRIORITY_REPEATEDLY();
 
     HRESULT hr = connection_profile->get_NetworkAdapter(&network_adapter);
@@ -356,7 +360,7 @@ HRESULT GetAllConnectionProfiles(
     // RoGetActivationFactory() may load the Windows.Networking.Connectivity.dll
     // module. Temporarily boost the priority of this background thread to avoid
     // causing jank by blocking the UI thread from loading modules. For more
-    // details, see https://crbug.com/973868.
+    // details, see https://crbug.com/41464781.
     SCOPED_MAY_LOAD_LIBRARY_AT_BACKGROUND_PRIORITY_REPEATEDLY();
 
     HRESULT hr =

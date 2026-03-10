@@ -7,16 +7,18 @@
 #import "base/notreached.h"
 #import "ios/chrome/browser/bubble/ui_bundled/guided_tour/guided_tour_bubble_view_controller_presenter.h"
 #import "ios/chrome/browser/shared/coordinator/layout_guide/layout_guide_util.h"
+#import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/util/layout_guide_names.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
 #import "ios/chrome/browser/shared/ui/util/util_swift.h"
-#import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/toolbar_button.h"
+#import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/legacy_toolbar_button.h"
 #import "ios/chrome/grit/ios_strings.h"
 #import "ui/base/l10n/l10n_util_mac.h"
 
 namespace {
 // Corner radius of the spotlight cutouts.
 const CGFloat kNTPTabGridButtonSpotlightCornerRadius = 7.0f;
+const CGFloat kNTPAppBarTabGridButtonSpotlightCornerRadius = 14.0f;
 const CGFloat kNTPTabGridPageControlCornerRadius = 13.0f;
 }  // namespace
 
@@ -69,6 +71,9 @@ const CGFloat kNTPTabGridPageControlCornerRadius = 13.0f;
 }
 
 - (void)stop {
+  // Dismissing the presenter could trigger the dismiss callback, so break the
+  // connection to the delegate to avoid infinite loops.
+  _delegate = nil;
   [_presenter dismiss];
   _presenter = nil;
 }
@@ -78,8 +83,14 @@ const CGFloat kNTPTabGridPageControlCornerRadius = 13.0f;
 // Returns the view to which the bubble view will be anchored.
 - (UIView*)anchorView {
   if (_step == GuidedTourStep::kNTP) {
-    ToolbarButton* tabSwitcherButton =
-        static_cast<ToolbarButton*>([LayoutGuideCenterForBrowser(self.browser)
+    if (IsChromeNextIaEnabled()) {
+      UIButton* tabSwitcherButton =
+          static_cast<UIButton*>([LayoutGuideCenterForBrowser(nil)
+              referencedViewUnderName:kTabSwitcherGuide]);
+      return tabSwitcherButton;
+    }
+    LegacyToolbarButton* tabSwitcherButton = static_cast<LegacyToolbarButton*>(
+        [LayoutGuideCenterForBrowser(self.browser)
             referencedViewUnderName:kTabSwitcherGuide]);
     return tabSwitcherButton.spotlightView;
   } else if (_step == GuidedTourStep::kTabGridIncognito) {
@@ -155,24 +166,48 @@ const CGFloat kNTPTabGridPageControlCornerRadius = 13.0f;
 
 // The corner radius of the spotlight cutout for this Bubble View.
 - (CGFloat)backgroundCutoutCornerRadius {
-  return _step == GuidedTourStep::kNTP ? kNTPTabGridButtonSpotlightCornerRadius
+  CGFloat NTPTabGridButtonSpotlightCornerRadius =
+      IsChromeNextIaEnabled() ? kNTPAppBarTabGridButtonSpotlightCornerRadius
+                              : kNTPTabGridButtonSpotlightCornerRadius;
+  return _step == GuidedTourStep::kNTP ? NTPTabGridButtonSpotlightCornerRadius
                                        : kNTPTabGridPageControlCornerRadius;
 }
 
 // YES if the bubble arrow should point down (e.g. the NTP step is pointing down
 // to the bottom toolbar).
 - (BOOL)shouldPointArrowDown {
-  return IsSplitToolbarMode(self.baseViewController) &&
-         _step == GuidedTourStep::kNTP;
+  if (_step == GuidedTourStep::kNTP) {
+    return IsSplitToolbarMode(self.baseViewController);
+  }
+  if (_step == GuidedTourStep::kTabGridLongPress) {
+    UIView* anchorView = [self anchorView];
+    CGRect anchorFrameInBaseViewController =
+        [anchorView convertRect:[anchorView bounds]
+                         toView:self.baseViewController.view];
+    // Point arrow down if anchor view is on the bottom half of the screen.
+    return CGRectGetMidY(anchorFrameInBaseViewController) >
+           CGRectGetMidY(self.baseViewController.view.bounds);
+  }
+  return NO;
 }
 
 // Returns the bubble alignment for each step.
 - (BubbleAlignment)bubbleAlignment {
   if (_step == GuidedTourStep::kNTP) {
     return BubbleAlignmentBottomOrTrailing;
-  } else if (_step == GuidedTourStep::kTabGridIncognito ||
-             _step == GuidedTourStep::kTabGridLongPress) {
+  } else if (_step == GuidedTourStep::kTabGridIncognito) {
     return BubbleAlignmentTopOrLeading;
+  } else if (_step == GuidedTourStep::kTabGridLongPress) {
+    UIView* anchorView = [self anchorView];
+    CGRect anchorFrameInBaseViewController =
+        [anchorView convertRect:[anchorView bounds]
+                         toView:self.baseViewController.view];
+
+    BOOL onLeftHalfOfScreen =
+        CGRectGetMidX(self.baseViewController.view.bounds) >
+        CGRectGetMidX(anchorFrameInBaseViewController);
+    return (onLeftHalfOfScreen) ? BubbleAlignmentTopOrLeading
+                                : BubbleAlignmentBottomOrTrailing;
   } else if (_step == GuidedTourStep::kTabGridTabGroup) {
     return BubbleAlignmentBottomOrTrailing;
   }

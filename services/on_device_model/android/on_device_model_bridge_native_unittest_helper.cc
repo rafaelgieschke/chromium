@@ -19,6 +19,11 @@ OnDeviceModelBridgeNativeUnitTestHelper::
 OnDeviceModelBridgeNativeUnitTestHelper::
     ~OnDeviceModelBridgeNativeUnitTestHelper() = default;
 
+void OnDeviceModelBridgeNativeUnitTestHelper::SetDefaultAiCoreFactory() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  Java_OnDeviceModelBridgeNativeUnitTestHelper_setDefaultAiCoreFactory(env);
+}
+
 void OnDeviceModelBridgeNativeUnitTestHelper::SetMockAiCoreFactory() {
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_OnDeviceModelBridgeNativeUnitTestHelper_setMockAiCoreFactory(
@@ -100,6 +105,14 @@ void OnDeviceModelBridgeNativeUnitTestHelper::TriggerDownloaderOnAvailable(
       base::android::ConvertUTF8ToJavaString(env, version);
   Java_OnDeviceModelBridgeNativeUnitTestHelper_triggerDownloaderOnAvailable(
       env, java_helper_, j_name, j_version);
+}
+
+void OnDeviceModelBridgeNativeUnitTestHelper::
+    TriggerDownloaderOnStatusCheckResult(
+        ModelDownloaderAndroid::ModelStatus model_status) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  Java_OnDeviceModelBridgeNativeUnitTestHelper_triggerDownloaderOnStatusCheckResult(
+      env, java_helper_, static_cast<int>(model_status));
 }
 
 }  // namespace on_device_model

@@ -9,8 +9,10 @@
 #include "components/autofill/core/browser/data_manager/addresses/address_data_manager.h"
 #include "components/autofill/core/browser/data_manager/addresses/address_data_manager_test_api.h"
 #include "components/autofill/core/browser/data_manager/payments/payments_data_manager.h"
+#include "components/autofill/core/browser/data_manager/valuables/valuables_data_manager.h"
 #include "components/autofill/core/browser/data_model/payments/credit_card.h"
 #include "components/autofill/core/browser/form_import/form_data_importer_test_api.h"
+#include "components/autofill/core/browser/form_import/payments/payments_form_data_importer_test_api.h"
 #include "components/autofill/core/browser/foundations/autofill_manager_test_api.h"
 #include "components/autofill/core/browser/payments/credit_card_access_manager.h"
 #include "components/autofill/core/browser/payments/credit_card_access_manager_test_api.h"
@@ -22,11 +24,13 @@
 #include "components/autofill/core/browser/payments/test_payments_autofill_client.h"
 #include "components/autofill/core/browser/payments/test_payments_network_interface.h"
 #include "components/autofill/core/browser/test_utils/autofill_form_test_utils.h"
+#include "components/autofill/core/browser/webdata/valuables/valuables_table.h"
 #include "components/autofill/core/common/autofill_clock.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/credit_card_network_identifiers.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
 
 #if !BUILDFLAG(IS_IOS)
 #include "components/autofill/core/browser/payments/test_credit_card_fido_authenticator.h"
@@ -41,10 +45,20 @@ using ::testing::Invoke;
 using ::testing::NiceMock;
 
 void SetProfileTestData(AutofillProfile* profile) {
-  test::SetProfileInfo(profile, "Elvis", "Aaron", "Presley",
-                       "theking@gmail.com", "RCA", "3734 Elvis Presley Blvd.",
-                       "Apt. 10", "Memphis", "Tennessee", "38116", "US",
-                       "12345678901");
+  test::SetProfileInfo(profile, test::SetProfileInfoOptionsBuilder()
+                                    .with_first_name("Elvis")
+                                    .with_middle_name("Aaron")
+                                    .with_last_name("Presley")
+                                    .with_email("theking@gmail.com")
+                                    .with_company("RCA")
+                                    .with_address1("3734 Elvis Presley Blvd.")
+                                    .with_address2("Apt. 10")
+                                    .with_city("Memphis")
+                                    .with_state("Tennessee")
+                                    .with_zipcode("38116")
+                                    .with_country("US")
+                                    .with_phone("12345678901")
+                                    .Build());
   profile->set_guid(kTestProfileId);
 }
 }  // namespace
@@ -74,7 +88,8 @@ MockAutofillDriver::MockAutofillDriver(TestAutofillClient* client)
                  mojom::ActionPersistence action_persistence,
                  base::span<const FormFieldData> data, const FillId& fill_id,
                  bool supports_refill, const url::Origin& triggered_origin,
-                 const base::flat_map<FieldGlobalId, FieldType>& field_type_map,
+                 const absl::flat_hash_map<FieldGlobalId, FieldType>&
+                     field_type_map,
                  const Section& section_for_clear_form_on_ios)
               -> base::flat_set<FieldGlobalId> {
             return TestAutofillDriver::ApplyFormAction(
@@ -114,6 +129,12 @@ void AutofillMetricsBaseTest::InitAutofillClient() {
   autofill_client().set_payments_autofill_client(
       std::make_unique<NiceMock<MockPaymentsAutofillClient>>(
           &autofill_client()));
+  autofill_client().set_valuables_data_manager(
+      std::make_unique<ValuablesDataManager>(
+          web_data_service_helper_->autofill_webdata_service(),
+          autofill_client().GetPrefs(),
+          /*image_fetcher=*/nullptr));
+  web_data_service_helper_->WaitUntilIdle();
 }
 
 void AutofillMetricsBaseTest::SetUpHelper() {
@@ -121,6 +142,10 @@ void AutofillMetricsBaseTest::SetUpHelper() {
   base::Time year2020;
   ASSERT_TRUE(base::Time::FromString("01/01/20", &year2020));
   task_environment_.FastForwardBy(year2020 - base::Time::Now());
+
+  std::unique_ptr<ValuablesTable> valuables_table =
+      std::make_unique<ValuablesTable>();
+  web_data_service_helper_.emplace(std::move(valuables_table));
 
   InitAutofillClient();
 
@@ -140,7 +165,8 @@ void AutofillMetricsBaseTest::SetUpHelper() {
           *autofill_client().GetIdentityManager());
   payments_autofill_client().set_multiple_request_payments_network_interface(
       std::move(multiple_request_payments_network_interface));
-  test_api(*autofill_client().GetFormDataImporter())
+  test_api(
+      autofill_client().GetFormDataImporter()->GetPaymentsFormDataImporter())
       .set_credit_card_save_manager(
           std::make_unique<TestCreditCardSaveManager>(&autofill_client()));
   payments_autofill_client().set_autofill_offer_manager(
@@ -169,6 +195,7 @@ void AutofillMetricsBaseTest::SetUpHelper() {
 void AutofillMetricsBaseTest::TearDownHelper() {
   test_ukm_recorder().Purge();
   DestroyAutofillClient();
+  web_data_service_helper_.reset();
 }
 
 void AutofillMetricsBaseTest::PurgeUKM() {
@@ -182,9 +209,20 @@ void AutofillMetricsBaseTest::CreateAmbiguousProfiles() {
   CreateTestAutofillProfiles();
 
   AutofillProfile profile(i18n_model_definition::kLegacyHierarchyCountryCode);
-  test::SetProfileInfo(&profile, "John", "Decca", "Public", "john@gmail.com",
-                       "Company", "123 Main St.", "unit 7", "Springfield",
-                       "Texas", "79401", "US", "2345678901");
+  test::SetProfileInfo(&profile, test::SetProfileInfoOptionsBuilder()
+                                     .with_first_name("John")
+                                     .with_middle_name("Decca")
+                                     .with_last_name("Public")
+                                     .with_email("john@gmail.com")
+                                     .with_company("Company")
+                                     .with_address1("123 Main St.")
+                                     .with_address2("unit 7")
+                                     .with_city("Springfield")
+                                     .with_state("Texas")
+                                     .with_zipcode("79401")
+                                     .with_country("US")
+                                     .with_phone("2345678901")
+                                     .Build());
   profile.set_guid("00000000-0000-0000-0000-000000000003");
   personal_data().address_data_manager().AddProfile(profile);
 }
@@ -389,17 +427,38 @@ void AutofillMetricsBaseTest::AddMaskedServerCreditCardWithOffer(
 
 void AutofillMetricsBaseTest::CreateTestAutofillProfiles() {
   AutofillProfile profile1(i18n_model_definition::kLegacyHierarchyCountryCode);
-  test::SetProfileInfo(&profile1, "Elvis", "Aaron", "Presley",
-                       "theking@gmail.com", "RCA", "3734 Elvis Presley Blvd.",
-                       "Apt. 10", "Memphis", "Tennessee", "38116", "US",
-                       "12345678901");
+  test::SetProfileInfo(&profile1, test::SetProfileInfoOptionsBuilder()
+                                      .with_first_name("Elvis")
+                                      .with_middle_name("Aaron")
+                                      .with_last_name("Presley")
+                                      .with_email("theking@gmail.com")
+                                      .with_company("RCA")
+                                      .with_address1("3734 Elvis Presley Blvd.")
+                                      .with_address2("Apt. 10")
+                                      .with_city("Memphis")
+                                      .with_state("Tennessee")
+                                      .with_zipcode("38116")
+                                      .with_country("US")
+                                      .with_phone("12345678901")
+                                      .Build());
   profile1.set_guid(kTestProfileId);
   personal_data().address_data_manager().AddProfile(profile1);
 
   AutofillProfile profile2(i18n_model_definition::kLegacyHierarchyCountryCode);
-  test::SetProfileInfo(&profile2, "Charles", "Hardin", "Holley",
-                       "buddy@gmail.com", "Decca", "123 Apple St.", "unit 6",
-                       "Lubbock", "Texas", "79401", "US", "2345678901");
+  test::SetProfileInfo(&profile2, test::SetProfileInfoOptionsBuilder()
+                                      .with_first_name("Charles")
+                                      .with_middle_name("Hardin")
+                                      .with_last_name("Holley")
+                                      .with_email("buddy@gmail.com")
+                                      .with_company("Decca")
+                                      .with_address1("123 Apple St.")
+                                      .with_address2("unit 6")
+                                      .with_city("Lubbock")
+                                      .with_state("Texas")
+                                      .with_zipcode("79401")
+                                      .with_country("US")
+                                      .with_phone("2345678901")
+                                      .Build());
   profile2.set_guid(kTestProfile2Id);
   personal_data().address_data_manager().AddProfile(profile2);
 }

@@ -14,20 +14,28 @@
 #include "base/types/expected.h"
 #include "chrome/browser/actor/actor_keyed_service.h"
 #include "chrome/browser/actor/actor_keyed_service_factory.h"
+#include "chrome/browser/actor/actor_metrics.h"
+#include "chrome/browser/actor/actor_proto_conversion.h"
 #include "chrome/browser/actor/actor_task.h"
 #include "chrome/browser/actor/actor_task_metadata.h"
-#include "chrome/browser/actor/browser_action_util.h"
 #include "chrome/browser/actor/execution_engine.h"
 #include "chrome/browser/actor/tools/tool_request.h"
 #include "chrome/browser/actor/ui/actor_ui_state_manager_interface.h"
+#include "chrome/browser/glic/actor/glic_actor_policy_checker.h"
 #include "chrome/browser/glic/host/context/glic_tab_data.h"
+#include "chrome/browser/glic/host/glic_mojom_traits.h"
+#include "chrome/browser/glic/public/glic_keyed_service.h"
+#include "chrome/browser/glic/public/glic_keyed_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
-#include "chrome/common/actor.mojom-data-view.h"
+#include "chrome/common/actor.mojom-shared.h"
+#include "chrome/common/actor.mojom.h"
 #include "chrome/common/actor/action_result.h"
 #include "chrome/common/actor/journal_details_builder.h"
+#include "chrome/common/actor_webui.mojom.h"
 #include "chrome/common/chrome_features.h"
 #include "components/optimization_guide/proto/features/actions_data.pb.h"
+#include "components/page_content_annotations/content/page_context_fetcher.h"
 #include "components/sessions/core/session_id.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/navigation_controller.h"
@@ -59,7 +67,9 @@ tabs::TabInterface* GetCrashedTab(actor::ActorTask& task) {
     }
 
     content::WebContents* contents = tab->GetContents();
-    CHECK(contents);
+    if (!contents) {
+      continue;
+    }
     if (contents->IsCrashed()) {
       return tab;
     }
@@ -67,14 +77,25 @@ tabs::TabInterface* GetCrashedTab(actor::ActorTask& task) {
 
   return nullptr;
 }
+
 }  // namespace
 
-GlicActorTaskManager::GlicActorTaskManager(Profile* profile)
+GlicActorTaskManager::GlicActorTaskManager(
+    Profile* profile,
+    actor::ActorKeyedService* actor_keyed_service,
+    GlicActorPolicyChecker& actor_policy_checker)
     : profile_(profile),
-      actor_keyed_service_(
-          actor::ActorKeyedServiceFactory::GetActorKeyedService(profile)) {
+      actor_keyed_service_(actor_keyed_service),
+      actor_policy_checker_(actor_policy_checker) {
   CHECK(profile_);
   CHECK(actor_keyed_service_);
+
+  // Unretained is safe because the subscription cancels the callback when this
+  // is destroyed.
+  can_act_on_web_changed_subscription_ =
+      actor_policy_checker.AddActOnWebCapabilityChangedCallback(
+          base::BindRepeating(&GlicActorTaskManager::CanActOnWebChanged,
+                              base::Unretained(this)));
 }
 
 GlicActorTaskManager::~GlicActorTaskManager() = default;
@@ -89,10 +110,39 @@ void GlicActorTaskManager::CreateTask(
     return;
   }
 
-  CancelTask();
+  if (!current_task_id_.is_null()) {
+    std::move(callback).Run(
+        base::unexpected(mojom::CreateTaskErrorReason::kExistingActiveTask));
+    return;
+  }
 
+  if (!actor_policy_checker_->CanActOnWeb()) {
+    // TODO(bokan): This was moved here to preserve behavior; the failure case
+    // was only counting policy blocks which are a Glic-only concept. However,
+    // the UMA histogram is in Actor which implies it records all sources of
+    // actor tasks. This histogram should probably be migrated to be Glic
+    // namespaced.
+    actor::RecordActorTaskCreated(/*success=*/false);
+    actor_keyed_service_->GetJournal().Log(
+        GURL(), actor::TaskId(), "GlicActorTaskManager::CreateTask",
+        actor::JournalDetailsBuilder()
+            .AddError("Actuation capability disabled")
+            .Build());
+    std::move(callback).Run(
+        base::unexpected(mojom::CreateTaskErrorReason::kBlockedByPolicy));
+    return;
+  }
+
+  actor::RecordActorTaskCreated(true);
   current_task_id_ = actor_keyed_service_->CreateTaskWithOptions(
-      std::move(options), std::move(delegate));
+      &actor_policy_checker_.get(), std::move(options), std::move(delegate));
+  CHECK(!current_task_id_.is_null());
+
+  actor_task_state_changed_subscription_ =
+      actor_keyed_service_->AddTaskStateChangedCallback(base::BindRepeating(
+          &GlicActorTaskManager::NotifyActorTaskStateChanged,
+          base::Unretained(this)));
+
   std::move(callback).Run(current_task_id_.value());
 }
 
@@ -101,6 +151,9 @@ void GlicActorTaskManager::PerformActionsFinished(
     actor::TaskId task_id,
     base::TimeTicks start_time,
     bool skip_async_observation_information,
+    std::optional<page_content_annotations::ScreenshotOptions::
+                      ScreenshotCollectionOptions>
+        screenshot_collection_options,
     actor::mojom::ActionResultCode result_code,
     std::optional<size_t> index_of_failed_action,
     std::vector<actor::ActionResultWithLatencyInfo> action_results) {
@@ -112,11 +165,9 @@ void GlicActorTaskManager::PerformActionsFinished(
           .Add("result_code", base::ToString(result_code))
           .Build());
 
-  // Task has disappeared, clear the current task id.
   // TODO(b/470985724): Reply at the time the task is stopped/canceled instead
   // of here.
   if (!task) {
-    ResetTaskState();
     optimization_guide::proto::ActionsResult response =
         actor::BuildErrorActionsResult(
             actor::mojom::ActionResultCode::kTaskWentAway, std::nullopt);
@@ -124,13 +175,10 @@ void GlicActorTaskManager::PerformActionsFinished(
     return;
   }
 
-  // If the task went away it must have been handled in the !task branch above.
-  DCHECK_NE(result_code, actor::mojom::ActionResultCode::kTaskWentAway);
-
-  if (result_code == actor::mojom::ActionResultCode::kTaskPaused) {
+  if (result_code == actor::mojom::ActionResultCode::kTaskPaused ||
+      result_code == actor::mojom::ActionResultCode::kTaskWentAway) {
     optimization_guide::proto::ActionsResult response =
-        actor::BuildErrorActionsResult(
-            actor::mojom::ActionResultCode::kTaskPaused, std::nullopt);
+        actor::BuildErrorActionsResult(result_code, std::nullopt);
     std::move(callback).Run(mojo_base::ProtoWrapper(response));
     return;
   }
@@ -150,6 +198,7 @@ void GlicActorTaskManager::PerformActionsFinished(
           &GlicActorTaskManager::PerformActionsFinished,
           weak_ptr_factory_.GetWeakPtr(), std::move(callback), task_id,
           start_time, skip_async_observation_information,
+          std::move(screenshot_collection_options),
           actor::mojom::ActionResultCode::kRendererCrashed,
           index_of_failed_action, std::move(action_results));
       ReloadCrashedTab(*crashed_tab, task->id(),
@@ -161,6 +210,7 @@ void GlicActorTaskManager::PerformActionsFinished(
   actor::BuildActionsResultWithObservations(
       *profile_, start_time, result_code, index_of_failed_action,
       std::move(action_results), *task, skip_async_observation_information,
+      screenshot_collection_options,
       base::BindOnce(&GlicActorTaskManager::DidFinishBuildObservation,
                      weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
 }
@@ -173,10 +223,15 @@ void GlicActorTaskManager::DidFinishBuildObservation(
     std::vector<actor::ActionResultWithLatencyInfo> action_results,
     actor::TaskId task_id,
     bool skip_async_observation_information,
+    std::optional<page_content_annotations::ScreenshotOptions::
+                      ScreenshotCollectionOptions>
+        screenshot_collection_options,
     std::unique_ptr<optimization_guide::proto::ActionsResult> result,
     std::unique_ptr<actor::AggregatedJournal::PendingAsyncEntry>
         journal_entry) {
   CHECK(result);
+
+  actor::RecordTabObservationResultHistogram(*result);
 
   if (base::FeatureList::IsEnabled(kGlicRetryFailedObservations) &&
       !attempted_observation_retry_) {
@@ -198,7 +253,8 @@ void GlicActorTaskManager::DidFinishBuildObservation(
         auto retry_perform_actions_finished = base::BindOnce(
             &GlicActorTaskManager::PerformActionsFinished,
             weak_ptr_factory_.GetWeakPtr(), std::move(callback), task_id,
-            start_time, skip_async_observation_information, result_code,
+            start_time, skip_async_observation_information,
+            std::move(screenshot_collection_options), result_code,
             index_of_failed_action, std::move(action_results));
 
         base::SequencedTaskRunner::GetCurrentDefault()->PostDelayedTask(
@@ -208,6 +264,9 @@ void GlicActorTaskManager::DidFinishBuildObservation(
       }
     }
   }
+
+  actor::RecordObservationOutcomeHistogram(*result,
+                                           attempted_observation_retry_);
 
   std::move(callback).Run(mojo_base::ProtoWrapper(*result));
 }
@@ -219,7 +278,10 @@ void GlicActorTaskManager::ReloadCrashedTab(tabs::TabInterface& crashed_tab,
   // Task. If they are multiple tabs that crashed we might want to figure out
   // how to deal with that.
   content::WebContents* contents = crashed_tab.GetContents();
-  CHECK(contents);
+  if (!contents) {
+    std::move(callback).Run();
+    return;
+  }
   CHECK(contents->IsCrashed());
 
   actor_keyed_service_->GetJournal().Log(
@@ -303,32 +365,36 @@ void GlicActorTaskManager::PerformActions(
   bool skip_async_observation_information =
       actions.has_skip_async_observation_collection() &&
       actions.skip_async_observation_collection();
+
   attempted_observation_retry_ = false;
   actor_keyed_service_->PerformActions(
       task_id, std::move(requests.value()), actor::ActorTaskMetadata(actions),
       base::BindOnce(&GlicActorTaskManager::PerformActionsFinished,
                      GetWeakPtr(), std::move(callback), task_id, start_time,
-                     skip_async_observation_information));
+                     skip_async_observation_information,
+                     actor::GetScreenshotCollectionOptions(actions)));
+}
+
+void GlicActorTaskManager::CancelActions(
+    actor::TaskId task_id,
+    mojom::WebClientHandler::CancelActionsCallback callback) {
+  actor::ActorTask* task = actor_keyed_service_->GetTask(task_id);
+  if (!task) {
+    std::move(callback).Run(mojom::CancelActionsResult::kTaskNotFound);
+    return;
+  }
+
+  bool success = task->CancelOngoingActions(
+      actor::mojom::ActionResultCode::kActionsCancelled);
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback),
+                                success ? mojom::CancelActionsResult::kSuccess
+                                        : mojom::CancelActionsResult::kFailed));
 }
 
 void GlicActorTaskManager::StopActorTask(
     actor::TaskId task_id,
     mojom::ActorTaskStopReason stop_reason) {
-  if (current_task_id_ == task_id) {
-    ResetTaskState();
-  }
-
-  actor::ActorTask* task = actor_keyed_service_->GetTask(task_id);
-  if (!task || task->IsCompleted()) {
-    actor_keyed_service_->GetJournal().Log(
-        GURL::EmptyGURL(), task_id, "Failed to stop task",
-        actor::JournalDetailsBuilder()
-            .AddError(task ? "Task already stopped" : "No such task")
-            .Add("id", task_id.value())
-            .Build());
-    return;
-  }
-
   actor::ActorTask::StoppedReason reason;
   switch (stop_reason) {
     case glic::mojom::ActorTaskStopReason::kTaskComplete:
@@ -348,14 +414,22 @@ void GlicActorTaskManager::StopActorTask(
       break;
   }
 
-  actor_keyed_service_->StopTask(task->id(), reason);
+  StopTaskImpl(task_id, reason);
 }
 
 void GlicActorTaskManager::MaybeShowDeactivationToastUi() {
+  // If the ui is deactivated on a tab that is not actuating, don't show the
+  // toast.
+  if (!IsActuating()) {
+    return;
+  }
+
+#if !BUILDFLAG(IS_ANDROID)
   BrowserWindowInterface* const last_active_bwi =
       GetLastActiveBrowserWindowInterfaceWithAnyProfile();
   actor_keyed_service_->GetActorUiStateManager()->MaybeShowToast(
       last_active_bwi);
+#endif
 }
 
 void GlicActorTaskManager::PauseActorTask(
@@ -406,12 +480,11 @@ void GlicActorTaskManager::ResumeActorTask(
 
   actor::mojom::ActionResultCode resume_response_code =
       actor::mojom::ActionResultCode::kOk;
-  if (actor::ExecutionEngine* execution_engine = task->GetExecutionEngine()) {
-    resume_response_code = execution_engine->user_take_over_result().value_or(
-        actor::mojom::ActionResultCode::kOk);
-    // Reset the takeover result
-    execution_engine->set_user_take_over_result(std::nullopt);
-  }
+  actor::ExecutionEngine& execution_engine = task->GetExecutionEngine();
+  resume_response_code = execution_engine.user_take_over_result().value_or(
+      actor::mojom::ActionResultCode::kOk);
+  // Reset the takeover result
+  execution_engine.set_user_take_over_result(std::nullopt);
 
   // TODO(crbug.com/420669167): GetLastActedTabs should only ever have 1 tab in
   // it for now but once we support multi-tab we'll need to grab observations
@@ -489,11 +562,13 @@ void GlicActorTaskManager::ResumeActorTask(
                 std::move(tab_context_ptr),
                 static_cast<int32_t>(resume_response_code)));
       },
-      std::move(callback), CreateTabData(tab_of_resumed_task->GetContents()),
+      std::move(callback), CreateTabData(tab_of_resumed_task),
       resume_response_code);
 
-  actor_keyed_service_->RequestTabObservation(*tab_of_resumed_task, task_id,
-                                              std::move(observation_callback));
+  actor_keyed_service_->RequestTabObservation(
+      *tab_of_resumed_task, task_id,
+      context_options.screenshot_collection_options,
+      std::move(observation_callback));
 }
 
 bool GlicActorTaskManager::IsActuating() const {
@@ -526,8 +601,7 @@ void GlicActorTaskManager::UninterruptActorTask(actor::TaskId task_id) {
     return;
   }
   actor::ActorTask::State next_state = actor::ActorTask::State::kReflecting;
-  if (task->GetExecutionEngine() &&
-      task->GetExecutionEngine()->HasActionSequence()) {
+  if (task->GetExecutionEngine().HasActionSequence()) {
     next_state = actor::ActorTask::State::kActing;
   }
   task->Uninterrupt(next_state);
@@ -557,8 +631,7 @@ void GlicActorTaskManager::CreateActorTab(
 void GlicActorTaskManager::CreateActorTabFinished(
     glic::mojom::WebClientHandler::CreateActorTabCallback callback,
     tabs::TabInterface* new_tab) {
-  std::move(callback).Run(
-      CreateTabData(new_tab ? new_tab->GetContents() : nullptr));
+  std::move(callback).Run(CreateTabData(new_tab));
 }
 
 void GlicActorTaskManager::ReloadObserverDone(
@@ -586,15 +659,49 @@ void GlicActorTaskManager::ReloadObserverDone(
 
 void GlicActorTaskManager::CancelTask() {
   if (current_task_id_) {
-    StopActorTask(current_task_id_,
-                  glic::mojom::ActorTaskStopReason::kStoppedByUser);
+    StopTaskImpl(current_task_id_,
+                 actor::ActorTask::StoppedReason::kStoppedByUser);
   }
 }
 
-void GlicActorTaskManager::ResetTaskState() {
-  current_task_id_ = actor::TaskId();
-  attempted_reload_after_crash_ = false;
-  reload_observer_.reset();
+void GlicActorTaskManager::CanActOnWebChanged(bool can_act_on_web) {
+  if (!can_act_on_web && current_task_id_) {
+    StopTaskImpl(current_task_id_,
+                 actor::ActorTask::StoppedReason::kChromeFailure);
+  }
+}
+
+void GlicActorTaskManager::NotifyActorTaskStateChanged(
+    actor::TaskId task_id,
+    actor::ActorTask::State task_state) {
+  CHECK(!task_id.is_null());
+  if (current_task_id_ != task_id) {
+    return;
+  }
+
+  if (actor::ActorTask::IsCompletedState(task_state)) {
+    current_task_id_ = actor::TaskId();
+    attempted_reload_after_crash_ = false;
+    reload_observer_.reset();
+    actor_task_state_changed_subscription_.reset();
+  }
+}
+
+void GlicActorTaskManager::StopTaskImpl(
+    actor::TaskId task_id,
+    actor::ActorTask::StoppedReason reason) {
+  actor::ActorTask* task = actor_keyed_service_->GetTask(task_id);
+  if (!task || task->IsCompleted()) {
+    actor_keyed_service_->GetJournal().Log(
+        GURL::EmptyGURL(), task_id, "Failed to stop task",
+        actor::JournalDetailsBuilder()
+            .AddError(task ? "Task already stopped" : "No such task")
+            .Add("id", task_id.value())
+            .Build());
+    return;
+  }
+
+  actor_keyed_service_->StopTask(task->id(), reason);
 }
 
 base::WeakPtr<GlicActorTaskManager> GlicActorTaskManager::GetWeakPtr() {

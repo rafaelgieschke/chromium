@@ -177,16 +177,6 @@ class PageInfo : private content_settings::CookieControlsObserver,
   // clicked.
   void OnThirdPartyToggleClicked(bool block_third_party_cookies);
 
-  // Checks whether this permission is currently the factory default, as set by
-  // Chrome. Specifically, that the following three conditions are true:
-  //   - The current active setting comes from the default or pref provider.
-  //   - The setting is the factory default setting (as opposed to a global
-  //     default setting set by the user).
-  //   - The setting is a wildcard setting applying to all origins (which can
-  //     only be set from the default provider).
-  static bool IsPermissionFactoryDefault(const PermissionInfo& info,
-                                         bool is_incognito);
-
   // Returns whether this page info is for an internal page.
   static bool IsFileOrInternalPage(const GURL& url);
 
@@ -261,6 +251,10 @@ class PageInfo : private content_settings::CookieControlsObserver,
   // This method is called when the user opens the Cookies & Site Data subpage.
   void OnCookiesPageOpened();
 
+#if BUILDFLAG(IS_CHROMEOS)
+  bool ShouldSyncCookiesForCurrentUrl();
+#endif
+
   // Return a pointer to the ObjectPermissionContextBase corresponding to the
   // content settings type, |type|. Returns nullptr for content settings
   // for which there's no ObjectPermissionContextBase.
@@ -272,8 +266,6 @@ class PageInfo : private content_settings::CookieControlsObserver,
     return site_connection_status_;
   }
 
-  const GURL& site_url() const { return site_url_; }
-
   const SiteIdentityStatus& site_identity_status() const {
     return site_identity_status_;
   }
@@ -281,8 +273,6 @@ class PageInfo : private content_settings::CookieControlsObserver,
   const SafeBrowsingStatus& safe_browsing_status() const {
     return safe_browsing_status_;
   }
-
-  content::WebContents* web_contents() const { return web_contents_.get(); }
 
   // For most sites, this returns a human-friendly string based on site origin,
   // without scheme, the username and password, the path or trivial subdomains.
@@ -390,7 +380,6 @@ class PageInfo : private content_settings::CookieControlsObserver,
 
   // Get the count of blocked and allowed sites.
   int GetSitesWithAllowedCookiesAccessCount();
-  int GetThirdPartySitesWithBlockedCookiesAccessCount(const GURL& site_url);
 
   bool IsIsolatedWebApp() const;
 
@@ -490,16 +479,14 @@ class PageInfo : private content_settings::CookieControlsObserver,
 
   std::u16string site_name_for_testing_;
 
-  std::unique_ptr<content_settings::CookieControlsController> controller_;
+  std::unique_ptr<content_settings::CookieControlsController>
+      cookie_controller_;
   base::ScopedObservation<content_settings::CookieControlsController,
                           content_settings::CookieControlsObserver>
-      observation_{this};
-
-  CookieControlsEnforcement enforcement_ =
+      cookie_observation_{this};
+  CookieControlsEnforcement cookie_enforcement_ =
       CookieControlsEnforcement::kNoEnforcement;
-
-  CookieControlsState controls_state_ = CookieControlsState::kBlocked3pc;
-
+  CookieControlsState cookie_controls_state_ = CookieControlsState::kBlocked3pc;
   base::Time cookie_exception_expiration_;
 
   bool is_subscribed_to_permission_change_for_testing = false;

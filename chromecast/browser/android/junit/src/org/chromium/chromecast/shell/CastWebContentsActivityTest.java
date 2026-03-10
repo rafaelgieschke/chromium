@@ -60,8 +60,6 @@ import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
 import org.robolectric.annotation.Implementation;
 import org.robolectric.annotation.Implements;
-import org.robolectric.annotation.LooperMode;
-import org.robolectric.annotation.LooperMode.Mode;
 import org.robolectric.shadow.api.Shadow;
 import org.robolectric.shadows.ShadowActivity;
 import org.robolectric.shadows.ShadowActivityManager;
@@ -86,7 +84,6 @@ import org.chromium.content_public.browser.WebContentsObserver;
  */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
-@LooperMode(Mode.PAUSED)
 public class CastWebContentsActivityTest {
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule();
 
@@ -778,6 +775,51 @@ public class CastWebContentsActivityTest {
     }
 
     @Test
+    public void testBroadcastActivityStartByCastCoreOnCreation() {
+        BroadcastReceiver mockReceiver = mock(BroadcastReceiver.class);
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(CastWebContentsIntentUtils.ACTION_ON_ACTIVITY_STARTED_BY_CAST_CORE);
+        LocalBroadcastManager.getInstance(RuntimeEnvironment.application)
+                .registerReceiver(mockReceiver, filter);
+        Intent intent = new Intent(RuntimeEnvironment.application, CastWebContentsActivity.class);
+        intent.putExtra(CastWebContentsIntentUtils.INTENT_EXTRA_FROM_CAST_CORE, true);
+        mActivityLifecycle = Robolectric.buildActivity(CastWebContentsActivity.class, intent);
+        mActivity = mActivityLifecycle.get();
+        mActivityLifecycle.create();
+        Shadows.shadowOf(getMainLooper()).idle();
+        verify(mockReceiver, times(1)).onReceive(any(Context.class), mIntentCaptor.capture());
+        Intent broadcastIntent = mIntentCaptor.getValue();
+        assertEquals(
+                CastWebContentsIntentUtils.ACTION_ON_ACTIVITY_STARTED_BY_CAST_CORE,
+                broadcastIntent.getAction());
+    }
+
+    @Test
+    public void testBroadcastActivityStartByCastCoreOnNewIntentFromCastCoreOnly() {
+        BroadcastReceiver mockReceiver = mock(BroadcastReceiver.class);
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(CastWebContentsIntentUtils.ACTION_ON_ACTIVITY_STARTED_BY_CAST_CORE);
+        LocalBroadcastManager.getInstance(RuntimeEnvironment.application)
+                .registerReceiver(mockReceiver, filter);
+        mActivityLifecycle.create().start().resume();
+
+        Intent defaultIntent = defaultIntentForCastWebContentsActivity(mWebContents);
+        mActivityLifecycle.newIntent(defaultIntent);
+        Shadows.shadowOf(getMainLooper()).idle();
+        verify(mockReceiver, times(0)).onReceive(any(Context.class), any(Intent.class));
+
+        Intent castCoreIntent =
+                new Intent(RuntimeEnvironment.application, CastWebContentsActivity.class);
+        castCoreIntent.putExtra(CastWebContentsIntentUtils.INTENT_EXTRA_FROM_CAST_CORE, true);
+        mActivityLifecycle.newIntent(castCoreIntent);
+        verify(mockReceiver, times(1)).onReceive(any(Context.class), mIntentCaptor.capture());
+        Intent broadcastIntent = mIntentCaptor.getValue();
+        assertEquals(
+                CastWebContentsIntentUtils.ACTION_ON_ACTIVITY_STARTED_BY_CAST_CORE,
+                broadcastIntent.getAction());
+    }
+
+    @Test
     public void testTaskRemovedMonitorServiceStartedOnCreation() {
         mActivityLifecycle =
                 Robolectric.buildActivity(
@@ -850,6 +892,25 @@ public class CastWebContentsActivityTest {
         assertEquals(
                 TaskRemovedMonitorService.class.getName(),
                 serviceIntent.getComponent().getClassName());
+    }
+
+    @Test
+    public void doesNotLeakWebContentsObservers() {
+        mActivityLifecycle.create();
+        verify(mWebContents, times(1)).addObserver(any());
+
+        // New media sessions shouldn't add additional observers; one WebContentsObserver should be
+        // shared between all reactive subscribers to the media session state.
+        updateMediaState(true, true);
+        verify(mWebContents, times(1)).addObserver(any());
+        updateMediaState(true, false);
+        verify(mWebContents, times(1)).addObserver(any());
+        updateMediaState(false, true);
+        verify(mWebContents, times(1)).addObserver(any());
+
+        // When the Activity is destroyed, the WebContentsObserver should be removed.
+        mActivityLifecycle.destroy();
+        verify(mWebContents, times(1)).removeObserver(any());
     }
 
     private void assertWakeLockFlags(boolean keepScreenOn, boolean allowLockWhileScreenOn) {

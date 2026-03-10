@@ -32,7 +32,6 @@ using UpdateSuggestionsCallback =
 
 struct BnplFetchVcnResponseDetails;
 struct BnplFetchUrlResponseDetails;
-struct BnplIssuerContext;
 
 // Owned by BrowserAutofillManager. There is one instance of this class per
 // frame. This class manages the flow for BNPL to complete a payment
@@ -108,16 +107,15 @@ class BnplManager {
     OngoingFlowState& operator=(const OngoingFlowState&) = delete;
     ~OngoingFlowState();
 
+    // True if the ToS UI was shown, and false otherwise.
+    // Used to determine which UI to close during the BNPL flow.
+    bool tos_ui_was_shown = false;
+
     // Billing customer number for the user's Google Payments account.
     int64_t billing_customer_number;
 
     // The user's current app locale.
     std::string app_locale;
-
-    // BNPL Issuer Data - Populated when user selects a BNPL issuer
-    // Instrument ID used by the server to identify a specific BNPL issuer. This
-    // is selected by the user.
-    std::string instrument_id;
 
     // Risk data contains the fingerprint data for the user and the device.
     std::string risk_data;
@@ -279,13 +277,6 @@ class BnplManager {
   // indicates success/failure; If successful, fetches the redirect URL.
   void OnBnplPaymentInstrumentUpdated(
       PaymentsAutofillClient::PaymentsRpcResult result);
-
-  // Return all BNPL Issuer contexts including eligibility in order of:
-  // eligible + linked, eligible + unlinked, uneligible + linked,
-  // uneligible + unlinked.
-  // TODO(crbug.com/444684996): Add the handling logic for the case where the
-  // checkout amount is missing.
-  std::vector<BnplIssuerContext> GetSortedBnplIssuerContext();
 
 #if BUILDFLAG(IS_ANDROID)
   // Callback triggered when Issuer selection is cancelled during Touch To Fill

@@ -20,7 +20,9 @@
 #include "base/types/expected.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/browser/web_applications/model/display_override.h"
 #include "chrome/browser/web_applications/model/localized_text.h"
+#include "chrome/browser/web_applications/model/migration_source.h"
 #include "chrome/browser/web_applications/mojom/user_display_mode.mojom.h"
 #include "chrome/browser/web_applications/proto/web_app.pb.h"
 #include "chrome/browser/web_applications/scope_extension_info.h"
@@ -30,12 +32,10 @@
 #include "components/services/app_service/public/cpp/share_target.h"
 #include "components/webapps/common/web_app_id.h"
 #include "components/webapps/isolated_web_apps/types/iwa_version.h"
-#include "services/network/public/cpp/permissions_policy/permissions_policy_declaration.h"
 #include "third_party/blink/public/common/manifest/manifest.h"
-#include "third_party/blink/public/common/safe_url_pattern.h"
 #include "third_party/blink/public/mojom/manifest/display_mode.mojom.h"
 #include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
-#include "third_party/blink/public/mojom/manifest/manifest_launch_handler.mojom-data-view.h"
+#include "third_party/blink/public/mojom/manifest/manifest_launch_handler.mojom-shared.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/size.h"
@@ -327,8 +327,9 @@ struct WebAppInstallInfo {
   // translations and text direction information to be preserved.
   LocalizedText title;
 
-  // Description of the application.
-  std::u16string description;
+  // Description of the application, stored in a localized format to allow
+  // translations and text direction information to be preserved.
+  LocalizedText description;
 
   // The URL of the manifest.
   // https://www.w3.org/TR/appmanifest/#web-application-manifest
@@ -389,17 +390,13 @@ struct WebAppInstallInfo {
   blink::mojom::DisplayMode display_mode = blink::mojom::DisplayMode::kBrowser;
 
   // App preference to control display fallback ordering
-  std::vector<blink::mojom::DisplayMode> display_override;
+  std::vector<web_app::DisplayOverride> display_override;
 
   // User preference for whether the app should be opened as a tab or in an app
   // window. Must be either kBrowser or kStandalone, this will be checked by
   // WebApp::SetUserDisplayMode().
   std::optional<web_app::mojom::UserDisplayMode> user_display_mode =
       web_app::mojom::UserDisplayMode::kBrowser;
-
-  // URL patterns used to decide when a window should have display mode
-  // `kBorderless`.
-  std::vector<blink::SafeUrlPattern> borderless_url_patterns;
 
   // The extensions and mime types the app can handle.
   apps::FileHandlers file_handlers;
@@ -456,10 +453,6 @@ struct WebAppInstallInfo {
   // A mapping from locales to translated fields.
   base::flat_map<std::string, blink::Manifest::TranslationItem> translations;
 
-  // The declared permissions policy to apply as the baseline policy for all
-  // documents belonging to the application.
-  network::ParsedPermissionsPolicy permissions_policy;
-
   // See ExternallyManagedAppManager for placeholder app documentation.
   // Intended to be a temporary app while we wait for the install_url to
   // successfully load.
@@ -478,11 +471,6 @@ struct WebAppInstallInfo {
   // is only used when the app is installed as a sub app through the SUB_APP
   // API.
   std::optional<webapps::AppId> parent_app_id;
-
-  // ManifestId of the app that called the SUB_APP API to install this app. This
-  // field is only used when the app is installed as a sub app through the
-  // SUB_APP API.
-  std::optional<webapps::ManifestId> parent_app_manifest_id;
 
   // A list of additional terms to use when matching this app against
   // identifiers in admin policies (for shelf pinning, default file handlers,
@@ -519,6 +507,9 @@ struct WebAppInstallInfo {
   // Note that the `update_manifest_url` specified in the
   // IsolatedWebAppInstallForceList policy takes precedence over this value.
   std::optional<GURL> iwa_update_manifest_url;
+
+  // Migration sources to be associated with the app.
+  std::vector<MigrationSource> migration_sources;
 
  private:
   // Used this method in Clone() method. Use Clone() to deep copy explicitly.

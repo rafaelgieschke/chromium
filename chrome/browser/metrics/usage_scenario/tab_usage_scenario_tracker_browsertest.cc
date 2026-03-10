@@ -9,6 +9,7 @@
 
 #include <memory>
 
+#include "base/cfi_buildflags.h"
 #include "base/memory/raw_ptr.h"
 #include "base/test/bind.h"
 #include "base/test/run_until.h"
@@ -592,7 +593,19 @@ IN_PROC_BROWSER_TEST_F(TabUsageScenarioTrackerBrowserTest, FullScreenVideo) {
             interval_data.source_id_for_longest_visible_origin_duration);
 }
 
-IN_PROC_BROWSER_TEST_F(TabUsageScenarioTrackerBrowserTest, VisibleTabVideo) {
+// Disabled on Linux ASAN/LSAN/CFI due to test failures.
+// Also disabled on ChromeOS Debug/ASAN/LSAN builds; see crbug.com/476415209.
+#if (BUILDFLAG(IS_LINUX) &&                                                    \
+     (defined(LEAK_SANITIZER) || defined(ADDRESS_SANITIZER) ||                 \
+      BUILDFLAG(CFI_ICALL_CHECK))) ||                                          \
+    (BUILDFLAG(IS_CHROMEOS) && (!defined(NDEBUG) || defined(LEAK_SANITIZER) || \
+                                defined(ADDRESS_SANITIZER)))
+#define MAYBE_VisibleTabVideo DISABLED_VisibleTabVideo
+#else
+#define MAYBE_VisibleTabVideo VisibleTabVideo
+#endif
+IN_PROC_BROWSER_TEST_F(TabUsageScenarioTrackerBrowserTest,
+                       MAYBE_VisibleTabVideo) {
   // Play video in a tab, ensure that things are tracked properly.
   auto* contents = browser()->tab_strip_model()->GetWebContentsAt(0);
   MediaWaiter waiter(contents);

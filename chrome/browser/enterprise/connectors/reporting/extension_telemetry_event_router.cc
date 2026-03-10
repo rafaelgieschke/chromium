@@ -33,6 +33,10 @@ using RemoteHostContactedInfo = safe_browsing::
 using TabsApiInfo =
     safe_browsing::ExtensionTelemetryReportRequest_SignalInfo_TabsApiInfo;
 using Report = safe_browsing::ExtensionTelemetryReportRequest_Report;
+using DOMAccessInfo =
+    safe_browsing::ExtensionTelemetryReportRequest_SignalInfo_DOMAccessInfo;
+using ScriptInjectionInfo = safe_browsing::
+    ExtensionTelemetryReportRequest_SignalInfo_ScriptInjectionInfo;
 
 #ifndef COPY_IF_SET
 #define COPY_IF_SET(source, dest_ptr, field)   \
@@ -58,8 +62,8 @@ void CopyExtensionInfo(const ExtensionInfo& original_extension,
   }
 }
 
-base::Value::Dict CreateExtensionInfoDict(const ExtensionInfo& extension_info) {
-  base::Value::Dict dict;
+base::DictValue CreateExtensionInfoDict(const ExtensionInfo& extension_info) {
+  base::DictValue dict;
   dict.Set(ExtensionTelemetryEventRouter::kKeyId, extension_info.id());
   dict.Set(ExtensionTelemetryEventRouter::kKeyName, extension_info.name());
   dict.Set(ExtensionTelemetryEventRouter::kKeyVersion,
@@ -70,9 +74,9 @@ base::Value::Dict CreateExtensionInfoDict(const ExtensionInfo& extension_info) {
   dict.Set(ExtensionTelemetryEventRouter::kKeyIsFromStore,
            extension_info.is_from_store());
   if (extension_info.file_infos_size() > 0) {
-    base::Value::List file_infos_list;
+    base::ListValue file_infos_list;
     for (const auto& file_info : extension_info.file_infos()) {
-      base::Value::Dict file_info_dict;
+      base::DictValue file_info_dict;
       file_info_dict.Set(ExtensionTelemetryEventRouter::kKeyName,
                          file_info.name());
       file_info_dict.Set(ExtensionTelemetryEventRouter::kKeyHash,
@@ -106,12 +110,12 @@ void CopyCookiesGetAllArgsInfo(const CookiesGetAllInfo& cookies_get_all_info,
   }
 }
 
-base::Value::Dict CreateCookiesGetAllInfoDict(
+base::DictValue CreateCookiesGetAllInfoDict(
     const CookiesGetAllInfo& cookies_get_all_info) {
-  base::Value::List get_all_args_list;
+  base::ListValue get_all_args_list;
   for (const auto& get_all_args_info :
        cookies_get_all_info.get_all_args_info()) {
-    base::Value::Dict get_all_args_dict;
+    base::DictValue get_all_args_dict;
     get_all_args_dict.Set(ExtensionTelemetryEventRouter::kKeyDomain,
                           get_all_args_info.domain());
     get_all_args_dict.Set(ExtensionTelemetryEventRouter::kKeyName,
@@ -132,7 +136,7 @@ base::Value::Dict CreateCookiesGetAllInfoDict(
     get_all_args_list.Append(std::move(get_all_args_dict));
   }
 
-  base::Value::Dict signal_dict;
+  base::DictValue signal_dict;
   signal_dict.Set(ExtensionTelemetryEventRouter::kKeyGetAllArgsInfo,
                   std::move(get_all_args_list));
   return signal_dict;
@@ -152,11 +156,11 @@ void CopyCookiesGetInfo(const CookiesGetInfo& cookies_get_info,
   }
 }
 
-base::Value::Dict CreateCookiesGetInfoDict(
+base::DictValue CreateCookiesGetInfoDict(
     const CookiesGetInfo& cookies_get_info) {
-  base::Value::List get_args_list;
+  base::ListValue get_args_list;
   for (const auto& get_args_info : cookies_get_info.get_args_info()) {
-    base::Value::Dict get_args_dict;
+    base::DictValue get_args_dict;
     get_args_dict.Set(ExtensionTelemetryEventRouter::kKeyName,
                       get_args_info.name());
     get_args_dict.Set(ExtensionTelemetryEventRouter::kKeyUrl,
@@ -169,7 +173,7 @@ base::Value::Dict CreateCookiesGetInfoDict(
     get_args_list.Append(std::move(get_args_dict));
   }
 
-  base::Value::Dict signal_dict;
+  base::DictValue signal_dict;
   signal_dict.Set(ExtensionTelemetryEventRouter::kKeyGetArgsInfo,
                   std::move(get_args_list));
   return signal_dict;
@@ -192,12 +196,12 @@ void CopyRemoteHostContactedInfo(
   }
 }
 
-base::Value::Dict CreateRemoteHostContactedInfoDict(
+base::DictValue CreateRemoteHostContactedInfoDict(
     const RemoteHostContactedInfo& remote_host_contacted_info) {
-  base::Value::List remote_host_info_list;
+  base::ListValue remote_host_info_list;
   for (const auto& remote_host_info :
        remote_host_contacted_info.remote_host()) {
-    base::Value::Dict remote_host_info_dict;
+    base::DictValue remote_host_info_dict;
     remote_host_info_dict.Set(ExtensionTelemetryEventRouter::kKeyUrl,
                               remote_host_info.url());
     remote_host_info_dict.Set(
@@ -214,7 +218,7 @@ base::Value::Dict CreateRemoteHostContactedInfoDict(
     remote_host_info_list.Append(std::move(remote_host_info_dict));
   }
 
-  base::Value::Dict signal_dict;
+  base::DictValue signal_dict;
   signal_dict.Set(ExtensionTelemetryEventRouter::kKeyRemoteHost,
                   std::move(remote_host_info_list));
   return signal_dict;
@@ -234,10 +238,10 @@ void CopyTabsApiInfo(const TabsApiInfo& tabs_api_info,
   }
 }
 
-base::Value::Dict CreateTabsApiInfoDict(const TabsApiInfo& tabs_api_info) {
-  base::Value::List tabs_api_info_list;
+base::DictValue CreateTabsApiInfoDict(const TabsApiInfo& tabs_api_info) {
+  base::ListValue tabs_api_info_list;
   for (const auto& call_detail : tabs_api_info.call_details()) {
-    base::Value::Dict tabs_api_info_dict;
+    base::DictValue tabs_api_info_dict;
     tabs_api_info_dict.Set(ExtensionTelemetryEventRouter::kKeyMethod,
                            TabsApiInfo::ApiMethod_Name(call_detail.method()));
     tabs_api_info_dict.Set(ExtensionTelemetryEventRouter::kKeyNewUrl,
@@ -250,9 +254,104 @@ base::Value::Dict CreateTabsApiInfoDict(const TabsApiInfo& tabs_api_info) {
     tabs_api_info_list.Append(std::move(tabs_api_info_dict));
   }
 
-  base::Value::Dict signal_dict;
+  base::DictValue signal_dict;
   signal_dict.Set(ExtensionTelemetryEventRouter::kKeyCallDetails,
                   std::move(tabs_api_info_list));
+  return signal_dict;
+}
+
+void CopyDOMAccessInfo(const DOMAccessInfo& dom_access_info,
+                       Report* redacted_report) {
+  DOMAccessInfo* redacted_dom_access_info =
+      redacted_report->add_signals()->mutable_dom_access_info();
+  for (const auto& dom_access : dom_access_info.dom_accesses()) {
+    DOMAccessInfo::DOMAccess* redacted_dom_access =
+        redacted_dom_access_info->add_dom_accesses();
+    COPY_IF_SET(dom_access, redacted_dom_access, api_name);
+    COPY_IF_SET(dom_access, redacted_dom_access, url);
+    COPY_IF_SET(dom_access, redacted_dom_access, access_type);
+    COPY_IF_SET(dom_access, redacted_dom_access, count);
+    COPY_IF_SET(dom_access, redacted_dom_access, timestamp_ms);
+  }
+}
+
+base::DictValue CreateDOMAccessInfoDict(const DOMAccessInfo& dom_access_info) {
+  base::ListValue dom_access_list;
+  for (const auto& dom_access : dom_access_info.dom_accesses()) {
+    base::DictValue dom_access_dict;
+    dom_access_dict.Set(ExtensionTelemetryEventRouter::kKeyApiName,
+                        dom_access.api_name());
+    dom_access_dict.Set(ExtensionTelemetryEventRouter::kKeyUrl,
+                        dom_access.url());
+    dom_access_dict.Set(
+        ExtensionTelemetryEventRouter::kKeyAccessType,
+        DOMAccessInfo::DOMAccess::AccessType_Name(dom_access.access_type()));
+    dom_access_dict.Set(ExtensionTelemetryEventRouter::kKeyCount,
+                        static_cast<int>(dom_access.count()));
+    dom_access_dict.Set(ExtensionTelemetryEventRouter::kKeyTimestampMs,
+                        base::NumberToString(dom_access.timestamp_ms()));
+
+    dom_access_list.Append(std::move(dom_access_dict));
+  }
+
+  base::DictValue signal_dict;
+  signal_dict.Set(ExtensionTelemetryEventRouter::kKeyDOMAccesses,
+                  std::move(dom_access_list));
+  return signal_dict;
+}
+
+void CopyScriptInjectionInfo(const ScriptInjectionInfo& script_injection_info,
+                             Report* redacted_report) {
+  ScriptInjectionInfo* redacted_script_injection_info =
+      redacted_report->add_signals()->mutable_script_injection_info();
+  for (const auto& script_injection :
+       script_injection_info.script_injections()) {
+    ScriptInjectionInfo::ScriptInjection* redacted_script_injection =
+        redacted_script_injection_info->add_script_injections();
+    COPY_IF_SET(script_injection, redacted_script_injection, api_name);
+    COPY_IF_SET(script_injection, redacted_script_injection, url);
+    COPY_IF_SET(script_injection, redacted_script_injection, count);
+    COPY_IF_SET(script_injection, redacted_script_injection, timestamp_ms);
+    if (script_injection.args_list_size() > 0) {
+      *redacted_script_injection->mutable_args_list() =
+          script_injection.args_list();
+    }
+    COPY_IF_SET(script_injection, redacted_script_injection, arg_url);
+  }
+}
+
+base::DictValue CreateScriptInjectionInfoDict(
+    const ScriptInjectionInfo& script_injection_info) {
+  base::ListValue script_injection_list;
+  for (const auto& script_injection :
+       script_injection_info.script_injections()) {
+    base::DictValue script_injection_dict;
+    script_injection_dict.Set(ExtensionTelemetryEventRouter::kKeyApiName,
+                              script_injection.api_name());
+    script_injection_dict.Set(ExtensionTelemetryEventRouter::kKeyUrl,
+                              script_injection.url());
+    script_injection_dict.Set(ExtensionTelemetryEventRouter::kKeyCount,
+                              static_cast<int>(script_injection.count()));
+    script_injection_dict.Set(
+        ExtensionTelemetryEventRouter::kKeyTimestampMs,
+        base::NumberToString(script_injection.timestamp_ms()));
+
+    base::ListValue args_list_value;
+    for (const auto& arg : script_injection.args_list()) {
+      args_list_value.Append(arg);
+    }
+    script_injection_dict.Set(ExtensionTelemetryEventRouter::kKeyArgsList,
+                              std::move(args_list_value));
+
+    script_injection_dict.Set(ExtensionTelemetryEventRouter::kKeyArgUrl,
+                              script_injection.arg_url());
+
+    script_injection_list.Append(std::move(script_injection_dict));
+  }
+
+  base::DictValue signal_dict;
+  signal_dict.Set(ExtensionTelemetryEventRouter::kKeyScriptInjections,
+                  std::move(script_injection_list));
   return signal_dict;
 }
 
@@ -281,19 +380,24 @@ CreateRedactedExtensionTelemetryReportRequestProto(
                                     redacted_report);
       } else if (signal.has_tabs_api_info()) {
         CopyTabsApiInfo(signal.tabs_api_info(), redacted_report);
+      } else if (signal.has_dom_access_info()) {
+        CopyDOMAccessInfo(signal.dom_access_info(), redacted_report);
+      } else if (signal.has_script_injection_info()) {
+        CopyScriptInjectionInfo(signal.script_injection_info(),
+                                redacted_report);
       }
     }
   }
   return redacted_request;
 }
 
-base::Value::Dict CreateExtensionTelemetryReportDict(
+base::DictValue CreateExtensionTelemetryReportDict(
     const ExtensionTelemetryReportRequest::Report& report) {
-  base::Value::Dict report_dict;
+  base::DictValue report_dict;
   report_dict.Set(ExtensionTelemetryEventRouter::kKeyExtension,
                   CreateExtensionInfoDict(report.extension()));
 
-  base::Value::Dict signals_dict;
+  base::DictValue signals_dict;
   for (const auto& signal : report.signals()) {
     if (signal.has_cookies_get_all_info()) {
       signals_dict.Set(
@@ -310,6 +414,13 @@ base::Value::Dict CreateExtensionTelemetryReportDict(
     } else if (signal.has_tabs_api_info()) {
       signals_dict.Set(ExtensionTelemetryEventRouter::kKeyTabsApiInfo,
                        CreateTabsApiInfoDict(signal.tabs_api_info()));
+    } else if (signal.has_dom_access_info()) {
+      signals_dict.Set(ExtensionTelemetryEventRouter::kKeyDOMAccessInfo,
+                       CreateDOMAccessInfoDict(signal.dom_access_info()));
+    } else if (signal.has_script_injection_info()) {
+      signals_dict.Set(
+          ExtensionTelemetryEventRouter::kKeyScriptInjectionInfo,
+          CreateScriptInjectionInfoDict(signal.script_injection_info()));
     }
   }
 
@@ -318,20 +429,20 @@ base::Value::Dict CreateExtensionTelemetryReportDict(
   return report_dict;
 }
 
-base::Value::Dict CreateExtensionTelemetryReportRequestDict(
+base::DictValue CreateExtensionTelemetryReportRequestDict(
     const ExtensionTelemetryReportRequest& request) {
-  base::Value::List report_list;
+  base::ListValue report_list;
   for (const auto& telemetry_report : request.reports()) {
     report_list.Append(CreateExtensionTelemetryReportDict(telemetry_report));
   }
 
-  base::Value::Dict request_dict;
+  base::DictValue request_dict;
   request_dict.Set(ExtensionTelemetryEventRouter::kKeyReports,
                    std::move(report_list));
   request_dict.Set(ExtensionTelemetryEventRouter::kKeyCreationTimeMsec,
                    base::NumberToString(request.creation_timestamp_msec()));
 
-  return base::Value::Dict().Set(
+  return base::DictValue().Set(
       ExtensionTelemetryEventRouter::kKeyExtensionTelemetryReport,
       std::move(request_dict));
 }
@@ -377,8 +488,20 @@ const char ExtensionTelemetryEventRouter::kKeyCount[] = "count";
 const char ExtensionTelemetryEventRouter::kKeyMethod[] = "method";
 const char ExtensionTelemetryEventRouter::kKeyNewUrl[] = "new_url";
 const char ExtensionTelemetryEventRouter::kKeyCurrentUrl[] = "current_url";
-const char ExtensionTelemetryEventRouter::kKeyFileInfo[] = "file_info";
+const char ExtensionTelemetryEventRouter::kKeyFileInfo[] = "file_infos";
 const char ExtensionTelemetryEventRouter::kKeyHash[] = "hash";
+const char ExtensionTelemetryEventRouter::kKeyDOMAccessInfo[] =
+    "dom_access_info";
+const char ExtensionTelemetryEventRouter::kKeyDOMAccesses[] = "dom_accesses";
+const char ExtensionTelemetryEventRouter::kKeyScriptInjectionInfo[] =
+    "script_injection_info";
+const char ExtensionTelemetryEventRouter::kKeyScriptInjections[] =
+    "script_injections";
+const char ExtensionTelemetryEventRouter::kKeyApiName[] = "api_name";
+const char ExtensionTelemetryEventRouter::kKeyAccessType[] = "access_type";
+const char ExtensionTelemetryEventRouter::kKeyArgsList[] = "args_list";
+const char ExtensionTelemetryEventRouter::kKeyArgUrl[] = "arg_url";
+const char ExtensionTelemetryEventRouter::kKeyTimestampMs[] = "timestamp_ms";
 
 // static
 ExtensionTelemetryEventRouter* ExtensionTelemetryEventRouter::Get(

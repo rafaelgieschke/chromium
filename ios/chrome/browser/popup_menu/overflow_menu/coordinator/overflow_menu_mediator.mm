@@ -41,7 +41,8 @@
 #import "ios/chrome/browser/find_in_page/model/find_tab_helper.h"
 #import "ios/chrome/browser/intelligence/bwg/model/bwg_service.h"
 #import "ios/chrome/browser/intelligence/bwg/model/bwg_service_factory.h"
-#import "ios/chrome/browser/intelligence/bwg/utils/bwg_constants.h"
+#import "ios/chrome/browser/intelligence/bwg/model/bwg_tab_helper.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/intents/model/intents_donation_helper.h"
 #import "ios/chrome/browser/lens_overlay/coordinator/lens_overlay_availability.h"
@@ -56,7 +57,6 @@
 #import "ios/chrome/browser/policy/ui_bundled/user_policy_util.h"
 #import "ios/chrome/browser/popup_menu/overflow_menu/coordinator/overflow_menu_orderer.h"
 #import "ios/chrome/browser/popup_menu/overflow_menu/model/destination_usage_history.h"
-#import "ios/chrome/browser/popup_menu/overflow_menu/public/feature_flags.h"
 #import "ios/chrome/browser/popup_menu/overflow_menu/public/overflow_menu_constants.h"
 #import "ios/chrome/browser/popup_menu/overflow_menu/ui/overflow_menu_metrics.h"
 #import "ios/chrome/browser/popup_menu/overflow_menu/ui/ui_swift.h"
@@ -75,7 +75,6 @@
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list_observer_bridge.h"
 #import "ios/chrome/browser/shared/public/commands/activity_service_commands.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
 #import "ios/chrome/browser/shared/public/commands/bookmarks_commands.h"
 #import "ios/chrome/browser/shared/public/commands/browser_coordinator_commands.h"
 #import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
@@ -92,6 +91,7 @@
 #import "ios/chrome/browser/shared/public/commands/reader_mode_commands.h"
 #import "ios/chrome/browser/shared/public/commands/reading_list_add_command.h"
 #import "ios/chrome/browser/shared/public/commands/reminder_notifications_commands.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/settings_commands.h"
 #import "ios/chrome/browser/shared/public/commands/tab_groups_commands.h"
 #import "ios/chrome/browser/shared/public/commands/text_zoom_commands.h"
@@ -99,7 +99,10 @@
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/public/features/system_flags.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
+#import "ios/chrome/browser/shared/ui/util/layout_guide_names.h"
 #import "ios/chrome/browser/shared/ui/util/uikit_ui_util.h"
+#import "ios/chrome/browser/shared/ui/util/util_swift.h"
+#import "ios/chrome/browser/sharing/ui_bundled/sharing_metrics.h"
 #import "ios/chrome/browser/sharing/ui_bundled/sharing_params.h"
 #import "ios/chrome/browser/supervised_user/model/supervised_user_capabilities.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_utils.h"
@@ -262,6 +265,8 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 @property(nonatomic, strong) OverflowMenuAction* askBWGAction;
 
 @property(nonatomic, strong) OverflowMenuAction* hideToolbarsAction;
+
+@property(nonatomic, strong) OverflowMenuAction* shareAction;
 
 @end
 
@@ -622,6 +627,8 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 
   self.requestDesktopAction = [self newRequestDesktopAction];
 
+  self.shareAction = [self newShareAction];
+
   NSString* requestMobileHideItemText =
       l10n_util::GetNSString(IDS_IOS_OVERFLOW_MENU_HIDE_ACTION_MOBILE_SITE);
   self.requestMobileAction = [self
@@ -708,8 +715,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
     self.readerModeAction = [self toggleReaderModeAction];
   }
 
-  if (send_tab_to_self::
-          IsSendTabIOSPushNotificationsEnabledWithTabReminders()) {
+  if (send_tab_to_self::AreIOSTabRemindersEnabled()) {
     self.setTabReminderAction = [self newSetTabReminderAction];
   }
 
@@ -990,8 +996,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 
 // Notifies the FET that the user tapped the "Set a Reminder" action.
 - (void)notifySetTabReminderActionTapped {
-  CHECK(
-      send_tab_to_self::IsSendTabIOSPushNotificationsEnabledWithTabReminders());
+  CHECK(send_tab_to_self::AreIOSTabRemindersEnabled());
 
   if (self.engagementTracker) {
     self.engagementTracker->NotifyEvent(
@@ -1050,6 +1055,22 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
                             hideItemText:hideItemText
                                  handler:^{
                                    [weakSelf requestDesktopSite];
+                                 }];
+}
+
+- (OverflowMenuAction*)newShareAction {
+  __weak __typeof(self) weakSelf = self;
+  return [self
+      createOverflowMenuActionWithNameID:IDS_IOS_TOOLS_MENU_SHARE_THIS_PAGE
+                              actionType:overflow_menu::ActionType::
+                                             ShareThisPage
+                              symbolName:kShareSymbol
+                            systemSymbol:YES
+                        monochromeSymbol:YES
+                         accessibilityID:kToolsMenuShareId
+                            hideItemText:nil
+                                 handler:^{
+                                   [weakSelf shareThisPage];
                                  }];
 }
 
@@ -1403,6 +1424,11 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
     if (weakSelf.menuHasBeenDismissed) {
       return;
     }
+    // Ensures that the floaty doesn't show when another view controller is
+    // presented as a result of an overflow item being tapped.
+    [weakSelf.BWGHandler
+        hideFloatyIfInvokedAnimated:NO
+                         fromSource:gemini::FloatyUpdateSource::ViewTransition];
     [weakSelf logFeatureEngagementEventForClickOnAction:actionType];
     handler();
   };
@@ -1569,7 +1595,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
   self.openIncognitoTabAction.enterpriseDisabled =
       IsIncognitoModeDisabled(self.profilePrefs);
 
-  if (IsLensOverlayAvailable(_profilePrefs)) {
+  if (IsLensOverlayAllowedByPolicy(_profilePrefs)) {
     self.lensOverlayAction.enabled = ![self isLensOverlayVisible];
   }
 
@@ -1577,10 +1603,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
     self.readerModeAction.enabled = [self isReaderModeEnabled];
   }
 
-  if ([self isGeminiAvailable]) {
-    self.askBWGAction.enabled =
-        IsGeminiImmediateOverlayEnabled() || !_webState->IsLoading();
-  }
+  self.askBWGAction.enabled = [self isGeminiAvailable];
 
   if (base::FeatureList::IsEnabled(kHideToolbarsInOverflowMenu)) {
     self.hideToolbarsAction.enabled = YES;
@@ -1598,6 +1621,13 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 
   NSMutableArray<OverflowMenuAction*>* appActions =
       [[NSMutableArray alloc] init];
+
+  if (base::FeatureList::IsEnabled(kShareInOverflowMenu) &&
+      [self isCurrentURLWebURL]) {
+    base::UmaHistogramEnumeration("Mobile.ShareThisPage.Shown",
+                                  ShareThisPageLocation::kOverflowMenu);
+    [appActions addObject:self.shareAction];
+  }
 
   // The reload/stop action is only shown when the reload button is not in the
   // toolbar. The reload button is shown in the toolbar when the toolbar is not
@@ -1665,7 +1695,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
       search_engines::SupportsSearchImageWithLens(self.templateURLService);
   BOOL portraitOverride =
       IsLensOverlayLandscapeOrientationEnabled(_profilePrefs);
-  BOOL isAvailable = IsLensOverlayAvailable(_profilePrefs);
+  BOOL isAvailable = IsLensOverlayAllowedByPolicy(_profilePrefs);
   return isAvailable && isSupported && (isPortrait || portraitOverride) &&
          ![self isLensOverlayVisible];
 }
@@ -1843,15 +1873,16 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
   if (!IsPageActionMenuEnabled()) {
     return NO;
   }
-  if (_webState) {
-    ProfileIOS* profile =
-        ProfileIOS::FromBrowserState(_webState->GetBrowserState());
-    BwgService* BWGService = BwgServiceFactory::GetForProfile(profile);
-    if (BWGService) {
-      return BWGService->IsBwgAvailableForWebState(_webState);
-    }
+  if (!_webState) {
+    return NO;
   }
-  return NO;
+
+  ProfileIOS* profile =
+      ProfileIOS::FromBrowserState(_webState->GetBrowserState());
+  BwgService* geminiService = BwgServiceFactory::GetForProfile(profile);
+  BwgTabHelper* tabHelper = BwgTabHelper::FromWebState(_webState);
+  return tabHelper && tabHelper->IsGeminiAvailableForWebState() &&
+         geminiService && geminiService->IsProfileEligibleForGemini();
 }
 
 #pragma mark - CRWWebStateObserver
@@ -1971,7 +2002,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
   _templateURLService = nullptr;
 }
 
-#pragma mark - BrowserContainerConsumer
+#pragma mark - BrowserContentConsumer
 
 - (void)setContentBlocked:(BOOL)contentBlocked {
   if (_contentBlocked == contentBlocked) {
@@ -2128,8 +2159,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 - (ActionRanking)basePageActions {
   ActionRanking actions;
 
-  if (send_tab_to_self::
-          IsSendTabIOSPushNotificationsEnabledWithTabReminders()) {
+  if (send_tab_to_self::AreIOSTabRemindersEnabled()) {
     actions.push_back(overflow_menu::ActionType::SetTabReminder);
   }
 
@@ -2214,8 +2244,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
     case overflow_menu::ActionType::AIPrototype:
       return self.AIPrototypeAction;
     case overflow_menu::ActionType::SetTabReminder:
-      return send_tab_to_self::
-                     IsSendTabIOSPushNotificationsEnabledWithTabReminders()
+      return send_tab_to_self::AreIOSTabRemindersEnabled()
                  ? self.setTabReminderAction
                  : nil;
     case overflow_menu::ActionType::ReaderMode:
@@ -2224,6 +2253,8 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
       return self.askBWGAction;
     case overflow_menu::ActionType::HideToolbars:
       return self.hideToolbarsAction;
+    case overflow_menu::ActionType::ShareThisPage:
+      return self.shareAction;
   }
 }
 
@@ -2243,6 +2274,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
     case overflow_menu::ActionType::Help:
     case overflow_menu::ActionType::ShareChrome:
     case overflow_menu::ActionType::EditActions:
+    case overflow_menu::ActionType::ShareThisPage:
       NOTREACHED();
     case overflow_menu::ActionType::Bookmark:
       return [self newAddBookmarkAction];
@@ -2298,7 +2330,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
   RecordAction(UserMetricsAction("MobileTabNewTab"));
 
   [self dismissMenu];
-  [self.applicationHandler
+  [self.sceneHandler
       openURLInNewTab:[OpenNewTabCommand commandWithIncognito:NO]];
 }
 
@@ -2306,7 +2338,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 - (void)openIncognitoTab {
   RecordAction(UserMetricsAction("MobileMenuNewIncognitoTab"));
   [self dismissMenu];
-  [self.applicationHandler
+  [self.sceneHandler
       openURLInNewTab:[OpenNewTabCommand commandWithIncognito:YES]];
 }
 
@@ -2314,7 +2346,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 - (void)openNewWindow {
   RecordAction(UserMetricsAction("MobileMenuNewWindow"));
   [self dismissMenu];
-  [self.applicationHandler
+  [self.sceneHandler
       openNewWindowWithActivity:ActivityToLoadURL(WindowActivityToolsOrigin,
                                                   GURL(kChromeUINewTabURL))];
 }
@@ -2465,6 +2497,17 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
       presentInProductHelpWithType:InProductHelpType::kDefaultSiteView];
 }
 
+- (void)shareThisPage {
+  base::UmaHistogramEnumeration("Mobile.ShareThisPage.Used",
+                                ShareThisPageLocation::kOverflowMenu);
+  [self dismissMenu];
+
+  UIView* toolMenuView =
+      [_layoutGuideCenter referencedViewUnderName:kToolsMenuGuide];
+
+  [self.activityServiceHandler showShareSheetFromShareButton:toolMenuView];
+}
+
 // Dismisses the menu and requests the mobile version of the current page
 - (void)requestMobileSite {
   RecordAction(UserMetricsAction("MobileMenuRequestMobileSite"));
@@ -2490,7 +2533,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 - (void)reportAnIssue {
   RecordAction(UserMetricsAction("MobileMenuReportAnIssue"));
   [self dismissMenu];
-  [self.applicationHandler
+  [self.sceneHandler
       showReportAnIssueFromViewController:self.baseViewController
                                    sender:UserFeedbackSender::ToolsMenu];
 }
@@ -2551,14 +2594,16 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 // Creates and opens the AIPrototype UI.
 - (void)startAIPrototype {
   [self dismissMenu];
-  [self.applicationHandler openAIMenu];
+  [self.sceneHandler openAIMenu];
 }
 
 // Starts ask BWG.
 - (void)startAskBWG {
   [self dismissMenu];
   [self.BWGHandler
-      startGeminiFlowWithEntryPoint:gemini::EntryPoint::OverflowMenu];
+      startGeminiFlowWithStartupState:
+          [[GeminiStartupState alloc]
+              initWithEntryPoint:gemini::EntryPoint::OverflowMenu]];
 }
 
 - (void)startCollapseToolbars {
@@ -2568,8 +2613,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 
 // Opens the "Set a reminder" screen for the user's current tab.
 - (void)showSetTabReminderUI {
-  CHECK(
-      send_tab_to_self::IsSendTabIOSPushNotificationsEnabledWithTabReminders());
+  CHECK(send_tab_to_self::AreIOSTabRemindersEnabled());
 
   [self dismissMenu];
   [self.reminderNotificationsHandler
@@ -2611,7 +2655,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
   }
   [IntentDonationHelper donateIntent:IntentType::kViewHistory];
   [self dismissMenu];
-  [self.applicationHandler showHistory];
+  [self.sceneHandler showHistory];
 }
 
 // Dismisses the menu and opens reading list.
@@ -2682,7 +2726,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
       self.incognito ? profile_metrics::BrowserProfileType::kIncognito
                      : profile_metrics::BrowserProfileType::kRegular;
   UmaHistogramEnumeration("Settings.OpenSettingsFromMenu.PerProfileType", type);
-  [self.applicationHandler
+  [self.sceneHandler
       showSettingsFromViewController:self.baseViewController
             hasDefaultBrowserBlueDot:(self.settingsDestination.badge ==
                                       BadgeTypePromo)];
@@ -2690,7 +2734,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 
 - (void)enterpriseLearnMore {
   [self dismissMenu];
-  [self.applicationHandler
+  [self.sceneHandler
       openURLInNewTab:[OpenNewTabCommand commandWithURLFromChrome:
                                              GURL(kChromeUIManagementURL)]];
 }
@@ -2698,7 +2742,7 @@ OverflowMenuFooter* CreateOverflowMenuManagedFooter(
 - (void)parentLearnMore {
   [self dismissMenu];
   GURL familyLinkURL = GURL(supervised_user::kManagedByParentUiMoreInfoUrl);
-  [self.applicationHandler
+  [self.sceneHandler
       openURLInNewTab:[OpenNewTabCommand
                           commandWithURLFromChrome:familyLinkURL]];
 }

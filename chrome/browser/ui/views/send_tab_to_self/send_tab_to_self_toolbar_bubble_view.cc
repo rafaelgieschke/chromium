@@ -9,6 +9,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "chrome/browser/send_tab_to_self/send_tab_to_self_client_service.h"
 #include "chrome/browser/send_tab_to_self/send_tab_to_self_client_service_factory.h"
+#include "chrome/browser/send_tab_to_self/send_tab_to_self_util.h"
 #include "chrome/browser/sync/send_tab_to_self_sync_service_factory.h"
 #include "chrome/browser/ui/actions/chrome_action_id.h"
 #include "chrome/browser/ui/browser.h"
@@ -34,17 +35,19 @@
 #include "ui/views/controls/button/md_text_button.h"
 #include "ui/views/layout/flex_layout.h"
 #include "ui/views/layout/flex_layout_types.h"
+#include "url/origin.h"
 
 namespace send_tab_to_self {
 
 // static
 SendTabToSelfToolbarBubbleView* SendTabToSelfToolbarBubbleView::CreateBubble(
     BrowserWindowInterface& browser,
-    View* parent,
+    views::BubbleAnchor anchor,
     const SendTabToSelfEntry& entry,
-    base::OnceCallback<void(NavigateParams*)> navigate_callback) {
+    base::OnceCallback<base::WeakPtr<content::NavigationHandle>(
+        NavigateParams*)> navigate_callback) {
   SendTabToSelfToolbarBubbleView* bubble_view =
-      new SendTabToSelfToolbarBubbleView(browser, parent, entry,
+      new SendTabToSelfToolbarBubbleView(browser, anchor, entry,
                                          std::move(navigate_callback));
   // The widget is owned by the views system.
   views::Widget* widget =
@@ -57,10 +60,11 @@ SendTabToSelfToolbarBubbleView::~SendTabToSelfToolbarBubbleView() = default;
 
 SendTabToSelfToolbarBubbleView::SendTabToSelfToolbarBubbleView(
     BrowserWindowInterface& browser,
-    View* parent,
+    views::BubbleAnchor anchor,
     const SendTabToSelfEntry& entry,
-    base::OnceCallback<void(NavigateParams*)> navigate_callback)
-    : views::BubbleDialogDelegateView(parent, views::BubbleBorder::TOP_RIGHT),
+    base::OnceCallback<base::WeakPtr<content::NavigationHandle>(
+        NavigateParams*)> navigate_callback)
+    : views::BubbleDialogDelegateView(anchor, views::BubbleBorder::TOP_RIGHT),
       navigate_callback_(std::move(navigate_callback)),
       browser_(browser),
       title_(entry.GetTitle()),
@@ -139,7 +143,20 @@ void SendTabToSelfToolbarBubbleView::OpenInNewTab() {
   NavigateParams params(browser_->GetProfile(), url_, ui::PAGE_TRANSITION_LINK);
   params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
   params.window_action = NavigateParams::WindowAction::kShowWindow;
-  std::move(navigate_callback_).Run(&params);
+  base::WeakPtr<content::NavigationHandle> handle =
+      std::move(navigate_callback_).Run(&params);
+
+  if (handle &&
+      base::FeatureList::IsEnabled(kSendTabToSelfPropagateFormFields)) {
+    const SendTabToSelfEntry* entry =
+        SendTabToSelfSyncServiceFactory::GetForProfile(browser_->GetProfile())
+            ->GetSendTabToSelfModel()
+            ->GetEntryByGUID(guid_);
+    if (entry) {
+      FillWebContents(params.navigated_or_inserted_contents,
+                      url::Origin::Create(url_), entry->GetPageContext());
+    }
+  }
 
   GetWidget()->Close();
   send_tab_to_self::RecordNotificationOpened();

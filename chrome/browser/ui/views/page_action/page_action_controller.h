@@ -7,6 +7,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <set>
 #include <string>
@@ -17,8 +18,10 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
+#include "base/timer/timer.h"
 #include "base/types/pass_key.h"
 #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
+#include "chrome/browser/ui/views/page_action/chip_selector.h"
 #include "chrome/browser/ui/views/page_action/page_action_metrics_recorder_interface.h"
 #include "chrome/browser/ui/views/page_action/page_action_model.h"
 #include "chrome/browser/ui/views/page_action/page_action_properties_provider.h"
@@ -46,6 +49,7 @@ class PageActionModelInterface;
 class PageActionModelObserver;
 class PageActionMetricsRecorderFactory;
 class PageActionMetricsRecorderInterface;
+class ChipSelector;
 
 // Indicates the source used to color the page action icon.
 enum class PageActionColorSource {
@@ -114,9 +118,17 @@ class PageActionController {
   // the framework may choose to display only one chip at a time, despite
   // requests from multiple features).
   virtual void ShowSuggestionChip(actions::ActionId action_id,
-                                  SuggestionChipConfig config) = 0;
+                                  const SuggestionChipConfig& config) = 0;
   virtual void ShowSuggestionChip(actions::ActionId action_id) = 0;
   virtual void HideSuggestionChip(actions::ActionId action_id) = 0;
+
+  // Request that the page action's anchored message state shown or hidden. Note
+  // that a request to show the anchored message does not guarantee that it will
+  // be shown. The framework currently supports a page action showing an
+  // anchored message or a suggestion chip, not both. A later successful show
+  // request will override an earlier one.
+  virtual void ShowAnchoredMessage(actions::ActionId action_id) = 0;
+  virtual void HideAnchoredMessage(actions::ActionId action_id) = 0;
 
   // By default, in suggestion chip mode, the ActionItem text will be used as
   // the control label. However, features can provide a custom text to use
@@ -154,6 +166,16 @@ class PageActionController {
                                const std::u16string& override_tooltip) = 0;
   virtual void ClearOverrideTooltip(actions::ActionId action_id) = 0;
 
+  // Functions to set configs for anchored messages.
+  virtual void SetAnchoredMessageText(
+      actions::ActionId action_id,
+      const std::u16string& anchored_message_text) = 0;
+  virtual void ShouldShowAnchoredMessageCloseIcon(actions::ActionId action_id,
+                                                  bool show) = 0;
+  virtual void SetAnchoredMessageIcon(actions::ActionId action_id,
+                                      const ui::ImageModel& icon) = 0;
+  virtual void ClearAnchoredMessageIcon(actions::ActionId action_id) = 0;
+
   // Adds a scope of activity for the given action. Returns a scoped object
   // that manages the activity counter. The action is considered active as
   // long as at least one ScopedPageActionActivity object exists for it.
@@ -186,12 +208,17 @@ class PageActionController {
       base::PassKey<PageActionView>,
       actions::ActionId action_id) = 0;
 
+  // Provides callback for when an anchored message is closed by used, either by
+  // interacting with it or clicking the close icon.
+  virtual base::RepeatingClosure GetAnchoredMessageCloseCallback(
+      base::PassKey<PageActionView>,
+      actions::ActionId action_id) = 0;
+
   // Subscribes this controller to get `page_action_view` complete chip
   // visibility change (it final state after animation).
-  virtual void RegisterIsChipShowingChangedCallback(
-      base::PassKey<PageActionView>,
-      actions::ActionId action_id,
-      PageActionView* page_action_view) = 0;
+  virtual void RegisterCallbacks(base::PassKey<PageActionView>,
+                                 actions::ActionId action_id,
+                                 PageActionView* page_action_view) = 0;
 
   static base::PassKey<PageActionController> PassKeyForTesting() {
     return base::PassKey<PageActionController>();
@@ -229,8 +256,10 @@ class PageActionControllerImpl : public PageActionController,
   void Hide(actions::ActionId action_id) override;
   void ShowSuggestionChip(actions::ActionId action_id) override;
   void ShowSuggestionChip(actions::ActionId action_id,
-                          SuggestionChipConfig config) override;
+                          const SuggestionChipConfig& config) override;
   void HideSuggestionChip(actions::ActionId action_id) override;
+  void ShowAnchoredMessage(actions::ActionId action_id) override;
+  void HideAnchoredMessage(actions::ActionId action_id) override;
   void OverrideText(actions::ActionId action_id,
                     const std::u16string& override_text) override;
   void ClearOverrideText(actions::ActionId action_id) override;
@@ -247,6 +276,14 @@ class PageActionControllerImpl : public PageActionController,
   void OverrideTooltip(actions::ActionId action_id,
                        const std::u16string& override_tooltip) override;
   void ClearOverrideTooltip(actions::ActionId action_id) override;
+  void SetAnchoredMessageText(
+      actions::ActionId action_id,
+      const std::u16string& anchored_message_text) override;
+  void ShouldShowAnchoredMessageCloseIcon(actions::ActionId action_id,
+                                          bool show) override;
+  void SetAnchoredMessageIcon(actions::ActionId action_id,
+                              const ui::ImageModel& icon) override;
+  void ClearAnchoredMessageIcon(actions::ActionId action_id) override;
   ScopedPageActionActivity AddActivity(actions::ActionId action_id) override;
   void AddObserver(
       actions::ActionId action_id,
@@ -258,12 +295,14 @@ class PageActionControllerImpl : public PageActionController,
   base::RepeatingCallback<void(PageActionTrigger)> GetClickCallback(
       base::PassKey<PageActionView>,
       actions::ActionId action_id) override;
+  base::RepeatingClosure GetAnchoredMessageCloseCallback(
+      base::PassKey<PageActionView>,
+      actions::ActionId action_id) override;
   base::CallbackListSubscription RegisterOnWillDestroyCallback(
       base::OnceCallback<void(PageActionController&)> callback) override;
-  void RegisterIsChipShowingChangedCallback(
-      base::PassKey<PageActionView>,
-      actions::ActionId action_id,
-      PageActionView* page_action_view) override;
+  void RegisterCallbacks(base::PassKey<PageActionView>,
+                         actions::ActionId action_id,
+                         PageActionView* page_action_view) override;
 
   // PinnedToolbarActionsModel::Observer
   void OnActionsChanged() override;
@@ -325,6 +364,12 @@ class PageActionControllerImpl : public PageActionController,
   // are ephemeral.
   int GetVisibleEphemeralPageActionsCount() const;
 
+  void DoShowSuggestionChip(actions::ActionId action_id,
+                            const SuggestionChipConfig& config);
+  void DoHideSuggestionChip(actions::ActionId action_id);
+  void DoShowAnchoredMessage(actions::ActionId action_id);
+  void DoHideAnchoredMessage(actions::ActionId action_id);
+
   const raw_ptr<PageActionModelFactory> page_action_model_factory_ = nullptr;
   const raw_ptr<PageActionMetricsRecorderFactory>
       page_action_metrics_recorder_factory_ = nullptr;
@@ -352,6 +397,9 @@ class PageActionControllerImpl : public PageActionController,
 
   base::OnceCallbackList<void(PageActionController&)>
       on_will_destroy_callback_list_;
+  std::unique_ptr<ChipSelector> chip_selector_;
+  base::RetainingOneShotTimer anchored_message_timeout_;
+  std::optional<actions::ActionId> active_anchored_message_;
 
   base::WeakPtrFactory<PageActionControllerImpl> weak_factory_{this};
 };

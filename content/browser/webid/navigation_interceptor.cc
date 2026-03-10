@@ -8,12 +8,19 @@
 #include "base/logging.h"
 #include "base/strings/string_split.h"
 #include "base/values.h"
+#include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/webid/flags.h"
+#include "content/browser/webid/identity_registry.h"
 #include "content/browser/webid/request_service.h"
 #include "content/browser/webid/webid_utils.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/web_contents.h"
+#include "content/public/browser/webid/federated_embedder_login_request.h"
+#include "content/public/browser/webid/identity_credential_source.h"
+#include "content/public/common/content_client.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/url_util.h"
 #include "net/http/http_response_headers.h"
@@ -100,10 +107,13 @@ NavigationInterceptor::ProcessRequest() {
     return PROCEED;
   }
 
-  std::optional<std::string> header =
+  std::optional<std::string> intercept_header =
       headers->GetNormalizedHeader("FedCM-Intercept-Navigation");
 
-  if (!header) {
+  std::optional<std::string> connection_status_header =
+      headers->GetNormalizedHeader("Federation-RP-Connection-Status");
+
+  if (!intercept_header && !connection_status_header) {
     return PROCEED;
   }
 
@@ -113,9 +123,41 @@ NavigationInterceptor::ProcessRequest() {
     return PROCEED;
   }
 
-  data_decoder::DataDecoder::ParseStructuredHeaderDictionaryIsolated(
-      *header, base::BindOnce(&NavigationInterceptor::OnHeaderParsed,
-                              weak_ptr_factory_.GetWeakPtr()));
+  if (FrameTreeNode::From(rfh)->is_on_initial_empty_document() &&
+      rfh->GetLastCommittedOrigin().opaque()) {
+    // Navigations out of an initial empty document with an opaque origin
+    // (e.g., target="_blank" which defaults to rel="noopener") cannot support
+    // FedCM because the Relying Party context is opaque.
+    // An initial empty document has an opaque origin ONLY when there is no
+    // opener relationship; if an opener were present (e.g., window.open or
+    // rel="opener"), the origin would have been inherited from the opener
+    // and would not be opaque.
+    return PROCEED;
+  }
+
+  if (IdentityRegistry::FromWebContents(
+          WebContents::FromRenderFrameHost(rfh)) &&
+      FrameTreeNode::From(rfh)->is_on_initial_empty_document()) {
+    // In pop-up windows that FedCM opens itself, such as when using the
+    // Continuation API or when the user is logged out, the render frame host
+    // needs to be loaded with a valid document before we can intercept
+    // navigations out of it.
+    return PROCEED;
+  }
+
+  if (connection_status_header) {
+    data_decoder::DataDecoder::ParseStructuredHeaderDictionaryIsolated(
+        *connection_status_header,
+        base::BindOnce(&NavigationInterceptor::OnConnectionStatusHeaderParsed,
+                       weak_ptr_factory_.GetWeakPtr()));
+  } else if (intercept_header) {
+    data_decoder::DataDecoder::ParseStructuredHeaderDictionaryIsolated(
+        *intercept_header,
+        base::BindOnce(&NavigationInterceptor::OnHeaderParsed,
+                       weak_ptr_factory_.GetWeakPtr()));
+  } else {
+    return PROCEED;
+  }
 
   // TODO(http://crbug.com/455614294): Ideally, we'd like to cancel the
   // navigation early on so that the spinner stops. However, we need to
@@ -123,6 +165,55 @@ NavigationInterceptor::ProcessRequest() {
   // async header parsing and token request complete.
 
   return DEFER;
+}
+
+void NavigationInterceptor::OnConnectionStatusHeaderParsed(
+    base::expected<net::structured_headers::Dictionary, std::string> result) {
+  content::RenderFrameHost* rfh = document_.AsRenderFrameHostIfValid();
+  if (!rfh) {
+    // The document is no longer valid, likely because the target frame has
+    // navigated in the meantime.
+    // Resume the deferred navigation without cancelling.
+    Resume();
+    return;
+  }
+
+  if (!result.has_value()) {
+    // The header was available, but malformed.
+    // Cancel the navigation because it is a developer error.
+    CancelDeferredNavigation(CANCEL);
+    return;
+  }
+
+  auto it = result->find("status");
+  if (it != result->end() && it->second.member.size() == 1 &&
+      it->second.member[0].item.is_string() &&
+      it->second.member[0].item.GetString() == "connected") {
+    std::optional<std::string> account_id;
+    auto account_id_it = result->find("account_id");
+    if (account_id_it != result->end() &&
+        account_id_it->second.member.size() == 1 &&
+        account_id_it->second.member[0].item.is_string()) {
+      account_id = account_id_it->second.member[0].item.GetString();
+    }
+
+    FederatedEmbedderLoginRequest* embedder_login_request =
+        FederatedEmbedderLoginRequest::Get(
+            WebContents::FromRenderFrameHost(rfh));
+    // The server can send this header without embedder login request.
+    if (embedder_login_request) {
+      if (account_id == embedder_login_request->account_id()) {
+        embedder_login_request->OnFederatedResultReceived(
+            FederatedLoginResult::kSuccess);
+      } else {
+        embedder_login_request->OnFederatedResultReceived(
+            FederatedLoginResult::kExpectedAccountNotPresent);
+      }
+    }
+  }
+
+  // Resume the deferred navigation without cancelling.
+  Resume();
 }
 
 void NavigationInterceptor::OnHeaderParsed(
@@ -168,45 +259,12 @@ void NavigationInterceptor::OnTokenResponse(
     std::optional<base::Value> token,
     blink::mojom::TokenErrorPtr error,
     bool is_auto_selected) {
-  // TODO(http://crbug.com/455614294): expose the redirect_to URL outside
-  // of the token so that either one or the other can be used.
-  // TODO(http://crbug.com/455614294): consider supporting the redirect_to
-  // response for non-interception use cases too.
-  if (status != blink::mojom::RequestTokenStatus::kSuccess) {
-    // The FedCM request failed.
-    // Cancel the navigation because it is a developer error.
-    CancelDeferredNavigation(CANCEL);
-    return;
-  }
-
-  ResponseBuilder response_builder;
-  auto params = response_builder.Build(std::move(*token));
-
-  if (!params) {
-    // The FedCM request succeeded, but the IdP returned an
-    // invalid response.
-    // Cancel the navigation because it is a developer error.
-    CancelDeferredNavigation(CANCEL);
-    return;
-  }
-
-  auto frame_tree_node_id = navigation_handle()->GetFrameTreeNodeId();
-
-  params->frame_tree_node_id = frame_tree_node_id;
-
-  content::WebContents* web_contents = navigation_handle()->GetWebContents();
-
-  if (!web_contents) {
-    return;
-  }
-
-  // Redirect the navigation to the URL specified in the token (which also
-  // cancels the current one).
-  // TODO(http://crbug.com/455614294): re-consider the security properties that
-  // the redirection need to have (e.g. CSP, who is the initiator, should
-  // SameSite cookies be passed, how does it relate to the history, the Referer
-  // header, navigating to internal schemes, like chrome://settings, etc).
-  web_contents->GetController().LoadURLWithParams(*params);
+  // The token response is not used in the navigation interception flow because
+  // the IdP is expected to respond with a "redirect_to" field which is handled
+  // in RequestService.
+  // We cancel this specific navigation, assuming that the RequestService
+  // will have already started a new navigation.
+  CancelDeferredNavigation(CANCEL);
 }
 
 const char* NavigationInterceptor::GetNameForLogging() {

@@ -9,7 +9,6 @@
 <translation id="101823271612280837">Upptaka stöðvuð. Ekki hægt að nota leikjastjórnborð í spjaldtölvustillingu.</translation>
 <translation id="1024364763893396229">Vistaðu <ph name="NAME" /></translation>
 <translation id="1032891413405719768">Lítil hleðsla á pennarafhlöðu</translation>
-<translation id="1036073649888683237">Opnaðu stillingar til að stjórna tilkynningum</translation>
 <translation id="1036348656032585052">Slökkva</translation>
 <translation id="1037492556044956303"><ph name="DEVICE_NAME" /> bætt við</translation>
 <translation id="1038106730571050514">Sýna tillögur</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">Nýleg mynd <ph name="INDEX" /> af <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Draga saman Google-verkefni</translation>
 <translation id="2208323208084708176">Sameinuð skjáborðsstilling</translation>
-<translation id="2210311543574621570">Klippiborð birtist þegar þú heldur inni Ctrl + V. Þú getur slökkt á þessari flýtileið með því að slökkva á flagginu #clipboard-history-longpress í chrome://flags.</translation>
 <translation id="2215920961700443347">Engin nettenging. Tengstu netinu og reyndu aftur.</translation>
 <translation id="2222841058024245321">Skrifborð 7</translation>
 <translation id="2223384056430485343">Í skjáskiptingu</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">Setja upp forrit</translation>
 <translation id="2482878487686419369">Tilkynningar</translation>
 <translation id="2484513351006226581">Ýttu á <ph name="KEYBOARD_SHORTCUT" /> til að skipta um lyklaskipan.</translation>
+<translation id="2485422356828889247">Fjarlægja</translation>
 <translation id="2486214324139475545">Forskoðun <ph name="DESK_NAME" />. Virkt skrifborð.</translation>
 <translation id="2486405091093637109">„<ph name="DISPLAY_NAME" />“ var breytt í <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz) upplausn. Án staðfestingar verða fyrri stillingar endurheimtar eftir <ph name="TIMEOUT_SECONDS" />.</translation>
 <translation id="2487915095798731898">Tengjast</translation>
@@ -2195,7 +2194,6 @@ Til að slökkva á tækinu skaltu halda aflrofa tækisins inni aftur.</translat
 <translation id="8241650983304689286">Bæta flipa við nýjan tvískiptan skjá</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, <ph name="SIGNAL_STRENGTH" /> sendistyrkur, <ph name="BATTERY_STATUS" /> hleðsla á rafhlöðu símans</translation>
 <translation id="825129991941217170">Sýna allt innihald Google Drive</translation>
-<translation id="8257510091797044096">Settu tækið upp</translation>
 <translation id="8261506727792406068">Eyða</translation>
 <translation id="8262312463845990408">Slökkva/kveikja á spilun</translation>
 <translation id="8268302343625273732">Sjá öll verkefni í Google Classroom</translation>

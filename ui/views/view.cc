@@ -20,7 +20,6 @@
 #include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/containers/adapters.h"
-#include "base/containers/contains.h"
 #include "base/containers/flat_set.h"
 #include "base/debug/crash_logging.h"
 #include "base/debug/dump_without_crashing.h"
@@ -45,6 +44,7 @@
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkScalar.h"
 #include "ui/accessibility/ax_action_data.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/actions/actions.h"
 #include "ui/base/accelerators/accelerator_manager.h"
 #include "ui/base/cursor/cursor.h"
@@ -878,14 +878,17 @@ void View::SetClipLayerToVisibleBounds(bool clip_layer) {
     return;
   }
   bool remove_layer_clip = clip_layer_to_visible_bounds_;
+  clip_layer_to_visible_bounds_ = clip_layer;
   auto* widget = GetWidget();
   // Register / Unregister to visible bounds notification only when the view is
-  // already added to the widget.  Otherwise this will registered when added to
-  // the widget.
-  if (!clip_layer && widget) {
+  // already added to the widget. Otherwise this will registered when added to
+  // the widget. If the view still needs notifications after `clip_layer` is set
+  // to false, don't unregister for notifications.
+  if (!clip_layer && widget &&
+      !GetNeedsNotificationWhenVisibleBoundsChangeImpl()) {
     UnregisterForVisibleBoundsNotification();
   }
-  clip_layer_to_visible_bounds_ = clip_layer;
+
   if (clip_layer_to_visible_bounds_ && widget) {
     RegisterForVisibleBoundsNotification();
   }
@@ -1309,6 +1312,15 @@ void View::ConvertRectToScreen(const View* src, gfx::Rect* rect) {
   rect->set_origin(new_origin);
 }
 
+// static
+gfx::Rect View::ConvertRectFromScreen(const View* dst, const gfx::Rect& rect) {
+  gfx::Point local_origin = rect.origin();
+  ConvertPointFromScreen(dst, &local_origin);
+  gfx::Rect local_rect = rect;
+  local_rect.set_origin(local_origin);
+  return local_rect;
+}
+
 gfx::Rect View::ConvertRectToParent(const gfx::Rect& rect) const {
   // This mapping returns the enclosing rect, which is good because pixels that
   // partially occupy in the parent should be included.
@@ -1593,7 +1605,10 @@ View* View::GetEventHandlerForRect(const gfx::Rect& rect) {
 }
 
 bool View::GetCanProcessEventsWithinSubtree() const {
-  return can_process_events_within_subtree_;
+  if (!can_process_events_within_subtree_) {
+    return false;
+  }
+  return parent() ? parent()->GetCanProcessEventsWithinSubtree() : true;
 }
 
 void View::SetCanProcessEventsWithinSubtree(bool can_process) {
@@ -1710,9 +1725,10 @@ bool View::OnMouseWheel(const ui::MouseWheelEvent& event) {
 }
 
 void View::OnEvent(ui::Event* event) {
-  if (!GetEnabledInViewsSubtree()) {
-    // if this view or any of it parent is disabled, we should "eat" events
-    // without processing
+  if (!GetEnabledInViewsSubtree() || !GetCanProcessEventsWithinSubtree()) {
+    // If this view or any of it parent is disabled, we should "eat" events
+    // without processing. Similarly we should honor views configured to
+    // ignore events within its subtree.
     return;
   }
   ui::EventHandler::OnEvent(event);
@@ -1821,7 +1837,7 @@ WordLookupClient* View::GetWordLookupClient() {
 }
 
 bool View::CanAcceptEvent(const ui::Event& event) {
-  return IsDrawn();
+  return IsDrawn() && GetCanProcessEventsWithinSubtree();
 }
 
 ui::EventTarget* View::GetParentTarget() {
@@ -1855,7 +1871,7 @@ void View::AddAccelerator(const ui::Accelerator& accelerator) {
     accelerators_ = std::make_unique<std::vector<ui::Accelerator>>();
   }
 
-  if (!base::Contains(*accelerators_, accelerator)) {
+  if (!std::ranges::contains(*accelerators_, accelerator)) {
     accelerators_->push_back(accelerator);
   }
 
@@ -2080,15 +2096,27 @@ const FocusManager* View::GetFocusManager() const {
 }
 
 void View::RequestFocus() {
+  auto focus_reason =
+      GetFocusManager() && GetFocusManager()->is_restoring_focused_view()
+          ? FocusManager::FocusChangeReason::kFocusRestore
+          : FocusManager::FocusChangeReason::kDirectFocusChange;
+  RequestFocusWithReason(focus_reason);
+}
+
+void View::RequestFocusWithReason(FocusManager::FocusChangeReason reason) {
   FocusManager* focus_manager = GetFocusManager();
-  if (focus_manager) {
-    bool focusable = focus_manager->keyboard_accessible()
-                         ? GetViewAccessibility().IsAccessibilityFocusable()
-                         : IsFocusable();
-    if (focusable) {
-      focus_manager->SetFocusedView(this);
-    }
+  if (!focus_manager) {
+    return;
   }
+
+  bool focusable = focus_manager->keyboard_accessible()
+                       ? GetViewAccessibility().IsAccessibilityFocusable()
+                       : IsFocusable();
+  if (!focusable) {
+    return;
+  }
+
+  focus_manager->SetFocusedViewWithReason(this, reason);
 }
 
 bool View::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
@@ -2329,6 +2357,23 @@ void View::RemoveObserver(ViewObserver* observer) {
 
 bool View::HasObserver(const ViewObserver* observer) const {
   return observers_.HasObserver(observer);
+}
+
+View::ScopedNotifyObserversOnVisibleBoundsChanged::
+    ScopedNotifyObserversOnVisibleBoundsChanged(View& view)
+    : view_(view),
+      reset_(base::AutoReset<bool>(
+          &view.notify_observers_on_visible_bounds_change_,
+          true)) {
+  view_->RegisterForVisibleBoundsNotification();
+}
+
+View::ScopedNotifyObserversOnVisibleBoundsChanged::
+    ~ScopedNotifyObserversOnVisibleBoundsChanged() {
+  reset_.reset();
+  if (!view_->GetNeedsNotificationWhenVisibleBoundsChangeImpl()) {
+    view_->UnregisterForVisibleBoundsNotification();
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -2642,7 +2687,8 @@ void View::AddLayerToRegionImpl(
     ui::Layer* new_layer,
     std::vector<raw_ptr<ui::Layer, VectorExperimental>>& layer_vector) {
   DCHECK(new_layer);
-  DCHECK(!base::Contains(layer_vector, new_layer)) << "Layer already added.";
+  DCHECK(!std::ranges::contains(layer_vector, new_layer))
+      << "Layer already added.";
 
   new_layer->AddObserver(this);
   new_layer->SetVisible(GetVisible());
@@ -2691,11 +2737,13 @@ void View::SetLayerParent(ui::Layer* parent_layer) {
 
 bool View::GetNeedsNotificationWhenVisibleBoundsChangeImpl() const {
   return clip_layer_to_visible_bounds_ ||
+         notify_observers_on_visible_bounds_change_ ||
          GetNeedsNotificationWhenVisibleBoundsChange();
 }
 
 void View::OnVisibleBoundsChangedImpl() {
   OnVisibleBoundsChanged();
+  observers_.Notify(&ViewObserver::OnViewVisibleBoundsChanged, this);
 
   if (!clip_layer_to_visible_bounds_) {
     return;
@@ -2785,9 +2833,12 @@ void View::Focus() {
     }
 
     // Notify assistive technologies of the focus change.
-    AXVirtualView* const focused_virtual_child =
-        view_accessibility_ ? view_accessibility_->FocusedVirtualChild()
-                            : nullptr;
+    // Check if there's an active descendant that should receive the focus
+    // event.
+    ViewAccessibility* active_descendant_view = nullptr;
+    if (view_accessibility_) {
+      active_descendant_view = view_accessibility_->GetActiveDescendantView();
+    }
 
     // Rare edge case: the top-level window can briefly lose focus to a child
     // widget that is then destroyed (e.g., another widget opens, gains focus,
@@ -2799,8 +2850,8 @@ void View::Focus() {
     if (!ui::AXPlatformNode::GetPopupFocusOverride() ||
         ui::AXPlatformNode::GetPopupFocusOverride() ==
             GetNativeViewAccessible()) {
-      if (focused_virtual_child) {
-        focused_virtual_child->NotifyEvent(ax::mojom::Event::kFocus, true);
+      if (active_descendant_view) {
+        active_descendant_view->NotifyEvent(ax::mojom::Event::kFocus, true);
       } else {
         NotifyAccessibilityEventDeprecated(ax::mojom::Event::kFocus, true);
       }
@@ -3136,6 +3187,8 @@ void View::AddChildViewAtImpl(View* view, size_t index) {
   ui::NativeTheme* old_theme = old_widget ? view->GetNativeTheme() : nullptr;
   if (parent) {
     parent->DoRemoveChildView(view, true, false, this);
+  } else {
+    UnregisterChildrenForVisibleBoundsNotification(view);
   }
 
   view->parent_ = this;
@@ -3215,12 +3268,10 @@ void View::AddChildViewAtImpl(View* view, size_t index) {
 
   UpdateTooltip();
 
-  if (widget) {
-    RegisterChildrenForVisibleBoundsNotification(view);
+  RegisterChildrenForVisibleBoundsNotification(view);
 
-    if (view->GetVisible()) {
-      view->SchedulePaint();
-    }
+  if (widget && view->GetVisible()) {
+    view->SchedulePaint();
   }
 
   observers_.Notify(&ViewObserver::OnChildViewAdded, this, view);
@@ -3240,10 +3291,11 @@ void View::DoRemoveChildView(View* view,
   std::unique_ptr<View> view_to_be_deleted;
   view->RemoveFromFocusList();
 
+  UnregisterChildrenForVisibleBoundsNotification(view);
+
   Widget* widget = GetWidget();
   bool is_removed_from_widget = false;
   if (widget) {
-    UnregisterChildrenForVisibleBoundsNotification(view);
     if (view->GetVisible()) {
       view->SchedulePaint();
     }
@@ -3429,9 +3481,7 @@ void View::RegisterChildrenForVisibleBoundsNotification(View* view) {
 
 // static
 void View::UnregisterChildrenForVisibleBoundsNotification(View* view) {
-  if (view->GetNeedsNotificationWhenVisibleBoundsChangeImpl()) {
-    view->UnregisterForVisibleBoundsNotification();
-  }
+  view->UnregisterForVisibleBoundsNotification();
   for (View* child : view->children_) {
     UnregisterChildrenForVisibleBoundsNotification(child);
   }

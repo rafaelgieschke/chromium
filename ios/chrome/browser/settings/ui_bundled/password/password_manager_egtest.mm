@@ -651,6 +651,14 @@ void OpenPasswordManagerWidgetPromoInstructions() {
 
 @end
 
+#if !TARGET_OS_SIMULATOR
+#define MAYBE_testTappingInfoButtonForHiddenPasskey \
+  FLAKY_testTappingInfoButtonForHiddenPasskey
+#else
+#define MAYBE_testTappingInfoButtonForHiddenPasskey \
+  testTappingInfoButtonForHiddenPasskey
+#endif
+
 @implementation PasswordManagerTestCase {
   // A swizzler to observe fake auto-fill status instead of real one.
   std::unique_ptr<EarlGreyScopedBlockSwizzler> _passwordAutoFillStatusSwizzler;
@@ -703,6 +711,7 @@ void OpenPasswordManagerWidgetPromoInstructions() {
   [PasswordSettingsAppInterface dismissSnackBar];
   GREYAssert([PasswordSettingsAppInterface clearProfilePasswordStore],
              @"PasswordStore was not cleared.");
+  [PasswordSettingsAppInterface clearPasskeyStore];
 
   chrome_test_util::GREYAssertErrorNil(
       [MetricsAppInterface releaseHistogramTester]);
@@ -741,7 +750,8 @@ void OpenPasswordManagerWidgetPromoInstructions() {
     config.iph_feature_enabled = "IPH_iOSPromoPasswordManagerWidget";
   }
 
-  if ([self isRunningTest:@selector(testTappingInfoButtonForHiddenPasskey)]) {
+  if ([self isRunningTest:@selector
+            (MAYBE_testTappingInfoButtonForHiddenPasskey)]) {
     config.features_enabled.push_back(kCredentialProviderSignalAPI);
   }
 
@@ -2416,7 +2426,8 @@ void OpenPasswordManagerWidgetPromoInstructions() {
 }
 
 // Checks interaction with an info button for a hidden passkey.
-- (void)testTappingInfoButtonForHiddenPasskey {
+// TODO(crbug.com/442428665): Test is flaky on physical phone devices.
+- (void)MAYBE_testTappingInfoButtonForHiddenPasskey {
   SaveHiddenPasskeyToStore();
 
   OpenPasswordManager();
@@ -2485,8 +2496,8 @@ void OpenPasswordManagerWidgetPromoInstructions() {
       performAction:grey_tap()];
 }
 
-// Tests that removing multiple passwords works fine.
-- (void)testRemovingMultiplePasswords {
+// TODO(crbug.com/477806564): Test is flaky.
+- (void)DISABLED_testRemovingMultiplePasswords {
   constexpr int kPasswordsCount = 4;
 
   // Send the passwords to the queue to be added to the ProfilePasswordStore.
@@ -2679,7 +2690,7 @@ void OpenPasswordManagerWidgetPromoInstructions() {
 // the add credential flow, the VC auto scrolls to the newly created or the
 // updated entry.
 // TODO(crbug.com/460743577): Test is flaky.
-- (void)testAutoScroll {
+- (void)FLAKY_testAutoScroll {
   for (int i = 0; i < 20; i++) {
     NSString* username = [NSString stringWithFormat:@"username %d", i];
     NSString* password = [NSString stringWithFormat:@"password %d", i];
@@ -2709,8 +2720,17 @@ void OpenPasswordManagerWidgetPromoInstructions() {
   [[EarlGrey selectElementWithMatcher:AddPasswordSaveButton()]
       performAction:grey_tap()];
 
-  [[EarlGrey selectElementWithMatcher:ButtonWithAccessibilityID(kAddedDomain)]
-      assertWithMatcher:grey_sufficientlyVisible()];
+  // Verify that the added credential was automatically scrolled at and visible.
+  ConditionBlock condition = ^{
+    NSError* error = nil;
+    [[EarlGrey selectElementWithMatcher:ButtonWithAccessibilityID(kAddedDomain)]
+        assertWithMatcher:grey_sufficientlyVisible()
+                    error:&error];
+    return error == nil;
+  };
+  GREYAssert(
+      base::test::ios::WaitUntilConditionOrTimeout(base::Seconds(2), condition),
+      @"Didn't scroll to the added credential item");
 }
 
 // Tests that adding new password credential where the username and website

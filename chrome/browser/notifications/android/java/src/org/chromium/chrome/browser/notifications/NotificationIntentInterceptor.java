@@ -218,10 +218,14 @@ public class NotificationIntentInterceptor {
             pendingIntent = pendingIntentProvider.getPendingIntent();
             flags = pendingIntentProvider.getFlags();
         }
-        // The delete intent needs to be handled by broadcast receiver from Q due to background
-        // activity start restriction.
+        // The delete intent, and "close incognito" content intent, need to be handled by broadcast
+        // receiver from Q due to background activity start restriction.
         boolean shouldUseBroadcast =
-                intentType == NotificationIntentInterceptor.IntentType.DELETE_INTENT
+                (intentType == IntentType.CONTENT_INTENT
+                                && metadata.type
+                                        == NotificationUmaTracker.SystemNotificationType
+                                                .CLOSE_INCOGNITO)
+                        || intentType == NotificationIntentInterceptor.IntentType.DELETE_INTENT
                         || actionType == NotificationUmaTracker.ActionType.PRE_UNSUBSCRIBE
                         || actionType == NotificationUmaTracker.ActionType.UNDO_UNSUBSCRIBE
                         || actionType
@@ -260,6 +264,20 @@ public class NotificationIntentInterceptor {
         // picture-in-picture.
         if (!shouldUseBroadcast && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             intent.addFlags(Intent.FLAG_ACTIVITY_NO_USER_ACTION);
+        }
+
+        // Required because we are starting an Activity from a non-Activity context.
+        if (!shouldUseBroadcast) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+
+        // To preserve legacy behavior, FLAG_ACTIVITY_NEW_DOCUMENT and
+        // FLAG_ACTIVITY_MULTIPLE_TASK are added to replicate the previous
+        // documentLaunchMode="always" behavior.
+        // TODO(crbug.com/445326737): remove once the experiment is fully rolled out.
+        if (!shouldUseBroadcast
+                && !ChromeFeatureList.sNotificationTrampolineNoNewTask.isEnabled()) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_DOCUMENT | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
         }
 
         // This flag ensures the broadcast is delivered with foreground priority to speed up the

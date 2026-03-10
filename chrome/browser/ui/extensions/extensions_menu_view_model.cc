@@ -6,6 +6,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "base/i18n/case_conversion.h"
 #include "base/metrics/user_metrics.h"
@@ -16,9 +17,9 @@
 #include "chrome/browser/extensions/extension_ui_util.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/tab_list/tab_list_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/extensions/extension_action_view_model.h"
-#include "chrome/browser/ui/tabs/tab_list_interface.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_model.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
 #include "chrome/browser/ui/views/extensions/extensions_menu_delegate_desktop.h"
@@ -428,7 +429,7 @@ base::debug::CrashKeyString* GetCurrentUrlCrashKey() {
   return crash_key;
 }
 
-std::string GetCurrentSiteAccessCrashValue(
+std::string_view GetCurrentSiteAccessCrashValue(
     PermissionsManager::UserSiteAccess site_access) {
   switch (site_access) {
     case PermissionsManager::UserSiteAccess::kOnClick:
@@ -442,7 +443,7 @@ std::string GetCurrentSiteAccessCrashValue(
   }
 }
 
-std::string GetCurrentSiteInteractionCrashValue(
+std::string_view GetCurrentSiteInteractionCrashValue(
     SitePermissionsHelper::SiteInteraction site_interaction) {
   switch (site_interaction) {
     case SitePermissionsHelper::SiteInteraction::kNone:
@@ -538,6 +539,7 @@ ExtensionsMenuViewModel::ExtensionsMenuViewModel(
     : browser_(browser),
       delegate_(delegate),
       toolbar_model_(ToolbarActionsModel::Get(browser_->GetProfile())) {
+  content::WebContentsObserver::Observe(GetActiveWebContents());
   permissions_manager_observation_.Observe(
       extensions::PermissionsManager::Get(browser_->GetProfile()));
   toolbar_model_observation_.Observe(toolbar_model_.get());
@@ -545,11 +547,17 @@ ExtensionsMenuViewModel::ExtensionsMenuViewModel(
   tab_list_interface_observation_.Observe(tab_list);
 
   if (toolbar_model_->actions_initialized()) {
-    PopulateActionModels();
+    Populate();
   }
 }
 
-ExtensionsMenuViewModel::~ExtensionsMenuViewModel() = default;
+ExtensionsMenuViewModel::~ExtensionsMenuViewModel() {
+  // Stop observing to avoid notifications during destruction.
+  WebContentsObserver::Observe(nullptr);
+  tab_list_interface_observation_.Reset();
+  toolbar_model_observation_.Reset();
+  permissions_manager_observation_.Reset();
+}
 
 void ExtensionsMenuViewModel::AddObserver(Observer* observer) {
   observers_.AddObserver(observer);
@@ -706,11 +714,28 @@ void ExtensionsMenuViewModel::RevokeSiteAccess(
   }
 }
 
+void ExtensionsMenuViewModel::ExecuteAction(
+    const extensions::ExtensionId& extension_id) {
+  ExtensionActionViewModel* action_model = GetActionViewModel(extension_id);
+  if (!action_model) {
+    return;
+  }
+
+  action_model->ExecuteUserAction(
+      ToolbarActionViewModel::InvocationSource::kMenuEntry);
+  base::RecordAction(
+      base::UserMetricsAction("Extensions.Toolbar.ExtensionActivatedFromMenu"));
+}
+
 void ExtensionsMenuViewModel::UpdateSiteSetting(
     extensions::PermissionsManager::UserSiteSetting site_setting) {
   content::WebContents* web_contents = GetActiveWebContents();
   const url::Origin& origin =
       GetActiveWebContents()->GetPrimaryMainFrame()->GetLastCommittedOrigin();
+
+  if (origin.opaque()) {
+    return;
+  }
 
   extensions::TabHelper::FromWebContents(web_contents)
       ->SetReloadRequired(site_setting);
@@ -738,6 +763,41 @@ bool ExtensionsMenuViewModel::CanShowSitePermissionsPage(
                                              *toolbar_model_, *web_contents);
 }
 
+ExtensionActionViewModel* ExtensionsMenuViewModel::GetActionViewModel(
+    const extensions::ExtensionId& extension_id) const {
+  std::optional<int> index = GetActionIndex(extension_id);
+  return index ? action_models_[*index].get() : nullptr;
+}
+
+ExtensionsMenuViewModel::ControlState
+ExtensionsMenuViewModel::GetActionButtonState(
+    const extensions::ExtensionId& extension_id,
+    const gfx::Size& icon_size) {
+  ExtensionActionViewModel* action_model = GetActionViewModel(extension_id);
+  CHECK(action_model);
+  content::WebContents* web_contents = GetActiveWebContents();
+
+  ExtensionsMenuViewModel::ControlState button_state;
+  button_state.text = action_model->GetActionName();
+  button_state.tooltip_text = action_model->GetTooltip(web_contents);
+  button_state.status =
+      action_model->IsEnabled(web_contents)
+          ? ExtensionsMenuViewModel::ControlState::Status::kEnabled
+          : ExtensionsMenuViewModel::ControlState::Status::kDisabled;
+  button_state.icon = action_model->GetIcon(web_contents, icon_size);
+  return button_state;
+}
+
+ui::ImageModel ExtensionsMenuViewModel::GetActionIcon(
+    int action_index,
+    const gfx::Size& icon_size) {
+  CHECK_GE(action_index, 0);
+  CHECK_LT(static_cast<size_t>(action_index), action_models_.size());
+  content::WebContents* web_contents = GetActiveWebContents();
+
+  return action_models_[action_index]->GetIcon(web_contents, icon_size);
+}
+
 ExtensionsMenuViewModel::ControlState
 ExtensionsMenuViewModel::GetContextMenuButtonState(
     const extensions::ExtensionId& extension_id) {
@@ -745,6 +805,20 @@ ExtensionsMenuViewModel::GetContextMenuButtonState(
   CHECK(action_model);
 
   return GetContextMenuButtonState(action_model);
+}
+
+ExtensionsMenuViewModel::HostAccessRequest
+ExtensionsMenuViewModel::GetHostAccessRequest(
+    const extensions::ExtensionId& extension_id,
+    const gfx::Size& icon_size) {
+  ExtensionActionViewModel* action_model = GetActionViewModel(extension_id);
+  HostAccessRequest request;
+  request.extension_id = extension_id;
+  request.extension_name = action_model->GetActionName();
+  request.extension_icon =
+      action_model->GetIcon(GetActiveWebContents(), icon_size);
+
+  return request;
 }
 
 ExtensionsMenuViewModel::ControlState
@@ -840,24 +914,28 @@ ExtensionsMenuViewModel::GetExtensionShowRequestsToggleState(
 
 ExtensionsMenuViewModel::MenuEntryState
 ExtensionsMenuViewModel::GetMenuEntryState(
-    const extensions::ExtensionId& extension_id) {
+    const extensions::ExtensionId& extension_id,
+    const gfx::Size& action_icon_size) {
   Profile* profile = browser_->GetProfile();
   ExtensionActionViewModel* action_model = GetActionViewModel(extension_id);
   const extensions::Extension* extension = action_model->GetExtension();
   CHECK(extension);
   content::WebContents* web_contents = GetActiveWebContents();
 
-  MenuEntryState menu_item;
-  menu_item.context_menu_button = GetContextMenuButtonState(action_model);
-  menu_item.site_access_toggle = GetSiteAccessToggleState(
+  MenuEntryState entry_state;
+  entry_state.extension_id = extension_id;
+  entry_state.action_button =
+      GetActionButtonState(extension_id, action_icon_size);
+  entry_state.context_menu_button = GetContextMenuButtonState(action_model);
+  entry_state.site_access_toggle = GetSiteAccessToggleState(
       *extension, *profile, *toolbar_model_, *web_contents);
-  menu_item.site_permissions_button = GetSitePermissionsButtonState(
+  entry_state.site_permissions_button = GetSitePermissionsButtonState(
       *extension, *profile, *toolbar_model_, *web_contents);
-  menu_item.is_enterprise = extensions::ExtensionSystem::Get(profile)
-                                ->management_policy()
-                                ->HasEnterpriseForcedAccess(*extension);
+  entry_state.is_enterprise = extensions::ExtensionSystem::Get(profile)
+                                  ->management_policy()
+                                  ->HasEnterpriseForcedAccess(*extension);
 
-  return menu_item;
+  return entry_state;
 }
 
 ExtensionsMenuViewModel::OptionalSection
@@ -890,6 +968,12 @@ ExtensionsMenuViewModel::SiteSettingsState
 ExtensionsMenuViewModel::GetSiteSettingsState() {
   content::WebContents* web_contents = GetActiveWebContents();
   Profile* profile = browser_->GetProfile();
+  ExtensionsMenuViewModel::SiteSettingsState site_settings;
+  if (!web_contents) {
+    site_settings.toggle.status = ControlState::Status::kHidden;
+    return site_settings;
+  }
+
   auto has_enterprise_extensions = [&]() {
     return std::any_of(
         toolbar_model_->action_ids().begin(),
@@ -902,7 +986,6 @@ ExtensionsMenuViewModel::GetSiteSettingsState() {
         });
   };
 
-  ExtensionsMenuViewModel::SiteSettingsState site_settings;
   std::u16string current_site =
       extensions::ui_util::GetFormattedHostForDisplay(*web_contents);
 
@@ -966,9 +1049,13 @@ void ExtensionsMenuViewModel::OnHostAccessRequestAdded(
     return;
   }
 
-  for (Observer& observer : observers_) {
-    observer.OnHostAccessRequestAddedOrUpdated(extension_id, web_contents);
+  // Ignore if the extension already has an active request.
+  if (std::ranges::find(host_access_requests_, extension_id) !=
+      host_access_requests_.end()) {
+    return;
   }
+
+  AddHostAccessRequest(extension_id);
 }
 
 void ExtensionsMenuViewModel::OnHostAccessRequestUpdated(
@@ -983,17 +1070,31 @@ void ExtensionsMenuViewModel::OnHostAccessRequestUpdated(
 
   auto* permissions_manager =
       extensions::PermissionsManager::Get(browser_->GetProfile());
-  if (permissions_manager->HasActiveHostAccessRequest(tab_id, extension_id)) {
-    // Update the request iff it's an active one.
+  bool is_active =
+      permissions_manager->HasActiveHostAccessRequest(tab_id, extension_id);
+  bool is_on_menu_model =
+      std::ranges::find(host_access_requests_, extension_id) !=
+      host_access_requests_.end();
+
+  if (is_active && is_on_menu_model) {
+    // Since it's already on the menu model, just notify the observers about the
+    // update.
+    auto it = std::ranges::find(host_access_requests_, extension_id);
+    int index = std::distance(host_access_requests_.begin(), it);
+
     for (Observer& observer : observers_) {
-      observer.OnHostAccessRequestAddedOrUpdated(extension_id,
-                                                 GetActiveWebContents());
+      observer.OnHostAccessRequestUpdated(extension_id, index);
     }
-  } else {
-    // Otherwise, remove the request if existent.
-    for (Observer& observer : observers_) {
-      observer.OnHostAccessRequestRemoved(extension_id);
-    }
+    return;
+  }
+
+  if (is_active && !is_on_menu_model) {
+    AddHostAccessRequest(extension_id);
+    return;
+  }
+
+  if (!is_active && is_on_menu_model) {
+    RemoveHostAccessRequest(extension_id);
   }
 }
 
@@ -1007,9 +1108,7 @@ void ExtensionsMenuViewModel::OnHostAccessRequestRemoved(
     return;
   }
 
-  for (Observer& observer : observers_) {
-    observer.OnHostAccessRequestRemoved(extension_id);
-  }
+  RemoveHostAccessRequest(extension_id);
 }
 
 void ExtensionsMenuViewModel::OnHostAccessRequestsCleared(int tab_id) {
@@ -1019,6 +1118,8 @@ void ExtensionsMenuViewModel::OnHostAccessRequestsCleared(int tab_id) {
   if (tab_id != current_tab_id) {
     return;
   }
+
+  host_access_requests_.clear();
 
   for (Observer& observer : observers_) {
     observer.OnHostAccessRequestsCleared();
@@ -1036,9 +1137,7 @@ void ExtensionsMenuViewModel::OnHostAccessRequestDismissedByUser(
     return;
   }
 
-  for (Observer& observer : observers_) {
-    observer.OnHostAccessRequestDismissedByUser(extension_id);
-  }
+  RemoveHostAccessRequest(extension_id);
 }
 
 void ExtensionsMenuViewModel::OnShowAccessRequestsInToolbarChanged(
@@ -1063,6 +1162,12 @@ void ExtensionsMenuViewModel::OnToolbarActionAdded(
       delegate_->CreateActionViewModel(action_id);
   ExtensionActionViewModel* action_model_ptr = action_model.get();
 
+  // Register action icon observer.
+  action_icon_subscriptions_[action_id] =
+      action_model->RegisterIconUpdateObserver(
+          base::BindRepeating(&ExtensionsMenuViewModel::OnActionIconUpdated,
+                              base::Unretained(this), action_id));
+
   // Insert action model in the correct order.
   auto it = std::upper_bound(action_models_.begin(), action_models_.end(),
                              action_model, SortActionsByName);
@@ -1078,15 +1183,12 @@ void ExtensionsMenuViewModel::OnToolbarActionAdded(
 void ExtensionsMenuViewModel::OnToolbarActionRemoved(
     const ToolbarActionsModel::ActionId& action_id) {
   // Find the action model and return if it doesn't exist.
-  auto it = std::ranges::find_if(
-      action_models_,
-      [&action_id](const auto& model) { return model->GetId() == action_id; });
-  if (it == action_models_.end()) {
+  std::optional<int> index = GetActionIndex(action_id);
+  if (!index) {
     return;
   }
 
-  // Calculate index for action to be removed.
-  int index = std::distance(action_models_.begin(), it);
+  auto it = action_models_.begin() + *index;
 
   // Move the action model out of the vector but keep it alive locally.
   // This removes it from the list (so repopulation doesn't see it)
@@ -1096,9 +1198,12 @@ void ExtensionsMenuViewModel::OnToolbarActionRemoved(
       std::move(*it);
   action_models_.erase(it);
 
+  // Remove the action icon observer subscription.
+  action_icon_subscriptions_.erase(action_id);
+
   // Notify observers.
   for (Observer& observer : observers_) {
-    observer.OnActionRemoved(action_id, index);
+    observer.OnActionRemoved(action_id, *index);
   }
 
   // preserved_action_model goes out of scope here and is destroyed safely.
@@ -1106,20 +1211,31 @@ void ExtensionsMenuViewModel::OnToolbarActionRemoved(
 
 void ExtensionsMenuViewModel::OnToolbarActionUpdated(
     const ToolbarActionsModel::ActionId& action_id) {
+  // Action updates can be triggered during WebContents destruction/navigation.
+  // We ignore these here as they are handled by the specific web contents
+  // observers.
+  if (!GetActiveWebContents()) {
+    return;
+  }
+
   // Re-sort the models in case the action name changed (affecting alphabetical
   // order).
   // TODO(emiliapaz): Investigate whether this is necessary, because extension
   // name is set on the manifest and shouldn't dynamically change.
   std::sort(action_models_.begin(), action_models_.end(), SortActionsByName);
 
+  // Find the new index of the action.
+  std::optional<int> index = GetActionIndex(action_id);
+  CHECK(index);
+
   // Notify observers.
   for (Observer& observer : observers_) {
-    observer.OnActionUpdated();
+    observer.OnActionUpdated(action_id, *index);
   }
 }
 
 void ExtensionsMenuViewModel::OnToolbarModelInitialized() {
-  PopulateActionModels();
+  Populate();
 
   for (Observer& observer : observers_) {
     observer.OnActionsInitialized();
@@ -1132,44 +1248,155 @@ void ExtensionsMenuViewModel::OnToolbarPinnedActionsChanged() {
   }
 }
 
-void ExtensionsMenuViewModel::OnActiveTabChanged(tabs::TabInterface* tab) {
-  auto* web_contents = tab->GetContents();
-  for (Observer& observer : observers_) {
-    observer.OnActiveWebContentsChanged(web_contents);
+void ExtensionsMenuViewModel::OnActiveTabChanged(TabListInterface& tab_list,
+                                                 tabs::TabInterface* tab) {
+  if (!tab_list_interface_observation_.IsObserving()) {
+    return;
   }
+  auto* web_contents = tab->GetContents();
+  WebContentsObserver::Observe(web_contents);
+
+  OnWebContentsChanged(web_contents);
+}
+void ExtensionsMenuViewModel::OnTabListDestroyed(TabListInterface& tab_list) {
+  tab_list_interface_observation_.Reset();
 }
 
 void ExtensionsMenuViewModel::DidFinishNavigation(
     content::NavigationHandle* handle) {
   auto* web_contents = GetActiveWebContents();
-  for (Observer& observer : observers_) {
-    observer.OnActiveWebContentsChanged(web_contents);
+  if (!web_contents) {
+    return;
   }
+
+  OnWebContentsChanged(web_contents);
 }
 
-void ExtensionsMenuViewModel::PopulateActionModels() {
+void ExtensionsMenuViewModel::Populate() {
   CHECK(toolbar_model_->actions_initialized());
   CHECK(action_models_.empty());
+  CHECK(host_access_requests_.empty());
 
+  is_populated_ = true;
+
+  // Create and sort the action models by name.
   for (const auto& id : toolbar_model_->action_ids()) {
     auto model = delegate_->CreateActionViewModel(id);
     if (model) {
       action_models_.push_back(std::move(model));
     }
   }
-
   std::sort(action_models_.begin(), action_models_.end(), SortActionsByName);
+
+  UpdateHostAccessRequests();
 }
 
-ExtensionActionViewModel* ExtensionsMenuViewModel::GetActionViewModel(
+void ExtensionsMenuViewModel::AddHostAccessRequest(
+    const extensions::ExtensionId& extension_id) {
+  // Find the "rank" of the new extension in the sorted `action_models_` list.
+  std::optional<int> action_model_index = GetActionIndex(extension_id);
+  CHECK(action_model_index);
+  auto action_model_it = action_models_.begin() + *action_model_index;
+
+  // Find the correct insertion spot in `host_access_requests_` to match
+  // the order in `action_models_`.
+  auto insert_it = host_access_requests_.begin();
+  for (; insert_it != host_access_requests_.end(); ++insert_it) {
+    auto current_req_it = std::ranges::find_if(
+        action_models_, [req_id = *insert_it](const auto& model) {
+          return model->GetId() == req_id;
+        });
+
+    if (action_model_it < current_req_it) {
+      break;
+    }
+  }
+
+  // Insert the extension to the requests list.
+  insert_it = host_access_requests_.insert(insert_it, extension_id);
+
+  // Notify observers.
+  int index = std::distance(host_access_requests_.begin(), insert_it);
+  for (Observer& observer : observers_) {
+    observer.OnHostAccessRequestAdded(extension_id, index);
+  }
+}
+
+void ExtensionsMenuViewModel::RemoveHostAccessRequest(
+    const extensions::ExtensionId& extension_id) {
+  auto it = std::ranges::find(host_access_requests_, extension_id);
+  if (it == host_access_requests_.end()) {
+    return;
+  }
+
+  int index = std::distance(host_access_requests_.begin(), it);
+  host_access_requests_.erase(it);
+
+  for (Observer& observer : observers_) {
+    observer.OnHostAccessRequestRemoved(extension_id, index);
+  }
+}
+
+void ExtensionsMenuViewModel::UpdateHostAccessRequests() {
+  host_access_requests_.clear();
+
+  // Store the extension ids for the actions that have an active request.
+  // Since action_models_ is sorted, iterating through it ensures
+  // host_access_requests_ is also sorted.
+  auto* permissions_manager =
+      extensions::PermissionsManager::Get(browser_->GetProfile());
+  int tab_id = extensions::ExtensionTabUtil::GetTabId(GetActiveWebContents());
+
+  for (const auto& action_model : action_models()) {
+    auto extension_id = action_model->GetId();
+    if (permissions_manager->HasActiveHostAccessRequest(tab_id, extension_id)) {
+      host_access_requests_.push_back(extension_id);
+    }
+  }
+}
+
+std::optional<int> ExtensionsMenuViewModel::GetActionIndex(
     const extensions::ExtensionId& extension_id) const {
   auto it =
       std::ranges::find_if(action_models_, [&extension_id](const auto& model) {
         return model->GetId() == extension_id;
       });
-  return it != action_models_.end() ? it->get() : nullptr;
+  if (it == action_models_.end()) {
+    return std::nullopt;
+  }
+  return std::distance(action_models_.begin(), it);
+}
+
+void ExtensionsMenuViewModel::OnActionIconUpdated(
+    const extensions::ExtensionId& extension_id) {
+  // Find the index of the action.
+  std::optional<int> index = GetActionIndex(extension_id);
+  CHECK(index);
+
+  // Notify observers that the action icon has changed. The platform-specific
+  // delegate will then re-fetch the necessary state (e.g. MenuEntryState) and
+  // update the corresponding views.
+  for (Observer& observer : observers_) {
+    observer.OnActionIconUpdated(extension_id, *index);
+  }
+}
+
+void ExtensionsMenuViewModel::OnWebContentsChanged(
+    content::WebContents* web_contents) {
+  // Host access requests are dependent on the web content's origin. Therefore,
+  // we need to reset them when web contents change.
+  UpdateHostAccessRequests();
+
+  for (Observer& observer : observers_) {
+    observer.OnPageNavigation();
+  }
 }
 
 content::WebContents* ExtensionsMenuViewModel::GetActiveWebContents() {
-  return TabListInterface::From(browser_)->GetActiveTab()->GetContents();
+  auto* tab_list = TabListInterface::From(browser_);
+  if (!tab_list) {
+    return nullptr;
+  }
+  auto* tab = tab_list->GetActiveTab();
+  return tab ? tab->GetContents() : nullptr;
 }

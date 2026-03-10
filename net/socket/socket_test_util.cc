@@ -874,7 +874,14 @@ void MockClientSocketFactory::AddSSLSocketDataProvider(
 
 void MockClientSocketFactory::ResetNextMockIndexes() {
   mock_data_.ResetNextIndex();
+  mock_tcp_data_.ResetNextIndex();
   mock_ssl_data_.ResetNextIndex();
+}
+
+bool MockClientSocketFactory::AllDataProvidersUsed() const {
+  return mock_data_.no_more_data_providers() &&
+         mock_tcp_data_.no_more_data_providers() &&
+         mock_ssl_data_.no_more_data_providers();
 }
 
 std::unique_ptr<DatagramClientSocket>
@@ -886,7 +893,8 @@ MockClientSocketFactory::CreateDatagramClientSocket(
   SocketDataProvider* data_provider = mock_data_.GetNext();
   auto socket = std::make_unique<MockUDPClientSocket>(data_provider, net_log);
   if (bind_type == DatagramSocket::RANDOM_BIND)
-    socket->set_source_port(static_cast<uint16_t>(base::RandInt(1025, 65535)));
+    socket->set_source_port(
+        static_cast<uint16_t>(base::RandIntInclusive(1025, 65535)));
   udp_client_socket_ports_.push_back(socket->source_port());
   return std::move(socket);
 }
@@ -1051,6 +1059,7 @@ MockClientSocket::~MockClientSocket() = default;
 
 void MockClientSocket::RunCallbackAsync(CompletionOnceCallback callback,
                                         int result) {
+  CHECK_NE(result, ERR_IO_PENDING);
   base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE,
       base::BindOnce(&MockClientSocket::RunCallback, weak_factory_.GetWeakPtr(),
@@ -1609,12 +1618,13 @@ std::vector<uint8_t> MockSSLClientSocket::GetECHRetryConfigs() {
 }
 
 std::vector<std::vector<uint8_t>>
-MockSSLClientSocket::GetServerTrustAnchorIDsForRetry() {
-  return data_->server_trust_anchor_ids_for_retry;
+MockSSLClientSocket::GetServerTrustAnchorIDs() {
+  return data_->server_trust_anchor_ids;
 }
 
 void MockSSLClientSocket::RunCallbackAsync(CompletionOnceCallback callback,
                                            int result) {
+  CHECK_NE(result, ERR_IO_PENDING);
   base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE,
       base::BindOnce(&MockSSLClientSocket::RunCallback,
@@ -1960,6 +1970,7 @@ int MockUDPClientSocket::CompleteRead() {
 
 void MockUDPClientSocket::RunCallbackAsync(CompletionOnceCallback callback,
                                            int result) {
+  CHECK_NE(result, ERR_IO_PENDING);
   base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
       FROM_HERE,
       base::BindOnce(&MockUDPClientSocket::RunCallback,
@@ -2121,7 +2132,6 @@ int MockTransportClientSocketPool::RequestSocket(
     ClientSocketHandle* handle,
     CompletionOnceCallback callback,
     const ProxyAuthCallback& on_auth_callback,
-    bool fail_if_alias_requires_proxy_override,
     const NetLogWithSource& net_log) {
   last_request_priority_ = priority;
   std::unique_ptr<StreamSocket> socket =
@@ -2328,18 +2338,28 @@ constexpr auto kSOCKS5OkResponseData =
 const std::string_view kSOCKS5OkResponse(kSOCKS5OkResponseData.begin(),
                                          kSOCKS5OkResponseData.end());
 
+base::ByteSize CountReadByteSize(base::span<const MockRead> reads) {
+  base::ByteSize total;
+  for (const MockRead& read : reads) {
+    total += base::ByteSize(read.data.length());
+  }
+  return total;
+}
+
 int64_t CountReadBytes(base::span<const MockRead> reads) {
-  int64_t total = 0;
-  for (const MockRead& read : reads)
-    total += static_cast<int>(read.data.length());
+  return CountReadByteSize(reads).InBytes();
+}
+
+base::ByteSize CountWriteByteSize(base::span<const MockWrite> writes) {
+  base::ByteSize total;
+  for (const MockWrite& write : writes) {
+    total += base::ByteSize(write.data.length());
+  }
   return total;
 }
 
 int64_t CountWriteBytes(base::span<const MockWrite> writes) {
-  int64_t total = 0;
-  for (const MockWrite& write : writes)
-    total += static_cast<int>(write.data.length());
-  return total;
+  return CountWriteByteSize(writes).InBytes();
 }
 
 #if BUILDFLAG(IS_ANDROID)

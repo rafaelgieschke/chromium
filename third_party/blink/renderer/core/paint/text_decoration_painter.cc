@@ -151,6 +151,8 @@ void TextDecorationPainter::PaintUnderOrOverLineDecorations(
   const AutoDarkMode auto_dark_mode(PaintAutoDarkMode(
       decoration_info.TargetStyle(), DarkModeFilter::ElementRole::kForeground));
   const TextDecorationOffset decoration_offset(style_);
+  const ETextDecorationSkipInk skip_ink =
+      decoration_info.TargetStyle().TextDecorationSkipInk();
   PaintWithTextShadow(
       [&](TextShadowPaintPhase phase) {
         for (wtf_size_t i = 0; i < decoration_info.AppliedDecorationCount();
@@ -161,42 +163,41 @@ void TextDecorationPainter::PaintUnderOrOverLineDecorations(
               EnumHasFlags(lines_to_paint,
                            TextDecorationLine::kSpellingError |
                                TextDecorationLine::kGrammarError)) {
-            decoration_info.SetSpellingOrGrammarErrorLineData(
-                decoration_offset);
+            DecorationGeometry geometry =
+                decoration_info.ComputeSpellingOrGrammarErrorLineData(
+                    decoration_offset);
             // We ignore "text-decoration-skip-ink: auto" for spelling and
             // grammar error markers.
             text_painter_.PaintDecorationLine(
-                decoration_info, LineColorForPhase(decoration_info, phase),
-                auto_dark_mode);
+                geometry, decoration_info.HasDecorationOverride(),
+                LineColorForPhase(decoration_info, phase), auto_dark_mode);
             continue;
           }
 
           if (decoration_info.HasUnderline() && decoration_info.FontData() &&
               EnumHasFlags(lines_to_paint, TextDecorationLine::kUnderline)) {
-            decoration_info.SetUnderlineLineData(decoration_offset);
-            if (decoration_info.TargetStyle().TextDecorationSkipInk() ==
-                ETextDecorationSkipInk::kAuto) {
-              text_painter_.ClipDecorationLine(
-                  decoration_info.GetGeometry(),
-                  decoration_info.BaselineForInkSkip(), fragment_paint_info);
-            }
+            DecorationGeometry geometry =
+                decoration_info.ComputeUnderlineLineData(decoration_offset);
+            text_painter_.ClipDecorationLine(
+                geometry, decoration_info.BaselineForInkSkip(),
+                fragment_paint_info, skip_ink);
+
             text_painter_.PaintDecorationLine(
-                decoration_info, LineColorForPhase(decoration_info, phase),
-                auto_dark_mode);
+                geometry, decoration_info.HasDecorationOverride(),
+                LineColorForPhase(decoration_info, phase), auto_dark_mode);
           }
 
           if (decoration_info.HasOverline() && decoration_info.FontData() &&
               EnumHasFlags(lines_to_paint, TextDecorationLine::kOverline)) {
-            decoration_info.SetOverlineLineData(decoration_offset);
-            if (decoration_info.TargetStyle().TextDecorationSkipInk() ==
-                ETextDecorationSkipInk::kAuto) {
-              text_painter_.ClipDecorationLine(
-                  decoration_info.GetGeometry(),
-                  decoration_info.BaselineForInkSkip(), fragment_paint_info);
-            }
+            DecorationGeometry geometry =
+                decoration_info.ComputeOverlineLineData(decoration_offset);
+            text_painter_.ClipDecorationLine(
+                geometry, decoration_info.BaselineForInkSkip(),
+                fragment_paint_info, skip_ink);
+
             text_painter_.PaintDecorationLine(
-                decoration_info, LineColorForPhase(decoration_info, phase),
-                auto_dark_mode);
+                geometry, decoration_info.HasDecorationOverride(),
+                LineColorForPhase(decoration_info, phase), auto_dark_mode);
           }
         }
       },
@@ -224,13 +225,14 @@ void TextDecorationPainter::PaintLineThroughDecorations(
           if (EnumHasFlags(lines, TextDecorationLine::kLineThrough)) {
             decoration_info.SetDecorationIndex(applied_decoration_index);
 
-            decoration_info.SetLineThroughLineData();
+            DecorationGeometry geometry =
+                decoration_info.ComputeLineThroughLineData();
 
             // No skip: ink for line-through,
             // compare https://github.com/w3c/csswg-drafts/issues/711
             text_painter_.PaintDecorationLine(
-                decoration_info, LineColorForPhase(decoration_info, phase),
-                auto_dark_mode);
+                geometry, decoration_info.HasDecorationOverride(),
+                LineColorForPhase(decoration_info, phase), auto_dark_mode);
           }
         }
       },

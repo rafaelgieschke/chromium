@@ -92,9 +92,8 @@ TryPromoteDrawQuadForDelegation(
       case OverlayCandidate::CandidateStatus::kFailQuadNotSupported:
         return base::unexpected(
             DelegationStatus::kCompositedCandidateQuadMaterial);
-      case OverlayCandidate::CandidateStatus::kFailBufferFormat:
-        return base::unexpected(
-            DelegationStatus::kCompositedCandidateBufferFormat);
+      case OverlayCandidate::CandidateStatus::kFailFormat:
+        return base::unexpected(DelegationStatus::kCompositedCandidateFormat);
       case OverlayCandidate::CandidateStatus::kFailNearFilter:
         return base::unexpected(
             DelegationStatus::kCompositedCandidateNearFilter);
@@ -107,6 +106,9 @@ TryPromoteDrawQuadForDelegation(
       case OverlayCandidate::CandidateStatus::kFailRpdqWithTransform:
         return base::unexpected(
             DelegationStatus::kCompositedCandidateRpdqWithTransform);
+      case OverlayCandidate::CandidateStatus::kFailBackdropFilter:
+        return base::unexpected(
+            DelegationStatus::kCompositedCandidateBackdropFilter);
       default:
         return base::unexpected(DelegationStatus::kCompositedCandidateFailed);
     }

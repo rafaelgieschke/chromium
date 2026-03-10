@@ -239,7 +239,7 @@ class GpuIntegrationTest(
     if cls._finder_options.browser_type in [
         'web-engine-shell', 'cast-streaming-shell'
     ]:
-      page_action.DEFAULT_TIMEOUT = 120
+      page_action.DEFAULT_TIMEOUT = 240
 
   @classmethod
   def AddCommandlineArgs(cls, parser: ct.CmdArgParser) -> None:
@@ -314,6 +314,9 @@ class GpuIntegrationTest(
         # TODO(crbug.com/458424927): Remove this once the feature no longer
         # causes test failures.
         '--disable-features=SessionRestoreInfobar',
+        # TODO(crbug.com/458424927): Remove this once the feature no longer
+        # causes trace_test speed regression on Android devices.
+        '--disable-features=AndroidWarmUpSpareRendererWithTimeout',
     ]
     if cls._SuiteSupportsParallelTests():
       # When running tests in parallel, windows can be treated as occluded if a
@@ -683,23 +686,19 @@ class GpuIntegrationTest(
     for arg in browser_options.extra_browser_args:
       if arg == cba.DISABLE_GPU:
         cls._ClearFeatureValues()
+        # Early return here since --disable-gpu should override any flags that
+        # come after it which might re-enable GPU features otherwise.
         return
-      if arg.startswith('--use-gl='):
+      if arg == cba.ENABLE_SKIA_GRAPHITE:
+        cls._graphite_status = 'graphite-enabled'
+      elif arg == cba.DISABLE_SKIA_GRAPHITE:
+        cls._graphite_status = 'graphite-disabled'
+      elif arg.startswith('--use-gl='):
         cls._gl_backend = arg[len('--use-gl='):]
       elif arg.startswith('--use-angle='):
         cls._angle_backend = arg[len('--use-angle='):]
       elif arg.startswith('--use-cmd-decoder='):
         cls._command_decoder = arg[len('--use-cmd-decoder='):]
-      elif arg.startswith('--enable-features='):
-        values = arg[len('--enable-features='):]
-        for feature in values.split(','):
-          if feature == 'SkiaGraphite':
-            cls._graphite_status = 'graphite-enabled'
-      elif arg.startswith('--disable-features='):
-        values = arg[len('--disable-features='):]
-        for feature in values.split(','):
-          if feature == 'SkiaGraphite':
-            cls._graphite_status = 'graphite-disabled'
 
   @classmethod
   def _VerifyBrowserFeaturesMatchExpectedValues(cls) -> None:
@@ -1385,6 +1384,7 @@ class GpuIntegrationTest(
         'qualcomm-adreno-(tm)-610',  # android-sm-a236b
         'qualcomm-adreno-(tm)-640',  # android-pixel-4
         'qualcomm-adreno-(tm)-740',  # android-sm-s911u1
+        'arm-0x92020010',  # android-pixel-6
         'arm-mali-g78',  # android-pixel-6
         'nvidia-nvidia-tegra',  # android-shield-android-tv
         'imagination-technologies-0x71061212',  # android-pixel-10

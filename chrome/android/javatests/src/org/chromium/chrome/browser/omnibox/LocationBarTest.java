@@ -16,9 +16,9 @@ import static org.junit.Assert.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 
+import static org.chromium.base.test.transit.ViewFinder.waitForNoView;
 import static org.chromium.chrome.browser.url_constants.UrlConstantResolver.getOriginalNativeNtpUrl;
 
-import android.content.Intent;
 import android.content.res.Configuration;
 import android.view.View;
 import android.view.ViewGroup;
@@ -29,7 +29,6 @@ import androidx.test.espresso.matcher.ViewMatchers;
 import androidx.test.filters.MediumTest;
 import androidx.test.filters.SmallTest;
 
-import org.hamcrest.Matchers;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -41,12 +40,9 @@ import org.mockito.Mockito;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
-import org.chromium.base.CommandLine;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
-import org.chromium.base.test.util.Criteria;
 import org.chromium.base.test.util.CriteriaHelper;
-import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.DoNotBatch;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Restriction;
@@ -56,7 +52,6 @@ import org.chromium.chrome.browser.app.ChromeActivity;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.lens.LensController;
-import org.chromium.chrome.browser.lifecycle.InflationObserver;
 import org.chromium.chrome.browser.locale.LocaleManager;
 import org.chromium.chrome.browser.locale.LocaleManagerDelegate;
 import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionHandler;
@@ -66,11 +61,11 @@ import org.chromium.chrome.test.R;
 import org.chromium.chrome.test.transit.ChromeTransitTestRules;
 import org.chromium.chrome.test.transit.FreshCtaTransitTestRule;
 import org.chromium.chrome.test.transit.page.WebPageStation;
-import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.OmniboxTestUtils;
 import org.chromium.components.embedder_support.util.UrlConstants;
-import org.chromium.components.omnibox.OmniboxFeatureList;
+import org.chromium.components.omnibox.AutocompleteInput;
 import org.chromium.components.omnibox.OmniboxFeatures;
+import org.chromium.components.omnibox.OmniboxFocusReason;
 import org.chromium.components.search_engines.TemplateUrl;
 import org.chromium.components.search_engines.TemplateUrlService;
 import org.chromium.content_public.common.ContentSwitches;
@@ -82,7 +77,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Instrumentation tests for the LocationBar component. */
 @RunWith(ChromeJUnit4ClassRunner.class)
@@ -139,41 +133,6 @@ public class LocationBarTest {
         mActivity = mActivityTestRule.getActivity();
         doPostActivitySetup(mActivity);
         return webPageStation;
-    }
-
-    private void startActivityWithDeferredNativeInitialization() {
-        CommandLine.getInstance().appendSwitch(ChromeSwitches.DISABLE_NATIVE_INITIALIZATION);
-        Intent intent = new Intent("about:blank");
-        intent.addCategory(Intent.CATEGORY_LAUNCHER);
-        mActivityTestRule.getActivityTestRule().prepareUrlIntent(intent, "about:blank");
-        mActivityTestRule.getActivityTestRule().launchActivity(intent);
-        mActivity = mActivityTestRule.getActivity();
-        if (!mActivity.isInitialLayoutInflationComplete()) {
-            AtomicBoolean isInflated = new AtomicBoolean();
-            mActivity
-                    .getLifecycleDispatcher()
-                    .register(
-                            new InflationObserver() {
-                                @Override
-                                public void onPreInflationStartup() {}
-
-                                @Override
-                                public void onPostInflationStartup() {
-                                    isInflated.set(true);
-                                }
-                            });
-            CriteriaHelper.pollUiThread(isInflated::get);
-        }
-        doPostActivitySetup(mActivity);
-    }
-
-    private void triggerAndWaitForDeferredNativeInitialization() {
-        CommandLine.getInstance().removeSwitch(ChromeSwitches.DISABLE_NATIVE_INITIALIZATION);
-        ThreadUtils.runOnUiThreadBlocking(
-                () -> {
-                    mActivityTestRule.getActivity().startDelayedNativeInitializationForTests();
-                });
-        mActivityTestRule.waitForActivityNativeInitializationComplete();
     }
 
     private void doPostActivitySetup(ChromeActivity activity) {
@@ -266,58 +225,20 @@ public class LocationBarTest {
     public void testSetSearchQueryFocusesUrlBar() {
         startActivityNormally();
         final String query = "testing query";
-
         ThreadUtils.runOnUiThreadBlocking(
                 () -> {
-                    mLocationBarMediator.setSearchQuery(query);
-                    Assert.assertEquals(query, mUrlBar.getTextWithoutAutocomplete());
-                    Assert.assertTrue(mLocationBarMediator.isUrlBarFocused());
+                    AutocompleteInput input =
+                            new AutocompleteInput()
+                                    .setUserText(query)
+                                    .setFocusReason(OmniboxFocusReason.SEARCH_QUERY);
+                    mLocationBarMediator.beginInput(input);
                 });
-
-        CriteriaHelper.pollUiThread(() -> mKeyboardDelegate.isKeyboardShowing(mUrlBar));
-    }
-
-    @Test
-    @MediumTest
-    @DisabledTest(message = "crbug.com/1470145")
-    public void testSetSearchQueryFocusesUrlBar_preNative() {
-        startActivityWithDeferredNativeInitialization();
-        final String query = "testing query";
-
-        ThreadUtils.runOnUiThreadBlocking(() -> mLocationBarMediator.setSearchQuery(query));
-
-        triggerAndWaitForDeferredNativeInitialization();
+        // Query cannot be applied right away because the UrlBar needs to acquire focus first.
         CriteriaHelper.pollUiThread(
                 () -> {
-                    Criteria.checkThat(mUrlBar.getTextWithoutAutocomplete(), Matchers.is(query));
-                    Criteria.checkThat(mLocationBarMediator.isUrlBarFocused(), Matchers.is(true));
-                });
-    }
-
-    @Test
-    @MediumTest
-    public void testPerformSearchQuery() {
-        startActivityNormally();
-        doReturn(mSearchUrl)
-                .when(mTemplateUrlService)
-                .getUrlForSearchQuery(TEST_QUERY, TEST_PARAMS);
-
-        ThreadUtils.runOnUiThreadBlocking(
-                () -> mLocationBarMediator.performSearchQuery(TEST_QUERY, TEST_PARAMS));
-
-        ChromeTabUtils.waitForTabPageLoaded(mActivityTestRule.getActivityTab(), mSearchUrl);
-    }
-
-    @Test
-    @MediumTest
-    public void testPerformSearchQuery_emptyUrl() {
-        startActivityNormally();
-        doReturn("").when(mTemplateUrlService).getUrlForSearchQuery(TEST_QUERY, TEST_PARAMS);
-
-        ThreadUtils.runOnUiThreadBlocking(
-                () -> {
-                    mLocationBarMediator.performSearchQuery(TEST_QUERY, TEST_PARAMS);
-                    Assert.assertEquals(TEST_QUERY, mUrlBar.getTextWithoutAutocomplete());
+                    Assert.assertEquals(query, mUrlBar.getTextWithoutAutocomplete());
+                    Assert.assertTrue(mLocationBarMediator.isUrlBarFocused());
+                    mKeyboardDelegate.isKeyboardShowing(mUrlBar);
                 });
     }
 
@@ -504,7 +425,7 @@ public class LocationBarTest {
                     mUrlBar.clearFocus();
                 });
 
-        ViewUtils.waitForViewCheckingState(withId(R.id.delete_button), ViewUtils.VIEW_GONE);
+        waitForNoView(withId(R.id.delete_button));
     }
 
     @Test
@@ -547,7 +468,7 @@ public class LocationBarTest {
                     mUrlBar.clearFocus();
                 });
 
-        ViewUtils.waitForViewCheckingState(withId(R.id.delete_button), ViewUtils.VIEW_GONE);
+        waitForNoView(withId(R.id.delete_button));
     }
 
     @Test
@@ -606,7 +527,7 @@ public class LocationBarTest {
                 () -> {
                     mUrlBar.requestFocus();
                 });
-        ViewUtils.waitForViewCheckingState(withId(R.id.lens_camera_button), ViewUtils.VIEW_GONE);
+        waitForNoView(withId(R.id.lens_camera_button));
         ViewUtils.waitForVisibleView(withId(R.id.mic_button));
         assertLocationBarButtonsAre(R.id.mic_button);
 
@@ -647,7 +568,7 @@ public class LocationBarTest {
                 () -> {
                     mUrlBar.requestFocus();
                 });
-        ViewUtils.waitForViewCheckingState(withId(R.id.lens_camera_button), ViewUtils.VIEW_GONE);
+        waitForNoView(withId(R.id.lens_camera_button));
         ViewUtils.waitForVisibleView(withId(R.id.mic_button));
         assertLocationBarButtonsAre(R.id.mic_button);
 
@@ -794,18 +715,6 @@ public class LocationBarTest {
 
         mActivityTestRule.loadUrl(getOriginalNativeNtpUrl());
         onView(withId(R.id.location_bar_status_icon)).check(matches(not(isDisplayed())));
-    }
-
-    @Test
-    @SmallTest
-    @Restriction(DeviceFormFactor.PHONE)
-    @DisableFeatures(OmniboxFeatureList.OMNIBOX_MOBILE_PARITY_UPDATE_V2)
-    public void testOmniboxSearchEngineLogo_unfocusedOnSRP_nonGoogleSearchEngine() {
-        setupSearchEngineLogo(NON_GOOGLE_URL);
-        startActivityNormally();
-
-        mActivityTestRule.loadUrl(getOriginalNativeNtpUrl());
-        onView(withId(R.id.location_bar_status_icon)).check(matches(isDisplayed()));
     }
 
     @Test

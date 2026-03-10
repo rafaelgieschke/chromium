@@ -348,8 +348,8 @@ void CanvasResourceSharedImage::OnRefReturned(
   // refs (necessary for the provider to actually recycle the resource in the
   // case where there this is the last outstanding ref).
   resource.reset();
-  if (Provider()) {
-    Provider()->OnResourceRefReturned(std::move(downcast_ref));
+  if (provider_) {
+    provider_->OnResourceRefReturned(std::move(downcast_ref));
   }
 }
 
@@ -375,8 +375,8 @@ CanvasResourceSharedImage::~CanvasResourceSharedImage() {
     return;
   }
 
-  if (Provider()) {
-    Provider()->OnDestroyResource();
+  if (provider_) {
+    provider_->OnDestroyResource();
   }
 }
 
@@ -416,7 +416,6 @@ scoped_refptr<StaticBitmapImage> CanvasResourceSharedImage::Bitmap() {
 
     auto image = UnacceleratedStaticBitmapImage::Create(sk_image);
     image->SetOriginClean(OriginClean());
-    image->SetHighEntropyCanvasOpTypes(HighEntropyCanvasOpTypes());
     return image;
   }
 
@@ -438,7 +437,6 @@ scoped_refptr<StaticBitmapImage> CanvasResourceSharedImage::Bitmap() {
       std::move(release_callback));
 
   DCHECK(image);
-  image->SetHighEntropyCanvasOpTypes(HighEntropyCanvasOpTypes());
   return image;
 }
 
@@ -466,6 +464,8 @@ void CanvasResourceSharedImage::EndExternalWrite(
 
 void CanvasResourceSharedImage::UploadSoftwareRenderingResults(
     SkSurface* sk_surface) {
+  // Copy the rendering results from `sk_surface` to the SharedImage backing
+  // this resource.
   auto scoped_mapping = GetClientSharedImage()->Map();
   if (!scoped_mapping) {
     LOG(ERROR) << "MapSharedImage failed.";
@@ -474,27 +474,24 @@ void CanvasResourceSharedImage::UploadSoftwareRenderingResults(
 
   sk_surface->readPixels(
       scoped_mapping->GetSkPixmapForPlane(0, CreateSkImageInfo()), 0, 0);
-
-  // Making the below call is not necessary for the case where the the software
-  // compositor is being used, as all accesses to the SI's backing happen via
-  // shared memory. It's also not currently trivial to add in this case as
-  // setting the sync token here would require it to later be verified before it
-  // is sent to the display compositor.
-  if (GetClientSharedImage()->is_software()) {
-    return;
-  }
-
-  // Unmap the SI, inform the service that the SharedImage's backing memory was
-  // written to on the CPU and update this resource's sync token to ensure
-  // proper sequencing of future accesses to the SI with respect to this call on
-  // the service side.
   scoped_mapping.reset();
 
-  DCHECK(!is_cross_thread());
-  owning_thread_data().sync_token =
-      GetClientSharedImage()->BackingWasExternallyUpdated(gpu::SyncToken());
-  GetClientSharedImage()->UpdateDestructionSyncToken(
-      owning_thread_data().sync_token);
+  // If using GPU compositing, inform the service that the SharedImage's backing
+  // memory was written to on the CPU and update this resource's sync token to
+  // ensure proper sequencing of future accesses to the SI with respect to this
+  // call on the service side.
+  // NOTE: Giving the GPU service this update is not necessary for the case
+  // where the software compositor is being used, as all accesses to the SI's
+  // backing happen via shared memory.  It's also not currently trivial to add
+  // in this case as setting the sync token here would require it to later be
+  // verified before it is sent to the display compositor.
+  if (!GetClientSharedImage()->is_software()) {
+    DCHECK(!is_cross_thread());
+    owning_thread_data().sync_token =
+        GetClientSharedImage()->BackingWasExternallyUpdated(gpu::SyncToken());
+    GetClientSharedImage()->UpdateDestructionSyncToken(
+        owning_thread_data().sync_token);
+  }
 }
 
 void CanvasResourceSharedImage::WaitSyncToken(
@@ -571,10 +568,6 @@ void CanvasResourceSharedImage::OnMemoryDump(
       static_cast<int>(gpu::TracingImportance::kClientOwner));
 }
 
-CanvasResourceProviderSharedImage* CanvasResourceSharedImage::Provider() {
-  return provider_.get();
-}
-
 void CanvasResourceSharedImage::PrepareForWebGPUDummyMailbox() {
   // In the dummy WebGPU mailbox case, we skip write operation to CanvasResource
   // and therefore did not wait on `acquire_sync_token_`. Instead, the consumer
@@ -645,7 +638,6 @@ scoped_refptr<StaticBitmapImage> ExternalCanvasResource::Bitmap() {
           client_si_, sync_token(), GetAlphaType(), context_provider_wrapper_,
           owning_thread_ref_, owning_thread_task_runner_,
           std::move(release_callback));
-  image->SetHighEntropyCanvasOpTypes(HighEntropyCanvasOpTypes());
   return image;
 }
 

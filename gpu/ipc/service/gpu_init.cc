@@ -65,9 +65,14 @@
 
 #if BUILDFLAG(IS_WIN)
 #include "gpu/config/gpu_driver_bug_workarounds.h"
+#include "services/on_device_model/ml_internal_buildflags.h"
 #include "ui/gl/direct_composition_support.h"
 #include "ui/gl/gl_angle_util_win.h"
 #include "ui/gl/gl_surface_egl.h"
+
+#if BUILDFLAG(ENABLE_ML_INTERNAL)
+#include "services/webnn/public/mojom/features.mojom-features.h"  // nogncheck
+#endif
 #endif
 
 #if BUILDFLAG(IS_ANDROID)
@@ -476,8 +481,6 @@ bool GpuInit::InitializeAndStartSandbox(base::CommandLine* command_line,
   params.single_process = false;
   params.enable_native_gpu_memory_buffers =
       gpu_preferences_.enable_native_gpu_memory_buffers;
-  params.handle_overlays_swap_failure =
-      base::FeatureList::IsEnabled(features::kHandleOverlaysSwapFailure);
 
 #if BUILDFLAG(IS_CHROMEOS)
   params.allow_sync_and_real_buffer_page_flip_testing = true;
@@ -517,8 +520,7 @@ bool GpuInit::InitializeAndStartSandbox(base::CommandLine* command_line,
 
   const bool need_fallback_from_graphite = [this]() {
     // If graphite is requested, check ANGLE implementation.
-    if (gpu_preferences_.gr_context_type != GrContextType::kGraphiteDawn &&
-        gpu_preferences_.gr_context_type != GrContextType::kGraphiteMetal) {
+    if (gpu_preferences_.gr_context_type != GrContextType::kGraphiteDawn) {
       return false;
     }
 
@@ -709,6 +711,18 @@ bool GpuInit::InitializeAndStartSandbox(base::CommandLine* command_line,
         TRACE_EVENT("gpu,startup", "Load directml.dll");
         base::LoadNativeLibrary(module_path.Append(L"directml.dll"), nullptr);
       }
+
+#if BUILDFLAG(ENABLE_ML_INTERNAL)
+      if (base::FeatureList::IsEnabled(
+              webnn::mojom::features::kWebMachineLearningNeuralNetwork)) {
+        // Ensure that optimization_guide_internal.dll is loaded before the
+        // sandbox is initialized as this provides a GPU delegate used as a
+        // fallback when Windows ML is not available.
+        TRACE_EVENT("gpu,startup", "Load optimization_guide_internal.dll");
+        base::LoadNativeLibrary(
+            module_path.Append(L"optimization_guide_internal.dll"), nullptr);
+      }
+#endif
     }
 
     ResumeGpuWatchdog(watchdog_thread_.get());
@@ -784,19 +798,18 @@ bool GpuInit::InitializeAndStartSandbox(base::CommandLine* command_line,
 #if BUILDFLAG(IS_OZONE)
   // We need to get supported formats before sandboxing to avoid an known
   // issue which breaks the camera preview. (b/166850715)
-  std::vector<gfx::BufferFormat> supported_buffer_formats_for_texturing;
   {
-    TRACE_EVENT("gpu,startup", "ui::ozone::GetSupportedFormatsForTexturing");
-    supported_buffer_formats_for_texturing =
-        ui::OzonePlatform::GetInstance()
-            ->GetSurfaceFactoryOzone()
-            ->GetSupportedFormatsForTexturing();
+    TRACE_EVENT("gpu,startup", "ui::ozone::IsFormatSupportedForTexturing");
+    auto* surface_factory =
+        ui::OzonePlatform::GetInstance()->GetSurfaceFactoryOzone();
+    auto* gl_ozone = surface_factory->GetCurrentGLOzone();
+    if (gl_ozone) {
+      gpu_feature_info_.supports_nv12_gl_native_pixmap =
+          gl_ozone->CanImportNativePixmap(viz::MultiPlaneFormat::kNV12);
+      gpu_feature_info_.supports_p010_gl_native_pixmap =
+          gl_ozone->CanImportNativePixmap(viz::MultiPlaneFormat::kP010);
+    }
   }
-  std::vector<viz::SharedImageFormat>
-      supported_formats_for_gl_native_pixmap_import =
-          ui::OzonePlatform::GetInstance()
-              ->GetSurfaceFactoryOzone()
-              ->GetSupportedFormatsForGLNativePixmapImport();
 #endif  // BUILDFLAG(IS_OZONE)
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
@@ -823,6 +836,12 @@ bool GpuInit::InitializeAndStartSandbox(base::CommandLine* command_line,
 
   if (gl_use_swiftshader_) {
     AdjustInfoToSwiftShader();
+  }
+  if (gl_disabled) {
+    // GL is disabled in display compositor mode, typically due to repeated GPU
+    // crashes. Disable WebNN to ensure stability in this state.
+    gpu_feature_info_.status_values[GPU_FEATURE_TYPE_WEBNN] =
+        kGpuFeatureStatusDisabled;
   }
 
   if (kGpuFeatureStatusEnabled !=
@@ -931,10 +950,6 @@ bool GpuInit::InitializeAndStartSandbox(base::CommandLine* command_line,
   SetSkiaBackendType();
 #if BUILDFLAG(IS_OZONE)
   ui::OzonePlatform::GetInstance()->AfterSandboxEntry();
-  gpu_feature_info_.supported_buffer_formats_for_allocation_and_texturing =
-      std::move(supported_buffer_formats_for_texturing);
-  gpu_feature_info_.supported_formats_for_gl_native_pixmap_import =
-      std::move(supported_formats_for_gl_native_pixmap_import);
   [[maybe_unused]] auto* factory =
       ui::OzonePlatform::GetInstance()->GetSurfaceFactoryOzone();
   bool filter_set = false;
@@ -1012,8 +1027,6 @@ void GpuInit::InitializeInProcess(base::CommandLine* command_line,
 #if BUILDFLAG(IS_OZONE)
   ui::OzonePlatform::InitParams params;
   params.single_process = true;
-  params.handle_overlays_swap_failure =
-      base::FeatureList::IsEnabled(features::kHandleOverlaysSwapFailure);
 
 #if BUILDFLAG(IS_CHROMEOS)
   params.allow_sync_and_real_buffer_page_flip_testing = true;
@@ -1138,21 +1151,23 @@ void GpuInit::InitializeInProcess(base::CommandLine* command_line,
   if (gl_use_swiftshader_) {
     AdjustInfoToSwiftShader();
   }
+  if (gl_disabled) {
+    // GL is disabled in display compositor mode, typically due to repeated GPU
+    // crashes. Disable WebNN to ensure stability in this state.
+    gpu_feature_info_.status_values[GPU_FEATURE_TYPE_WEBNN] =
+        kGpuFeatureStatusDisabled;
+  }
 
 #if BUILDFLAG(IS_OZONE)
-  const std::vector<gfx::BufferFormat> supported_buffer_formats_for_texturing =
-      ui::OzonePlatform::GetInstance()
-          ->GetSurfaceFactoryOzone()
-          ->GetSupportedFormatsForTexturing();
-  const std::vector<viz::SharedImageFormat>
-      supported_formats_for_gl_native_pixmap_import =
-          ui::OzonePlatform::GetInstance()
-              ->GetSurfaceFactoryOzone()
-              ->GetSupportedFormatsForGLNativePixmapImport();
-  gpu_feature_info_.supported_buffer_formats_for_allocation_and_texturing =
-      std::move(supported_buffer_formats_for_texturing);
-  gpu_feature_info_.supported_formats_for_gl_native_pixmap_import =
-      std::move(supported_formats_for_gl_native_pixmap_import);
+  auto* surface_factory =
+      ui::OzonePlatform::GetInstance()->GetSurfaceFactoryOzone();
+  auto* gl_ozone = surface_factory->GetCurrentGLOzone();
+  if (gl_ozone) {
+    gpu_feature_info_.supports_nv12_gl_native_pixmap =
+        gl_ozone->CanImportNativePixmap(viz::MultiPlaneFormat::kNV12);
+    gpu_feature_info_.supports_p010_gl_native_pixmap =
+        gl_ozone->CanImportNativePixmap(viz::MultiPlaneFormat::kP010);
+  }
 #endif  // BUILDFLAG(IS_OZONE)
 
   DisableInProcessGpuVulkan(&gpu_feature_info_, &gpu_preferences_);
@@ -1230,10 +1245,6 @@ void GpuInit::SetSkiaBackendType() {
     case gpu::GrContextType::kVulkan:
       skia_backend_type = SkiaBackendType::kGaneshVulkan;
       break;
-    case gpu::GrContextType::kGraphiteMetal:
-      // Graphite/Metal isn't expected to be used outside tests.
-      skia_backend_type = SkiaBackendType::kUnknown;
-      break;
     case gpu::GrContextType::kGraphiteDawn: {
 #if BUILDFLAG(SKIA_USE_DAWN)
       // The caller must ensure `dawn_context_provider_`'s creation, else the
@@ -1251,6 +1262,9 @@ void GpuInit::SetSkiaBackendType() {
           break;
         case wgpu::BackendType::Metal:
           skia_backend_type = SkiaBackendType::kGraphiteDawnMetal;
+          break;
+        case wgpu::BackendType::OpenGLES:
+          skia_backend_type = SkiaBackendType::kGraphiteDawnOpenGLES;
           break;
         default:
           break;

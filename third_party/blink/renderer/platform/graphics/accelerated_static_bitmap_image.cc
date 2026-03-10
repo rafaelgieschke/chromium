@@ -34,7 +34,6 @@
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkSamplingOptions.h"
 #include "third_party/skia/include/gpu/ganesh/GrBackendSurface.h"
-#include "third_party/skia/include/gpu/ganesh/GrDirectContext.h"
 #include "third_party/skia/include/gpu/ganesh/GrTypes.h"
 #include "third_party/skia/include/gpu/ganesh/SkImageGanesh.h"
 #include "third_party/skia/include/gpu/ganesh/gl/GrGLBackendSurface.h"
@@ -201,7 +200,7 @@ bool AcceleratedStaticBitmapImage::CopyToTexture(
 }
 
 bool AcceleratedStaticBitmapImage::CopyToResourceProvider(
-    CanvasResourceProviderSharedImage* resource_provider,
+    CanvasNon2DResourceProviderSharedImage* resource_provider,
     const gfx::Rect& copy_rect) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(resource_provider);
@@ -211,7 +210,7 @@ bool AcceleratedStaticBitmapImage::CopyToResourceProvider(
 
   const gpu::SyncToken& ready_sync_token = mailbox_ref_->sync_token();
   gpu::SyncToken completion_sync_token;
-  if (!resource_provider->OverwriteImage(
+  if (!resource_provider->CopyToBackingSharedImage(
           shared_image_, copy_rect, ready_sync_token, completion_sync_token)) {
     return false;
   }
@@ -325,15 +324,6 @@ void AcceleratedStaticBitmapImage::EnsureSyncTokenVerified() {
   ContextProvider()->InterfaceBase()->VerifySyncTokensCHROMIUM(&token_data, 1);
   sync_token.SetVerifyFlush();
   mailbox_ref_->set_sync_token(sync_token);
-}
-
-gpu::MailboxHolder AcceleratedStaticBitmapImage::GetMailboxHolder() const {
-  if (!IsValid()) {
-    return gpu::MailboxHolder();
-  }
-  return gpu::MailboxHolder(shared_image_->mailbox(),
-                            mailbox_ref_->sync_token(),
-                            shared_image_->GetTextureTarget());
 }
 
 scoped_refptr<gpu::ClientSharedImage>

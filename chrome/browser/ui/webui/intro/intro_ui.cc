@@ -4,11 +4,14 @@
 
 #include "chrome/browser/ui/webui/intro/intro_ui.h"
 
+#include "base/check_deref.h"
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/notreached.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/enterprise/browser_management/management_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/regional_capabilities/regional_capabilities_service_factory.h"
 #include "chrome/browser/ui/webui/intro/intro_handler.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/branded_strings.h"
@@ -17,6 +20,7 @@
 #include "chrome/grit/intro_resources.h"
 #include "chrome/grit/intro_resources_map.h"
 #include "chrome/grit/signin_resources.h"
+#include "components/regional_capabilities/regional_capabilities_service.h"
 #include "components/signin/public/base/signin_buildflags.h"
 #include "components/signin/public/base/signin_switches.h"
 #include "components/strings/grit/components_branded_strings.h"
@@ -31,7 +35,17 @@ IntroUI::IntroUI(content::WebUI* web_ui) : content::WebUIController(web_ui) {
   content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
       profile, chrome::kChromeUIIntroHost);
 
-  webui::SetupWebUIDataSource(source, kIntroResources, IDR_INTRO_INTRO_HTML);
+  const bool is_in_search_engine_choice_region =
+      CHECK_DEREF(regional_capabilities::RegionalCapabilitiesServiceFactory::
+                      GetForProfile(profile))
+          .IsInSearchEngineChoiceScreenRegion();
+  const bool is_first_run_desktop_refresh_enabled =
+      switches::IsFirstRunDesktopRefreshEnabled(
+          is_in_search_engine_choice_region);
+  webui::SetupWebUIDataSource(source, kIntroResources,
+                              is_first_run_desktop_refresh_enabled
+                                  ? IDR_INTRO_INTRO_REFRESH_HTML
+                                  : IDR_INTRO_INTRO_HTML);
 
   int title_id = IDS_FRE_SIGN_IN_TITLE_0;
 
@@ -57,6 +71,14 @@ IntroUI::IntroUI(content::WebUI* web_ui) : content::WebUIController(web_ui) {
        IDS_FRE_DEFAULT_BROWSER_ILLUSTRATION_ALT_TEXT},
       {"defaultBrowserSetAsDefault", IDS_FRE_DEFAULT_BROWSER_SET_AS_DEFAULT},
       {"defaultBrowserSkip", IDS_FRE_DEFAULT_BROWSER_SKIP},
+      // Strings for refreshed default browser promo subpage.
+      {"refreshDefaultBrowserTitle", IDS_FRE_REFRESH_DEFAULT_BROWSER_TITLE},
+      {"refreshDefaultBrowserSubtitle",
+       IDS_FRE_REFRESH_DEFAULT_BROWSER_SUBTITLE},
+      {"refreshDefaultBrowserSetAsDefault",
+       IDS_FRE_REFRESH_DEFAULT_BROWSER_SET_AS_DEFAULT},
+      {"refreshDefaultBrowserNoThanks",
+       IDS_FRE_REFRESH_DEFAULT_BROWSER_NO_THANKS},
   };
   source->AddLocalizedStrings(localized_strings);
 
@@ -89,10 +111,26 @@ IntroUI::IntroUI(content::WebUI* web_ui) : content::WebUIController(web_ui) {
   source->AddResourcePath("signin_vars.css.js", IDR_SIGNIN_SIGNIN_VARS_CSS_JS);
 
   source->AddBoolean("isDeviceManaged", is_device_managed);
+  source->AddBoolean("usePrimaryAndTonalButtonsForPromos",
+                     base::FeatureList::IsEnabled(
+                         switches::kUsePrimaryAndTonalButtonsForPromos));
 
   // Setup chrome://intro/default-browser UI.
-  source->AddResourcePath(chrome::kChromeUIIntroDefaultBrowserSubPage,
-                          IDR_INTRO_DEFAULT_BROWSER_DEFAULT_BROWSER_HTML);
+  source->AddResourcePath(
+      chrome::kChromeUIIntroDefaultBrowserSubPage,
+      is_first_run_desktop_refresh_enabled
+          ? IDR_INTRO_DEFAULT_BROWSER_DEFAULT_BROWSER_REFRESH_HTML
+          : IDR_INTRO_DEFAULT_BROWSER_DEFAULT_BROWSER_HTML);
+
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  source->AddResourcePath(
+      "images/refresh_showcase_illustration.png",
+      IDR_DEFAULT_BROWSER_SHOWCASE_CHROME);
+#else
+  source->AddResourcePath(
+      "images/refresh_showcase_illustration.png",
+      IDR_INTRO_IMAGES_REFRESH_SHOWCASE_ILLUSTRATION_CHROMIUM_PNG);
+#endif
 
   source->AddResourcePath("images/product-logo.svg", IDR_PRODUCT_LOGO_SVG);
   source->AddResourcePath("images/product-logo-animation.svg",

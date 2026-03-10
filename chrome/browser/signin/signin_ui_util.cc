@@ -156,7 +156,7 @@ std::u16string GetAuthenticatedUsername(Profile* profile) {
         identity_manager->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin)
             .email;
 #if BUILDFLAG(IS_CHROMEOS)
-    // See https://crbug.com/994798 for details.
+    // See https://crbug.com/40640779 for details.
     user_manager::User* user =
         ash::ProfileHelper::Get()->GetUserByProfile(profile);
     // |user| may be null in tests.
@@ -254,7 +254,6 @@ void ShowSigninPromptFromPromo(Profile* profile,
 #if BUILDFLAG(IS_CHROMEOS)
   NOTREACHED();
 #elif BUILDFLAG(ENABLE_DICE_SUPPORT)
-  CHECK_NE(signin_metrics::AccessPoint::kUnknown, access_point);
   CHECK(!profile->IsOffTheRecord());
 
   signin::IdentityManager* identity_manager =
@@ -275,7 +274,6 @@ void SignInFromSingleAccountPromo(Profile* profile,
                                   const CoreAccountInfo& account,
                                   signin_metrics::AccessPoint access_point) {
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
-  DCHECK_NE(signin_metrics::AccessPoint::kUnknown, access_point);
   DCHECK(!profile->IsOffTheRecord());
 
   signin::IdentityManager* identity_manager =
@@ -344,7 +342,6 @@ void EnableSyncFromMultiAccountPromo(Profile* profile,
                                      signin_metrics::AccessPoint access_point,
                                      bool is_default_promo_account) {
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
-  DCHECK_NE(signin_metrics::AccessPoint::kUnknown, access_point);
   DCHECK(!profile->IsOffTheRecord());
 
   signin::IdentityManager* identity_manager =
@@ -546,11 +543,12 @@ std::u16string GetShortProfileIdentityToDisplay(
       identity_manager->FindExtendedAccountInfoByAccountId(
           core_info.account_id);
   // If there's no given name available, return the user email.
-  if (extended_info.given_name.empty()) {
+  std::optional<std::string_view> given_name = extended_info.GetGivenName();
+  if (!given_name.has_value()) {
     return base::UTF8ToUTF16(core_info.email);
   }
 
-  return base::UTF8ToUTF16(extended_info.given_name);
+  return base::UTF8ToUTF16(*given_name);
 }
 
 std::string GetAllowedDomain(std::string signin_pattern) {

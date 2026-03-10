@@ -13,45 +13,16 @@ import type {PageData} from './on_device_internals_page.mojom-webui.js';
 import {PerformanceClass} from './on_device_model.mojom-webui.js';
 
 export class OnDeviceInternalsModelStatusElement extends CrLitElement {
-  constructor() {
-    super();
-    this.getPageData_();
-  }
-
-  private formatBytes(bytes: number) {
-    if (bytes === 0) {
-      return '0 Bytes';
-    }
-
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-
-    const i =
-        Math.min(Math.round(Math.log(bytes) / Math.log(k)) - 1, sizes.length);
-
-    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
-  }
-
-  override connectedCallback() {
-    super.connectedCallback();
-    BrowserProxy.getInstance()
-        .callbackRouter.onDownloadProgressUpdate.addListener(
-            this.logProgress_.bind(this));
-  }
-
-  private logProgress_(downloadedBytes: number, totalBytes: number) {
-    this.loadProgress = Number(downloadedBytes);
-    this.loadMax = Number(totalBytes);
-    this.readableLoadProgress = this.formatBytes(this.loadProgress);
-    this.readableLoadMax = this.formatBytes(this.loadMax);
-  }
-
   static get is() {
     return 'on-device-internals-model-status';
   }
 
   static override get styles() {
     return getCss();
+  }
+
+  override render() {
+    return getHtml.bind(this)();
   }
 
   static override get properties() {
@@ -63,10 +34,6 @@ export class OnDeviceInternalsModelStatusElement extends CrLitElement {
       readableLoadProgress: {type: String},
       readableLoadMax: {type: String},
     };
-  }
-
-  override render() {
-    return getHtml.bind(this)();
   }
 
   protected accessor pageData_: PageData = {
@@ -94,14 +61,56 @@ export class OnDeviceInternalsModelStatusElement extends CrLitElement {
   protected accessor readableLoadProgress: string = '_';
   protected accessor readableLoadMax: string = '_';
 
+  constructor() {
+    super();
+    this.getPageData_();
+  }
+
+  private formatBytes(bytes: number) {
+    if (bytes === 0) {
+      return '0 Bytes';
+    }
+
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+
+    const i =
+        Math.min(Math.round(Math.log(bytes) / Math.log(k)) - 1, sizes.length);
+
+    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
+  }
+
+  override connectedCallback() {
+    super.connectedCallback();
+    BrowserProxy.getInstance()
+        .callbackRouter.onDownloadProgressUpdate.addListener(
+            this.logProgress_.bind(this));
+  }
+
+  private logProgress_(downloadedBytes: bigint, totalBytes: bigint) {
+    this.loadProgress = Number(downloadedBytes);
+    this.loadMax = Number(totalBytes);
+    this.readableLoadProgress = this.formatBytes(this.loadProgress);
+    this.readableLoadMax = this.formatBytes(this.loadMax);
+  }
+
   protected async onResetModelCrashCountClick_() {
     await this.proxy_.handler.resetModelCrashCount();
     await this.getPageData_();
     this.mayRestartBrowser_ = true;
   }
 
-  protected async onFeatureUsageSetterClick_(
-      feature: number, isRecentlyUsed: boolean) {
+  protected onSetFeatureUsageTrueClick_(e: Event) {
+    const feature = Number((e.currentTarget as HTMLElement).dataset['feature']);
+    this.setFeatureUsage_(feature, true);
+  }
+
+  protected onSetFeatureUsageFalseClick_(e: Event) {
+    const feature = Number((e.currentTarget as HTMLElement).dataset['feature']);
+    this.setFeatureUsage_(feature, false);
+  }
+
+  protected async setFeatureUsage_(feature: number, isRecentlyUsed: boolean) {
     await this.proxy_.handler.setFeatureRecentlyUsedState(
         feature, isRecentlyUsed);
     this.getPageData_();
@@ -111,7 +120,7 @@ export class OnDeviceInternalsModelStatusElement extends CrLitElement {
     this.pageData_ = (await this.proxy_.handler.getPageData()).pageData;
   }
 
-  protected uninstallDefaultModel_() {
+  protected onUninstallDefaultModelClick_() {
     this.proxy_.handler.uninstallDefaultModel();
   }
 }

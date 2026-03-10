@@ -5,8 +5,10 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_JS_OPTIMIZATION_JS_OPTIMIZATIONS_PAGE_ACTION_CONTROLLER_H_
 #define CHROME_BROWSER_UI_VIEWS_JS_OPTIMIZATION_JS_OPTIMIZATIONS_PAGE_ACTION_CONTROLLER_H_
 
+#include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/tabs/contents_observing_tab_feature.h"
+#include "ui/views/bubble/bubble_dialog_delegate_view.h"
 
 namespace page_actions {
 class PageActionController;
@@ -18,7 +20,6 @@ class TabInterface;
 
 namespace views {
 class BubbleDialogModelHost;
-class View;
 }  // namespace views
 
 namespace actions {
@@ -27,7 +28,8 @@ class ActionItem;
 
 // Controls the visibility of the JS optimizations omnibar icon and bubble.
 class JsOptimizationsPageActionController
-    : public tabs::ContentsObservingTabFeature {
+    : public tabs::ContentsObservingTabFeature,
+      public views::WidgetObserver {
  public:
   explicit JsOptimizationsPageActionController(
       tabs::TabInterface& tab_interface,
@@ -41,20 +43,32 @@ class JsOptimizationsPageActionController
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kBubbleBodyElementId);
   DECLARE_CLASS_ELEMENT_IDENTIFIER_VALUE(kBubbleButtonElementId);
 
+  using BubbleCreatedCallback =
+      base::RepeatingCallback<void(views::BubbleDialogModelHost*)>;
+  static void SetBubbleCreatedCallbackForTesting(
+      BubbleCreatedCallback callback);
+
   // tabs::ContentsObservingTabFeature
   void PrimaryPageChanged(content::Page& page) override;
 
-  void ShowBubble(views::View* anchor_view, actions::ActionItem* item);
+  // views::WidgetObserver:
+  void OnWidgetClosing(views::Widget* widget) override;
+
+  void ShowBubble(views::BubbleAnchor anchor, actions::ActionItem* item);
 
  private:
   void UpdateIconVisibility();
   void OnBubbleHidden(actions::ActionItem* action_item);
-  views::BubbleDialogModelHost* CreateBubble(views::View* anchor_view,
+  views::BubbleDialogModelHost* CreateBubble(views::BubbleAnchor anchor,
                                              actions::ActionItem* action_item);
   void EnableV8Optimizations();
 
   const raw_ref<page_actions::PageActionController> page_action_controller_;
   raw_ptr<views::BubbleDialogModelHost> bubble_ = nullptr;
+  base::ScopedObservation<views::Widget, views::WidgetObserver>
+      widget_observation_{this};
+
+  base::WeakPtrFactory<JsOptimizationsPageActionController> weak_factory_{this};
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_JS_OPTIMIZATION_JS_OPTIMIZATIONS_PAGE_ACTION_CONTROLLER_H_

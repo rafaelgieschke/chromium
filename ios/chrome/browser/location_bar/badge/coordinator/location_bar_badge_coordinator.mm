@@ -13,9 +13,8 @@
 #import "ios/chrome/browser/feature_engagement/model/tracker_factory.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/animated_scoped_fullscreen_disabler.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_ui_updater.h"
-#import "ios/chrome/browser/intelligence/bwg/model/bwg_service.h"
 #import "ios/chrome/browser/intelligence/bwg/model/bwg_service_factory.h"
-#import "ios/chrome/browser/intelligence/bwg/utils/bwg_constants.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
 #import "ios/chrome/browser/location_bar/badge/coordinator/location_bar_badge_coordinator_delegate.h"
 #import "ios/chrome/browser/location_bar/badge/coordinator/location_bar_badge_mediator.h"
 #import "ios/chrome/browser/location_bar/badge/coordinator/location_bar_badge_mediator_delegate.h"
@@ -34,7 +33,6 @@
 #import "ios/chrome/browser/shared/ui/util/omnibox_util.h"
 
 @interface LocationBarBadgeCoordinator () <
-    ContextualPanelEntrypointCommands,
     ContextualPanelEntrypointMediatorDelegate,
     LocationBarBadgeMediatorDelegate>
 @end
@@ -83,8 +81,10 @@
   id<BWGCommands> BWGCommandHandler =
       HandlerForProtocol(_dispatcher, BWGCommands);
   _mediator.BWGCommandHandler = BWGCommandHandler;
-  [_dispatcher startDispatchingToTarget:_mediator
-                            forProtocol:@protocol(LocationBarBadgeCommands)];
+  if (!IsChromeNextIaEnabled()) {
+    [_dispatcher startDispatchingToTarget:_mediator
+                              forProtocol:@protocol(LocationBarBadgeCommands)];
+  }
 }
 
 - (void)stop {
@@ -169,16 +169,31 @@
   }
 }
 
+#pragma mark - LocationBarBadgeCommands
+
+- (void)updateBadgeConfig:(LocationBarBadgeConfiguration*)config {
+  CHECK(IsChromeNextIaEnabled());
+  [_mediator updateBadgeConfig:config];
+}
+
+- (void)updateColorForIPH {
+  CHECK(IsChromeNextIaEnabled());
+  [_mediator updateColorForIPH];
+}
+
+- (void)markDisplayedBadgeAsUnread:(BOOL)read {
+  CHECK(IsChromeNextIaEnabled());
+  [_mediator markDisplayedBadgeAsUnread:read];
+}
+
 #pragma mark - Private
 
 - (void)attachContextualPanelEntrypoint {
-  if (!IsContextualPanelEnabled()) {
-    return;
+  if (!IsChromeNextIaEnabled()) {
+    [_dispatcher
+        startDispatchingToTarget:self
+                     forProtocol:@protocol(ContextualPanelEntrypointCommands)];
   }
-
-  [_dispatcher
-      startDispatchingToTarget:self
-                   forProtocol:@protocol(ContextualPanelEntrypointCommands)];
   _mediator.contextualSheetHandler =
       HandlerForProtocol(_dispatcher, ContextualSheetCommands);
   _mediator.entrypointHelpHandler =
@@ -189,9 +204,6 @@
 // integrated with LocationBarBadgeMediator.
 // Creates a Contextual Panel entry point mediator.
 - (void)createContextualPanelEntryPointMediator {
-  if (!IsContextualPanelEnabled()) {
-    return;
-  }
   WebStateList* webStateList = self.browser->GetWebStateList();
 
   [_dispatcher

@@ -8,6 +8,7 @@
 
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/null_task_runner.h"
+#include "base/threading/sequence_local_storage_map.h"
 #include "components/viz/test/test_raster_interface.h"
 #include "gpu/command_buffer/common/capabilities.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
@@ -51,6 +52,9 @@ class BadSharedGpuContextTest : public Test {
     auto factory = []() -> std::unique_ptr<WebGraphicsContext3DProvider> {
       return nullptr;
     };
+    scoped_sequence_local_storage_map_for_current_thread_ = std::make_unique<
+        base::internal::ScopedSetSequenceLocalStorageMapForCurrentThread>(
+        &sequence_local_storage_);
     SharedGpuContext::SetContextProviderFactoryForTesting(
         BindRepeating(factory));
   }
@@ -68,6 +72,10 @@ class BadSharedGpuContextTest : public Test {
   std::unique_ptr<
       ScopedTestingPlatformSupport<AcceleratedCompositingTestPlatform>>
       accelerated_compositing_scope_;
+  base::internal::SequenceLocalStorageMap sequence_local_storage_;
+  std::unique_ptr<
+      base::internal::ScopedSetSequenceLocalStorageMapForCurrentThread>
+      scoped_sequence_local_storage_map_for_current_thread_;
 };
 
 // Test fixure that simulate not using gpu compositing.
@@ -81,6 +89,9 @@ class SoftwareCompositingTest : public Test {
       gl->SetIsContextLost(false);
       return std::make_unique<FakeWebGraphicsContext3DProvider>(gl);
     };
+    scoped_sequence_local_storage_map_for_current_thread_ = std::make_unique<
+        base::internal::ScopedSetSequenceLocalStorageMapForCurrentThread>(
+        &sequence_local_storage_);
     SharedGpuContext::SetContextProviderFactoryForTesting(
         BindRepeating(factory, Unretained(&gl_)));
   }
@@ -88,6 +99,10 @@ class SoftwareCompositingTest : public Test {
   void TearDown() override { SharedGpuContext::Reset(); }
 
   FakeGLES2Interface gl_;
+  base::internal::SequenceLocalStorageMap sequence_local_storage_;
+  std::unique_ptr<
+      base::internal::ScopedSetSequenceLocalStorageMapForCurrentThread>
+      scoped_sequence_local_storage_map_for_current_thread_;
 };
 
 class SharedGpuContextTest : public Test {
@@ -100,10 +115,13 @@ class SharedGpuContextTest : public Test {
         std::make_unique<base::SingleThreadTaskRunner::CurrentDefaultHandle>(
             task_runner_);
     test_context_provider_ = viz::TestContextProvider::CreateRaster();
+    scoped_sequence_local_storage_map_for_current_thread_ = std::make_unique<
+        base::internal::ScopedSetSequenceLocalStorageMapForCurrentThread>(
+        &sequence_local_storage_);
 
-    InitializeSharedGpuContextRaster(test_context_provider_.get(),
-                                     /*cache = */ nullptr,
-                                     SetIsContextLost::kSetToFalse);
+    InitializeSharedGpuContext(test_context_provider_.get(),
+                               /*cache = */ nullptr,
+                               SetIsContextLost::kSetToFalse);
   }
 
   void TearDown() override {
@@ -117,6 +135,10 @@ class SharedGpuContextTest : public Test {
   std::unique_ptr<
       ScopedTestingPlatformSupport<AcceleratedCompositingTestPlatform>>
       accelerated_compositing_scope_;
+  base::internal::SequenceLocalStorageMap sequence_local_storage_;
+  std::unique_ptr<
+      base::internal::ScopedSetSequenceLocalStorageMapForCurrentThread>
+      scoped_sequence_local_storage_map_for_current_thread_;
 };
 
 TEST_F(SharedGpuContextTest, contextLossAutoRecovery) {
@@ -149,11 +171,10 @@ TEST_F(BadSharedGpuContextTest, AccelerateImageBufferSurfaceCreationFails) {
   // With a bad shared context, AccelerateImageBufferSurface should fail and
   // return a nullptr provider
   std::unique_ptr<CanvasResourceProvider> resource_provider =
-      CanvasResourceProvider::CreateSharedImageProvider(
+      CanvasNon2DResourceProviderSharedImage::Create(
           gfx::Size(10, 10), GetN32FormatForCanvas(), kPremul_SkAlphaType,
           gfx::ColorSpace::CreateSRGB(),
-          CanvasResourceProvider::ShouldInitialize::kNo,
-          SharedGpuContext::ContextProviderWrapper(), RasterMode::kGPU,
+          SharedGpuContext::ContextProviderWrapper(),
           gpu::SharedImageUsageSet());
   EXPECT_FALSE(resource_provider);
 }
@@ -176,11 +197,10 @@ TEST_F(SharedGpuContextTest, AccelerateImageBufferSurfaceAutoRecovery) {
   test_context_provider_->GetTestRasterInterface()->set_context_lost(true);
   EXPECT_FALSE(SharedGpuContext::IsValidWithoutRestoringForTesting());
   std::unique_ptr<CanvasResourceProvider> resource_provider =
-      CanvasResourceProvider::CreateSharedImageProvider(
+      CanvasNon2DResourceProviderSharedImage::Create(
           gfx::Size(10, 10), GetN32FormatForCanvas(), kPremul_SkAlphaType,
           gfx::ColorSpace::CreateSRGB(),
-          CanvasResourceProvider::ShouldInitialize::kNo,
-          SharedGpuContext::ContextProviderWrapper(), RasterMode::kGPU,
+          SharedGpuContext::ContextProviderWrapper(),
           gpu::SharedImageUsageSet());
   EXPECT_TRUE(resource_provider && resource_provider->IsValid());
   EXPECT_TRUE(resource_provider->IsAccelerated());

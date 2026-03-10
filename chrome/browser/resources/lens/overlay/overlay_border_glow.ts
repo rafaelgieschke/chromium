@@ -17,6 +17,14 @@ export class OverlayBorderGlowElement extends CrLitElement {
     return 'overlay-border-glow';
   }
 
+  static override get styles() {
+    return getCss();
+  }
+
+  override render() {
+    return getHtml.bind(this)();
+  }
+
   static override get properties() {
     return {
       isFadingOut: {
@@ -38,16 +46,16 @@ export class OverlayBorderGlowElement extends CrLitElement {
   // The bounding box of the selection overlay.
   private accessor selectionOverlayRect: DOMRect = new DOMRect(0, 0, 0, 0);
 
-  static override get styles() {
-    return getCss();
-  }
-
   protected getGradientColorStyles(): string {
     const styles: string[] = [
-      `--gradient-blue: ${GLIF_HEX_COLORS.blue}`,
-      `--gradient-red: ${GLIF_HEX_COLORS.red}`,
-      `--gradient-yellow: ${GLIF_HEX_COLORS.yellow}`,
-      `--gradient-green: ${GLIF_HEX_COLORS.green}`,
+      `--gradient-blue: var(--overlay-border-glow-color-1, ${
+          GLIF_HEX_COLORS.blue})`,
+      `--gradient-red: var(--overlay-border-glow-color-2, ${
+          GLIF_HEX_COLORS.red})`,
+      `--gradient-yellow: var(--overlay-border-glow-color-3, ${
+          GLIF_HEX_COLORS.yellow})`,
+      `--gradient-green: var(--overlay-border-glow-color-4, ${
+          GLIF_HEX_COLORS.green})`,
     ];
     return styles.join(';');
   }
@@ -71,10 +79,6 @@ export class OverlayBorderGlowElement extends CrLitElement {
   handleClearSelection() {
     this.isFadingOut = false;
     this.isFadingIn = true;
-  }
-
-  override render() {
-    return getHtml.bind(this)();
   }
 }
 

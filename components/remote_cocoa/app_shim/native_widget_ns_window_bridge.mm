@@ -60,7 +60,9 @@
 #include "ui/events/types/event_type.h"
 #include "ui/gfx/geometry/dip_util.h"
 #include "ui/gfx/geometry/size_conversions.h"
+#include "ui/gfx/image/image_skia_util_mac.h"
 #import "ui/gfx/mac/coordinate_conversion.h"
+#import "ui/gfx/mac/menu_text_elider_mac.h"
 #import "ui/gfx/mac/nswindow_frame_controls.h"
 #include "ui/gfx/native_ui_types.h"
 
@@ -88,6 +90,30 @@ display::Display GetDisplayForWindow(NSWindow* window) {
 }
 
 }  // namespace
+
+@class NSWindowRestorationOptions;
+
+// An NSKeyedUnarchiver that can optionally vend NSWindowRestorationOptions.
+@interface RestorationOptionsKeyedUnarchiver : NSKeyedUnarchiver
+@property BOOL returnRestorationOptions;
+@end
+
+@implementation RestorationOptionsKeyedUnarchiver
+
+@synthesize returnRestorationOptions;
+
+- (NSWindowRestorationOptions*)_windowRestorationOptions {
+  // Returning a default-initialized NSWindowRestorationOptions from
+  // _windowRestorationOptions is enough to get windows to restore on the spaces
+  // whence they came.
+  if (self.returnRestorationOptions) {
+    return [[NSClassFromString(@"NSWindowRestorationOptions") alloc] init];
+  }
+
+  return nil;
+}
+
+@end
 
 // The NSView that hosts the composited CALayer drawing the UI. It fills the
 // window but is not hittable so that accessibility hit tests always go to the
@@ -527,13 +553,11 @@ void NativeWidgetNSWindowBridge::InitWindow(
     mojom::NativeWidgetNSWindowInitParamsPtr params) {
   modal_type_ = params->modal_type;
   is_translucent_window_ = params->is_translucent;
-  pending_restoration_data_ = params->state_restoration_data;
+  pending_restoration_data_ = params->state_restoration_data.Clone();
 
   if (display::Screen::Get()->IsHeadless()) {
-    headless_mode_window_ = std::make_optional<HeadlessModeWindow>();
+    [window_ setIsHeadless:YES];
   }
-
-  [window_ setIsHeadless:headless_mode_window_.has_value()];
 
   // Register for application hide notifications so that visibility can be
   // properly tracked. This is not done in the delegate so that the lifetime is
@@ -583,6 +607,7 @@ void NativeWidgetNSWindowBridge::InitWindow(
     [window_ setMovable:NO];
   }
   [window_ setIsTooltip:params->is_tooltip];
+  CheckAndNotifyAllWorkspacesStateChanged();
 }
 
 void NativeWidgetNSWindowBridge::SetInitialBounds(
@@ -826,41 +851,6 @@ void NativeWidgetNSWindowBridge::CloseWindowNow() {
 
 void NativeWidgetNSWindowBridge::SetVisibilityState(
     WindowVisibilityState new_state) {
-  // In headless mode the platform window is always hidden, so instead of
-  // changing its visibility state just maintain a local flag to track the
-  // expected visibility state and lie to the upper layer pretending the
-  // window did change its visibility and activation state.
-  if (headless_mode_window_) {
-    const bool new_visibility_state =
-        new_state != WindowVisibilityState::kHideWindow;
-    if (headless_mode_window_->visibility_state != new_visibility_state) {
-      headless_mode_window_->visibility_state = new_visibility_state;
-      base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-          FROM_HERE,
-          base::BindOnce(
-              [](const base::WeakPtr<NativeWidgetNSWindowBridge>& bridge,
-                 bool visibility_state) {
-                if (bridge && bridge->host_) {
-                  bridge->host_->OnVisibilityChanged(visibility_state);
-                }
-              },
-              factory_.GetWeakPtr(), new_visibility_state));
-    }
-
-    if (new_state == WindowVisibilityState::kShowAndActivateWindow) {
-      base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
-          FROM_HERE,
-          base::BindOnce(
-              [](const base::WeakPtr<NativeWidgetNSWindowBridge>& bridge) {
-                if (bridge) {
-                  bridge->OnWindowKeyStatusChangedTo(/*is_key=*/true);
-                }
-              },
-              factory_.GetWeakPtr()));
-    }
-    return;
-  }
-
   // During session restore this method gets called from RestoreTabsToBrowser()
   // with new_state = kShowAndActivateWindow. We consume restoration data on our
   // first time through this method so we can use its existence as an
@@ -876,15 +866,54 @@ void NativeWidgetNSWindowBridge::SetVisibilityState(
   bool session_restore_in_progress = false;
 
   // Restore Cocoa window state.
-  if (HasWindowRestorationData()) {
-    NSData* restore_ns_data =
-        [NSData dataWithBytes:pending_restoration_data_.data()
-                       length:pending_restoration_data_.size()];
-    NSKeyedUnarchiver* decoder =
-        [[NSKeyedUnarchiver alloc] initForReadingFromData:restore_ns_data
-                                                    error:nil];
+  if (pending_restoration_data_) {
+    NSData* restore_ns_data = [NSData
+        dataWithBytes:pending_restoration_data_->appkit_restoration_data.data()
+               length:pending_restoration_data_->appkit_restoration_data
+                          .size()];
+    RestorationOptionsKeyedUnarchiver* decoder =
+        [[RestorationOptionsKeyedUnarchiver alloc]
+            initForReadingFromData:restore_ns_data
+                             error:nil];
+
+    // Standard macOS behavior is: if a user quits and relaunches an app, window
+    // restoration code puts all restored windows onto the primary space. If the
+    // system quits and relaunches an app during, say, a system restart, window
+    // restoration code puts the restored windows back onto the spaces whence
+    // they came.
+    //
+    // Chromium wants to do the same for its restarts: if it was restarted
+    // (rather than just quit), it wants to return windows to their spaces.
+    // There is no API to do this (FB22128442), so two different approaches are
+    // used.
+    //
+    // Prior to macOS 15, the defaults key NSWindowRestoresWorkspaceAtLaunch is
+    // used. That triggers window restoration code to put windows back.
+    //
+    // NSWindowRestoresWorkspaceAtLaunch stopped working in macOS 15
+    // (FB15644170). However, if the decoder passed to -restoreStateWithCoder:
+    // has a method _windowRestorationOptions which returns a
+    // default-initialized NSWindowRestorationOptions object, that will cause
+    // the window restoration code to put windows back.
+    //
+    // Note that, in theory, -restoreStateWithCoder: shouldn't be used at all;
+    // the NSWindowRestoration API should be used (https://crbug.com/376834368).
+    // However, that API is insufficiently flexible enough for Chromium's usage
+    // (FB22128526) so it is not used. When that API is revised so that it is
+    // flexible enough, Chromium should switch to it.
+
+    if (base::mac::MacOSMajorVersion() >= 15) {
+      decoder.returnRestorationOptions =
+          pending_restoration_data_->restore_space;
+    } else if (pending_restoration_data_->restore_space) {
+      [NSUserDefaults.standardUserDefaults registerDefaults:@{
+        @"NSWindowRestoresWorkspaceAtLaunch" : @YES
+      }];
+    }
+
     [window_ restoreStateWithCoder:decoder];
-    pending_restoration_data_.clear();
+
+    pending_restoration_data_.reset();
 
     session_restore_in_progress = true;
   }
@@ -1064,7 +1093,14 @@ void NativeWidgetNSWindowBridge::SetLocalEventMonitorEnabled(bool enabled) {
 }
 
 bool NativeWidgetNSWindowBridge::HasWindowRestorationData() {
-  return !pending_restoration_data_.empty();
+  return !pending_restoration_data_.is_null();
+}
+
+void NativeWidgetNSWindowBridge::RestoreCollectionBehavior() {
+  if (collection_behavior_to_restore_.has_value() && window_) {
+    window_.collectionBehavior = *collection_behavior_to_restore_;
+    collection_behavior_to_restore_.reset();
+  }
 }
 
 bool NativeWidgetNSWindowBridge::RunMoveLoop(const gfx::Vector2d& drag_offset) {
@@ -1238,6 +1274,61 @@ void NativeWidgetNSWindowBridge::SetColorMode(
           ? [NSAppearance appearanceNamed:NSAppearanceNameAqua]
           : [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
   [window_ setAppearance:appearance];
+}
+
+void NativeWidgetNSWindowBridge::BeginFileDrag(
+    mojom::FileDragDataPtr file_drag_data,
+    const gfx::PointF& mouse_location) {
+  if (!window_ || !bridged_view_) {
+    DLOG(WARNING) << "BeginFileDrag failed: window or bridged_view is null";
+    return;
+  }
+
+  NSURL* file_url = base::apple::FilePathToNSURL(file_drag_data->file_path);
+  if (!file_url) {
+    return;
+  }
+
+  NSDraggingItem* file_item =
+      [[NSDraggingItem alloc] initWithPasteboardWriter:file_url];
+
+  // Align to backing pixels for Retina displays.
+  NSPoint mouse_point = NSMakePoint(mouse_location.x(), mouse_location.y());
+  NSPoint current_position =
+      [bridged_view_
+          backingAlignedRect:NSMakeRect(mouse_point.x, mouse_point.y, 0, 0)
+                     options:NSAlignAllEdgesOutward]
+          .origin;
+
+  if (!file_drag_data->drag_image.isNull()) {
+    NSImage* image = gfx::NSImageFromImageSkia(file_drag_data->drag_image);
+    NSSize image_size = image.size;
+    gfx::Vector2d offset = file_drag_data->image_offset;
+    NSRect image_rect = NSMakeRect(current_position.x - offset.x(),
+                                   current_position.y - offset.y(),
+                                   image_size.width, image_size.height);
+    [file_item setDraggingFrame:image_rect contents:image];
+  } else {
+    // 16x16 placeholder corresponding to IconLoader::IconSize::SMALL.
+    NSRect placeholder_rect =
+        NSMakeRect(current_position.x - 8, current_position.y - 8, 16, 16);
+    [file_item setDraggingFrame:placeholder_rect contents:nil];
+  }
+
+  // Synthesize a drag event
+  NSEvent* dragEvent = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDragged
+                                          location:current_position
+                                     modifierFlags:0
+                                         timestamp:NSApp.currentEvent.timestamp
+                                      windowNumber:window_.windowNumber
+                                           context:nil
+                                       eventNumber:0
+                                        clickCount:1
+                                          pressure:1.0];
+
+  [bridged_view_ beginDraggingSessionWithItems:@[ file_item ]
+                                         event:dragEvent
+                                        source:bridged_view_];
 }
 
 void NativeWidgetNSWindowBridge::OnWindowWillClose() {
@@ -1549,23 +1640,6 @@ void NativeWidgetNSWindowBridge::FullscreenControllerSetFrame(
 }
 
 void NativeWidgetNSWindowBridge::FullscreenControllerToggleFullscreen() {
-  // AppKit implicitly makes the fullscreen window visible, so avoid going
-  // fullscreen in headless mode. Instead, toggle the expected fullscreen state
-  // and fake the relevant callbacks for the fullscreen controller to
-  // believe the fullscreen state was toggled.
-  if (headless_mode_window_) {
-    headless_mode_window_->fullscreen_state =
-        !headless_mode_window_->fullscreen_state;
-    if (headless_mode_window_->fullscreen_state) {
-      fullscreen_controller_.OnWindowWillEnterFullscreen();
-      fullscreen_controller_.OnWindowDidEnterFullscreen();
-    } else {
-      fullscreen_controller_.OnWindowWillExitFullscreen();
-      fullscreen_controller_.OnWindowDidExitFullscreen();
-    }
-    return;
-  }
-
   bool is_key_window = [window_ isKeyWindow];
   [window_ toggleFullScreen:nil];
   // Ensure the transitioning window maintains focus.
@@ -1655,6 +1729,34 @@ NSWindow* NativeWidgetNSWindowBridge::GetWindow() const {
 
 void NativeWidgetNSWindowBridge::SetVisibleOnAllSpaces(bool always_visible) {
   gfx::SetNSWindowVisibleOnAllWorkspaces(window_, always_visible);
+  CheckAndNotifyAllWorkspacesStateChanged();
+}
+
+void NativeWidgetNSWindowBridge::MoveToActiveFullscreenSpace() {
+  // If we're still waiting for a previous collection behavior to be restored,
+  // then restore it now before temporarily changing it again.
+  RestoreCollectionBehavior();
+
+  // Temporarily change the collection behavior to move the window into the
+  // fullscreen space and then move it into the space.
+  // `NSWindowCollectionBehaviorMoveToActiveSpace` is incompatible with
+  // `NSWindowCollectionBehaviorCanJoinAllSpaces`, so we also disable that if
+  // necessary.
+  NSWindowCollectionBehavior initial_behavior = window_.collectionBehavior;
+  collection_behavior_to_restore_ = initial_behavior;
+  NSWindowCollectionBehavior temporary_behavior = initial_behavior;
+  temporary_behavior |= NSWindowCollectionBehaviorMoveToActiveSpace;
+  temporary_behavior &= ~NSWindowCollectionBehaviorCanJoinAllSpaces;
+  window_.collectionBehavior = temporary_behavior;
+  [window_ orderFrontRegardless];
+
+  // We can't synchronously restore the collection behavior or else the OS will
+  // treat the behavior as `initial_behavior` when performing the
+  // `orderFrontRegardless` call, so here we asynchronously restore it.
+  base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&NativeWidgetNSWindowBridge::RestoreCollectionBehavior,
+                     factory_.GetWeakPtr()));
 }
 
 void NativeWidgetNSWindowBridge::SetZoomed(bool zoomed) {
@@ -1715,15 +1817,6 @@ void NativeWidgetNSWindowBridge::SetCanAppearInExistingFullscreenSpaces(
 }
 
 void NativeWidgetNSWindowBridge::SetMiniaturized(bool miniaturized) {
-  // In headless mode the platform window is always hidden and WebKit
-  // will not deminiaturize hidden windows. So instead of changing the window
-  // miniaturization state just lie to the upper layer pretending the window did
-  // change its state. We don't need to keep track of the requested state here
-  // because the host will do this.
-  if (headless_mode_window_) {
-    host_->OnWindowMiniaturizedChanged(miniaturized);
-    return;
-  }
 
   if (miniaturized) {
     // Calling performMiniaturize: will momentarily highlight the button, but
@@ -1805,6 +1898,9 @@ void NativeWidgetNSWindowBridge::MakeFirstResponder() {
 }
 
 void NativeWidgetNSWindowBridge::SetWindowTitle(const std::u16string& title) {
+  // Truncate long titles to avoid overflow in Dock menu and window title bar.
+  std::u16string truncated_title = gfx::ElideMenuItemTitle(title);
+
   // Delay setting the window title until after any menu tracking is complete.
   if (NSRunLoop.currentRunLoop.currentMode == NSEventTrackingRunLoopMode) {
     // Install one run loop trigger to handle all the pending titles.
@@ -1820,9 +1916,9 @@ void NativeWidgetNSWindowBridge::SetWindowTitle(const std::u16string& title) {
           });
     }
 
-    GetPendingWindowTitleMap()[window_] = title;
+    GetPendingWindowTitleMap()[window_] = truncated_title;
   } else {
-    window_.title = base::SysUTF16ToNSString(title);
+    window_.title = base::SysUTF16ToNSString(truncated_title);
 
     // In case there is an unfired run loop trigger, erase any pending title so
     // that the new title now being set doesn't get smashed.
@@ -1920,6 +2016,20 @@ void NativeWidgetNSWindowBridge::CheckAndNotifyZoomedStateChanged() {
   host_->OnWindowZoomedChanged(window_zoomed_);
 }
 
+void NativeWidgetNSWindowBridge::CheckAndNotifyAllWorkspacesStateChanged() {
+  const bool visible_on_all_spaces =
+      ([window_ collectionBehavior] &
+       NSWindowCollectionBehaviorCanJoinAllSpaces) != 0;
+  if (visible_on_all_spaces_ == visible_on_all_spaces) {
+    return;
+  }
+
+  visible_on_all_spaces_ = visible_on_all_spaces;
+
+  // Notify that the window's "visible on all spaces" state has changed.
+  host_->OnVisibleOnAllWorkspacesChanged(visible_on_all_spaces_);
+}
+
 void NativeWidgetNSWindowBridge::NotifyVisibilityChangeDown() {
   // Child windows sometimes like to close themselves in response to visibility
   // changes. That's supported, but only with the asynchronous Widget::Close().
@@ -1956,6 +2066,7 @@ void NativeWidgetNSWindowBridge::UpdateWindowGeometry() {
   host_->OnWindowGeometryChanged(window_in_screen, content_in_screen);
 
   CheckAndNotifyZoomedStateChanged();
+  CheckAndNotifyAllWorkspacesStateChanged();
 
   if (content_resized && !ca_transaction_sync_suppressed_)
     ui::CATransactionCoordinator::Get().Synchronize();
@@ -2035,15 +2146,6 @@ void NativeWidgetNSWindowBridge::ShowAsModalSheet() {
   } else {
     std::move(begin_sheet_closure).Run();
   }
-}
-
-bool NativeWidgetNSWindowBridge::window_visible() const {
-  // In headless mode the platform window is always hidden, so instead of
-  // returning the actual platform window visibility state tracked by
-  // OnVisibilityChanged() callback, return the expected visibility state
-  // maintained by SetVisibilityState() call.
-  return headless_mode_window_ ? headless_mode_window_->visibility_state
-                               : window_visible_;
 }
 
 }  // namespace remote_cocoa

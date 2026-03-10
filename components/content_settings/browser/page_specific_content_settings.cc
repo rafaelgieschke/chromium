@@ -22,9 +22,8 @@
 #include "build/build_config.h"
 #include "components/browsing_data/content/cookie_helper.h"
 #include "components/content_settings/common/content_settings_agent.mojom.h"
-#include "components/content_settings/core/browser/content_settings_info.h"
-#include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/content_settings_utils.h"
+#include "components/content_settings/core/browser/permission_settings_info.h"
 #include "components/content_settings/core/browser/permission_settings_registry.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_pattern_parser.h"
@@ -42,6 +41,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/security_principal.h"
 #include "content/public/browser/trust_token_access_details.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
@@ -744,8 +744,9 @@ void PageSpecificContentSettings::StorageAccessed(
       auto* web_contents = content::WebContents::FromRenderFrameHost(rfh);
       const auto& session_storage_namespace_map =
           web_contents->GetController().GetSessionStorageNamespaceMap();
-      const auto& storage_partition_config =
-          web_contents->GetSiteInstance()->GetStoragePartitionConfig();
+      const auto& storage_partition_config = web_contents->GetSiteInstance()
+                                                 ->GetSecurityPrincipal()
+                                                 .GetStoragePartitionConfig();
       const auto& namespace_id =
           session_storage_namespace_map.at(storage_partition_config);
 
@@ -946,7 +947,7 @@ void PageSpecificContentSettings::OnContentBlocked(ContentSettingsType type) {
     return;
   }
 
-  if (!content_settings::ContentSettingsRegistry::GetInstance()->Get(type)) {
+  if (!content_settings::PermissionSettingsRegistry::GetInstance()->Get(type)) {
     return;
   }
 
@@ -1034,8 +1035,8 @@ void PageSpecificContentSettings::OnTwoSitePermissionChanged(
   switch (content_setting) {
     case CONTENT_SETTING_ASK:
     case CONTENT_SETTING_DEFAULT:
-      if (site_map.contains(requesting_site)) {
-        site_map.erase(requesting_site);
+      if (auto it = site_map.find(requesting_site); it != site_map.end()) {
+        site_map.erase(it);
         access_changed = true;
       }
       break;
@@ -1476,9 +1477,9 @@ void PageSpecificContentSettings::ClearContentSettingsChangedViaPageInfo() {
 }
 
 void PageSpecificContentSettings::BlockAllContentForTesting() {
-  content_settings::ContentSettingsRegistry* registry =
-      content_settings::ContentSettingsRegistry::GetInstance();
-  for (const content_settings::ContentSettingsInfo* info : *registry) {
+  content_settings::PermissionSettingsRegistry* registry =
+      content_settings::PermissionSettingsRegistry::GetInstance();
+  for (const content_settings::PermissionSettingsInfo* info : *registry) {
     ContentSettingsType type = info->website_settings_info()->type();
     if (type != ContentSettingsType::MEDIASTREAM_MIC &&
         type != ContentSettingsType::MEDIASTREAM_CAMERA) {
@@ -1568,8 +1569,11 @@ void PageSpecificContentSettings::OnCapturingStateChanged(
 
   // If `is_capturing` is true, we should not hide an indicator. Erasing an
   // entry from `indicators_hiding_delay_timer_` will stop a dedicated timer.
-  if (indicators_hiding_delay_timer_.contains(type) && is_capturing) {
-    indicators_hiding_delay_timer_.erase(type);
+  if (is_capturing) {
+    if (auto it = indicators_hiding_delay_timer_.find(type);
+        it != indicators_hiding_delay_timer_.end()) {
+      indicators_hiding_delay_timer_.erase(it);
+    }
   }
 
   // Check if media indicators should be hidden.

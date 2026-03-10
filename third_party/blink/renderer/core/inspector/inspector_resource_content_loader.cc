@@ -29,23 +29,7 @@ namespace blink {
 namespace {
 
 bool ShouldSkipFetchingUrl(const KURL& url) {
-  return !url.IsValid() || url.IsAboutBlankURL() || url.IsAboutSrcdocURL();
-}
-
-bool IsServiceWorkerPresent(Document* document) {
-  DocumentLoader* loader = document->Loader();
-  if (!loader)
-    return false;
-
-  if (loader->GetResponse().WasFetchedViaServiceWorker())
-    return true;
-
-  WebServiceWorkerNetworkProvider* provider =
-      loader->GetServiceWorkerNetworkProvider();
-  if (!provider)
-    return false;
-
-  return provider->ControllerServiceWorkerID() >= 0;
+  return !url.IsValid() || url.IsAboutBlankUrl() || url.IsAboutSrcdocUrl();
 }
 
 }  // namespace
@@ -111,16 +95,10 @@ void InspectorResourceContentLoader::Start() {
       resource_request = ResourceRequest(document->Url());
       resource_request.SetCacheMode(mojom::FetchCacheMode::kOnlyIfCached);
     }
+    // kOnlyIfCached requires kSameOrigin mode.
+    resource_request.SetMode(network::mojom::RequestMode::kSameOrigin);
     resource_request.SetRequestContext(
         mojom::blink::RequestContextType::INTERNAL);
-
-    if (IsServiceWorkerPresent(document)) {
-      // If the request is going to be intercepted by a service worker, then
-      // don't use only-if-cached. only-if-cached will cause the service worker
-      // to throw an exception if it repeats the request, which is a problem:
-      // crbug.com/823392 crbug.com/1098389
-      resource_request.SetCacheMode(mojom::FetchCacheMode::kDefault);
-    }
 
     ResourceFetcher* fetcher = document->Fetcher();
 
@@ -177,7 +155,7 @@ void InspectorResourceContentLoader::Start() {
     if (link_element)
       link = link_element->Href();
     if (!ShouldSkipFetchingUrl(link)) {
-      auto use_credentials = EqualIgnoringASCIICase(
+      auto use_credentials = EqualIgnoringAsciiCase(
           link_element->FastGetAttribute(html_names::kCrossoriginAttr),
           "use-credentials");
       ResourceRequest manifest_request(link);

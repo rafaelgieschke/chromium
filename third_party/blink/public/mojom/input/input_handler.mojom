@@ -8,6 +8,7 @@ import "cc/mojom/browser_controls_offset_tag_modifications.mojom";
 import "cc/mojom/browser_controls_state.mojom";
 import "cc/mojom/overscroll_behavior.mojom";
 import "cc/mojom/touch_action.mojom";
+import "mojo/public/mojom/base/big_buffer.mojom";
 import "mojo/public/mojom/base/string16.mojom";
 import "mojo/public/mojom/base/time.mojom";
 import "third_party/blink/public/mojom/input/gesture_event.mojom";
@@ -46,6 +47,8 @@ struct KeyData {
   int32 native_key_code;
   bool is_system_key;
   bool is_browser_shortcut;
+  [EnableIf=is_android]
+  bool is_confirmed_physical_keyboard_input;
   mojo_base.mojom.String16 text;
   mojo_base.mojom.String16 unmodified_text;
 };
@@ -80,6 +83,7 @@ struct WheelData {
   blink.mojom.DispatchType cancelable;
   uint8 event_action;
   uint8 delta_units;
+  blink.mojom.RailsMode rails_mode;
 };
 
 struct MouseData {
@@ -234,6 +238,12 @@ enum PanAction {
   kStylusWritable,
 };
 
+// An enumeration that describes IME state.
+enum ImeState {
+  kNone,
+  kTextSuggestionSelected,
+};
+
 // Interface exposed by the browser to the renderer.
 interface WidgetInputHandlerHost {
   // When the renderer's main thread computes the touch action, send this to the
@@ -364,6 +374,11 @@ interface FrameWidgetInputHandler {
 
   PasteAndMatchStyle();
 
+  // Dispatches a paste event with the given image bytes and file extension to
+  // the currently focused frame. |image_bytes| should be non-empty.
+  PasteFromImageBytes(mojo_base.mojom.BigBuffer image_bytes,
+                      string media_format) => (bool success);
+
   Delete();
 
   SelectAll();
@@ -483,7 +498,8 @@ interface WidgetInputHandler {
                     array<ui.mojom.ImeTextSpan> ime_text_spans,
                     gfx.mojom.Range range,
                     int32 start,
-                    int32 end) => ();
+                    int32 end,
+                    ImeState ime_state) => ();
 
   // This message deletes the current composition, inserts specified text, and
   // moves the cursor.

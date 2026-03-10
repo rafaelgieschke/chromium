@@ -94,6 +94,37 @@
                 "project": "chromium"
               }
             }
+          },
+          {
+            "builder_id": {
+              "bucket": "ci",
+              "builder": "linux-webium-product-rel",
+              "project": "chromium"
+            },
+            "builder_spec": {
+              "builder_group": "chromium.linux",
+              "execution_mode": "TEST",
+              "legacy_chromium_config": {
+                "apply_configs": [
+                  "mb"
+                ],
+                "build_config": "Release",
+                "config": "chromium",
+                "target_bits": 64,
+                "target_platform": "linux"
+              },
+              "legacy_gclient_config": {
+                "apply_configs": [
+                  "use_clang_coverage"
+                ],
+                "config": "chromium"
+              },
+              "parent": {
+                "bucket": "ci",
+                "builder": "Linux Builder",
+                "project": "chromium"
+              }
+            }
           }
         ]
       },
@@ -113,6 +144,11 @@
         {
           "bucket": "ci",
           "builder": "linux-oi-rel",
+          "project": "chromium"
+        },
+        {
+          "bucket": "ci",
+          "builder": "linux-webium-product-rel",
           "project": "chromium"
         }
       ],
@@ -134,17 +170,12 @@
           "group": "tryserver.chromium.linux"
         },
         {
-          "builder": "linux-rel-test-selection",
-          "group": "tryserver.chromium.linux"
-        },
-        {
           "builder": "linux_chromium_compile_rel_ng",
           "group": "tryserver.chromium.linux"
         }
       ],
       "retry_failed_shards": true,
-      "targets_spec_directory": "infra/config/generated/builders/ci/Linux Builder/targets",
-      "targets_spec_directory_relative_to_source_dir": true
+      "targets_spec_directory": "infra/config/generated/builders/ci/Linux Builder/targets"
     }
   },
   "$build/siso": {
@@ -153,11 +184,10 @@
       "remote-link"
     ],
     "enable_cloud_monitoring": true,
-    "enable_cloud_profiler": true,
     "enable_cloud_trace": true,
     "experiments": [],
-    "metrics_project": "chromium-reclient-metrics",
     "output_local_strategy": "minimum",
+    "profile_mode": "cloud",
     "project": "rbe-chromium-trusted",
     "remote_jobs": 500
   },

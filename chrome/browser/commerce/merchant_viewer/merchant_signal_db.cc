@@ -65,7 +65,7 @@ void OnUpdateCallback(
     bool success) {
   DCHECK(success) << "There was an error modifying MerchantSignalDB";
   if (joncomplete_for_testing)
-    base::android::RunRunnableAndroid(joncomplete_for_testing);
+    jni_zero::RunRunnable(joncomplete_for_testing);
 }
 }  // namespace
 
@@ -75,8 +75,8 @@ MerchantSignalDB::MerchantSignalDB(content::BrowserContext* browser_context)
 MerchantSignalDB::~MerchantSignalDB() = default;
 
 void MerchantSignalDB::Save(JNIEnv* env,
-                            std::string& key,
-                            const jlong jtimestamp,
+                            const std::string& key,
+                            const int64_t jtimestamp,
                             const base::android::JavaRef<jobject>& jcallback) {
   MerchantSignalProto proto;
   proto.set_key(key);
@@ -88,7 +88,7 @@ void MerchantSignalDB::Save(JNIEnv* env,
 }
 
 void MerchantSignalDB::Load(JNIEnv* env,
-                            std::string& key,
+                            const std::string& key,
                             const base::android::JavaRef<jobject>& jcallback) {
   proto_db_->LoadOneEntry(
       key,
@@ -98,7 +98,7 @@ void MerchantSignalDB::Load(JNIEnv* env,
 
 void MerchantSignalDB::LoadWithPrefix(
     JNIEnv* env,
-    std::string& prefix,
+    const std::string& prefix,
     const base::android::JavaRef<jobject>& jcallback) {
   proto_db_->LoadContentWithPrefix(
       prefix,
@@ -108,7 +108,7 @@ void MerchantSignalDB::LoadWithPrefix(
 
 void MerchantSignalDB::Delete(
     JNIEnv* env,
-    std::string& key,
+    const std::string& key,
     const base::android::JavaRef<jobject>& joncomplete_for_testing) {
   proto_db_->DeleteOneEntry(
       key, base::BindOnce(&OnUpdateCallback,

@@ -6,11 +6,11 @@ package org.chromium.net.telemetry;
 
 import android.os.Build;
 import android.os.Process;
-import android.util.Log;
 
 import androidx.annotation.RequiresApi;
 import androidx.annotation.VisibleForTesting;
 
+import org.chromium.base.Log;
 import org.chromium.base.metrics.ScopedSysTraceEvent;
 import org.chromium.net.ConnectionCloseSource;
 import org.chromium.net.impl.CronetLogger;
@@ -250,7 +250,8 @@ public class CronetLoggerImpl extends CronetLogger {
                     trafficInfo.getTimeToEstablishSSLMicros(),
                     trafficInfo.getTimeToConnectMicros(),
                     trafficInfo.getTimeToSendFirstByteMicros(),
-                    trafficInfo.getTimeToReceiveHeaderLastByteMicros());
+                    trafficInfo.getTimeToReceiveHeaderLastByteMicros(),
+                    OptionalBoolean.fromBoolean(trafficInfo.isProxied()).getValue());
         } catch (Exception e) {
             // using addAndGet because another thread might have modified samplesRateLimited's value
             mSamplesRateLimited.addAndGet(samplesRateLimitedCount);

@@ -11,6 +11,7 @@
 #include "components/safe_browsing/core/browser/ping_manager.h"
 #include "components/safe_browsing/core/browser/realtime/url_lookup_service_base.h"
 #include "components/safe_browsing/core/browser/web_ui/safe_browsing_ui_util.h"
+#include "services/network/public/mojom/cookie_manager.mojom.h"
 
 namespace sync_pb {
 class GaiaPasswordReuse;
@@ -79,17 +80,11 @@ class WebUIInfoSingleton : public RealTimeUrlLookupServiceBase::WebUIDelegate,
   // chrome://safe-browsing tabs.
   void AddToCSBRRsSent(
       std::unique_ptr<ClientSafeBrowsingReportRequest> csbrr) override;
-  // Add the new message in |hit_reports_sent_| and send it to all the open
-  // chrome://safe-browsing tabs.
-  void AddToHitReportsSent(std::unique_ptr<HitReport> hit_report) override;
 
   // Clear the list of the sent ClientSafeBrowsingReportRequest messages.
   void ClearCSBRRsSent();
 
   void SetOnCSBRRLoggedCallbackForTesting(base::OnceClosure on_done);
-
-  // Clear the list of the sent HitReport messages.
-  void ClearHitReportsSent();
 
   // Add the new message in |pg_event_log_| and send it to all the open
   // chrome://safe-browsing tabs.
@@ -140,25 +135,29 @@ class WebUIInfoSingleton : public RealTimeUrlLookupServiceBase::WebUIDelegate,
   void ClearHPRTLookupPings();
 
   // Log an arbitrary message. Frequently used for debugging.
-  virtual void LogMessage(const std::string& message) = 0;
+  void LogMessage(const std::string& message);
 
   // Clear the log messages.
   void ClearLogMessages();
+
+  // Notify listeners of changes to the log messages.
+  void NotifyLogMessageListeners(const base::Time& timestamp,
+                                 const std::string& message);
 
   // Add the reporting event to |upload_event_requests_| and send it to all the
   // open chrome://safe-browsing tabs.
   void AddToReportingEvents(
       const ::chrome::cros::reporting::proto::UploadEventsRequest& event,
-      const base::Value::Dict& result);
+      const base::DictValue& result);
 
   // Add the reporting event to |reporting_events_| and send it to all the open
   // chrome://safe-browsing tabs.
-  void AddToReportingEvents(const base::Value::Dict& event);
+  void AddToReportingEvents(const base::DictValue& event);
 
   // Clear |reporting_events_| & |upload_event_requests_|.
   void ClearReportingEvents();
 
-#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION) && !BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
   // Add the new request to |deep_scan_requests_| and send it to all the open
   // chrome://safe-browsing tabs. Uses |request.request_token()| as an
   // identifier that can be used in |AddToDeepScanResponses| to correlate a ping
@@ -179,7 +178,9 @@ class WebUIInfoSingleton : public RealTimeUrlLookupServiceBase::WebUIDelegate,
 
   // Clear the list of deep scan requests and responses.
   void ClearDeepScans();
+#endif  // BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
 
+#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION) && !BUILDFLAG(IS_ANDROID)
   // Overwrites any existing override.
   void SetTailoredVerdictOverride(
       ClientDownloadResponse::TailoredVerdict new_value,
@@ -196,6 +197,9 @@ class WebUIInfoSingleton : public RealTimeUrlLookupServiceBase::WebUIDelegate,
   // Unregister the WebUI listener object, and clean the list of reports, if
   // this is last listener.
   void UnregisterWebUIInstance(WebUIInfoSingletonEventObserver* observer);
+
+  mojo::Remote<network::mojom::CookieManager> GetCookieManager(
+      network::mojom::NetworkContext* network_context);
 
   // Get the list of download URLs checked since the oldest currently open
   // chrome://safe-browsing tab was opened.
@@ -238,12 +242,6 @@ class WebUIInfoSingleton : public RealTimeUrlLookupServiceBase::WebUIDelegate,
   const std::vector<std::unique_ptr<ClientSafeBrowsingReportRequest>>&
   csbrrs_sent() const {
     return csbrrs_sent_;
-  }
-
-  // Get the list of the sent HitReports that have been collected since the
-  // oldest currently open chrome://safe-browsing tab was opened.
-  const std::vector<std::unique_ptr<HitReport>>& hit_reports_sent() const {
-    return hit_reports_sent_;
   }
 
   // Get the list of WebUI listener objects.
@@ -302,7 +300,7 @@ class WebUIInfoSingleton : public RealTimeUrlLookupServiceBase::WebUIDelegate,
     return hprt_lookup_responses_;
   }
 
-#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION) && !BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
   // Get the collection of deep scanning requests since the oldest currently
   // open chrome://safe-browsing tab was opened. Returns a map from a unique
   // token to the request proto.
@@ -310,7 +308,9 @@ class WebUIInfoSingleton : public RealTimeUrlLookupServiceBase::WebUIDelegate,
   deep_scan_requests() const {
     return deep_scan_requests_;
   }
+#endif  // BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
 
+#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION) && !BUILDFLAG(IS_ANDROID)
   // Gets the currently registered override data.
   const web_ui::TailoredVerdictOverrideData& tailored_verdict_override() const {
     return tailored_verdict_override_;
@@ -322,13 +322,13 @@ class WebUIInfoSingleton : public RealTimeUrlLookupServiceBase::WebUIDelegate,
     return log_messages_;
   }
 
-  const std::vector<base::Value::Dict>& reporting_events() {
+  const std::vector<base::DictValue>& reporting_events() {
     return reporting_events_;
   }
 
   const std::vector<
       std::pair<::chrome::cros::reporting::proto::UploadEventsRequest,
-                base::Value::Dict>>&
+                base::DictValue>>&
   upload_event_requests() {
     return upload_event_requests_;
   }
@@ -338,6 +338,10 @@ class WebUIInfoSingleton : public RealTimeUrlLookupServiceBase::WebUIDelegate,
   void ClearListenerForTesting();
 
  protected:
+  // Posts the task that logs the message and timestamp to the UI thread runner.
+  virtual void PostLogMessage(base::Time timestamp,
+                              const std::string& message) = 0;
+
   // List of messages logged since the oldest currently open
   // chrome://safe-browsing tab was opened.
   std::vector<std::pair<base::Time, std::string>> log_messages_;
@@ -387,12 +391,6 @@ class WebUIInfoSingleton : public RealTimeUrlLookupServiceBase::WebUIDelegate,
   // Gets fired at the end of the AddToCSBRRsSent function. Only used for tests.
   base::OnceClosure on_csbrr_logged_for_testing_;
 
-  // List of HitReports sent since since the oldest currently open
-  // chrome://safe-browsing tab was opened.
-  // "HitReport" cannot be const, due to being used by
-  // functions that call AllowJavascript(), which is not marked const.
-  std::vector<std::unique_ptr<HitReport>> hit_reports_sent_;
-
   // List of PhishGuard events sent since the oldest currently open
   // chrome://safe-browsing tab was opened.
   std::vector<sync_pb::UserEventSpecifics> pg_event_log_;
@@ -436,17 +434,19 @@ class WebUIInfoSingleton : public RealTimeUrlLookupServiceBase::WebUIDelegate,
 
   // List of reporting events logged since the oldest currently open
   // chrome://safe-browsing tab was opened.
-  std::vector<base::Value::Dict> reporting_events_;
+  std::vector<base::DictValue> reporting_events_;
   std::vector<std::pair<::chrome::cros::reporting::proto::UploadEventsRequest,
-                        base::Value::Dict>>
+                        base::DictValue>>
       upload_event_requests_;
 
-#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION) && !BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
   // Map of deep scan requests sent since the oldest currently open
   // chrome://safe-browsing tab was opened. Maps from the unique token per
   // request to the data about the request.
   base::flat_map<std::string, web_ui::DeepScanDebugData> deep_scan_requests_;
+#endif  // BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
 
+#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION) && !BUILDFLAG(IS_ANDROID)
   // Local override of download TailoredVerdict.
   web_ui::TailoredVerdictOverrideData tailored_verdict_override_;
 #endif  // BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION) &&

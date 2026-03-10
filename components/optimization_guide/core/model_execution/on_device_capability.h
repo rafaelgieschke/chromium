@@ -15,7 +15,6 @@
 #include "components/optimization_guide/core/model_execution/multimodal_message.h"
 #include "components/optimization_guide/proto/model_execution.pb.h"
 #include "components/optimization_guide/proto/model_quality_metadata.pb.h"
-#include "components/optimization_guide/public/mojom/model_broker.mojom-shared.h"
 #include "components/optimization_guide/public/mojom/model_broker.mojom.h"
 #include "services/on_device_model/public/cpp/capabilities.h"
 #include "services/on_device_model/public/mojom/on_device_model.mojom.h"
@@ -97,6 +96,11 @@ using OptimizationGuideModelExecutionResultStreamingCallback =
 // The callback for receiving the token size of the given input.
 using OptimizationGuideModelSizeInTokenCallback =
     base::OnceCallback<void(std::optional<uint32_t>)>;
+
+// The callback for adding a download progress observer to
+// OnDeviceModelDownloadProgressManager.
+using AddDownloadProgressObserverCallback = base::RepeatingCallback<void(
+    mojo::PendingRemote<on_device_model::mojom::DownloadObserver>)>;
 
 // Params used to control sampling output tokens for the on-device model.
 struct SamplingParams {

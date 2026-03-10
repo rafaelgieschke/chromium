@@ -6,11 +6,10 @@
 
 #include <string>
 
-#include "base/containers/contains.h"
-#include "base/functional/bind.h"
-#include "base/functional/callback.h"
+#include "base/functional/function_ref.h"
 #include "net/http/http_util.h"
 #include "services/network/public/cpp/cors/cors.h"
+#include "services/network/public/cpp/features.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
@@ -59,50 +58,40 @@ class HTTPHeaderNameListParser {
         return;
       }
 
-      output.insert(value_.Substring(token_start, token_size).Ascii());
+      output.insert(value_.substr(token_start, token_size).Ascii());
       ConsumeSpaces();
 
-      if (pos_ == value_.length())
+      if (pos_ == value_.length()) {
         return;
-
-      if (value_[pos_] == ',') {
-        if (pos_ < value_.length())
-          ++pos_;
-      } else {
+      }
+      if (value_[pos_] != ',') {
         output.clear();
         return;
       }
+      ++pos_;
     }
   }
 
  private:
-  void ConsumePermittedCharacters(
-      base::RepeatingCallback<bool(UChar)> is_permitted) {
-    while (true) {
-      if (pos_ == value_.length())
-        return;
-
-      if (!is_permitted.Run(value_[pos_]))
-        return;
+  void ConsumeWhile(base::FunctionRef<bool(UChar)> match) {
+    while (pos_ < value_.length() && match(value_[pos_])) {
       ++pos_;
     }
   }
   // Consumes zero or more spaces (SP and HTAB) from value_.
   void ConsumeSpaces() {
-    ConsumePermittedCharacters(
-        base::BindRepeating([](UChar c) { return c == ' ' || c == '\t'; }));
+    ConsumeWhile([](UChar c) { return c == ' ' || c == '\t'; });
   }
 
   // Consumes zero or more comma from value_.
   void ConsumeComma() {
-    ConsumePermittedCharacters(
-        base::BindRepeating([](UChar c) { return c == ','; }));
+    ConsumeWhile([](UChar c) { return c == ','; });
   }
 
   // Consumes zero or more tchars from value_.
   void ConsumeTokenChars() {
-    ConsumePermittedCharacters(base::BindRepeating(
-        [](UChar c) { return c <= 0x7F && net::HttpUtil::IsTokenChar(c); }));
+    ConsumeWhile(
+        [](UChar c) { return c <= 0x7F && net::HttpUtil::IsTokenChar(c); });
   }
 
   const String value_;
@@ -205,7 +194,7 @@ HTTPHeaderSet ExtractCorsExposedHeaderNamesList(
   parser.Parse(header_set);
 
   if (credentials_mode != network::mojom::CredentialsMode::kInclude &&
-      base::Contains(header_set, "*")) {
+      header_set.contains("*")) {
     header_set.clear();
     for (const auto& header : response.HttpHeaderFields())
       header_set.insert(header.key.Ascii());
@@ -227,7 +216,7 @@ bool IsCorsSafelistedResponseHeader(const String& name) {
                                       "last-modified",
                                       "pragma",
                                   }));
-  return base::Contains(allowed_cross_origin_response_headers, name.Ascii());
+  return allowed_cross_origin_response_headers.contains(name.Ascii());
 }
 
 // In the spec, https://fetch.spec.whatwg.org/#ref-for-concept-request-mode,
@@ -251,6 +240,11 @@ bool IsNoCorsAllowedContext(mojom::blink::RequestContextType context) {
     default:
       return false;
   }
+}
+
+bool IsBypassRequestForbiddenHeadersCheckEnabled() {
+  return base::FeatureList::IsEnabled(
+      network::features::kBypassRequestForbiddenHeadersCheck);
 }
 
 }  // namespace cors

@@ -11,6 +11,7 @@
 #include "chrome/browser/ash/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/ash/settings/device_settings_service.h"
 #include "chrome/browser/ash/settings/scoped_cros_settings_test_helper.h"
+#include "chrome/browser/global_features.h"
 #include "chrome/browser/ui/ash/login/mock_login_display_host.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chromeos/ash/components/dbus/session_manager/fake_session_manager_client.h"
@@ -49,7 +50,11 @@ class ExistingUserControllerAutoLoginTest : public ::testing::Test {
   }
 
   void SetUp() override {
-    existing_user_controller_ = std::make_unique<ExistingUserController>();
+    existing_user_controller_ = std::make_unique<ExistingUserController>(
+        TestingBrowserProcess::GetGlobal()->local_state(),
+        TestingBrowserProcess::GetGlobal()
+            ->GetFeatures()
+            ->application_locale_storage());
     mock_login_display_host_ = std::make_unique<MockLoginDisplayHost>();
 
     ON_CALL(*mock_login_display_host_, GetExistingUserController())
@@ -64,12 +69,12 @@ class ExistingUserControllerAutoLoginTest : public ::testing::Test {
         FakeSessionManagerClient::Get(), new ownership::MockOwnerKeyUtil());
     DeviceSettingsService::Get()->Load();
 
-    base::Value::Dict account;
+    base::DictValue account;
     account.Set(kAccountsPrefDeviceLocalAccountsKeyId, auto_login_user_id_);
     account.Set(
         kAccountsPrefDeviceLocalAccountsKeyType,
         static_cast<int>(policy::DeviceLocalAccountType::kPublicSession));
-    base::Value::List accounts;
+    base::ListValue accounts;
     accounts.Append(std::move(account));
     settings_helper_.Set(kAccountsPrefDeviceLocalAccounts,
                          base::Value(std::move(accounts)));

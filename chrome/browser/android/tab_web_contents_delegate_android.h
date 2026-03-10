@@ -111,8 +111,11 @@ class TabWebContentsDelegateAndroid
   void RequestPointerLock(content::WebContents* web_contents,
                           bool user_gesture,
                           bool last_unlocked_by_target) override;
-
   void LostPointerLock() override;
+  void GetAIPageContent(
+      content::WebContents* web_contents,
+      bool include_actionable_elements,
+      base::OnceCallback<void(const std::string&)> callback) override;
 
 #if BUILDFLAG(ENABLE_PRINTING)
   void PrintCrossProcessSubframe(
@@ -136,7 +139,7 @@ class TabWebContentsDelegateAndroid
 
   bool ShouldEnableEmbeddedMediaExperience() const;
   bool IsPictureInPictureEnabled() const;
-  bool IsNightModeEnabled() const;
+  virtual bool IsNightModeEnabled() const;
   bool IsForceDarkWebContentEnabled() const;
   bool CanShowAppBanners() const;
 

@@ -27,17 +27,17 @@ import {MostRelevantTabResumptionProxyImpl} from './most_relevant_tab_resumption
 
 export const MAX_URL_VISITS = 5;
 
-export interface ModuleElement {
+export interface MostRelevantTabResumptionModuleElement {
   $: {
-    moduleHeaderElementV2: ModuleHeaderElement,
+    moduleHeader: ModuleHeaderElement,
     urlVisits: HTMLElement,
   };
 }
 
-export class ModuleElement extends I18nMixinLit
+export class MostRelevantTabResumptionModuleElement extends I18nMixinLit
 (CrLitElement) {
   static get is() {
-    return 'ntp-most-relevant-tab-resumption';
+    return 'ntp-most-relevant-tab-resumption-module';
   }
 
   static override get styles() {
@@ -117,7 +117,7 @@ export class ModuleElement extends I18nMixinLit
     });
   }
 
-  protected onDismissAllButtonClick_() {
+  protected onHeaderDismissButtonClick_() {
     MostRelevantTabResumptionProxyImpl.getInstance().handler.dismissModule(
         this.urlVisits);
     this.fire('dismiss-module-instance', {
@@ -191,7 +191,7 @@ export class ModuleElement extends I18nMixinLit
   }
 
   protected computeDomain_(urlVisit: URLVisit): string {
-    let domain = (new URL(urlVisit.url.url)).hostname;
+    let domain = (new URL(urlVisit.url)).hostname;
     domain = domain.replace('www.', '');
     return domain;
   }
@@ -236,16 +236,28 @@ export class ModuleElement extends I18nMixinLit
   }
 }
 
-customElements.define(ModuleElement.is, ModuleElement);
+export type ModuleElement = MostRelevantTabResumptionModuleElement;
 
-async function createElement(): Promise<ModuleElement|null> {
+declare global {
+  interface HTMLElementTagNameMap {
+    'ntp-most-relevant-tab-resumption-module':
+        MostRelevantTabResumptionModuleElement;
+  }
+}
+
+customElements.define(
+    MostRelevantTabResumptionModuleElement.is,
+    MostRelevantTabResumptionModuleElement);
+
+async function createElement():
+    Promise<MostRelevantTabResumptionModuleElement|null> {
   const {urlVisits} = await MostRelevantTabResumptionProxyImpl.getInstance()
                           .handler.getURLVisits();
   if (!urlVisits || urlVisits.length === 0) {
     return null;
   }
 
-  const element = new ModuleElement();
+  const element = new MostRelevantTabResumptionModuleElement();
   element.urlVisits = urlVisits;
 
   urlVisits.slice(0, MAX_URL_VISITS).forEach((urlVisit) => {

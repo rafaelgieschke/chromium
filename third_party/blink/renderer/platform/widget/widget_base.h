@@ -179,6 +179,7 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
       cc::PaintHoldingReason reason,
       std::optional<cc::PaintHoldingCommitTrigger> trigger) override;
   void OnCommitRequested() override;
+  void WillBeginImplCommit() override;
   void DidBeginMainFrame() override;
   void RequestNewLayerTreeFrameSink(
       LayerTreeFrameSinkCallback callback) override;
@@ -271,7 +272,8 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
                          const Vector<ui::ImeTextSpan>& ime_text_spans,
                          const gfx::Range& replacement_range,
                          int selection_start,
-                         int selection_end);
+                         int selection_end,
+                         mojom::blink::ImeState ime_state);
   void ImeCommitText(const String& text,
                      const Vector<ui::ImeTextSpan>& ime_text_spans,
                      const gfx::Range& replacement_range,
@@ -406,6 +408,10 @@ class PLATFORM_EXPORT WidgetBase : public mojom::blink::Widget,
 
   // Helper to get the non-emulated device scale factor.
   float GetOriginalDeviceScaleFactor() const;
+
+  // Indicates a change in scheduling needs that should be forwarded to viz.
+  void RequestEfficientScheduling(
+      bool prefer_efficient_scheduling) const override;
 
  private:
   static void AssertAreCompatible(const WidgetBase& a, const WidgetBase& b);

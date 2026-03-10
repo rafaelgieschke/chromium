@@ -45,6 +45,7 @@
 #include "components/autofill/core/browser/payments/autofill_save_card_ui_info.h"
 #include "components/autofill/core/browser/payments/bnpl_util.h"
 #include "components/autofill/core/browser/test_utils/autofill_test_utils.h"
+#include "components/feature_engagement/public/feature_constants.h"
 #include "components/feature_engagement/test/mock_tracker.h"
 #include "ui/android/window_android.h"
 #else  // !BUILDFLAG(IS_ANDROID)
@@ -146,6 +147,7 @@ class MockSaveCardBubbleController : public SaveCardBubbleControllerImpl {
       void,
       ShowConfirmationBubbleView,
       (bool,
+       bool,
        std::optional<
            payments::PaymentsAutofillClient::OnConfirmationClosedCallback>),
       (override));
@@ -363,70 +365,6 @@ TEST_F(ChromePaymentsAutofillClientTest,
       payments::ChromePaymentsAutofillClient::SaveCreditCardOptions()
           .with_show_prompt(true),
       base::DoNothing()));
-}
-
-// Verify that the prompt to upload save a user's card without CVC is shown in a
-// bottom sheet.
-TEST_F(ChromePaymentsAutofillClientTest,
-       ShowSaveCreditCardToCloud_CardSaveTypeIsOnlyCard_RequestsBottomSheet) {
-  MockAutofillSaveCardBottomSheetBridge* bottom_sheet_bridge =
-      InjectMockAutofillSaveCardBottomSheetBridge();
-
-  std::u16string expected_description;
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  expected_description =
-      u"To pay faster next time, save your card and billing address in your "
-      u"Google Account";
-#endif
-
-  // Verify that `AutofillSaveCardUiInfo` has the correct attributes that
-  // indicate upload save card prompt without CVC.
-  EXPECT_CALL(*bottom_sheet_bridge,
-              RequestShowContent(
-                  AllOf(Field(&AutofillSaveCardUiInfo::is_for_upload, true),
-                        Field(&AutofillSaveCardUiInfo::description_text,
-                              expected_description)),
-                  NotNull()));
-
-  chrome_payments_client()->ShowSaveCreditCardToCloud(
-      CreditCard(), LegalMessageLines(),
-      payments::ChromePaymentsAutofillClient::SaveCreditCardOptions()
-          .with_card_save_type(payments::ChromePaymentsAutofillClient::
-                                   CardSaveType::kCardSaveOnly)
-          .with_show_prompt(true),
-      base::DoNothing());
-}
-
-// Verify that the prompt to upload save a user's card with CVC is shown in a
-// bottom sheet.
-TEST_F(ChromePaymentsAutofillClientTest,
-       ShowSaveCreditCardToCloud_CardSaveTypeIsWithCvc_RequestsBottomSheet) {
-  MockAutofillSaveCardBottomSheetBridge* bottom_sheet_bridge =
-      InjectMockAutofillSaveCardBottomSheetBridge();
-
-  std::u16string expected_description;
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  expected_description =
-      u"Pay faster when your card is saved. Card details are encrypted in "
-      u"your Google Account.";
-#endif
-
-  // Verify that `AutofillSaveCardUiInfo` has the correct attributes that
-  // indicate upload save card prompt with CVC.
-  EXPECT_CALL(*bottom_sheet_bridge,
-              RequestShowContent(
-                  AllOf(Field(&AutofillSaveCardUiInfo::is_for_upload, true),
-                        Field(&AutofillSaveCardUiInfo::description_text,
-                              expected_description)),
-                  NotNull()));
-
-  chrome_payments_client()->ShowSaveCreditCardToCloud(
-      CreditCard(), LegalMessageLines(),
-      payments::ChromePaymentsAutofillClient::SaveCreditCardOptions()
-          .with_card_save_type(payments::ChromePaymentsAutofillClient::
-                                   CardSaveType::kCardSaveWithCvc)
-          .with_show_prompt(true),
-      base::DoNothing());
 }
 
 TEST_F(ChromePaymentsAutofillClientTest,
@@ -664,9 +602,9 @@ TEST_F(ChromePaymentsAutofillClientTest,
   chrome_payments_client()->OnCardDataAvailable(options);
 }
 
-// Test that calling `ShowLoyaltyCards` passes the correct lists of loyalty
-// cards.
-TEST_F(ChromePaymentsAutofillClientTest, ShowTouchToFillLoyaltyCard) {
+// Test that calling `ShowAffiliatedLoyaltyCards` passes the correct lists of
+// loyalty cards.
+TEST_F(ChromePaymentsAutofillClientTest, ShowTouchToFillAffiliatedLoyaltyCard) {
   MockTouchToFillPaymentMethodController* ttf_payment_method_controller =
       InjectMockTouchToFillPaymentMethodController();
 
@@ -675,32 +613,35 @@ TEST_F(ChromePaymentsAutofillClientTest, ShowTouchToFillLoyaltyCard) {
       /*merchant_name=*/"Walgreens",
       /*program_name=*/"CustomerCard",
       /*program_logo=*/GURL(""),
-      /*loyalty_card_number=*/"998766823", {GURL("https://example.com")});
-  const LoyaltyCard affiliated_card_2 =
-      LoyaltyCard(/*loyalty_card_id=*/ValuableId("id_3"),
-                  /*merchant_name=*/"Ticket Maester",
-                  /*program_name=*/"TourLoyal",
-                  /*program_logo=*/GURL(""),
-                  /*loyalty_card_number=*/"37262999281",
-                  {GURL("https://affiliated.example.com")});
+      /*loyalty_card_number=*/"998766823",
+      /*merchant_domains=*/{GURL("https://example.com")},
+      /*use_date=*/{}, /*use_count=*/0);
+  const LoyaltyCard affiliated_card_2 = LoyaltyCard(
+      /*loyalty_card_id=*/ValuableId("id_3"),
+      /*merchant_name=*/"Ticket Maester",
+      /*program_name=*/"TourLoyal",
+      /*program_logo=*/GURL(""),
+      /*loyalty_card_number=*/"37262999281",
+      /*merchant_domains=*/{GURL("https://affiliated.example.com")},
+      /*use_date=*/{}, /*use_count=*/0);
   content::WebContentsTester::For(web_contents())
       ->NavigateAndCommit(GURL("https://example.com"));
 
   const std::vector<LoyaltyCard> cards = {CreateLoyaltyCard(),
                                           affiliated_card_1, affiliated_card_2};
-  EXPECT_CALL(
-      *ttf_payment_method_controller,
-      ShowLoyaltyCards(_, _, ElementsAre(affiliated_card_1, affiliated_card_2),
-                       ElementsAreArray(cards), _));
+  EXPECT_CALL(*ttf_payment_method_controller,
+              ShowAffiliatedLoyaltyCards(
+                  _, _, ElementsAre(affiliated_card_1, affiliated_card_2),
+                  ElementsAreArray(cards), _));
 
-  chrome_payments_client()->ShowTouchToFillLoyaltyCard(/*delegate=*/nullptr,
-                                                       cards);
+  chrome_payments_client()->ShowTouchToFillAffiliatedLoyaltyCard(
+      /*delegate=*/nullptr, cards);
 }
 
-// Test that calling ShowLoyaltyCards checks/updates for IPH status correctly if
-// IPH was never shown before.
+// Test that calling ShowAffiliatedLoyaltyCards checks/updates for IPH status
+// correctly if IPH was never shown before.
 TEST_F(ChromePaymentsAutofillClientTest,
-       ShowTouchToFillLoyaltyCardFirstTimeUsage) {
+       ShowTouchToFillAffiliatedLoyaltyCardFirstTimeUsage) {
   MockTouchToFillPaymentMethodController* ttf_payment_method_controller =
       InjectMockTouchToFillPaymentMethodController();
   InjectFeatureEngagementMockTracker();
@@ -717,20 +658,20 @@ TEST_F(ChromePaymentsAutofillClientTest,
       ->NavigateAndCommit(GURL("https://example.com"));
 
   EXPECT_CALL(*ttf_payment_method_controller,
-              ShowLoyaltyCards(_, _, _, _,
-                               /*first_time_usage=*/true))
+              ShowAffiliatedLoyaltyCards(_, _, _, _,
+                                         /*first_time_usage=*/true))
       .WillOnce(Return(true));
   EXPECT_CALL(*tracker,
               NotifyEvent("keyboard_accessory_loyalty_cards_autofilled"));
 
-  chrome_payments_client()->ShowTouchToFillLoyaltyCard(/*delegate=*/nullptr,
-                                                       {CreateLoyaltyCard()});
+  chrome_payments_client()->ShowTouchToFillAffiliatedLoyaltyCard(
+      /*delegate=*/nullptr, {CreateLoyaltyCard()});
 }
 
-// Test that calling ShowLoyaltyCards does not update IPH status if IPH already
-// shown.
+// Test that calling ShowAffiliatedLoyaltyCards does not update IPH status if
+// IPH already shown.
 TEST_F(ChromePaymentsAutofillClientTest,
-       ShowTouchToFillLoyaltyCardNotFirstTimeUsage) {
+       ShowTouchToFillAffiliatedLoyaltyCardNotFirstTimeUsage) {
   MockTouchToFillPaymentMethodController* ttf_payment_method_controller =
       InjectMockTouchToFillPaymentMethodController();
   InjectFeatureEngagementMockTracker();
@@ -747,15 +688,15 @@ TEST_F(ChromePaymentsAutofillClientTest,
       ->NavigateAndCommit(GURL("https://example.com"));
 
   EXPECT_CALL(*ttf_payment_method_controller,
-              ShowLoyaltyCards(_, _, _, _,
-                               /*first_time_usage=*/false))
+              ShowAffiliatedLoyaltyCards(_, _, _, _,
+                                         /*first_time_usage=*/false))
       .WillOnce(Return(true));
   EXPECT_CALL(*tracker,
               NotifyEvent("keyboard_accessory_loyalty_cards_autofilled"))
       .Times(0);
 
-  chrome_payments_client()->ShowTouchToFillLoyaltyCard(/*delegate=*/nullptr,
-                                                       {CreateLoyaltyCard()});
+  chrome_payments_client()->ShowTouchToFillAffiliatedLoyaltyCard(
+      /*delegate=*/nullptr, {CreateLoyaltyCard()});
 }
 
 TEST_F(ChromePaymentsAutofillClientTest, ShowTouchToFillBnplIssuers) {
@@ -830,7 +771,8 @@ TEST_F(ChromePaymentsAutofillClientTest,
 TEST_F(ChromePaymentsAutofillClientTest,
        CreditCardUploadCompletedSuccess_CallsShowConfirmationBubbleView) {
   EXPECT_CALL(save_card_bubble_controller(),
-              ShowConfirmationBubbleView(true, _));
+              ShowConfirmationBubbleView(/*card_saved=*/true,
+                                         /*is_for_save_and_fill=*/true, _));
   chrome_payments_client()->CreditCardUploadCompleted(
       payments::PaymentsAutofillClient::PaymentsRpcResult::kSuccess,
       std::nullopt);
@@ -842,7 +784,8 @@ TEST_F(ChromePaymentsAutofillClientTest,
 TEST_F(ChromePaymentsAutofillClientTest,
        CreditCardUploadCompletedFailure_CallsShowConfirmationBubbleView) {
   EXPECT_CALL(save_card_bubble_controller(),
-              ShowConfirmationBubbleView(false, _));
+              ShowConfirmationBubbleView(/*card_saved=*/false,
+                                         /*is_for_save_and_fill=*/false, _));
   chrome_payments_client()->CreditCardUploadCompleted(
       payments::PaymentsAutofillClient::PaymentsRpcResult::kPermanentFailure,
       std::nullopt);
@@ -855,7 +798,8 @@ TEST_F(
     CreditCardUploadCompletedClientSideTimeout_CallsShowConfirmationBubbleView) {
   EXPECT_CALL(save_card_bubble_controller(), HideSaveCardBubble());
   EXPECT_CALL(save_card_bubble_controller(),
-              ShowConfirmationBubbleView(false, _))
+              ShowConfirmationBubbleView(/*card_saved=*/false,
+                                         /*is_for_save_and_fill=*/false, _))
       .Times(0);
   chrome_payments_client()->CreditCardUploadCompleted(
       payments::PaymentsAutofillClient::PaymentsRpcResult::kClientSideTimeout,
@@ -924,6 +868,100 @@ TEST_F(ChromePaymentsAutofillClientTest, DisablePaymentsAutofill) {
   EXPECT_FALSE(chrome_payments_client()->IsAutofillPaymentMethodsEnabled());
 }
 
+#if BUILDFLAG(IS_ANDROID)
+class ChromePaymentsAutofillClientWalletBrandingTest
+    : public ChromePaymentsAutofillClientTest,
+      public testing::WithParamInterface<bool> {
+ public:
+  ChromePaymentsAutofillClientWalletBrandingTest() {
+    if (IsWalletBrandingEnabled()) {
+      feature_list_.InitAndEnableFeature(
+          features::kAutofillEnableWalletBranding);
+    } else {
+      feature_list_.InitAndDisableFeature(
+          features::kAutofillEnableWalletBranding);
+    }
+  }
+
+  bool IsWalletBrandingEnabled() { return GetParam(); }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+INSTANTIATE_TEST_SUITE_P(,
+                         ChromePaymentsAutofillClientWalletBrandingTest,
+                         testing::Bool());
+
+// Verify that the prompt to upload save a user's card without CVC is shown in a
+// bottom sheet.
+TEST_P(ChromePaymentsAutofillClientWalletBrandingTest,
+       ShowSaveCreditCardToCloud_CardSaveTypeIsOnlyCard_RequestsBottomSheet) {
+  MockAutofillSaveCardBottomSheetBridge* bottom_sheet_bridge =
+      InjectMockAutofillSaveCardBottomSheetBridge();
+
+  std::u16string expected_description;
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  expected_description = IsWalletBrandingEnabled()
+                             ? u"To pay faster next time, save your card and "
+                               u"billing address in Google Wallet"
+                             : u"To pay faster next time, save your card and "
+                               u"billing address in your Google Account";
+#endif
+
+  // Verify that `AutofillSaveCardUiInfo` has the correct attributes
+  // that indicate upload save card prompt without CVC.
+  EXPECT_CALL(*bottom_sheet_bridge,
+              RequestShowContent(
+                  AllOf(Field(&AutofillSaveCardUiInfo::is_for_upload, true),
+                        Field(&AutofillSaveCardUiInfo::description_text,
+                              expected_description)),
+                  NotNull()));
+
+  chrome_payments_client()->ShowSaveCreditCardToCloud(
+      CreditCard(), LegalMessageLines(),
+      payments::ChromePaymentsAutofillClient::SaveCreditCardOptions()
+          .with_card_save_type(payments::ChromePaymentsAutofillClient::
+                                   CardSaveType::kCardSaveOnly)
+          .with_show_prompt(true),
+      base::DoNothing());
+}
+
+// Verify that the prompt to upload save a user's card with CVC is shown in a
+// bottom sheet.
+TEST_P(ChromePaymentsAutofillClientWalletBrandingTest,
+       ShowSaveCreditCardToCloud_CardSaveTypeIsWithCvc_RequestsBottomSheet) {
+  MockAutofillSaveCardBottomSheetBridge* bottom_sheet_bridge =
+      InjectMockAutofillSaveCardBottomSheetBridge();
+
+  std::u16string expected_description;
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  expected_description = IsWalletBrandingEnabled()
+                             ? u"Pay faster when your card is saved. Card "
+                               u"details are encrypted in Google Wallet."
+                             : u"Pay faster when your card is saved. Card "
+                               u"details are encrypted in your Google Account.";
+#endif
+
+  // Verify that `AutofillSaveCardUiInfo` has the correct attributes
+  // that indicate upload save card prompt with CVC.
+  EXPECT_CALL(*bottom_sheet_bridge,
+              RequestShowContent(
+                  AllOf(Field(&AutofillSaveCardUiInfo::is_for_upload, true),
+                        Field(&AutofillSaveCardUiInfo::description_text,
+                              expected_description)),
+                  NotNull()));
+
+  chrome_payments_client()->ShowSaveCreditCardToCloud(
+      CreditCard(), LegalMessageLines(),
+      payments::ChromePaymentsAutofillClient::SaveCreditCardOptions()
+          .with_card_save_type(payments::ChromePaymentsAutofillClient::
+                                   CardSaveType::kCardSaveWithCvc)
+          .with_show_prompt(true),
+      base::DoNothing());
+}
+#endif  // BUILDFLAG(IS_ANDROID)
+
 #if !BUILDFLAG(IS_ANDROID)
 class ChromePaymentsAutofillIOSPromoClientTest
     : public ChromePaymentsAutofillClientTest {
@@ -946,7 +984,8 @@ class ChromePaymentsAutofillIOSPromoClientTest
 TEST_F(ChromePaymentsAutofillIOSPromoClientTest,
        IOSPaymentPromoFailedToShow_CallsShowConfirmationBubbleView) {
   EXPECT_CALL(save_card_bubble_controller(),
-              ShowConfirmationBubbleView(true, _));
+              ShowConfirmationBubbleView(/*card_saved=*/true,
+                                         /*is_for_save_and_fill=*/true, _));
   chrome_payments_client()->CreditCardUploadCompleted(
       payments::PaymentsAutofillClient::PaymentsRpcResult::kSuccess,
       std::nullopt);

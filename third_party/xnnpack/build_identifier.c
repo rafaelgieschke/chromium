@@ -576,8 +576,9 @@
 // - external/xnnpack+/src/qd8-f32-qb4w-gemm/gen/qd8-f32-qb4w-gemm-4x4c8-minmax-avx-ld128.c
 // - external/xnnpack+/src/qd8-f32-qb4w-gemm/gen/qd8-f32-qb4w-gemm-4x4c8-minmax-sse2-ld128.c
 // - external/xnnpack+/src/qd8-f32-qb4w-gemm/gen/qd8-f32-qb4w-gemm-8x16c8-minmax-avx512vnni-prfm.c
-// - external/xnnpack+/src/qd8-f32-qc2w-gemm/gen/qd8-f32-qc2w-gemm-1x4-minmax-scalar.c
-// - external/xnnpack+/src/qd8-f32-qc2w-gemm/gen/qd8-f32-qc2w-gemm-4x4-minmax-scalar.c
+// - external/xnnpack+/src/qd8-f32-qc2w-gemm/gen/qd8-f32-qc2w-gemm-1x2-minmax-scalar.c
+// - external/xnnpack+/src/qd8-f32-qc2w-gemm/gen/qd8-f32-qc2w-gemm-1x8c8-minmax-avx2-madd.c
+// - external/xnnpack+/src/qd8-f32-qc2w-gemm/gen/qd8-f32-qc2w-gemm-8x8c8-minmax-avx2-madd.c
 // - external/xnnpack+/src/qd8-f32-qc4w-gemm/gen/qd8-f32-qc4w-gemm-14x16c8-minmax-avx512vnnigfni-prfm.c
 // - external/xnnpack+/src/qd8-f32-qc4w-gemm/gen/qd8-f32-qc4w-gemm-16x64c4-minmax-avx512amx.c
 // - external/xnnpack+/src/qd8-f32-qc4w-gemm/gen/qd8-f32-qc4w-gemm-1x16c8-minmax-avx512skx-madd-prfm.c
@@ -669,6 +670,14 @@
 // - external/xnnpack+/src/qs8-packw/gen/qs8-packw-x8c8-gemm-goi-avx256vnni-prfm.c
 // - external/xnnpack+/src/qs8-packw/gen/qs8-packw-x8c8-gemm-goi-avxvnni-prfm.c
 // - external/xnnpack+/src/qs8-packw/gen/qs8-packw-x8c8-gemm-goi-avxvnni.c
+// - external/xnnpack+/src/qs8-qc2w-gemm/gen/qs8-qc2w-gemm-1x2-minmax-fp32-scalar-fmagic.c
+// - external/xnnpack+/src/qs8-qc2w-gemm/gen/qs8-qc2w-gemm-1x4-minmax-fp32-scalar-fmagic.c
+// - external/xnnpack+/src/qs8-qc2w-gemm/gen/qs8-qc2w-gemm-1x8c8-minmax-avx2-madd.c
+// - external/xnnpack+/src/qs8-qc2w-gemm/gen/qs8-qc2w-gemm-1x8c8-minmax-avx256skx-madd.c
+// - external/xnnpack+/src/qs8-qc2w-gemm/gen/qs8-qc2w-gemm-3x4-minmax-fp32-scalar-fmagic.c
+// - external/xnnpack+/src/qs8-qc2w-gemm/gen/qs8-qc2w-gemm-4x4-minmax-fp32-scalar-fmagic.c
+// - external/xnnpack+/src/qs8-qc2w-gemm/gen/qs8-qc2w-gemm-5x8c8-minmax-avx2-madd.c
+// - external/xnnpack+/src/qs8-qc2w-gemm/gen/qs8-qc2w-gemm-5x8c8-minmax-avx256skx-madd.c
 // - external/xnnpack+/src/qs8-qc4w-gemm/gen/qs8-qc4w-gemm-1x16c8-minmax-fp32-asm-amd64-avx512vnni.S
 // - external/xnnpack+/src/qs8-qc4w-gemm/gen/qs8-qc4w-gemm-1x16c8-minmax-fp32-avx512skx-madd-prfm.c
 // - external/xnnpack+/src/qs8-qc4w-gemm/gen/qs8-qc4w-gemm-1x16c8-minmax-fp32-avx512vnnigfni-prfm.c
@@ -1008,10 +1017,10 @@
 #include <string.h>
 
 static const uint8_t xnn_build_identifier[] = {
-   72, 126, 216, 186,  30, 226,  40, 178,
-   83, 195, 201, 251, 117,  20,   4, 207,
-  174,  67,  79,   3,  52,  62, 212, 215,
-  246, 129, 151, 220,  97, 184, 137, 170
+  121,  18, 147, 234, 134, 220, 237,   1,
+   80, 148, 246,  18,   5, 110,   9,  34,
+  154, 129,  60,   0,   3,  83, 140, 143,
+  209, 203,  32, 204, 180,  64,  29, 235
 };
 
 size_t xnn_experimental_get_build_identifier_size() {

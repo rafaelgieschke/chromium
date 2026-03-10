@@ -134,8 +134,8 @@ class GraphImplTflite::ComputeResources {
   Create(mojom::Device context_device,
          GraphBuilderTflite::Result build_graph_result) {
     auto self = std::make_unique<ComputeResources>(
-        std::move(build_graph_result.input_name_to_index),
-        std::move(build_graph_result.output_name_to_index));
+        std::move(build_graph_result.input_name_to_descriptor),
+        std::move(build_graph_result.output_name_to_descriptor));
 
     self->model_content_ = std::move(build_graph_result.buffer);
     self->model_ = ::tflite::FlatBufferModel::BuildFromBuffer(
@@ -153,14 +153,17 @@ class GraphImplTflite::ComputeResources {
     }
 
     OpResolver op_resolver;
-    if (!self->weights_mapped_file_.Initialize(
-            std::move(build_graph_result.weights_file))) {
-      return base::unexpected(mojom::Error::New(
-          mojom::Error::Code::kUnknownError, "Failed to map weights file."));
+    if (build_graph_result.weights_file.IsValid()) {
+      if (!self->weights_mapped_file_.Initialize(
+              std::move(build_graph_result.weights_file))) {
+        return base::unexpected(mojom::Error::New(
+            mojom::Error::Code::kUnknownError, "Failed to map weights file."));
+      }
+      self->allocation_ = std::make_unique<::tflite::MemoryAllocation>(
+          self->weights_mapped_file_.data(),
+          self->weights_mapped_file_.length(),
+          ::tflite::DefaultErrorReporter());
     }
-    self->allocation_ = std::make_unique<::tflite::MemoryAllocation>(
-        self->weights_mapped_file_.data(), self->weights_mapped_file_.length(),
-        ::tflite::DefaultErrorReporter());
 
     ::tflite::InterpreterBuilder builder(
         self->model_->GetModel(), op_resolver, ::tflite::DefaultErrorReporter(),
@@ -223,6 +226,26 @@ class GraphImplTflite::ComputeResources {
                                           TfLiteStatusToString(status)})));
     }
 
+    // Check that the input and output tensor sizes match the model.
+    for (auto [name, descriptor] : self->input_name_to_descriptor) {
+      TfLiteTensor* tensor =
+          self->interpreter_->tensor(descriptor.tensor_index);
+      if (tensor->bytes != descriptor.descriptor.PackedByteLength()) {
+        return base::unexpected(mojom::Error::New(
+            mojom::Error::Code::kUnknownError,
+            base::StrCat({"Input tensor size mismatch: ", name})));
+      }
+    }
+    for (auto [name, descriptor] : self->output_name_to_descriptor) {
+      TfLiteTensor* tensor =
+          self->interpreter_->tensor(descriptor.tensor_index);
+      if (tensor->bytes != descriptor.descriptor.PackedByteLength()) {
+        return base::unexpected(mojom::Error::New(
+            mojom::Error::Code::kUnknownError,
+            base::StrCat({"Output tensor size mismatch: ", name})));
+      }
+    }
+
     absl::flat_hash_set<mojom::Device> devices;
     for (int i : self->interpreter_->execution_plan()) {
       const auto& [node, registration] =
@@ -243,10 +266,11 @@ class GraphImplTflite::ComputeResources {
     return self;
   }
 
-  ComputeResources(base::flat_map<std::string, int> input_name_to_index,
-                   base::flat_map<std::string, int> output_name_to_index)
-      : input_name_to_index(std::move(input_name_to_index)),
-        output_name_to_index(std::move(output_name_to_index)) {}
+  ComputeResources(
+      base::flat_map<std::string, TensorDescriptor> input_name_to_descriptor,
+      base::flat_map<std::string, TensorDescriptor> output_name_to_descriptor)
+      : input_name_to_descriptor(std::move(input_name_to_descriptor)),
+        output_name_to_descriptor(std::move(output_name_to_descriptor)) {}
 
   ~ComputeResources() {
 #if BUILDFLAG(WEBNN_ENABLE_TFLITE_PROFILER)
@@ -276,6 +300,8 @@ class GraphImplTflite::ComputeResources {
       }
 
       base::span<uint8_t> data = buffer->AsSpan();
+      CHECK_EQ(data.size(), tensor->bytes);
+
       TfLiteStatus status = interpreter_->SetCustomAllocationForTensor(
           tensor_idx, {data.data(), data.size()});
       if (status != kTfLiteOk) {
@@ -341,8 +367,8 @@ class GraphImplTflite::ComputeResources {
   std::vector<mojom::Device> devices;
 
   // Used for getting queueable input/output resources.
-  base::flat_map<std::string, int> input_name_to_index;
-  base::flat_map<std::string, int> output_name_to_index;
+  base::flat_map<std::string, TensorDescriptor> input_name_to_descriptor;
+  base::flat_map<std::string, TensorDescriptor> output_name_to_descriptor;
 
  private:
   using TfLiteDelegatePtr =
@@ -463,8 +489,9 @@ void GraphImplTflite::CreateAndBuild(
     ComputeResourceInfo compute_resource_info,
     base::flat_map<OperandId, std::unique_ptr<WebNNConstantOperand>>
         constant_operands,
-    base::flat_map<OperandId, WebNNTensorImpl*> constant_tensor_operands,
-    ContextImplTflite* context,
+    base::flat_map<OperandId, scoped_refptr<WebNNTensorImpl>>
+        constant_tensor_operands,
+    ContextImplTflite& context,
     base::File weights_file,
     WebNNContextImpl::CreateGraphImplCallback callback) {
   base::flat_map<OperandId, base::flat_set<OperationId>>
@@ -477,13 +504,13 @@ void GraphImplTflite::CreateAndBuild(
       {base::TaskPriority::USER_BLOCKING,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN, base::MayBlock()},
       base::BindOnce(&GraphImplTflite::CreateAndBuildOnBackgroundThread,
-                     context->properties(), context->options().device,
+                     context.properties(), context.options().device,
                      std::move(graph_info), std::move(constant_operands),
                      std::move(operand_to_dependent_operations),
                      std::move(operand_to_producing_operation),
                      std::move(weights_file)),
       base::BindOnce(&GraphImplTflite::DidCreateAndBuild, std::move(receiver),
-                     context->AsWeakPtr(), std::move(compute_resource_info),
+                     context.AsWeakPtr(), std::move(compute_resource_info),
                      std::move(callback)));
 }
 
@@ -534,18 +561,17 @@ void GraphImplTflite::DidCreateAndBuild(
   }
 
   auto devices = std::move((*compute_resources)->devices);
-  auto input_name_to_index =
-      std::move((*compute_resources)->input_name_to_index);
-  auto output_name_to_index =
-      std::move((*compute_resources)->output_name_to_index);
+  auto input_name_to_descriptor =
+      std::move((*compute_resources)->input_name_to_descriptor);
+  auto output_name_to_descriptor =
+      std::move((*compute_resources)->output_name_to_descriptor);
   auto compute_resources_state =
       base::MakeRefCounted<QueueableResourceState<ComputeResources>>(
           std::move(*compute_resources));
   std::move(callback).Run(base::MakeRefCounted<GraphImplTflite>(
       std::move(receiver), std::move(compute_resource_info),
-      std::move(input_name_to_index), std::move(output_name_to_index),
-      std::move(compute_resources_state), std::move(context),
-      std::move(devices)));
+      std::move(input_name_to_descriptor), std::move(output_name_to_descriptor),
+      std::move(compute_resources_state), *context, std::move(devices)));
 }
 
 GraphImplTflite::~GraphImplTflite() = default;
@@ -553,19 +579,19 @@ GraphImplTflite::~GraphImplTflite() = default;
 GraphImplTflite::GraphImplTflite(
     mojo::PendingAssociatedReceiver<mojom::WebNNGraph> receiver,
     ComputeResourceInfo compute_resource_info,
-    base::flat_map<std::string, int> input_name_to_index,
-    base::flat_map<std::string, int> output_name_to_index,
+    base::flat_map<std::string, TensorDescriptor> input_name_to_descriptor,
+    base::flat_map<std::string, TensorDescriptor> output_name_to_descriptor,
     scoped_refptr<QueueableResourceState<ComputeResources>>
         compute_resources_state,
-    base::WeakPtr<WebNNContextImpl> context,
+    WebNNContextImpl& context,
     std::vector<mojom::Device> devices)
     : WebNNGraphImpl(std::move(receiver),
-                     std::move(context),
+                     context,
                      std::move(compute_resource_info),
                      std::move(devices)),
       compute_resources_state_(std::move(compute_resources_state)),
-      input_name_to_index_(std::move(input_name_to_index)),
-      output_name_to_index_(std::move(output_name_to_index)) {}
+      input_name_to_descriptor_(std::move(input_name_to_descriptor)),
+      output_name_to_descriptor_(std::move(output_name_to_descriptor)) {}
 
 void GraphImplTflite::DispatchImpl(
     const base::flat_map<std::string, scoped_refptr<WebNNTensorImpl>>
@@ -583,13 +609,15 @@ void GraphImplTflite::DispatchImpl(
   // The caller guarantees that all expected tensors have been provided.
   for (const auto& [name, tensor] : named_inputs) {
     auto* tflite_tensor = static_cast<TensorImplTflite*>(tensor.get());
-    input_buffer_states.emplace_back(input_name_to_index_.at(name),
-                                     tflite_tensor->GetBufferState());
+    input_buffer_states.emplace_back(
+        input_name_to_descriptor_.at(name).tensor_index,
+        tflite_tensor->GetBufferState());
   }
   for (const auto& [name, tensor] : named_outputs) {
     auto* tflite_tensor = static_cast<TensorImplTflite*>(tensor.get());
-    output_buffer_states.emplace_back(output_name_to_index_.at(name),
-                                      tflite_tensor->GetBufferState());
+    output_buffer_states.emplace_back(
+        output_name_to_descriptor_.at(name).tensor_index,
+        tflite_tensor->GetBufferState());
   }
 
   // Input tensors will be read from while the graph is executing, so lock them

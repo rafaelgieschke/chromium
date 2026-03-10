@@ -18,6 +18,8 @@
 
 void AddTabStripColorMixer(ui::ColorProvider* provider,
                            const ui::ColorProviderKey& key) {
+  const bool dark_mode =
+      key.color_mode == ui::ColorProviderKey::ColorMode::kDark;
   using TP = ThemeProperties;
   struct ColorPropertiesMapEntry {
     int property_id;
@@ -207,8 +209,13 @@ void AddTabStripColorMixer(ui::ColorProvider* provider,
       kColorNewTabButtonInkDropFrameActive, std::ceil(0.16f * 255.0f));
   mixer[kColorTabStripControlButtonInkDropRipple] = ui::SetAlpha(
       kColorNewTabButtonInkDropFrameActive, std::ceil(0.14f * 255.0f));
+
   /* Vertical Tab Strip colors. */
-  mixer[kColorVerticalTabStripBottomButtonBackground] = {kColorToolbar};
+  mixer[kColorVerticalTabStripShadow] =
+      SetAlpha(ui::kColorSysNeutralOutline, std::ceil(0.60f * 255.0f));
+  mixer[kColorVerticalTabPinnedOutline] = {
+      dark_mode ? kColorVerticalTabStripShadow : kColorTabDividerFrameActive};
+
   /* WebUI Tab Strip colors. */
   // TODO(crbug.com/40678998): Update the tab strip color to respond
   // appopriately to activation changes.

@@ -18,6 +18,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_microtasks_scope.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_arraybuffer_arraybufferview.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_web_transport_close_info.h"
@@ -58,6 +59,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/unique_identifier.h"
 #include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
+#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -122,6 +124,24 @@ bool CreateStreamDataPipe(mojo::ScopedDataPipeProducerHandle* producer,
 }
 
 }  // namespace
+
+// RecentlyForgottenStreamIdSet implementation
+void WebTransport::RecentlyForgottenStreamIdSet::Insert(uint32_t stream_id) {
+  auto result = id_set_.insert(stream_id);
+  CHECK(result.is_new_entry);  // Should always be new given our call sites.
+  if (id_set_.size() > kMaxSize) {
+    id_set_.RemoveFirst();
+  }
+}
+
+bool WebTransport::RecentlyForgottenStreamIdSet::Contains(
+    uint32_t stream_id) const {
+  return id_set_.Contains(stream_id);
+}
+
+void WebTransport::RecentlyForgottenStreamIdSet::Erase(uint32_t stream_id) {
+  id_set_.erase(stream_id);
+}
 
 // Sends a datagram on write().
 class WebTransport::DatagramUnderlyingSink final : public UnderlyingSinkBase {
@@ -215,7 +235,7 @@ class WebTransport::DatagramUnderlyingSink final : public UnderlyingSinkBase {
                          WrapWeakPersistent(this)));
     } else {
       Vector<uint8_t> datagram;
-      datagram.AppendSpan(data);
+      datagram.append_range(data);
       pending_datagrams_.push_back(std::move(datagram));
     }
     int high_water_mark = datagrams_->outgoingHighWaterMark();
@@ -673,9 +693,7 @@ class WebTransport::ReceiveStreamVendor final
     auto* receive_stream = MakeGarbageCollected<ReceiveStream>(
         script_state_, web_transport_, stream_id, std::move(readable));
     auto* isolate = script_state_->GetIsolate();
-    v8::MicrotasksScope microtasks_scope(
-        isolate, ToMicrotaskQueue(script_state_),
-        v8::MicrotasksScope::kDoNotRunMicrotasks);
+    V8DoNotRunMicrotasksScope microtasks_scope(script_state_);
     v8::TryCatch try_catch(isolate);
     receive_stream->Init(PassThroughException(isolate));
 
@@ -698,6 +716,9 @@ class WebTransport::ReceiveStreamVendor final
 
       // This can run JavaScript. This is safe because `receive_stream` hasn't
       // been exposed yet.
+      // Note: OnIncomingStreamClosed() will eventually trigger
+      // ForgetIncomingStream() via the on_abort_ callback, which handles
+      // removal from incoming_stream_map_.
       receive_stream->GetIncomingStream()->OnIncomingStreamClosed(fin_received);
     }
 
@@ -740,9 +761,7 @@ class WebTransport::BidirectionalStreamVendor final
         std::move(incoming_consumer));
 
     auto* isolate = script_state_->GetIsolate();
-    v8::MicrotasksScope microtasks_scope(
-        isolate, ToMicrotaskQueue(script_state_),
-        v8::MicrotasksScope::kDoNotRunMicrotasks);
+    V8DoNotRunMicrotasksScope microtasks_scope(script_state_);
     v8::TryCatch try_catch(isolate);
     bidirectional_stream->Init(PassThroughException(isolate));
     if (try_catch.HasCaught()) {
@@ -766,6 +785,9 @@ class WebTransport::BidirectionalStreamVendor final
 
       // This can run JavaScript. This is safe because `receive_stream` hasn't
       // been exposed yet.
+      // Note: OnIncomingStreamClosed() will eventually trigger
+      // ForgetIncomingStream() via the on_abort_ callback, which handles
+      // removal from incoming_stream_map_.
       bidirectional_stream->GetIncomingStream()->OnIncomingStreamClosed(
           fin_received);
     }
@@ -802,7 +824,7 @@ WebTransport::WebTransport(ScriptState* script_state,
     : ActiveScriptWrappable<WebTransport>({}),
       ExecutionContextLifecycleObserver(context),
       script_state_(script_state),
-      url_(NullURL(), url),
+      url_(NullUrl(), url),
       connector_(context),
       transport_remote_(context),
       handshake_client_receiver_(this, context),
@@ -1073,6 +1095,18 @@ void WebTransport::OnIncomingStreamClosed(uint32_t stream_id,
                                           bool fin_received) {
   DVLOG(1) << "WebTransport::OnIncomingStreamClosed(" << stream_id << ", "
            << fin_received << ") this=" << this;
+  // 0xfffffffe and 0xffffffff are reserved values in stream_map_.
+  CHECK_LT(stream_id, 0xfffffffe);
+
+  if (recently_forgotten_incoming_stream_ids_.Contains(stream_id)) {
+    recently_forgotten_incoming_stream_ids_.Erase(stream_id);
+    DVLOG(1) << "WebTransport::OnIncomingStreamClosed() correctly ignoring "
+                "close on recently forgotten stream_id="
+             << stream_id;
+    DCHECK(incoming_stream_map_.find(stream_id) == incoming_stream_map_.end());
+    return;
+  }
+
   auto it = incoming_stream_map_.find(stream_id);
 
   if (it == incoming_stream_map_.end()) {
@@ -1090,7 +1124,15 @@ void WebTransport::OnIncomingStreamClosed(uint32_t stream_id,
   }
 
   IncomingStream* stream = it->value;
+  // Note: stream->OnIncomingStreamClosed() will eventually trigger
+  // ForgetIncomingStream() via the on_abort_ callback, which handles removal
+  // from incoming_stream_map_. We don't need to record this close because
+  // OnIncomingStreamClosed() won't be called again for the same stream_id.
   stream->OnIncomingStreamClosed(fin_received);
+}
+
+bool WebTransport::HasPendingClosedStreamForTesting(uint32_t stream_id) const {
+  return closed_potentially_pending_streams_.Contains(stream_id);
 }
 
 void WebTransport::OnReceivedResetStream(uint32_t stream_id,
@@ -1207,10 +1249,18 @@ void WebTransport::StopSending(uint32_t stream_id, uint32_t code) {
   transport_remote_->StopSending(stream_id, code);
 }
 
-void WebTransport::ForgetIncomingStream(uint32_t stream_id) {
+void WebTransport::ForgetIncomingStream(uint32_t stream_id,
+                                        bool has_received_close) {
   DVLOG(1) << "WebTransport::ForgetIncomingStream() this=" << this
-           << ", stream_id=" << stream_id;
+           << ", stream_id=" << stream_id
+           << ", has_received_close=" << has_received_close;
   incoming_stream_map_.erase(stream_id);
+  // Only record if we haven't received OnIncomingStreamClosed() for this
+  // stream. If we have, we know it won't be called again, so no need to track
+  // it.
+  if (!has_received_close) {
+    recently_forgotten_incoming_stream_ids_.Insert(stream_id);
+  }
 }
 
 void WebTransport::ForgetOutgoingStream(uint32_t stream_id) {
@@ -1453,6 +1503,10 @@ void WebTransport::Dispose() {
   probe::WebTransportClosed(GetExecutionContext(), inspector_transport_id_);
   incoming_stream_map_.clear();
   outgoing_stream_map_.clear();
+  // Note: recently_forgotten_incoming_stream_ids_ is not cleared explicitly;
+  // let the garbage collector free the memory.
+  // Clear pending close notifications.
+  closed_potentially_pending_streams_.clear();
   connector_.reset();
   transport_remote_.reset();
   handshake_client_receiver_.reset();
@@ -1577,9 +1631,7 @@ void WebTransport::OnCreateSendStreamResponse(
       script_state_, this, stream_id, std::move(producer));
 
   auto* isolate = script_state_->GetIsolate();
-  v8::MicrotasksScope microtasks_scope(
-      isolate, ToMicrotaskQueue(script_state_),
-      v8::MicrotasksScope::kDoNotRunMicrotasks);
+  V8DoNotRunMicrotasksScope microtasks_scope(script_state_);
   v8::TryCatch try_catch(isolate);
   send_stream->Init(PassThroughException(isolate));
   if (try_catch.HasCaught()) {
@@ -1624,9 +1676,7 @@ void WebTransport::OnCreateBidirectionalStreamResponse(
       script_state_, this, stream_id, std::move(outgoing_producer),
       std::move(incoming_consumer));
 
-  v8::MicrotasksScope microtasks_scope(
-      isolate, ToMicrotaskQueue(script_state_),
-      v8::MicrotasksScope::kDoNotRunMicrotasks);
+  V8DoNotRunMicrotasksScope microtasks_scope(script_state_);
   v8::TryCatch try_catch(isolate);
   bidirectional_stream->Init(PassThroughException(isolate));
   if (try_catch.HasCaught()) {

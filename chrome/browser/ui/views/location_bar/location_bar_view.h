@@ -101,7 +101,7 @@ class LocationBarView
       public views::AnimationDelegateViews,
       public IconLabelBubbleView::Delegate,
       public LocationIconView::Delegate,
-      public ContentSettingImageView::Delegate,
+      public ContentSettingImageViewDelegate,
 #if BUILDFLAG(OS_LEVEL_GEOLOCATION_PERMISSION_SUPPORTED)
       public device::GeolocationSystemPermissionManager::PermissionObserver,
 #endif  // BUILDFLAG(OS_LEVEL_GEOLOCATION_PERMISSION_SUPPORTED)
@@ -141,10 +141,6 @@ class LocationBarView
   void Init();
 
   bool in_popup_state_transition() const { return in_popup_state_transition_; }
-
-  // True if this instance has been initialized by calling Init, which can only
-  // be called when the receiving instance is attached to a view container.
-  bool IsInitialized() const;
 
   // Returns a background that paints an (optionally stroked) rounded rect with
   // the given color.
@@ -195,19 +191,6 @@ class LocationBarView
 
   const OmniboxController* GetOmniboxController() const;
 
-  // Returns true if the location bar's current security state does not match
-  // the currently visible state.
-  bool HasSecurityStateChanged();
-
-  // Updates the controller, and, if |contents| is non-null, restores saved
-  // state that the tab holds.
-  void Update(content::WebContents* contents);
-
-  // Clears the location bar's state for |contents|.
-  void ResetTabState(content::WebContents* contents);
-
-  // Controls the chip in the LocationBarView.
-  ChipController* GetChipController();
 
   // Controls the permission dashboard in the LocationBarView.
   PermissionDashboardController* permission_dashboard_controller() {
@@ -217,15 +200,34 @@ class LocationBarView
   IntentChipButton* intent_chip() { return intent_chip_; }
 
   // LocationBar:
-  void FocusLocation(bool is_user_initiated) override;
+  void FocusLocation(bool is_user_initiated,
+                     bool clear_focus_if_failed) override;
   void Revert() override;
   OmniboxView* GetOmniboxView() override;
   OmniboxController* GetOmniboxController() override;
+  bool ShouldCloseOmniboxPopup(ui::MouseEvent* event) override;
+  ChipController* GetChipController() override;
   void UpdateWithoutTabRestore() override;
   LocationBarModel* GetLocationBarModel() override;
   content::WebContents* GetWebContents() override;
   std::optional<bubble_anchor_util::AnchorConfiguration> GetChipAnchor()
       override;
+  ui::TrackedElement* GetAnchorOrNull() override;
+  Browser* GetBrowser() override;
+
+  // True if this instance has been initialized by calling Init, which can only
+  // be called when the receiving instance is attached to a view container.
+  bool IsInitialized() const override;
+  bool IsVisible() const override;
+  bool IsDrawn() const override;
+  bool IsFullscreen() const override;
+  void InvalidateLayout() override;
+  gfx::Rect Bounds() const override;
+  gfx::Size MinimumSize() const override;
+  gfx::Size PreferredSize() const override;
+  void Update(content::WebContents* contents) override;
+  void ResetTabState(content::WebContents* contents) override;
+  bool HasSecurityStateChanged() override;
 
   // views::View:
   void AddedToWidget() override;
@@ -246,7 +248,7 @@ class LocationBarView
   SkAlpha GetIconLabelBubbleSeparatorAlpha() const override;
   SkColor GetIconLabelBubbleBackgroundColor() const override;
 
-  // ContentSettingImageView::Delegate:
+  // ContentSettingImageViewDelegate:
   bool ShouldHideContentSettingImage() override;
   content::WebContents* GetContentSettingWebContents() override;
   ContentSettingBubbleModelDelegate* GetContentSettingBubbleModelDelegate()
@@ -288,6 +290,7 @@ class LocationBarView
   // LocationIconView::Delegate:
   const LocationBarModel* GetLocationBarModel() const override;
   bool IsEditingOrEmpty() const override;
+  void OnLocationIconGestureEvent(ui::GestureEvent* event) override;
   void OnLocationIconPressed(const ui::MouseEvent& event) override;
   void OnLocationIconDragged(const ui::MouseEvent& event) override;
   bool ShowPageInfoDialog() override;
@@ -393,6 +396,7 @@ class LocationBarView
 
   // LocationBar:
   void FocusSearch() override;
+  void UpdateFocusBehavior(bool toolbar_visible) override;
   void UpdateContentSettingsIcons() override;
   void SaveStateToContents(content::WebContents* contents) override;
   LocationBarTesting* GetLocationBarForTesting() override;
@@ -482,6 +486,8 @@ class LocationBarView
   // destroyed.
   page_actions::PageActionController* GetPageActionController();
 
+  bool OpenContextMenu();
+
 #if BUILDFLAG(IS_MAC)
   // Called when app shims change.
   void OnAppShimChanged(const webapps::AppId& app_id);
@@ -501,7 +507,7 @@ class LocationBarView
 #endif  // BUILDFLAG(OS_LEVEL_GEOLOCATION_PERMISSION_SUPPORTED)
 
   // The Browser this LocationBarView is in.  Note that at least
-  // ash::SimpleWebViewDialog uses a LocationBarView outside any browser
+  // SimpleWebViewDialog uses a LocationBarView outside any browser
   // window, so this may be NULL.
   const raw_ptr<Browser> browser_;
 
@@ -613,6 +619,8 @@ class LocationBarView
   // TODO(crbug.com/40251974): Remove this once state manager is proven
   //  reliable.
   bool in_popup_state_transition_ = false;
+
+  void OnMiddleClickPaste(base::TimeTicks event_timestamp, std::u16string text);
 
   base::WeakPtrFactory<LocationBarView> weak_factory_{this};
 };

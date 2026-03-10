@@ -79,7 +79,7 @@ const int kDefaultHeight = 384;
 
 void SetConstraintProperty(const std::string& name,
                            int value,
-                           base::Value::Dict* bounds_properties) {
+                           base::DictValue* bounds_properties) {
   DCHECK(bounds_properties);
   if (value != SizeConstraints::kUnboundedSize)
     bounds_properties->Set(name, value);
@@ -91,9 +91,9 @@ void SetBoundsProperties(const gfx::Rect& bounds,
                          const gfx::Size& min_size,
                          const gfx::Size& max_size,
                          const std::string& bounds_name,
-                         base::Value::Dict* window_properties) {
+                         base::DictValue* window_properties) {
   DCHECK(window_properties);
-  base::Value::Dict bounds_properties;
+  base::DictValue bounds_properties;
 
   bounds_properties.Set("left", bounds.x());
   bounds_properties.Set("top", bounds.y());
@@ -301,6 +301,7 @@ void AppWindow::Init(const GURL& url,
   WebContentsModalDialogManager::CreateForWebContents(web_contents());
 
   web_contents()->SetDelegate(this);
+  web_contents()->SetIgnoreZoomGestures(true);
   WebContentsModalDialogManager::FromWebContents(web_contents())
       ->SetDelegate(this);
 
@@ -459,11 +460,6 @@ void AppWindow::RequestPointerLock(WebContents* web_contents,
   helper_->RequestPointerLock();
 }
 
-bool AppWindow::PreHandleGestureEvent(WebContents* source,
-                                      const blink::WebGestureEvent& event) {
-  return AppWebContentsHelper::ShouldSuppressGestureEvent(event);
-}
-
 content::PictureInPictureResult AppWindow::EnterPictureInPicture(
     content::WebContents* web_contents) {
   return app_delegate_->EnterPictureInPicture(web_contents);
@@ -608,7 +604,7 @@ void AppWindow::SetAppIconUrl(const GURL& url) {
   app_icon_url_ = url;
 
   // Don't start custom app icon loading in the case window is not ready yet.
-  // see crbug.com/788531.
+  // see crbug.com/41357416.
   if (!window_ready_)
     return;
 
@@ -647,7 +643,7 @@ void AppWindow::SetFullscreen(FullscreenType type, bool enable) {
 #if !BUILDFLAG(IS_MAC)
     // Do not enter fullscreen mode if disallowed by pref.
     // TODO(bartfab): Add a test once it becomes possible to simulate a user
-    // gesture. http://crbug.com/174178
+    // gesture. http://crbug.com/40300937
     if (type != FULLSCREEN_TYPE_FORCED) {
       PrefService* prefs =
           ExtensionsBrowserClient::Get()->GetPrefServiceForContext(
@@ -778,7 +774,7 @@ void AppWindow::RestoreAlwaysOnTop() {
     UpdateNativeAlwaysOnTop();
 }
 
-void AppWindow::GetSerializedState(base::Value::Dict* properties) const {
+void AppWindow::GetSerializedState(base::DictValue* properties) const {
   DCHECK(properties);
 
   properties->Set("fullscreen", native_app_window_->IsFullscreenOrPending());

@@ -25,7 +25,7 @@
 #include "content/browser/loader/url_loader_factory_utils.h"
 #include "content/browser/renderer_host/code_cache_host_impl.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
-#include "content/browser/renderer_host/private_network_access_util.h"
+#include "content/browser/renderer_host/local_network_access_util.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
 #include "content/browser/service_worker/service_worker_client.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
@@ -44,6 +44,7 @@
 #include "content/public/browser/permission_controller.h"
 #include "content/public/browser/permission_descriptor_util.h"
 #include "content/public/browser/service_worker_context.h"
+#include "content/public/common/child_process_id_util.h"
 #include "content/public/common/content_client.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "mojo/public/cpp/system/message_pipe.h"
@@ -82,7 +83,10 @@ DedicatedWorkerHost::DedicatedWorkerHost(
     const url::Origin& renderer_origin,
     const net::IsolationInfo& isolation_info,
     network::mojom::ClientSecurityStatePtr creator_client_security_state,
+    const PolicyContainerPolicies& creator_policies,
     base::WeakPtr<CrossOriginEmbedderPolicyReporter> creator_coep_reporter,
+    const std::optional<base::UnguessableToken>&
+        creator_network_restrictions_id,
     mojo::PendingReceiver<blink::mojom::DedicatedWorkerHost> host,
     net::StorageAccessApiStatus storage_access_api_status)
     : service_(service),
@@ -104,7 +108,10 @@ DedicatedWorkerHost::DedicatedWorkerHost(
       code_cache_host_receivers_(GetProcessHost()
                                      ->GetStoragePartition()
                                      ->GetGeneratedCodeCacheContext()),
-      storage_access_api_status_(storage_access_api_status) {
+      storage_access_api_status_(storage_access_api_status),
+      network_restrictions_id_(base::UnguessableToken::Create()),
+      creator_network_restrictions_id_(creator_network_restrictions_id),
+      creator_policies_(creator_policies.Clone()) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(worker_process_host_);
   DCHECK(worker_process_host_->IsInitializedAndNotDead());
@@ -163,6 +170,14 @@ DedicatedWorkerHost::~DedicatedWorkerHost() {
         ->Remove(weak_factory_.GetSafeRef());
   }
 
+  if (auto* lock_manager = GetStoragePartitionImpl()->GetLockManager()) {
+    lock_manager->RemoveLockObserver(GetToken().value());
+  }
+
+  GetStoragePartitionImpl()->ClearNoncesInNetworkContextAfterDelay({
+      network_restrictions_id_,
+  });
+
   // Send any final reports and allow the reporting configuration to be
   // removed. Note that the RenderProcessHost and the associated
   // StoragePartition outlives `this`.
@@ -197,6 +212,28 @@ void DedicatedWorkerHost::CreateContentSecurityNotifier(
   mojo::MakeSelfOwnedReceiver(
       std::make_unique<ContentSecurityNotifier>(ancestor_render_frame_host_id_),
       std::move(receiver));
+}
+
+void DedicatedWorkerHost::CreateLockManager(
+    mojo::PendingReceiver<blink::mojom::LockManager> receiver) {
+  GetStoragePartitionImpl()->BindLockManager(GetStorageKey(), GetToken().value(),
+                                          std::move(receiver));
+  GetStoragePartitionImpl()->GetLockManager()->AddLockObserver(GetToken().value(),
+                                                            this);
+}
+
+void DedicatedWorkerHost::OnLockContention() {
+  RenderFrameHostImpl* ancestor_render_frame_host =
+      RenderFrameHostImpl::FromID(ancestor_render_frame_host_id_);
+  if (!ancestor_render_frame_host) {
+    // The frame may have already been closed.
+    return;
+  }
+  if (ancestor_render_frame_host->IsInBackForwardCache()) {
+    // Evict the frame from the back-forward cache to avoid deadlock.
+    ancestor_render_frame_host->EvictFromBackForwardCacheWithReason(
+        BackForwardCacheMetrics::NotRestoredReason::kWebLocksContention);
+  }
 }
 
 void DedicatedWorkerHost::OnMojoDisconnect() {
@@ -258,8 +295,7 @@ void DedicatedWorkerHost::StartScriptLoad(
   DCHECK(client);
   client_ = std::move(client);
 
-  auto* storage_partition_impl = static_cast<StoragePartitionImpl*>(
-      worker_process_host_->GetStoragePartition());
+  auto* storage_partition_impl = GetStoragePartitionImpl();
 
   // Get nearest ancestor RenderFrameHost in order to determine the
   // top-frame origin to use for the network isolation key.
@@ -372,7 +408,8 @@ void DedicatedWorkerHost::StartScriptLoad(
       storage_partition_impl, partition_domain,
       DedicatedWorkerDevToolsAgentHost::GetFor(this), token_.value(),
       /*require_cross_site_request_for_cookies=*/false,
-      storage_access_api_status,
+      storage_access_api_status, network_restrictions_id_,
+      creator_network_restrictions_id_, creator_policies_.Clone(),
       base::BindOnce(&DedicatedWorkerHost::DidStartScriptLoad,
                      weak_factory_.GetWeakPtr()));
 }
@@ -439,12 +476,12 @@ void DedicatedWorkerHost::DidStartScriptLoad(
             ->policies()
             .allow_non_secure_local_network_access;
 
-    worker_client_security_state_->private_network_request_policy =
-        DerivePrivateNetworkRequestPolicy(
+    worker_client_security_state_->local_network_access_request_policy =
+        DeriveLocalNetworkAccessRequestPolicy(
             worker_client_security_state_->ip_address_space,
             worker_client_security_state_->is_web_secure_context,
             allow_non_secure_local_network_access,
-            PrivateNetworkRequestContext::kWorker);
+            LocalNetworkAccessRequestContext::kWorker);
 
     // Check for policy overrides on LNA. For dedicated workers, we apply
     // policy based on origin of the document that owns the worker.
@@ -452,11 +489,12 @@ void DedicatedWorkerHost::DidStartScriptLoad(
     ContentBrowserClient* client = GetContentClient()->browser();
     BrowserContext* context = ancestor_render_frame_host->GetBrowserContext();
     url::Origin origin = ancestor_render_frame_host->GetLastCommittedOrigin();
-    ContentBrowserClient::PrivateNetworkRequestPolicyOverride policy_override =
-        client->ShouldOverridePrivateNetworkRequestPolicy(context, origin);
-    worker_client_security_state_->private_network_request_policy =
+    ContentBrowserClient::LocalNetworkAccessRequestPolicyOverride
+        policy_override = client->ShouldOverrideLocalNetworkAccessRequestPolicy(
+            context, origin);
+    worker_client_security_state_->local_network_access_request_policy =
         OverrideLocalNetworkAccessPolicy(
-            worker_client_security_state_->private_network_request_policy,
+            worker_client_security_state_->local_network_access_request_policy,
             policy_override);
 
     // > 14.6 Otherwise, set worker global scope's embedder policy to the result
@@ -472,8 +510,7 @@ void DedicatedWorkerHost::DidStartScriptLoad(
   worker_client_security_state_->document_isolation_policy =
       creator_client_security_state_->document_isolation_policy;
 
-  auto* storage_partition = static_cast<StoragePartitionImpl*>(
-      worker_process_host_->GetStoragePartition());
+  auto* storage_partition = GetStoragePartitionImpl();
 
   // Create a COEP reporter with worker's policy.
   const network::CrossOriginEmbedderPolicy& coep =
@@ -514,8 +551,7 @@ void DedicatedWorkerHost::DidStartScriptLoad(
 
   // Start observing Network Service crash when it's running out-of-process.
   if (IsOutOfProcessNetworkService()) {
-    ObserveNetworkServiceCrash(static_cast<StoragePartitionImpl*>(
-        worker_process_host_->GetStoragePartition()));
+    ObserveNetworkServiceCrash(GetStoragePartitionImpl());
   }
 
   // Set up the default network loader factory.
@@ -581,6 +617,11 @@ void DedicatedWorkerHost::ScriptLoadStartFailed(
   client_->OnScriptLoadStartFailed();
 }
 
+StoragePartitionImpl* DedicatedWorkerHost::GetStoragePartitionImpl() {
+  return static_cast<StoragePartitionImpl*>(
+      GetProcessHost()->GetStoragePartition());
+}
+
 mojo::PendingRemote<network::mojom::URLLoaderFactory>
 DedicatedWorkerHost::CreateNetworkFactoryForSubresources(
     RenderFrameHostImpl* ancestor_render_frame_host,
@@ -619,7 +660,7 @@ DedicatedWorkerHost::CreateNetworkFactoryForSubresources(
                     kPotentiallyPermit
               : network::mojom::TrustTokenOperationPolicyVerdict::kForbid,
           ancestor_render_frame_host->GetCookieSettingOverrides(),
-          /*network_restrictions_id=*/std::nullopt,
+          network_restrictions_id_,
           "DedicatedWorkerHost::CreateNetworkFactoryForSubresources");
 
   RenderFrameHost* frame = nullptr;
@@ -740,8 +781,9 @@ void DedicatedWorkerHost::CreateWebSocketConnector(
   // TODO(crbug.com/379869738) Remove GetUnsafeValue.
   mojo::MakeSelfOwnedReceiver(
       std::make_unique<WebSocketConnectorImpl>(
-          ancestor_render_frame_host_id_.child_id.GetUnsafeValue(),
-          ancestor_render_frame_host_id_.frame_routing_id,
+          GlobalRenderFrameHostId(
+              ancestor_render_frame_host_id_.child_id,
+              ancestor_render_frame_host_id_.frame_routing_id),
           GetStorageKey().origin(),
           ancestor_render_frame_host->GetIsolationInfoForSubresources(),
           worker_client_security_state_->Clone()),
@@ -796,7 +838,8 @@ void DedicatedWorkerHost::CreateNestedDedicatedWorker(
       std::make_unique<DedicatedWorkerHostFactoryImpl>(
           worker_process_host_->GetDeprecatedID(), /*creator=*/token_,
           ancestor_render_frame_host_id_, GetStorageKey(), isolation_info_,
-          worker_client_security_state_->Clone(), creator_coep_reporter),
+          worker_client_security_state_->Clone(), creator_policies_,
+          creator_coep_reporter, network_restrictions_id_),
       std::move(receiver));
 }
 
@@ -818,8 +861,7 @@ void DedicatedWorkerHost::CreateBroadcastChannelProvider(
     mojo::PendingReceiver<blink::mojom::BroadcastChannelProvider> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  auto* storage_partition_impl = static_cast<StoragePartitionImpl*>(
-      GetProcessHost()->GetStoragePartition());
+  auto* storage_partition_impl = GetStoragePartitionImpl();
 
   auto* broadcast_channel_service =
       storage_partition_impl->GetBroadcastChannelService();
@@ -841,8 +883,7 @@ bool DedicatedWorkerHost::WasStorageAccessGranted() {
 void DedicatedWorkerHost::CreateBlobUrlStoreProvider(
     mojo::PendingReceiver<blink::mojom::BlobURLStore> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  auto* storage_partition_impl = static_cast<StoragePartitionImpl*>(
-      GetProcessHost()->GetStoragePartition());
+  auto* storage_partition_impl = GetStoragePartitionImpl();
 
   storage_partition_impl->GetBlobUrlRegistry()->AddReceiver(
       GetStorageKey(), renderer_origin_, GetProcessHost()->GetDeprecatedID(),
@@ -917,8 +958,7 @@ void DedicatedWorkerHost::CreateBucketManagerHost(
 void DedicatedWorkerHost::GetFileSystemAccessManager(
     mojo::PendingReceiver<blink::mojom::FileSystemAccessManager> receiver) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  auto* storage_partition_impl = static_cast<StoragePartitionImpl*>(
-      worker_process_host_->GetStoragePartition());
+  auto* storage_partition_impl = GetStoragePartitionImpl();
   auto* manager = storage_partition_impl->GetFileSystemAccessManager();
   manager->BindReceiver(
       FileSystemAccessManagerImpl::BindingContext(
@@ -971,7 +1011,7 @@ void DedicatedWorkerHost::BindPressureService(
 void DedicatedWorkerHost::ObserveNetworkServiceCrash(
     StoragePartitionImpl* storage_partition_impl) {
   auto params = network::mojom::URLLoaderFactoryParams::New();
-  params->process_id = worker_process_host_->GetDeprecatedID();
+  params->process_id = ToOriginatingProcessId(worker_process_host_->GetID());
   params->debug_tag = "DedicatedWorkerHost::ObserveNetworkServiceCrash";
   network_service_connection_error_handler_holder_.reset();
   storage_partition_impl->GetNetworkContext()->CreateURLLoaderFactory(
@@ -989,8 +1029,7 @@ void DedicatedWorkerHost::OnNetworkServiceCrash() {
   DCHECK(network_service_connection_error_handler_holder_);
   DCHECK(!network_service_connection_error_handler_holder_.is_connected());
 
-  auto* storage_partition_impl = static_cast<StoragePartitionImpl*>(
-      worker_process_host_->GetStoragePartition());
+  auto* storage_partition_impl = GetStoragePartitionImpl();
   // Start observing Network Service crash again.
   ObserveNetworkServiceCrash(storage_partition_impl);
 
@@ -1004,8 +1043,7 @@ void DedicatedWorkerHost::UpdateSubresourceLoaderFactories() {
     return;
   }
 
-  auto* storage_partition_impl = static_cast<StoragePartitionImpl*>(
-      worker_process_host_->GetStoragePartition());
+  auto* storage_partition_impl = GetStoragePartitionImpl();
 
   RenderFrameHostImpl* ancestor_render_frame_host =
       RenderFrameHostImpl::FromID(ancestor_render_frame_host_id_);

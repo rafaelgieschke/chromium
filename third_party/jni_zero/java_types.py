@@ -10,7 +10,7 @@ from typing import Tuple
 import common
 import java_lang_classes
 
-_CPP_TYPE_BY_JAVA_TYPE = {
+CPP_TYPE_BY_JAVA_TYPE = {
     'boolean': 'jboolean',
     'byte': 'jbyte',
     'char': 'jchar',
@@ -19,6 +19,21 @@ _CPP_TYPE_BY_JAVA_TYPE = {
     'int': 'jint',
     'long': 'jlong',
     'short': 'jshort',
+    'void': 'void',
+    'java/lang/Class': 'jclass',
+    'java/lang/String': 'jstring',
+    'java/lang/Throwable': 'jthrowable',
+}
+
+CPP_UNDERLYING_TYPE_BY_JAVA_TYPE = {
+    'boolean': 'bool',  # underlying type of jboolean
+    'byte': 'int8_t',  # underlying type of jbyte
+    'char': 'uint16_t',  # underlying type of jchar
+    'double': 'double',  # underlying type of jdouble
+    'float': 'float',  # underlying type of jfloat
+    'int': 'int32_t',  # underlying type of jint
+    'long': 'int64_t',  # underlying type of jlong
+    'short': 'int16_t',  # underlying type of jshort
     'void': 'void',
     'java/lang/Class': 'jclass',
     'java/lang/String': 'jstring',
@@ -89,6 +104,10 @@ class JavaClass:
   @property
   def package_with_dots(self):
     return self.package_with_slashes.replace('/', '.')
+
+  @property
+  def package_with_colons(self):
+    return self.package_with_slashes.replace('/', '::')
 
   @property
   def full_name_with_slashes(self):
@@ -241,11 +260,12 @@ class JavaType:
       # There is no jstringArray.
       return 'jobjectArray'
 
-    cpp_type = _CPP_TYPE_BY_JAVA_TYPE.get(self.non_array_full_name_with_slashes,
-                                          'jobject')
     if self.array_dimensions:
-      cpp_type = f'{cpp_type}Array'
-    return cpp_type
+      cpp_type = CPP_TYPE_BY_JAVA_TYPE.get(
+          self.non_array_full_name_with_slashes, 'jobject')
+      return f'{cpp_type}Array'
+    return CPP_UNDERLYING_TYPE_BY_JAVA_TYPE.get(
+        self.non_array_full_name_with_slashes, 'jobject')
 
   def to_cpp_default_value(self):
     """Returns a valid C return value for the given java type."""
@@ -256,6 +276,13 @@ class JavaType:
   def to_proxy(self):
     """Converts to types used over JNI boundary."""
     return self if self.is_primitive() else OBJECT
+
+  def enable_mirror(self, java_class=None):
+    """Whether to use a jobject subclass e.g. JMyClass."""
+    return (self.java_class and self.java_class.full_name_with_slashes
+            not in CPP_TYPE_BY_JAVA_TYPE and not self.converted_type
+            and self.array_dimensions == 0
+            and (not java_class or self.java_class == java_class))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -451,6 +478,9 @@ OBJECT = JavaType(java_class=OBJECT_CLASS)
 CLASS = JavaType(java_class=CLASS_CLASS)
 LIST = JavaType(java_class=_LIST_CLASS)
 INT = JavaType(primitive_name='int', nullable=False)
+DOUBLE = JavaType(primitive_name='double', nullable=False)
+FLOAT = JavaType(primitive_name='float', nullable=False)
+LONG = JavaType(primitive_name='long', nullable=False)
 VOID = JavaType(primitive_name='void', nullable=False)
 
 _EMPTY_TYPE_RESOLVER = TypeResolver(OBJECT_CLASS)

@@ -152,7 +152,8 @@ public class BookmarkBarItemsLayoutManagerTest {
 
     @Test
     @SmallTest
-    @Features.EnableFeatures(ChromeFeatureList.ANDROID_BOOKMARK_BAR_FAST_FOLLOW)
+    @Features.EnableFeatures(
+            ChromeFeatureList.ANDROID_BOOKMARK_BAR_FAST_FOLLOW + ":dynamic_width_enabled/true")
     public void testLayout_shrinksToFit() {
         // Set up items that will overflow at max width, but fit at min width.
         final var itemHeight = 10;
@@ -180,7 +181,9 @@ public class BookmarkBarItemsLayoutManagerTest {
     @SmallTest
     @Features.EnableFeatures(ChromeFeatureList.ANDROID_BOOKMARK_BAR_FAST_FOLLOW)
     public void testLayout_overflows() {
-        mLayoutManager.getItemsOverflowSupplier().addObserver(mItemsOverflowSupplierObserver);
+        mLayoutManager
+                .getItemsOverflowSupplier()
+                .addSyncObserverAndPostIfNonNull(mItemsOverflowSupplierObserver);
         Robolectric.flushForegroundThreadScheduler();
         clearInvocations(mItemsOverflowSupplierObserver);
 
@@ -237,7 +240,9 @@ public class BookmarkBarItemsLayoutManagerTest {
     public void testItemsOverflowChangeCallback() {
         // Bind observer and verify initial event propagation.
         verify(mItemsOverflowSupplierObserver, never()).onResult(any());
-        mLayoutManager.getItemsOverflowSupplier().addObserver(mItemsOverflowSupplierObserver);
+        mLayoutManager
+                .getItemsOverflowSupplier()
+                .addSyncObserverAndPostIfNonNull(mItemsOverflowSupplierObserver);
         Robolectric.flushForegroundThreadScheduler();
         verify(mItemsOverflowSupplierObserver).onResult(false);
         clearInvocations(mItemsOverflowSupplierObserver);

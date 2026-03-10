@@ -18,6 +18,7 @@
 #include "base/run_loop.h"
 #include "base/scoped_observation.h"
 #include "base/time/time.h"
+#include "base/types/pass_key.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
 #include "chrome/browser/web_applications/manifest_update_utils.h"
@@ -38,8 +39,10 @@ class WebContents;
 
 namespace web_app {
 
+struct FetchManifestAndUpdateCompletionInfo;
 struct ManifestSilentUpdateCompletionInfo;
 class WebAppProvider;
+class WebAppTabHelper;
 
 // Documentation: docs/webapps/manifest_update_process.md
 //
@@ -90,6 +93,12 @@ class ManifestUpdateManager final : public WebAppInstallManagerObserver {
   void SetProvider(base::PassKey<WebAppProvider>, WebAppProvider& provider);
   void Start();
   void Shutdown();
+
+  // Called by WebAppTabHelper when a developer-specified manifest is seen on
+  // the primary page.
+  void OnManifestSeenOnPrimaryPage(content::WebContents& web_contents,
+                                   const blink::mojom::ManifestPtr& manifest,
+                                   base::PassKey<WebAppTabHelper>);
 
   void MaybeUpdate(const GURL& url,
                    const std::optional<webapps::AppId>& app_id,
@@ -156,9 +165,12 @@ class ManifestUpdateManager final : public WebAppInstallManagerObserver {
 
   void OnManifestSilentUpdateComplete(
       base::WeakPtr<content::WebContents> contents,
-      const GURL& url,
       const webapps::AppId& app_id,
       ManifestSilentUpdateCompletionInfo completion_info);
+
+  void OnMigrationFetchManifestAndUpdateComplete(
+      const webapps::AppId& app_id,
+      FetchManifestAndUpdateCompletionInfo completion_info);
 
   void OnManifestCheckAwaitAppWindowClose(
       base::WeakPtr<content::WebContents> contents,

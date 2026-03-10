@@ -15,6 +15,7 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/run_until.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/with_feature_override.h"
 #include "build/build_config.h"
 #include "chrome/browser/actor/actor_keyed_service.h"
@@ -42,6 +43,7 @@
 #include "chrome/browser/ui/views/passwords/password_save_update_view.h"
 #include "chrome/browser/ui/views/passwords/shared_passwords_notification_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/autofill/core/common/autofill_features.h"
@@ -57,6 +59,8 @@
 #include "content/public/test/focus_changed_observer.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "ui/base/clipboard/clipboard.h"
+#include "ui/base/clipboard/test/clipboard_test_util.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/events/base_event_utils.h"
 #include "ui/views/controls/editable_combobox/editable_combobox.h"
 #include "ui/views/controls/styled_label.h"
@@ -132,7 +136,14 @@ class PasswordBubbleInteractiveUiTest : public ManagePasswordsTest,
  public:
   PasswordBubbleInteractiveUiTest()
       : base::test::WithFeatureOverride(
-            autofill::features::kAutofillShowBubblesBasedOnPriorities) {}
+            autofill::features::kAutofillShowBubblesBasedOnPriorities) {
+    scoped_feature_list_.InitWithFeaturesAndParameters(
+        /*enabled_features=*/{{features::kGlicActor,
+                               {{features::kGlicActorPolicyControlExemption
+                                     .name,
+                                 "true"}}}},
+        /*disabled_features=*/{features::kNonBlockingOsClipboardReads});
+  }
 
   PasswordBubbleInteractiveUiTest(const PasswordBubbleInteractiveUiTest&) =
       delete;
@@ -154,6 +165,9 @@ class PasswordBubbleInteractiveUiTest : public ManagePasswordsTest,
             [&](actor::mojom::ActionResultPtr result) { loop.Quit(); }));
     loop.Run();
   }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_P(PasswordBubbleInteractiveUiTest, BasicOpenAndClose) {
@@ -390,12 +404,20 @@ IN_PROC_BROWSER_TEST_P(PasswordBubbleInteractiveUiTest,
 
 IN_PROC_BROWSER_TEST_P(PasswordBubbleInteractiveUiTest, DontCloseOnClick) {
   SetupPendingPassword();
-  EXPECT_TRUE(IsBubbleShowing());
-  EXPECT_FALSE(PasswordBubbleViewBase::manage_password_bubble()
+  RunTestSequence(
+      Do([this]() { SetupPendingPassword(); }),
+      WaitForShow(PasswordSaveUpdateView::kPasswordBubbleElementId),
+      Check([]() {
+        return PasswordBubbleViewBase::manage_password_bubble()
                    ->GetFocusManager()
-                   ->GetFocusedView());
-  ui_test_utils::ClickOnView(browser(), VIEW_ID_TAB_CONTAINER);
-  EXPECT_TRUE(IsBubbleShowing());
+                   ->GetFocusedView() == nullptr;
+      }),
+      // Click somewhere outside the dialog. Use the menu button arbitrarily,
+      // as something that's safely outside the bounds of the dialog. Note that
+      // clicking the center of the content window (as was previously done) may
+      // actually hit the password dialog in some cases.
+      PressButton(kToolbarAppMenuButtonElementId),
+      EnsurePresent(PasswordSaveUpdateView::kPasswordBubbleElementId));
 }
 
 IN_PROC_BROWSER_TEST_P(PasswordBubbleInteractiveUiTest,
@@ -463,7 +485,6 @@ IN_PROC_BROWSER_TEST_P(PasswordBubbleInteractiveUiTest, DontCloseOnLostFocus) {
   EXPECT_TRUE(IsBubbleShowing());
 }
 
-// TODO(https://crbug.com/410751413): Test is flake on Mac.
 #if BUILDFLAG(IS_MAC)
 #define MAYBE_TwoTabsWithBubbleSwitch DISABLED_TwoTabsWithBubbleSwitch
 #else
@@ -489,11 +510,7 @@ IN_PROC_BROWSER_TEST_P(PasswordBubbleInteractiveUiTest,
   tab_model->ActivateTabAt(
       0, TabStripUserGestureDetails(
              TabStripUserGestureDetails::GestureType::kOther));
-  if (GetParam()) {
-    EXPECT_TRUE(IsBubbleShowing());
-  } else {
-    EXPECT_FALSE(IsBubbleShowing());
-  }
+  EXPECT_FALSE(IsBubbleShowing());
 }
 
 IN_PROC_BROWSER_TEST_P(PasswordBubbleInteractiveUiTest,
@@ -543,11 +560,7 @@ IN_PROC_BROWSER_TEST_P(PasswordBubbleInteractiveUiTest,
   int previous_tab_count = tab_model->count();
   tab_model->CloseWebContentsAt(0, 0);
   ASSERT_EQ(previous_tab_count - 1, tab_model->count());
-  if (GetParam()) {
-    EXPECT_TRUE(IsBubbleShowing());
-  } else {
-    EXPECT_FALSE(IsBubbleShowing());
-  }
+  EXPECT_FALSE(IsBubbleShowing());
 
   // The bubble is not destroyed. However, the WebContents _is_ destroyed.
   // Emptying the runloop will process the queued event, and should not cause a
@@ -556,53 +569,6 @@ IN_PROC_BROWSER_TEST_P(PasswordBubbleInteractiveUiTest,
   EXPECT_FALSE(ran_event_task);
   content::RunAllPendingInMessageLoop();
   EXPECT_TRUE(ran_event_task);
-}
-
-IN_PROC_BROWSER_TEST_P(PasswordBubbleInteractiveUiTest, AutoSignin) {
-  test_form()->url = GURL("https://example.com");
-  test_form()->display_name = u"Peter";
-  test_form()->username_value = u"pet12@gmail.com";
-  test_form()->icon_url = embedded_test_server()->GetURL("/icon.png");
-  std::vector<std::unique_ptr<password_manager::PasswordForm>>
-      local_credentials;
-  local_credentials.push_back(
-      std::make_unique<password_manager::PasswordForm>(*test_form()));
-
-  SetupAutoSignin(std::move(local_credentials));
-  EXPECT_TRUE(IsBubbleShowing());
-
-  PasswordBubbleViewBase::CloseCurrentBubble();
-  EXPECT_FALSE(IsBubbleShowing());
-  content::RunAllPendingInMessageLoop();
-  content::WebContents* web_contents =
-      browser()->tab_strip_model()->GetActiveWebContents();
-  EXPECT_EQ(password_manager::ui::MANAGE_STATE,
-            PasswordsModelDelegateFromWebContents(web_contents)->GetState());
-}
-
-IN_PROC_BROWSER_TEST_P(PasswordBubbleInteractiveUiTest, AutoSigninNoFocus) {
-  test_form()->url = GURL("https://example.com");
-  test_form()->display_name = u"Peter";
-  test_form()->username_value = u"pet12@gmail.com";
-  std::vector<std::unique_ptr<password_manager::PasswordForm>>
-      local_credentials;
-  local_credentials.push_back(
-      std::make_unique<password_manager::PasswordForm>(*test_form()));
-
-  // Open another window with focus.
-  Browser* focused_window = CreateBrowser(browser()->profile());
-  ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(focused_window));
-
-  PasswordAutoSignInView::set_auto_signin_toast_timeout(1);
-  SetupAutoSignin(std::move(local_credentials));
-  EXPECT_TRUE(IsBubbleShowing());
-
-  focused_window->window()->Close();
-  ui_test_utils::WaitForBrowserToClose(focused_window);
-
-  // Wait until the auto-signin bubble has disappeared, which should happen
-  // after its timeout.
-  EXPECT_TRUE(base::test::RunUntil([&] { return !IsBubbleShowing(); }));
 }
 
 IN_PROC_BROWSER_TEST_P(PasswordBubbleInteractiveUiTest,
@@ -777,15 +743,15 @@ IN_PROC_BROWSER_TEST_P(PasswordBubbleInteractiveUiTest,
   ClickOnView(PasswordBubbleViewBase::manage_password_bubble()->GetViewByID(
       static_cast<int>(
           password_manager::ManagePasswordsViewIDs::kCopyUsernameButton)));
-  clipboard->ReadText(ui::ClipboardBuffer::kCopyPaste, /*data_dst=*/nullptr,
-                      &clipboard_text);
+  clipboard_text = ui::clipboard_test_util::ReadText(
+      clipboard, ui::ClipboardBuffer::kCopyPaste, /*data_dst=*/nullptr);
   EXPECT_EQ(clipboard_text, u"test_username");
 
   ClickOnView(PasswordBubbleViewBase::manage_password_bubble()->GetViewByID(
       static_cast<int>(
           password_manager::ManagePasswordsViewIDs::kCopyPasswordButton)));
-  clipboard->ReadText(ui::ClipboardBuffer::kCopyPaste, /*data_dst=*/nullptr,
-                      &clipboard_text);
+  clipboard_text = ui::clipboard_test_util::ReadText(
+      clipboard, ui::ClipboardBuffer::kCopyPaste, /*data_dst=*/nullptr);
   EXPECT_EQ(clipboard_text, u"test_password");
 
   EXPECT_THAT(histogram_tester.GetAllSamples(
@@ -1274,17 +1240,9 @@ IN_PROC_BROWSER_TEST_P(PasswordBubbleInteractiveUiTest,
   EXPECT_NE(first_bubble, second_bubble);
 }
 
-// TODO(crbug.com/364687935): Failing on Mac.
-#if BUILDFLAG(IS_MAC)
-#define MAYBE_NavigateToManagementDetailsViewWithMoveFooterVisibleAndTakeScreenshot \
-  DISABLED_NavigateToManagementDetailsViewWithMoveFooterVisibleAndTakeScreenshot
-#else
-#define MAYBE_NavigateToManagementDetailsViewWithMoveFooterVisibleAndTakeScreenshot \
-  NavigateToManagementDetailsViewWithMoveFooterVisibleAndTakeScreenshot
-#endif
 IN_PROC_BROWSER_TEST_P(
     PasswordBubbleInteractiveUiTest,
-    MAYBE_NavigateToManagementDetailsViewWithMoveFooterVisibleAndTakeScreenshot) {
+    NavigateToManagementDetailsViewWithMoveFooterVisibleAndTakeScreenshot) {
   const char kFirstCredentialsRow[] = "FirstCredentialsRow";
 
   std::unique_ptr<base::AutoReset<bool>> bypass_user_auth_for_testing =
@@ -1522,6 +1480,73 @@ IN_PROC_BROWSER_TEST_P(ThreeButtonPasswordBubbleInteractiveUiTest, ClickNever) {
                       "PasswordManager.SaveUIDismissalReason",
                       password_manager::metrics_util::CLICKED_NEVER, 1));
 }
+
+class PasswordBubbleWithUnifiedUiDisabledInteractiveUiTest
+    : public PasswordBubbleInteractiveUiTest {
+ public:
+  // With Unified UI, we show a toast, not a bubble, so the tests don't apply.
+  PasswordBubbleWithUnifiedUiDisabledInteractiveUiTest() {
+    scoped_feature_list_.InitAndDisableFeature(
+        password_manager::features::kCredentialManagementUnifiedUi);
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_P(PasswordBubbleWithUnifiedUiDisabledInteractiveUiTest,
+                       AutoSignin) {
+  test_form()->url = GURL("https://example.com");
+  test_form()->display_name = u"Peter";
+  test_form()->username_value = u"pet12@gmail.com";
+  test_form()->icon_url = embedded_test_server()->GetURL("/icon.png");
+  std::vector<std::unique_ptr<password_manager::PasswordForm>>
+      local_credentials;
+  local_credentials.push_back(
+      std::make_unique<password_manager::PasswordForm>(*test_form()));
+
+  SetupAutoSignin(std::move(local_credentials));
+  EXPECT_TRUE(IsBubbleShowing());
+
+  PasswordBubbleViewBase::CloseCurrentBubble();
+  EXPECT_FALSE(IsBubbleShowing());
+  content::RunAllPendingInMessageLoop();
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  EXPECT_EQ(password_manager::ui::MANAGE_STATE,
+            PasswordsModelDelegateFromWebContents(web_contents)->GetState());
+}
+
+IN_PROC_BROWSER_TEST_P(PasswordBubbleWithUnifiedUiDisabledInteractiveUiTest,
+                       AutoSigninNoFocus) {
+  test_form()->url = GURL("https://example.com");
+  test_form()->display_name = u"Peter";
+  test_form()->username_value = u"pet12@gmail.com";
+  std::vector<std::unique_ptr<password_manager::PasswordForm>>
+      local_credentials;
+  local_credentials.push_back(
+      std::make_unique<password_manager::PasswordForm>(*test_form()));
+
+  // Open another window with focus.
+  Browser* focused_window = CreateBrowser(browser()->profile());
+  ASSERT_TRUE(ui_test_utils::BringBrowserWindowToFront(focused_window));
+
+  PasswordAutoSignInView::set_auto_signin_toast_timeout(1);
+  SetupAutoSignin(std::move(local_credentials));
+  EXPECT_TRUE(IsBubbleShowing());
+
+  ui_test_utils::BrowserDestroyedObserver observer(focused_window);
+  focused_window->window()->Close();
+  observer.Wait();
+
+  // Wait until the auto-signin bubble has disappeared, which should happen
+  // after its timeout.
+  EXPECT_TRUE(base::test::RunUntil([&] { return !IsBubbleShowing(); }));
+}
+
+INSTANTIATE_TEST_SUITE_P(All,
+                         PasswordBubbleWithUnifiedUiDisabledInteractiveUiTest,
+                         testing::Bool());
 
 INSTANTIATE_TEST_SUITE_P(All, PasswordBubbleInteractiveUiTest, testing::Bool());
 

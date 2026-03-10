@@ -11,8 +11,8 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "chrome/browser/ai/ai_context_bound_object.h"
-#include "chrome/browser/ai/ai_utils.h"
 #include "components/language/core/common/locale_util.h"
+#include "components/on_device_ai/ai_utils.h"
 #include "components/optimization_guide/core/optimization_guide_util.h"
 #include "components/optimization_guide/proto/features/summarize.pb.h"
 #include "components/optimization_guide/proto/string_value.pb.h"
@@ -74,7 +74,7 @@ AISummarizer::AISummarizer(
 
 AISummarizer::~AISummarizer() {
   for (auto& responder : responder_set_) {
-    AIUtils::SendStreamingStatus(
+    on_device_ai::SendStreamingStatus(
         responder,
         blink::mojom::ModelStreamingResponseStatus::kErrorSessionDestroyed);
   }
@@ -106,16 +106,24 @@ std::string AISummarizer::CombineContexts(std::string_view shared,
 }
 
 // static
-base::flat_set<std::string_view> AISummarizer::GetSupportedLanguageBaseCodes() {
+std::optional<base::flat_set<std::string>>
+AISummarizer::GetEnabledLanguageBaseCodes() {
   // Comma-separated language codes to enable; or "*" enables all supported.
   const base::FeatureParam<std::string> kAISummarizationAPILanguagesEnabled{
       &blink::features::kAISummarizationAPI, "langs", /*default=*/"en,es,ja"};
+  return on_device_ai::GetEnabledLanguagesForFeature(
+      GetDefaultSupportedLanguageBaseCodes(),
+      kAISummarizationAPILanguagesEnabled);
+}
+
+// static
+base::flat_set<std::string>
+AISummarizer::GetDefaultSupportedLanguageBaseCodes() {
   // TODO(crbug.com/394841624): Get supported languages from the model config.
   auto kSupportedBaseLanguages =
       base::MakeFixedFlatSet<std::string_view>({"en", "ja", "es"});
-  return AIUtils::RestrictSupportedLanguagesForFeature(
-      base::MakeFlatSet<std::string_view>(kSupportedBaseLanguages),
-      kAISummarizationAPILanguagesEnabled);
+  return base::flat_set<std::string>(kSupportedBaseLanguages.begin(),
+                                     kSupportedBaseLanguages.end());
 }
 
 void AISummarizer::Summarize(
@@ -127,7 +135,7 @@ void AISummarizer::Summarize(
   if (!session) {
     mojo::Remote<blink::mojom::ModelStreamingResponder> responder(
         std::move(pending_responder));
-    AIUtils::SendStreamingStatus(
+    on_device_ai::SendStreamingStatus(
         responder,
         blink::mojom::ModelStreamingResponseStatus::kErrorSessionDestroyed);
     return;
@@ -155,14 +163,14 @@ void AISummarizer::DidGetExecutionInputSizeForSummarize(
   }
 
   if (!session_wrapper_.session()) {
-    AIUtils::SendStreamingStatus(
+    on_device_ai::SendStreamingStatus(
         responder,
         blink::mojom::ModelStreamingResponseStatus::kErrorSessionDestroyed);
     return;
   }
 
   if (!result.has_value()) {
-    AIUtils::SendStreamingStatus(
+    on_device_ai::SendStreamingStatus(
         responder,
         blink::mojom::ModelStreamingResponseStatus::kErrorGenericFailure);
     return;
@@ -170,7 +178,7 @@ void AISummarizer::DidGetExecutionInputSizeForSummarize(
 
   uint32_t quota = blink::mojom::kWritingAssistanceMaxInputTokenSize;
   if (result.value() > quota) {
-    AIUtils::SendStreamingStatus(
+    on_device_ai::SendStreamingStatus(
         responder,
         blink::mojom::ModelStreamingResponseStatus::kErrorInputTooLarge,
         blink::mojom::QuotaErrorInfo::New(result.value(), quota));
@@ -193,8 +201,8 @@ void AISummarizer::ModelExecutionCallback(
   }
 
   if (!result.response.has_value()) {
-    AIUtils::SendStreamingStatus(
-        responder, AIUtils::ConvertOnDeviceError(result.response.error()));
+    on_device_ai::SendStreamingStatus(
+        responder, on_device_ai::ConvertOnDeviceError(result.response.error()));
     return;
   }
 

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/api/terminal/terminal_private_api.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -14,7 +15,6 @@
 #include "ash/constants/ash_pref_names.h"
 #include "ash/webui/settings/public/constants/routes.mojom.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/containers/fixed_flat_map.h"
 #include "base/containers/fixed_flat_set.h"
 #include "base/containers/flat_set.h"
@@ -196,8 +196,9 @@ std::string GetContainerFeaturesArg() {
   // sufficient.
   for (vm_tools::cicerone::ContainerFeature feature :
        crostini::GetContainerFeatures()) {
-    if (!result.empty())
+    if (!result.empty()) {
       result += ",";
+    }
     result += base::NumberToString(static_cast<int>(feature));
   }
   return result;
@@ -214,7 +215,7 @@ void NotifyProcessOutput(content::BrowserContext* browser_context,
     return;
   }
 
-  base::Value::List args;
+  base::ListValue args;
   args.Append(terminal_id);
   args.Append(output_type);
   args.Append(base::Value(base::as_byte_span(output)));
@@ -234,8 +235,8 @@ void PrefChanged(Profile* profile, const std::string& pref_name) {
   if (!event_router) {
     return;
   }
-  base::Value::List args;
-  base::Value::Dict prefs;
+  base::ListValue args;
+  base::DictValue prefs;
   prefs.Set(pref_name, profile->GetPrefs()->GetValue(pref_name).Clone());
   args.Append(std::move(prefs));
   auto event = std::make_unique<extensions::Event>(
@@ -293,8 +294,9 @@ TerminalPrivateOpenTerminalProcessFunction::OpenProcess(
       extensions::ExtensionsBrowserClient::Get()->GetUserIdHashFromContext(
           browser_context());
   content::WebContents* caller_contents = GetSenderWebContents();
-  if (!caller_contents)
+  if (!caller_contents) {
     return RespondNow(Error("No web contents."));
+  }
 
   // Passing --crosh-command overrides any JS process name.
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
@@ -327,8 +329,9 @@ TerminalPrivateOpenTerminalProcessFunction::OpenProcess(
     // command=vmshell: ensure --owner_id, --vm_name, --target_container, --cwd
     // are set, and the specified vm/container is running.
     base::CommandLine cmdline((base::FilePath(kVmShellCommand)));
-    if (!args)
+    if (!args) {
       args.emplace();
+    }
     args->insert(args->begin(), kVmShellCommand);
     base::CommandLine params_args(*args);
     VLOG(1) << "Original cmdline= " << params_args.GetCommandLineString();
@@ -346,8 +349,9 @@ TerminalPrivateOpenTerminalProcessFunction::OpenProcess(
     // Unlike the other switches, this is computed here directly rather than
     // taken from |args|.
     std::string container_features = GetContainerFeaturesArg();
-    if (!container_features.empty())
+    if (!container_features.empty()) {
       cmdline.AppendSwitchASCII(kSwitchContainerFeatures, container_features);
+    }
 
     // Append trailing passthrough args if any.  E.g. `-- vim file.txt`
     auto passthrough_args = params_args.GetArgs();
@@ -753,7 +757,7 @@ TerminalPrivateOpenSettingsSubpageFunction::Run() {
 TerminalPrivateGetOSInfoFunction::~TerminalPrivateGetOSInfoFunction() = default;
 
 ExtensionFunction::ResponseAction TerminalPrivateGetOSInfoFunction::Run() {
-  base::Value::Dict info;
+  base::DictValue info;
   info.Set("tast", extensions::ExtensionRegistry::Get(browser_context())
                        ->enabled_extensions()
                        .Contains(extension_misc::kGuestModeTestExtensionId));
@@ -767,11 +771,11 @@ ExtensionFunction::ResponseAction TerminalPrivateGetPrefsFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(params);
   PrefService* service =
       Profile::FromBrowserContext(browser_context())->GetPrefs();
-  base::Value::Dict result;
+  base::DictValue result;
 
   for (const auto& path : params->paths) {
     // Ignore non-allowed paths.
-    if (!base::Contains(*kPrefsReadAllowList, path)) {
+    if (!std::ranges::contains(*kPrefsReadAllowList, path)) {
       LOG(WARNING) << "Ignoring non-allowed GetPrefs path=" << path;
       continue;
     }

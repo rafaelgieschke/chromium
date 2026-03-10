@@ -257,7 +257,8 @@ public class CronetUrlRequestTest {
                         false,
                         "unknown",
                         ":0",
-                        receivedBytes);
+                        receivedBytes,
+                        /* isProxied= */ false);
         return unknown;
     }
 
@@ -890,9 +891,9 @@ public class CronetUrlRequestTest {
                 new MockUrlRequestJobFactory(mTestRule.getTestFramework().getEngine());
         TestUrlRequestCallback callback =
                 startAndWaitForComplete(mNativeTestServer.getMultiRedirectURL());
-        UrlResponseInfo mResponseInfo = callback.getResponseInfoWithChecks();
+        UrlResponseInfo responseInfo = callback.getResponseInfoWithChecks();
         assertThat(callback.mRedirectCount).isEqualTo(2);
-        assertThat(mResponseInfo).hasHttpStatusCodeThat().isEqualTo(200);
+        assertThat(responseInfo).hasHttpStatusCodeThat().isEqualTo(200);
         assertThat(callback.mRedirectResponseInfoList).hasSize(2);
 
         // Check first redirect (multiredirect.html -> redirect.html)
@@ -931,7 +932,7 @@ public class CronetUrlRequestTest {
                         "multi-header-name",
                         "header-value2");
 
-        mTestRule.assertResponseEquals(secondExpectedResponseInfo, mResponseInfo);
+        mTestRule.assertResponseEquals(secondExpectedResponseInfo, responseInfo);
         assertThat(callback.mHttpResponseDataLength).isNotEqualTo(0);
         assertThat(callback.mRedirectCount).isEqualTo(2);
         assertThat(callback.mResponseStep).isEqualTo(ResponseStep.ON_SUCCEEDED);

@@ -56,6 +56,7 @@ class ICloudRecoveryKey;
 }  // namespace trusted_vault
 
 enum class EnclaveEnabledStatus;
+enum class EnclaveChangePinEvent;
 class Profile;
 
 // Provides a TrustedVaultConnection for a given RenderFrameHost.
@@ -177,7 +178,7 @@ class GPMEnclaveController : public AuthenticatorRequestDialogModel::Observer,
   bool is_active() const;
 
   // Returns true if the enclave state is loaded to the point where the UI
-  // can be shown. If false, then the `OnReadyForUI` event will be triggered
+  // can be shown. If false, then the `OnGPMReadyForUI` event will be triggered
   // on the model when ready.
   bool ready_for_ui() const;
 
@@ -201,6 +202,10 @@ class GPMEnclaveController : public AuthenticatorRequestDialogModel::Observer,
   enclave_request_callback_for_testing() {
     return enclave_request_callback_;
   }
+
+  // To be called when an enclave transaction fails. Returns true if the event
+  // was handled.
+  bool OnEnclaveError();
 
  private:
   // GPMEnclaveTransaction::Delegate:
@@ -291,20 +296,23 @@ class GPMEnclaveController : public AuthenticatorRequestDialogModel::Observer,
   void OnLoadingTimeout();
 
   // AuthenticatorRequestDialogModel::Observer:
-  void OnGPMSelected() override;
+  void OnGPMCreationSelected() override;
   void OnGPMPasskeySelected(std::vector<uint8_t> credential_id) override;
-  void OnTrustThisComputer() override;
+  void OnGPMTrustThisComputer() override;
   void OnGPMPinOptionChanged(bool is_arbitrary) override;
-  void OnGPMCreatePasskey() override;
+  void OnGPMCreationConfirmed() override;
   void OnGPMConfirmOffTheRecordCreate() override;
   void OnGPMPinEntered(const std::u16string& pin) override;
-  void OnTouchIDComplete(bool success) override;
-  void OnForgotGPMPinPressed() override;
-  void OnReauthComplete(std::string rapt) override;
-  void OnGpmPasskeysReset(bool success) override;
+  void OnGPMTouchIDComplete(bool success) override;
+  void OnGPMForgotPinPressed() override;
+  void OnGPMReauthComplete(std::string rapt) override;
+  void OnGPMPasskeysReset(bool success) override;
 
   // Starts a create() or get() action with the enclave.
   void StartTransaction();
+
+  // Starts the flow to change a GPM PIN.
+  void StartChangePinFlow(EnclaveChangePinEvent change_pin_event);
 
   // Accessors for the profile pref that counts the number of consecutive failed
   // PIN attempts to know when a lockout will happen.
@@ -409,6 +417,9 @@ class GPMEnclaveController : public AuthenticatorRequestDialogModel::Observer,
 
   // Set to true when the user initiates reset GPM pin flow during UV.
   bool changing_gpm_pin_ = false;
+
+  // Set to true when the a new PIN is being set up to satisfy a UV requirement.
+  bool setting_new_pin_for_uv_ = false;
 
   // Records when the user has confirmed credential creation in an Incognito
   // context.

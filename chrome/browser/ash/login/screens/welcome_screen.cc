@@ -4,14 +4,16 @@
 
 #include "chrome/browser/ash/login/screens/welcome_screen.h"
 
+#include <algorithm>
 #include <utility>
 #include <vector>
 
 #include "ash/constants/ash_features.h"
+#include "ash/constants/ash_pref_names.h"
 #include "ash/constants/ash_switches.h"
+#include "base/check_deref.h"
 #include "base/check_is_test.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
@@ -30,8 +32,6 @@
 #include "chrome/browser/ash/policy/enrollment/enrollment_requisition_manager.h"
 #include "chrome/browser/ash/system/timezone_resolver_manager.h"
 #include "chrome/browser/ash/system/timezone_util.h"
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/ash/login/input_events_blocker.h"
 #include "chrome/browser/ui/ash/login/login_screen_client_impl.h"
@@ -42,8 +42,10 @@
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/ash/components/quick_start/quick_start_metrics.h"
 #include "chromeos/dbus/constants/dbus_switches.h"
+#include "components/application_locale_storage/application_locale_storage.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/prefs/pref_service.h"
+#include "components/session_manager/core/session_manager.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace ash {
@@ -163,10 +165,6 @@ bool IsMeetDeviceConfigurable() {
          switches::IsDeviceRequisitionConfigurable();
 }
 
-std::string GetApplicationLocale() {
-  return g_browser_process->GetApplicationLocale();
-}
-
 }  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -190,9 +188,14 @@ std::string WelcomeScreen::GetResultString(Result result) {
   // LINT.ThenChange(//tools/metrics/histograms/metadata/oobe/histograms.xml)
 }
 
-WelcomeScreen::WelcomeScreen(base::WeakPtr<WelcomeView> view,
-                             const ScreenExitCallback& exit_callback)
+WelcomeScreen::WelcomeScreen(
+    PrefService* local_state,
+    ApplicationLocaleStorage* application_locale_storage,
+    base::WeakPtr<WelcomeView> view,
+    const ScreenExitCallback& exit_callback)
     : BaseScreen(WelcomeView::kScreenId, OobeScreenPriority::DEFAULT),
+      local_state_(CHECK_DEREF(local_state)),
+      application_locale_storage_(CHECK_DEREF(application_locale_storage)),
       view_(std::move(view)),
       exit_callback_(exit_callback) {
   input_method::InputMethodManager::Get()->AddObserver(this);
@@ -228,7 +231,7 @@ void WelcomeScreen::UpdateLanguageList() {
 void WelcomeScreen::SetApplicationLocaleAndInputMethod(
     const std::string& locale,
     const std::string& input_method) {
-  const std::string& app_locale = GetApplicationLocale();
+  const std::string& app_locale = application_locale_storage_->Get();
   if (app_locale == locale || locale.empty()) {
     // If the locale doesn't change, set input method directly.
     SetInputMethod(input_method);
@@ -244,7 +247,8 @@ void WelcomeScreen::SetApplicationLocaleAndInputMethod(
       base::BindOnce(&WelcomeScreen::OnLanguageChangedCallback,
                      language_weak_ptr_factory_.GetWeakPtr(),
                      base::Owned(new InputEventsBlocker), input_method));
-  locale_util::SwitchLanguage(locale, /*enable_locale_keyboard_layouts=*/true,
+  locale_util::SwitchLanguage(&application_locale_storage_.get(), locale,
+                              /*enable_locale_keyboard_layouts=*/true,
                               /*login_layouts_only=*/false, std::move(callback),
                               ProfileManager::GetActiveUserProfile());
 }
@@ -255,7 +259,7 @@ std::string WelcomeScreen::GetInputMethod() const {
 
 void WelcomeScreen::SetApplicationLocale(const std::string& locale,
                                          const bool is_from_ui) {
-  const std::string& app_locale = GetApplicationLocale();
+  const std::string& app_locale = application_locale_storage_->Get();
   if (app_locale == locale || locale.empty()) {
     if (selected_language_code_.empty())
       UpdateLanguageList();
@@ -271,14 +275,14 @@ void WelcomeScreen::SetApplicationLocale(const std::string& locale,
       base::BindOnce(&WelcomeScreen::OnLanguageChangedCallback,
                      language_weak_ptr_factory_.GetWeakPtr(),
                      base::Owned(new InputEventsBlocker), std::string()));
-  locale_util::SwitchLanguage(locale, /*enable_locale_keyboard_layouts=*/true,
+  locale_util::SwitchLanguage(&application_locale_storage_.get(), locale,
+                              /*enable_locale_keyboard_layouts=*/true,
                               /*login_layouts_only=*/false, std::move(callback),
                               ProfileManager::GetActiveUserProfile());
   if (is_from_ui) {
     // Write into the local state to save data about locale changes in case of
     // reboot of device after forced update.
-    PrefService* local_state = g_browser_process->local_state();
-    local_state->SetBoolean(prefs::kOobeLocaleChangedOnWelcomeScreen, true);
+    local_state_->SetBoolean(prefs::kOobeLocaleChangedOnWelcomeScreen, true);
   }
 }
 
@@ -287,7 +291,8 @@ void WelcomeScreen::SetInputMethod(const std::string& input_method) {
       input_method::InputMethodManager::Get()
           ->GetActiveIMEState()
           ->GetEnabledInputMethodIds();
-  if (input_method.empty() || !base::Contains(input_methods, input_method)) {
+  if (input_method.empty() ||
+      !std::ranges::contains(input_methods, input_method)) {
     LOG(WARNING) << "The input method is empty or ineligible!";
     return;
   }
@@ -328,8 +333,8 @@ void WelcomeScreen::SetDeviceRequisition(const std::string& requisition) {
 
   if (policy::EnrollmentRequisitionManager::IsMeetDevice()) {
     // CfM devices default to static timezone.
-    g_browser_process->local_state()->SetInteger(
-        ::prefs::kResolveDeviceTimezoneByGeolocationMethod,
+    local_state_->SetInteger(
+        ash::prefs::kResolveDeviceTimezoneByGeolocationMethod,
         static_cast<int>(
             system::TimeZoneResolverManager::TimeZoneResolveMethod::DISABLED));
   }
@@ -337,7 +342,7 @@ void WelcomeScreen::SetDeviceRequisition(const std::string& requisition) {
   // Exit Chrome to force the restart as soon as a new requisition is set.
   if (initial_requisition !=
       policy::EnrollmentRequisitionManager::GetDeviceRequisition()) {
-    chrome::AttemptRestart();
+    session_manager::SessionManager::Get()->RequestRestart();
   }
 }
 
@@ -359,8 +364,8 @@ void WelcomeScreen::ShowImpl() {
   // resources. This would load fallback, but properly show "selected" locale
   // in the UI.
   if (selected_language_code_.empty()) {
-    std::string stored_locale = g_browser_process->local_state()->GetString(
-        language::prefs::kApplicationLocale);
+    std::string stored_locale =
+        local_state_->GetString(language::prefs::kApplicationLocale);
 
     if (!stored_locale.empty()) {
       SetApplicationLocale(stored_locale,
@@ -374,8 +379,7 @@ void WelcomeScreen::ShowImpl() {
   }
 
   // TODO(crbug.com/1105387): Part of initial screen logic.
-  PrefService* prefs = g_browser_process->local_state();
-  if (prefs->GetBoolean(::prefs::kDebuggingFeaturesRequested)) {
+  if (local_state_->GetBoolean(::prefs::kDebuggingFeaturesRequested)) {
     OnEnableDebugging();
     return;
   }
@@ -401,7 +405,7 @@ void WelcomeScreen::HideImpl() {
   CancelChromeVoxHintIdleDetection();
 }
 
-void WelcomeScreen::OnUserAction(const base::Value::List& args) {
+void WelcomeScreen::OnUserAction(const base::ListValue& args) {
   const std::string& action_id = args[0].GetString();
   if (action_id == kUserActionQuickStartClicked) {
     OnQuickStartClicked();
@@ -621,8 +625,8 @@ void WelcomeScreen::OnLanguageChangedCallback(
     // We still do not have device owner, so owner settings are not applied.
     // But Guest session can be started before owner is created, so we need to
     // save locale settings directly here.
-    g_browser_process->local_state()->SetString(
-        language::prefs::kApplicationLocale, selected_language_code_);
+    local_state_->SetString(language::prefs::kApplicationLocale,
+                            selected_language_code_);
   }
   ScheduleResolveLanguageList(
       std::make_unique<locale_util::LanguageSwitchResult>(result));
@@ -645,20 +649,20 @@ void WelcomeScreen::ScheduleResolveLanguageList(
 }
 
 void WelcomeScreen::OnLanguageListResolved(
-    base::Value::List new_language_list,
+    base::ListValue new_language_list,
     const std::string& new_language_list_locale,
     const std::string& new_selected_language) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  if (new_language_list_locale != GetApplicationLocale()) {
+  if (new_language_list_locale != application_locale_storage_->Get()) {
     UpdateLanguageList();
     return;
   }
 
   selected_language_code_ = new_selected_language;
 
-  g_browser_process->local_state()->SetString(
-      language::prefs::kApplicationLocale, selected_language_code_);
+  local_state_->SetString(language::prefs::kApplicationLocale,
+                          selected_language_code_);
   if (view_)
     view_->SetLanguageList(std::move(new_language_list));
   for (auto& observer : observers_)
@@ -732,10 +736,9 @@ void WelcomeScreen::OnQuickStartClicked() {
 }
 
 void WelcomeScreen::Exit(Result result) const {
-  PrefService* local_state = g_browser_process->local_state();
   base::UmaHistogramBoolean(
       kWelcomeScreenLocaleChangeMetric,
-      local_state->GetBoolean(prefs::kOobeLocaleChangedOnWelcomeScreen));
+      local_state_->GetBoolean(prefs::kOobeLocaleChangedOnWelcomeScreen));
   exit_callback_.Run(result);
 }
 

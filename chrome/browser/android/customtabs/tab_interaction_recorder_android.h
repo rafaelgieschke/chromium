@@ -40,8 +40,7 @@ class AutofillObserverImpl : public autofill::AutofillManager::Observer {
                                             autofill::FieldGlobalId) override;
   void OnAfterTextFieldValueChanged(autofill::AutofillManager&,
                                     autofill::FormGlobalId,
-                                    autofill::FieldGlobalId,
-                                    const std::u16string&) override;
+                                    autofill::FieldGlobalId) override;
   void OnAfterTextFieldDidScroll(autofill::AutofillManager&,
                                  autofill::FormGlobalId,
                                  autofill::FieldGlobalId) override;
@@ -120,10 +119,10 @@ class TabInteractionRecorderAndroid
   void DidGetUserInteraction(const blink::WebInputEvent& event) override;
 
   // JNI methods
-  jboolean DidGetUserInteraction(JNIEnv* env) const;
-  jboolean HadFormInteractionInSession(JNIEnv* env) const;
-  jboolean HadFormInteractionInActivePage(JNIEnv* env) const;
-  jboolean HadNavigationInteraction(JNIEnv* env) const;
+  bool DidGetUserInteraction(JNIEnv* env) const;
+  bool HadFormInteractionInSession(JNIEnv* env) const;
+  bool HadFormInteractionInActivePage(JNIEnv* env) const;
+  bool HadNavigationInteraction(JNIEnv* env) const;
   void Reset(JNIEnv* env);
 
 #ifdef UNIT_TEST

@@ -44,6 +44,7 @@
 #include "ui/views/test/button_test_api.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/view.h"
+#include "ui/views/view_utils.h"
 #include "ui/views/widget/any_widget_observer.h"
 #include "ui/views/widget/widget.h"
 
@@ -244,13 +245,26 @@ IN_PROC_BROWSER_TEST_F(
   ASSERT_EQ(3, tsm->count());
   std::optional<tab_groups::TabGroupId> group = tsm->AddToNewGroup({0, 1});
 
-  ASSERT_FALSE(browser_view->tabstrip()->tab_at(0)->HasFreezingVote());
-  ASSERT_FALSE(browser_view->tabstrip()->tab_at(1)->HasFreezingVote());
-  ASSERT_FALSE(browser_view->tabstrip()->tab_at(2)->HasFreezingVote());
-  browser_view->tabstrip()->ToggleTabGroupCollapsedState(group.value());
-  EXPECT_TRUE(browser_view->tabstrip()->tab_at(0)->HasFreezingVote());
-  EXPECT_TRUE(browser_view->tabstrip()->tab_at(1)->HasFreezingVote());
-  EXPECT_FALSE(browser_view->tabstrip()->tab_at(2)->HasFreezingVote());
+  ASSERT_FALSE(browser_view->horizontal_tab_strip_for_testing()
+                   ->tab_at(0)
+                   ->HasFreezingVote());
+  ASSERT_FALSE(browser_view->horizontal_tab_strip_for_testing()
+                   ->tab_at(1)
+                   ->HasFreezingVote());
+  ASSERT_FALSE(browser_view->horizontal_tab_strip_for_testing()
+                   ->tab_at(2)
+                   ->HasFreezingVote());
+  browser_view->horizontal_tab_strip_for_testing()
+      ->ToggleTabGroupCollapsedState(group.value());
+  EXPECT_TRUE(browser_view->horizontal_tab_strip_for_testing()
+                  ->tab_at(0)
+                  ->HasFreezingVote());
+  EXPECT_TRUE(browser_view->horizontal_tab_strip_for_testing()
+                  ->tab_at(1)
+                  ->HasFreezingVote());
+  EXPECT_FALSE(browser_view->horizontal_tab_strip_for_testing()
+                   ->tab_at(2)
+                   ->HasFreezingVote());
 }
 
 class TabGroupEditorBubbleViewDialogBrowserTestWithSavedGroup
@@ -450,7 +464,7 @@ IN_PROC_BROWSER_TEST_F(
               editor_bubble->GetRootView()));
   ASSERT_NE(nullptr, focus_button_view);
   views::LabelButton* const focus_button =
-      static_cast<views::LabelButton*>(focus_button_view);
+      views::AsViewClass<views::LabelButton>(focus_button_view);
   EXPECT_EQ(focus_button->GetText(),
             l10n_util::GetStringUTF16(IDS_TAB_GROUP_HEADER_CXMENU_FOCUS_GROUP));
 
@@ -478,7 +492,7 @@ IN_PROC_BROWSER_TEST_F(
               editor_bubble2->GetRootView()));
   ASSERT_NE(nullptr, unfocus_button_view);
   views::LabelButton* const unfocus_button =
-      static_cast<views::LabelButton*>(unfocus_button_view);
+      views::AsViewClass<views::LabelButton>(unfocus_button_view);
   EXPECT_EQ(
       unfocus_button->GetText(),
       l10n_util::GetStringUTF16(IDS_TAB_GROUP_HEADER_CXMENU_UNFOCUS_GROUP));

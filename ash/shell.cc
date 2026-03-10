@@ -248,7 +248,9 @@
 #include "base/check_is_test.h"
 #include "base/command_line.h"
 #include "base/containers/adapters.h"
+#include "base/feature_list.h"
 #include "base/functional/bind.h"
+#include "base/functional/callback_forward.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/ptr_util.h"
 #include "base/notreached.h"
@@ -263,6 +265,7 @@
 #include "chromeos/constants/chromeos_features.h"
 #include "chromeos/dbus/init/initialize_dbus_client.h"
 #include "chromeos/dbus/power/power_policy_controller.h"
+#include "chromeos/ui/clipboard_history/clipboard_history_types.h"
 #include "chromeos/ui/clipboard_history/clipboard_history_util.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
@@ -342,6 +345,16 @@ class AshVisibilityController : public ::wm::VisibilityController {
 };
 
 }  // namespace
+
+////////////////////////////////////////////////////////////////////////////////
+// TrayIconConfiguration, public:
+
+TrayIconConfiguration::TrayIconConfiguration() = default;
+
+TrayIconConfiguration::~TrayIconConfiguration() = default;
+
+////////////////////////////////////////////////////////////////////////////////
+// Shell, static:
 
 // static
 Shell* Shell::instance_ = nullptr;
@@ -631,18 +644,28 @@ void Shell::UpdateAfterLoginStatusChange(LoginStatus status) {
 
 void Shell::NotifyFullscreenStateChanged(bool is_fullscreen,
                                          aura::Window* container) {
-  for (auto& observer : shell_observers_) {
-    observer.OnFullscreenStateChanged(is_fullscreen, container);
+  if (shutting_down_) {
+    return;
   }
+  // A fullscreen state change may trigger another fullscreen state change.
+  // TODO(crbug.com/484371187): Investigate if we can remove the recentrancy.
+  shell_observers_.NotifyAllowReentrancyUntriaged(
+      &ShellObserver::OnFullscreenStateChanged, is_fullscreen, container);
 }
 
 void Shell::NotifyPinnedStateChanged(aura::Window* pinned_window) {
+  if (shutting_down_) {
+    return;
+  }
   for (auto& observer : shell_observers_) {
     observer.OnPinnedStateChanged(pinned_window);
   }
 }
 
 void Shell::NotifyUserWorkAreaInsetsChanged(aura::Window* root_window) {
+  if (shutting_down_) {
+    return;
+  }
   for (auto& observer : shell_observers_) {
     observer.OnUserWorkAreaInsetsChanged(root_window);
   }
@@ -650,12 +673,18 @@ void Shell::NotifyUserWorkAreaInsetsChanged(aura::Window* root_window) {
 
 void Shell::NotifyShelfAlignmentChanged(aura::Window* root_window,
                                         ShelfAlignment old_alignment) {
+  if (shutting_down_) {
+    return;
+  }
   for (auto& observer : shell_observers_) {
     observer.OnShelfAlignmentChanged(root_window, old_alignment);
   }
 }
 
 void Shell::NotifyDisplayForNewWindowsChanged() {
+  if (shutting_down_) {
+    return;
+  }
   for (auto& observer : shell_observers_) {
     observer.OnDisplayForNewWindowsChanged();
   }
@@ -676,6 +705,43 @@ void Shell::AddAccessibilityEventHandler(
 void Shell::RemoveAccessibilityEventHandler(ui::EventHandler* handler) {
   accessibility_event_handler_manager_->RemoveAccessibilityEventHandler(
       handler);
+}
+
+bool Shell::AddStatusTrayIcon(const TrayIconConfiguration& configuration,
+                              int64_t display_id,
+                              base::RepeatingClosure callback) {
+  if (!base::FeatureList::IsEnabled(
+          chromeos::features::kSupportCustomIconsInStatusArea)) {
+    return false;
+  }
+
+  aura::Window* root_window = GetRootWindowForDisplayId(display_id);
+  auto* status_area = StatusAreaWidget::ForWindow(root_window);
+  return status_area->AddTrayIcon(configuration, std::move(callback));
+}
+
+bool Shell::UpdateStatusTrayIcon(const TrayIconConfiguration& configuration,
+                                 int64_t display_id) {
+  if (!base::FeatureList::IsEnabled(
+          chromeos::features::kSupportCustomIconsInStatusArea)) {
+    return false;
+  }
+
+  aura::Window* root_window = GetRootWindowForDisplayId(display_id);
+  auto* status_area = StatusAreaWidget::ForWindow(root_window);
+  return status_area->UpdateTrayIcon(configuration);
+}
+
+bool Shell::RemoveStatusTrayIcon(const TrayIconConfiguration& configuration,
+                                 int64_t display_id) {
+  if (!base::FeatureList::IsEnabled(
+          chromeos::features::kSupportCustomIconsInStatusArea)) {
+    return false;
+  }
+
+  aura::Window* root_window = GetRootWindowForDisplayId(display_id);
+  auto* status_area = StatusAreaWidget::ForWindow(root_window);
+  return status_area->RemoveTrayIcon(configuration);
 }
 
 void Shell::RecreateMultiUserWindowManagerForTesting() {
@@ -735,6 +801,8 @@ Shell::Shell(std::unique_ptr<ShellDelegate> shell_delegate)
 
 Shell::~Shell() {
   TRACE_EVENT0("shutdown", "ash::Shell::Destructor");
+  shutting_down_ = true;
+
 #if DCHECK_IS_ON()
   // All WindowEventDispatchers should be shutdown before the Shell is
   // destroyed.
@@ -742,6 +810,7 @@ Shell::~Shell() {
     DCHECK(rwc->GetHost()->dispatcher()->in_shutdown());
   }
 #endif
+
   booting_animation_controller_.reset();
   unlock_throughput_recorder_.reset();
   login_unlock_throughput_recorder_.reset();
@@ -1853,7 +1922,7 @@ void Shell::Init(
   // `clipboard_history_controller_` is destroyed.
   chromeos::clipboard_history::SetQueryItemDescriptorsImpl(base::BindRepeating(
       [](ClipboardHistoryControllerImpl* controller) {
-        std::vector<crosapi::mojom::ClipboardHistoryItemDescriptor> descriptors;
+        std::vector<chromeos::clipboard_history::ItemDescriptor> descriptors;
         if (clipboard_history_util::IsEnabledInCurrentMode()) {
           const auto& items = controller->history()->GetItems();
           descriptors.reserve(items.size());
@@ -1866,7 +1935,7 @@ void Shell::Init(
   chromeos::clipboard_history::SetPasteClipboardItemByIdImpl(
       base::BindRepeating(
           [](const base::UnguessableToken& id, int event_flags,
-             crosapi::mojom::ClipboardHistoryControllerShowSource show_source) {
+             chromeos::clipboard_history::ShowSource show_source) {
             ClipboardHistoryController::Get()->PasteClipboardItemById(
                 id.ToString(), event_flags, show_source);
           }));

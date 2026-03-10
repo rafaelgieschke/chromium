@@ -29,11 +29,15 @@
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/pref_names.h"
 #include "extensions/browser/test_extension_registry_observer.h"
+#include "extensions/browser/ui_util.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/mojom/manifest.mojom-shared.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "extensions/test/test_extension_dir.h"
 #include "url/gurl.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -49,7 +53,10 @@ constexpr char kExtensionUpdateUrl[] =
 
 class ExtensionUtilUnittest : public ExtensionServiceTestBase {
  public:
-  void SetUp() override { InitializeEmptyExtensionService(); }
+  void SetUp() override {
+    ExtensionServiceTestBase::SetUp();
+    InitializeEmptyExtensionService();
+  }
 };
 
 TEST_F(ExtensionUtilUnittest, SetAllowFileAccess) {
@@ -199,7 +206,7 @@ TEST_F(ExtensionUtilUnittest, FixupLongExtensionName) {
       u"long\u2026";
 
   std::u16string fixup_extension_name =
-      util::GetFixupExtensionNameForUIDisplay(long_extension_name);
+      ui_util::GetFixupExtensionNameForUIDisplay(long_extension_name);
   EXPECT_EQ(fixup_extension_name, expected_fixup_extension_name);
 }
 
@@ -239,11 +246,11 @@ class ExtensionUtilWithSigninProfileUnittest : public ExtensionUtilUnittest {
   }
 
   void SetupForceList(const ExtensionIdList& extension_ids) {
-    base::Value::Dict dict = base::Value::Dict();
+    base::DictValue dict = base::DictValue();
     for (const auto& extension_id : extension_ids) {
       dict.Set(extension_id,
-               base::Value::Dict().Set(ExternalProviderImpl::kExternalUpdateUrl,
-                                       kExtensionUpdateUrl));
+               base::DictValue().Set(ExternalProviderImpl::kExternalUpdateUrl,
+                                     kExtensionUpdateUrl));
     }
     signin_profile_prefs_->SetManagedPref(pref_names::kInstallForceList,
                                           std::move(dict));

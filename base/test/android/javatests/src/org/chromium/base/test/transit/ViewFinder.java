@@ -16,8 +16,14 @@ import org.chromium.build.annotations.NullMarked;
 /**
  * Finds views for tests and return handles for them.
  *
- * <p>waitForView() methods wait for Views to exist, be visible, displayed and enabled before
- * returning.
+ * <p>By default, waitForView() methods wait for Views to:
+ *
+ * <ul>
+ *   <li>Exist
+ *   <li>Be {@link android.view.View#VISIBLE}
+ *   <li>Be displayed >= 51% ({@link ViewElement#MIN_DISPLAYED_PERCENT})
+ *   <li>Be enabled
+ * </ul>
  *
  * <p>Returns {@link ViewPresence}s to get/interact with them.
  */
@@ -79,9 +85,9 @@ public class ViewFinder {
     public static <ViewT extends View> ViewPresence<ViewT> waitForView(
             Class<ViewT> viewClass, Matcher<View> matcher, ViewElement.Options options) {
         RootSpec rootSpec = options.mRootSpec;
-        // If not specified, default to anyRoot().
+        // If not specified, default to focusedRoot().
         if (rootSpec == null) {
-            rootSpec = RootSpec.anyRoot();
+            rootSpec = RootSpec.focusedRoot();
         }
 
         return noopTo().enterState(
@@ -124,5 +130,17 @@ public class ViewFinder {
      */
     public static ViewPresence<View> waitForView(Matcher<View> matcher) {
         return waitForView(View.class, matcher);
+    }
+
+    /** Waits for a View that matches |matcher| to no longer be displayed. */
+    public static void waitForNoView(Matcher<View> matcher) {
+        noopTo().waitFor(new NotDisplayedAnymoreCondition(RootSpec::anyRoot, matcher));
+    }
+
+    /** Waits for a View that matches |matcher| to no longer be displayed in an activity. */
+    public static void waitForNoView(Activity activity, Matcher<View> matcher) {
+        noopTo().waitFor(
+                        new NotDisplayedAnymoreCondition(
+                                () -> RootSpec.activityRoot(activity), matcher));
     }
 }

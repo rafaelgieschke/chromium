@@ -11,7 +11,6 @@
 #include "base/android/callback_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/path_utils.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/metrics/field_trial_params.h"
@@ -170,9 +169,9 @@ ScopedJavaLocalRef<jobject> DownloadManagerService::CreateJavaDownloadInfo(
       item->IsTransient(), item->AllowAutoOpenAfterCompletion());
 }
 
-static jlong JNI_DownloadManagerService_Init(JNIEnv* env,
-                                             const JavaRef<jobject>& jobj,
-                                             jboolean is_full_browser_started) {
+static int64_t JNI_DownloadManagerService_Init(JNIEnv* env,
+                                               const JavaRef<jobject>& jobj,
+                                               bool is_full_browser_started) {
   DownloadManagerService* service = DownloadManagerService::GetInstance();
   service->Init(env, jobj, is_full_browser_started);
   return reinterpret_cast<intptr_t>(service);
@@ -240,9 +239,9 @@ void DownloadManagerService::HandleOMADownload(download::DownloadItem* download,
 }
 
 void DownloadManagerService::OpenDownload(JNIEnv* env,
-                                          std::string& download_guid,
+                                          const std::string& download_guid,
                                           const JavaRef<jobject>& j_profile_key,
-                                          jint source) {
+                                          int32_t source) {
   if (!is_manager_initialized_)
     return;
 
@@ -274,7 +273,7 @@ void DownloadManagerService::OpenDownloadsPage(
 
 void DownloadManagerService::ResumeDownload(
     JNIEnv* env,
-    std::string& download_guid,
+    const std::string& download_guid,
     const JavaRef<jobject>& j_profile_key) {
   ProfileKey* profile_key =
       ProfileKeyAndroid::FromProfileKeyAndroid(j_profile_key);
@@ -287,7 +286,7 @@ void DownloadManagerService::ResumeDownload(
 
 void DownloadManagerService::PauseDownload(
     JNIEnv* env,
-    std::string& download_guid,
+    const std::string& download_guid,
     const JavaRef<jobject>& j_profile_key) {
   ProfileKey* profile_key =
       ProfileKeyAndroid::FromProfileKeyAndroid(j_profile_key);
@@ -299,7 +298,7 @@ void DownloadManagerService::PauseDownload(
 
 void DownloadManagerService::RemoveDownload(
     JNIEnv* env,
-    std::string& download_guid,
+    const std::string& download_guid,
     const JavaRef<jobject>& j_profile_key) {
   ProfileKey* profile_key =
       ProfileKeyAndroid::FromProfileKeyAndroid(j_profile_key);
@@ -371,7 +370,7 @@ void DownloadManagerService::CheckForExternallyRemovedDownloads(
 
 void DownloadManagerService::UpdateLastAccessTime(
     JNIEnv* env,
-    std::string& download_guid,
+    const std::string& download_guid,
     const JavaRef<jobject>& j_profile_key) {
   ProfileKey* profile_key =
       ProfileKeyAndroid::FromProfileKeyAndroid(j_profile_key);
@@ -382,7 +381,7 @@ void DownloadManagerService::UpdateLastAccessTime(
 
 void DownloadManagerService::CancelDownload(
     JNIEnv* env,
-    std::string& download_guid,
+    const std::string& download_guid,
     const JavaRef<jobject>& j_profile_key) {
   ProfileKey* profile_key =
       ProfileKeyAndroid::FromProfileKeyAndroid(j_profile_key);
@@ -618,7 +617,7 @@ void DownloadManagerService::ResetCoordinatorIfNeeded(ProfileKey* profile_key) {
 void DownloadManagerService::UpdateCoordinator(
     download::SimpleDownloadManagerCoordinator* new_coordinator,
     ProfileKey* profile_key) {
-  bool coordinator_exists = base::Contains(coordinators_, profile_key);
+  bool coordinator_exists = coordinators_.contains(profile_key);
   if (!coordinator_exists || coordinators_[profile_key] != new_coordinator) {
     if (coordinator_exists)
       coordinators_[profile_key]->GetNotifier()->RemoveObserver(this);
@@ -629,14 +628,14 @@ void DownloadManagerService::UpdateCoordinator(
 
 download::SimpleDownloadManagerCoordinator*
 DownloadManagerService::GetCoordinator(ProfileKey* profile_key) {
-  DCHECK(base::Contains(coordinators_, profile_key));
+  DCHECK(coordinators_.contains(profile_key));
   return coordinators_[profile_key];
 }
 
 void DownloadManagerService::RenameDownload(
     JNIEnv* env,
-    std::string& download_guid,
-    std::string& target_name,
+    const std::string& download_guid,
+    const std::string& target_name,
     const JavaRef<jobject>& j_callback,
     const JavaRef<jobject>& j_profile_key) {
   ProfileKey* profile_key =
@@ -661,9 +660,9 @@ void DownloadManagerService::RenameDownload(
 
 void DownloadManagerService::CreateInterruptedDownloadForTest(
     JNIEnv* env,
-    std::string& url,
-    std::string& download_guid,
-    std::string& target_path_str) {
+    const std::string& url,
+    const std::string& download_guid,
+    const std::string& target_path_str) {
   download::InProgressDownloadManager* in_progress_manager =
       DownloadManagerUtils::GetInProgressDownloadManager(
           ProfileKeyStartupAccessor::GetInstance()->profile_key());
@@ -690,9 +689,9 @@ void DownloadManagerService::InitializeForProfile(ProfileKey* profile_key) {
 }
 
 // static
-static jboolean JNI_DownloadManagerService_IsSupportedMimeType(
+static bool JNI_DownloadManagerService_IsSupportedMimeType(
     JNIEnv* env,
-    std::string& mime_type) {
+    const std::string& mime_type) {
   return blink::IsSupportedMimeType(mime_type);
 }
 

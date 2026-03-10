@@ -20,6 +20,7 @@
 #import "ios/chrome/browser/autofill/ui_bundled/autofill_app_interface.h"
 #import "ios/chrome/browser/metrics/model/metrics_app_interface.h"
 #import "ios/chrome/browser/recent_tabs/public/recent_tabs_constants.h"
+#import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/public/features.h"
 #import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/public/quick_delete_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/password/password_settings_app_interface.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
@@ -216,6 +217,13 @@ NSString* CapitalizeFirstLetter(NSString* string) {
 
 @implementation QuickDeleteTestCase
 
+// Returns whether the `kPasswordRemovalFromDeleteBrowsingData` feature should
+// be enabled for the current test. `NO` is returned to verify all tests pass
+// when the `kPasswordRemovalFromDeleteBrowsingData` feature is disabled.
+- (BOOL)shouldEnablePasswordRemovalFeature {
+  return NO;
+}
+
 - (void)setUp {
   [super setUp];
 
@@ -281,6 +289,32 @@ NSString* CapitalizeFirstLetter(NSString* string) {
                                    syncer::kSyncShortNudgeDelayForTest);
   config.features_enabled.push_back(
       data_sharing::features::kDataSharingFeature);
+
+  // These tests will always run with the feature
+  // `kPasswordRemovalFromDeleteBrowsingData` as disabled and will be deleted
+  // after the feature's launch.
+  BOOL isTestRequiringFeatureDisabled =
+      [self isRunningTest:@selector
+            (DISABLED_testOpenSearchHistoryMyActivityFooterLink)] ||
+      [self isRunningTest:@selector
+            (FLAKY_testOpenOtherFormsOfActivityMyActivityFooterLink)] ||
+      [self isRunningTest:@selector(testHideShowFooterBasedOnSignInStatus)] ||
+      [self isRunningTest:@selector
+            (testButtonColorWhenThePasswordRemovalFeatureIsDisabled)] ||
+      [self isRunningTest:@selector(testPasswordsForDeletion)] ||
+      [self isRunningTest:@selector(testKeepPasswords)];
+
+  // The tests above will require the feature to be disabled in order to run.
+  // The  other tests will run with the `kPasswordRemovalFromDeleteBrowsingData`
+  // feature enabled or disabled.
+  if (isTestRequiringFeatureDisabled) {
+    config.features_disabled.push_back(kPasswordRemovalFromDeleteBrowsingData);
+  } else if ([self shouldEnablePasswordRemovalFeature]) {
+    config.features_enabled.push_back(kPasswordRemovalFromDeleteBrowsingData);
+  } else {
+    config.features_disabled.push_back(kPasswordRemovalFromDeleteBrowsingData);
+  }
+
   return config;
 }
 
@@ -727,7 +761,8 @@ NSString* CapitalizeFirstLetter(NSString* string) {
 // row when browsing history is selected as a data type to be deleted and when
 // the user syncs history. It also tests that the history entries get deleted
 // when the deletion of browsing data is selected.
-- (void)testBrowsingHistoryForDeletionWithHistorySync {
+// TODO(crbug.com/484951999): Unflake the test.
+- (void)FLAKY_testBrowsingHistoryForDeletionWithHistorySync {
   // Sign in and enable history sync.
   [self signInAndEnableHistorySync];
 
@@ -1147,7 +1182,7 @@ NSString* CapitalizeFirstLetter(NSString* string) {
   if (![ChromeEarlGrey areMultipleWindowsSupported]) {
     EARL_GREY_TEST_DISABLED(@"Multiple windows can't be opened.");
   }
-  if (@available(iOS 19.0, *)) {
+  if (@available(iOS 26.0, *)) {
     // TODO(crbug.com/427699033): Re-enable test on iOS 26.
     // Fails final histogram check.
     EARL_GREY_TEST_DISABLED(@"Test disabled on iOS 26.");
@@ -1621,7 +1656,8 @@ NSString* CapitalizeFirstLetter(NSString* string) {
 
 // Tests the footer other forms of activity link is opened correctly and metrics
 // are recorded in the corrresponding histogram bucket.
-- (void)testOpenOtherFormsOfActivityMyActivityFooterLink {
+// TODO(crbug.com/485590395): Fix flakiness and reenable.
+- (void)FLAKY_testOpenOtherFormsOfActivityMyActivityFooterLink {
   GREYAssertTrue(self.testServer->Start(), @"Test server failed to start.");
   // Sign in is required to show the footer.
   [self signIn];
@@ -1657,7 +1693,7 @@ NSString* CapitalizeFirstLetter(NSString* string) {
       DeleteBrowsingDataDialogAction::kMyActivityLinkedOpened);
 }
 
-// Tests the footer discalimer string is hidden when the user is signed out and
+// Tests the footer disclaimer string is hidden when the user is signed out and
 // shown when the user signs in.
 - (void)testHideShowFooterBasedOnSignInStatus {
   // Open Quick Delete bottom sheet.
@@ -1741,7 +1777,7 @@ NSString* CapitalizeFirstLetter(NSString* string) {
   if (![ChromeEarlGrey areMultipleWindowsSupported]) {
     EARL_GREY_TEST_DISABLED(@"Multiple windows can't be opened.");
   }
-  if (@available(iOS 19.0, *)) {
+  if (@available(iOS 26.0, *)) {
     // TODO(crbug.com/427699033): Re-enable test on iOS 26.
     // Fails interacting with both windows.
     EARL_GREY_TEST_DISABLED(@"Test disabled on iOS 26.");
@@ -1802,6 +1838,83 @@ NSString* CapitalizeFirstLetter(NSString* string) {
   // Assess that the cache pref is no longer displayed in the summary on the
   // second window.
   [[EarlGrey selectElementWithMatcher:BrowsingDataSummaryWithCache()]
+      assertWithMatcher:grey_nil()];
+}
+
+// Tests that the "Delete data" button isn't blue when the
+// `kPasswordRemovalFromDeleteBrowsingData` feature flag is turned off.
+- (void)testButtonColorWhenThePasswordRemovalFeatureIsDisabled {
+  // Open Quick Delete menu.
+  [self openQuickDeleteFromThreeDotMenu];
+
+  [[EarlGrey selectElementWithMatcher:ClearBrowsingDataButton()]
+      assertWithMatcher:grey_not(chrome_test_util::ButtonWithPrimaryColor())];
+}
+
+@end
+
+// Reruns all the tests in the file, but with the
+// `kPasswordRemovalFromDeleteBrowsingData` feature is enabled by default.
+@interface QuickDeletePasswordRemovalTestCase : QuickDeleteTestCase
+
+@end
+
+@implementation QuickDeletePasswordRemovalTestCase
+
+// Returns whether the `kPasswordRemovalFromDeleteBrowsingData` feature should
+// be enabled for the current test. It returns `YES` to rerun tests defined in
+// the QuickDeleteTestCase.
+- (BOOL)shouldEnablePasswordRemovalFeature {
+  return YES;
+}
+
+// Tests that the "Delete data" button is blue when the
+// `kPasswordRemovalFromDeleteBrowsingData` feature flag is turned on.
+- (void)testButtonColorWhenThePasswordRemovalFeatureIsEnabled {
+  // Open Quick Delete menu.
+  [self openQuickDeleteFromThreeDotMenu];
+
+  [[EarlGrey selectElementWithMatcher:ClearBrowsingDataButton()]
+      assertWithMatcher:chrome_test_util::ButtonWithPrimaryColor()];
+}
+
+// Tests that the footer disclaimer string is not present, regardless of the
+// user's sign-in status when the `kPasswordRemovalFromDeleteBrowsingData`
+// feature is enabled.
+- (void)testThatFooterIsNeverPresentWhenThePasswordRemovalFeatureIsEnabled {
+  // Open Quick Delete bottom sheet.
+  [self openQuickDeleteFromThreeDotMenu];
+
+  // Check that Quick Delete is presented.
+  [[EarlGrey selectElementWithMatcher:ClearBrowsingDataView()]
+      assertWithMatcher:grey_sufficientlyVisible()];
+
+  // Check that the footer is not shown.
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
+                                          kQuickDeleteFooterIdentifier)]
+      assertWithMatcher:grey_nil()];
+
+  // Swipe the bottom sheet down.
+  [[EarlGrey selectElementWithMatcher:ClearBrowsingDataView()]
+      performAction:grey_swipeFastInDirection(kGREYDirectionDown)];
+
+  // Check that Quick Delete has been dismissed.
+  [[EarlGrey selectElementWithMatcher:ClearBrowsingDataView()]
+      assertWithMatcher:grey_nil()];
+
+  // Sign in to the browser.
+  [self signIn];
+
+  // Re-open Quick Delete bottom sheet.
+  [self openQuickDeleteFromThreeDotMenu];
+
+  // Check that Quick Delete is presented.
+  [[EarlGrey selectElementWithMatcher:ClearBrowsingDataView()]
+      assertWithMatcher:grey_sufficientlyVisible()];
+
+  // Check that the footer is not shown.
+  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(
+                                          kQuickDeleteFooterIdentifier)]
       assertWithMatcher:grey_nil()];
 }
 

@@ -7,11 +7,13 @@
 
 #include <memory>
 
+#include "base/callback_list.h"
 #include "base/memory/raw_ptr.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_entry_key.h"
+#include "chrome/browser/ui/side_panel/side_panel_entry_key.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/accelerators/accelerator.h"
+#include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
 #include "ui/color/color_provider_key.h"
 #include "ui/color/color_provider_source.h"
 #include "ui/views/widget/widget.h"
@@ -28,12 +30,13 @@ class Widget;
 }  // namespace views
 
 class Browser;
+class ExtensionsContainer;
 class WebUIBrowserExtensionsContainer;
 class WebUIBrowserModalDialogHost;
 class WebUIBrowserSidePanelUI;
 class WebUIBrowserUI;
 class WebUIBrowserWebContentsDelegate;
-class WebUILocationBar;
+class WebUIStubLocationBar;
 
 // A BrowserWindow implementation that uses WebUI for its primary UI. It still
 // uses views::Widget for windowing management.
@@ -106,7 +109,6 @@ class WebUIBrowserWindow : public BrowserWindow,
   void SetDevToolsScrimVisibility(bool visible) override;
   void ResetToolbarTabState(content::WebContents* contents) override;
   void FocusToolbar() override;
-  ExtensionsContainer* GetExtensionsContainer() override;
   void ToolbarSizeChanged(bool is_animating) override;
   void TabDraggingStatusChanged(bool is_dragging) override;
   void LinkOpeningFromGesture(WindowOpenDisposition disposition) override;
@@ -161,9 +163,6 @@ class WebUIBrowserWindow : public BrowserWindow,
   void StartPartialTranslate(const std::string& source_language,
                              const std::string& target_language,
                              const std::u16string& text_selection) override;
-  void ShowOneClickSigninConfirmation(
-      const std::u16string& email,
-      base::OnceCallback<void(bool)> confirmed_callback) override;
   DownloadBubbleUIController* GetDownloadBubbleUIController() override;
   void ConfirmBrowserCloseWithPendingDownloads(
       int download_count,
@@ -202,14 +201,11 @@ class WebUIBrowserWindow : public BrowserWindow,
       content::RenderFrameHost* frame,
       content::EyeDropperListener* listener) override;
   void ShowCaretBrowsingDialog() override;
-  void CreateTabSearchBubble(
-      tab_search::mojom::TabSearchSection section,
-      tab_search::mojom::TabOrganizationFeature organization_feature) override;
+  void CreateTabSearchBubble() override;
   void CloseTabSearchBubble() override;
   void ShowIncognitoClearBrowsingDataDialog() override;
   void ShowIncognitoHistoryDisclaimerDialog() override;
-  bool IsBorderlessModeEnabled() const override;
-  void OnWebApiWindowResizableChanged() override;
+  bool IsUnframedModeEnabled() const override;
   bool GetCanResize() override;
   ui::mojom::WindowShowState GetWindowShowState() const override;
   void ShowChromeLabs() override;
@@ -299,6 +295,12 @@ class WebUIBrowserWindow : public BrowserWindow,
   ui::ColorProviderKey::ThemeInitializerSupplier* GetThemeInitializerSupplier()
       const;
 
+  // Called when the widget's ShouldPaintAsActive() state changes.
+  // Unlike OnWidgetActivationChanged(), this correctly handles child widget
+  // activation (e.g., modal dialogs) by not marking the browser inactive
+  // when a child widget takes focus.
+  void PaintAsActiveChanged();
+
   void OnWindowCloseRequested(views::Widget::ClosedReason close_reason);
 
   const raw_ptr<Browser> browser_;
@@ -306,7 +308,7 @@ class WebUIBrowserWindow : public BrowserWindow,
   std::unique_ptr<WidgetDelegate> widget_delegate_;
   std::unique_ptr<views::Widget> widget_;
   raw_ptr<views::WebView> web_view_ = nullptr;
-  std::unique_ptr<WebUILocationBar> location_bar_;
+  std::unique_ptr<WebUIStubLocationBar> location_bar_;
 
   // A mapping between accelerators and Chrome command IDs as defined in
   // //chrome/app/chrome_command_ids.h.
@@ -315,6 +317,13 @@ class WebUIBrowserWindow : public BrowserWindow,
 
   std::unique_ptr<WebUIBrowserModalDialogHost> modal_dialog_host_;
   std::unique_ptr<WebUIBrowserExtensionsContainer> extensions_container_;
+  std::unique_ptr<ui::ScopedUnownedUserData<ExtensionsContainer>>
+      scoped_extensions_container_user_data_;
+
+  // Subscription for paint-as-active changes on the widget. Used to call
+  // DidBecomeActive/DidBecomeInactive at the right time, accounting for child
+  // widget focus (e.g., modal dialogs keeping the parent "active").
+  base::CallbackListSubscription paint_as_active_subscription_;
 };
 
 #endif  // CHROME_BROWSER_UI_WEBUI_BROWSER_WEBUI_BROWSER_WINDOW_H_

@@ -28,7 +28,6 @@
 #include <utility>
 
 #include "base/auto_reset.h"
-#include "base/containers/contains.h"
 #include "base/containers/span.h"
 #include "base/feature_list.h"
 #include "base/numerics/safe_conversions.h"
@@ -130,7 +129,7 @@ void FindCharsetInMediaType(const String& media_type,
   unsigned length = media_type.length();
 
   while (pos < length) {
-    pos = media_type.FindIgnoringASCIICase("charset", pos);
+    pos = media_type.FindIgnoringAsciiCase("charset", pos);
 
     if (pos == kNotFound)
       return;
@@ -1503,7 +1502,7 @@ String XMLHttpRequest::getAllResponseHeaders() const {
       continue;
     }
 
-    headers.push_back(std::make_pair(it->key.UpperASCII(), it->value));
+    headers.push_back(std::make_pair(it->key.ToAsciiUpper(), it->value));
   }
   std::sort(headers.begin(), headers.end(),
             [](const std::pair<String, String>& x,
@@ -1541,7 +1540,7 @@ const AtomicString& XMLHttpRequest::getResponseHeader(
 
   if (response_.GetType() == network::mojom::FetchResponseType::kCors &&
       !cors::IsCorsSafelistedResponseHeader(name) &&
-      !base::Contains(access_control_expose_header_set, name.Ascii())) {
+      !access_control_expose_header_set.contains(name.Ascii())) {
     LogConsoleError(GetExecutionContext(),
                     StrCat({"Refused to get unsafe header \"", name, "\""}));
     return g_null_atom;
@@ -1626,7 +1625,7 @@ void XMLHttpRequest::UpdateContentTypeAndCharset(
 
   if (original_content_type != content_type) {
     UseCounter::Count(GetExecutionContext(), WebFeature::kReplaceCharsetInXHR);
-    if (!EqualIgnoringASCIICase(original_content_type, content_type)) {
+    if (!EqualIgnoringAsciiCase(original_content_type, content_type)) {
       UseCounter::Count(GetExecutionContext(),
                         WebFeature::kReplaceCharsetInXHRIgnoringCase);
     }
@@ -1638,7 +1637,7 @@ bool XMLHttpRequest::ResponseIsXML() const {
 }
 
 bool XMLHttpRequest::ResponseIsHTML() const {
-  return EqualIgnoringASCIICase(FinalResponseMIMETypeInternal(), "text/html");
+  return EqualIgnoringAsciiCase(FinalResponseMIMETypeInternal(), "text/html");
 }
 
 int XMLHttpRequest::status() const {

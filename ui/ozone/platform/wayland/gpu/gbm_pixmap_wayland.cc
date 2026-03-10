@@ -14,7 +14,6 @@
 #include "base/logging.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/trace_event/trace_event.h"
-#include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/buffer_usage_util.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/linux/drm_util_linux.h"
@@ -159,7 +158,7 @@ bool GbmPixmapWayland::SupportsZeroCopyWebGPUImport() const {
   return false;
 }
 
-uint64_t GbmPixmapWayland::GetBufferFormatModifier() const {
+uint64_t GbmPixmapWayland::GetFormatModifier() const {
   return gbm_bo_->GetFormatModifier();
 }
 
@@ -223,7 +222,7 @@ gfx::NativePixmapHandle GbmPixmapWayland::ExportHandle() const {
                                gbm_bo_->GetPlaneSize(i),
                                std::move(scoped_fds[i]));
   }
-  handle.modifier = GetBufferFormatModifier();
+  handle.modifier = GetFormatModifier();
   return handle;
 }
 

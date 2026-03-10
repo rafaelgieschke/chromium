@@ -9,6 +9,7 @@
 #include "base/location.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/notreached.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/common/chrome_switches.h"
@@ -110,6 +111,11 @@ GURL GetWebUIStartupURL() {
 #else
   NOTREACHED();
 #endif
+}
+
+bool UseStagingOverrideEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kWhatsNewUseStaging);
 }
 
 }  // namespace whats_new

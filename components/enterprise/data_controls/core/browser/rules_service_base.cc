@@ -60,6 +60,18 @@ Verdict RulesServiceBase::GetDownloadVerdict(const GURL& download_url) const {
                     });
 }
 
+bool RulesServiceBase::BlockScreenshots(const GURL& url) const {
+  return GetVerdict(Rule::Restriction::kScreenshot,
+                    {
+                        .source =
+                            {
+                                .url = url,
+                                .incognito = incognito_profile(),
+                            },
+                    })
+             .level() == Rule::Level::kBlock;
+}
+
 Verdict RulesServiceBase::GetVerdict(Rule::Restriction restriction,
                                      const ActionContext& context) const {
   Rule::Level max_level = Rule::Level::kNotSet;
@@ -104,7 +116,7 @@ void RulesServiceBase::OnDataControlsRulesUpdate() {
   DCHECK(pref_registrar_.prefs());
   rules_.clear();
 
-  const base::Value::List& rules_list =
+  const base::ListValue& rules_list =
       pref_registrar_.prefs()->GetList(kDataControlsRulesPref);
 
   for (const base::Value& rule_value : rules_list) {

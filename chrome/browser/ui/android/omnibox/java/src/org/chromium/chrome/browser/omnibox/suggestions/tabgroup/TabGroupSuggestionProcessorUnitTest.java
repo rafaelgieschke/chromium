@@ -4,11 +4,12 @@
 
 package org.chromium.chrome.browser.omnibox.suggestions.tabgroup;
 
+import static org.robolectric.Shadows.shadowOf;
+
 import android.content.Context;
 import android.graphics.drawable.ShapeDrawable;
 import android.text.style.ImageSpan;
 
-import androidx.core.content.ContextCompat;
 import androidx.test.filters.SmallTest;
 
 import org.junit.After;
@@ -23,7 +24,7 @@ import org.mockito.junit.MockitoRule;
 import org.robolectric.annotation.Config;
 
 import org.chromium.base.ContextUtils;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider.ControlsPosition;
 import org.chromium.chrome.browser.omnibox.UrlBarEditingTextStateProvider;
@@ -88,7 +89,7 @@ public class TabGroupSuggestionProcessorUnitTest {
                         mBookmarkState,
                         mTabSupplier,
                         mShareDelegateSupplier,
-                        new ObservableSupplierImpl<>(ControlsPosition.TOP));
+                        ObservableSuppliers.createNonNull(ControlsPosition.TOP));
         mProcessor = new TabGroupSuggestionProcessor(uiContext);
         mInput = new AutocompleteInput();
         OmniboxResourceProvider.disableCachesForTesting();
@@ -119,16 +120,10 @@ public class TabGroupSuggestionProcessorUnitTest {
         mInput.setPageClassification(PageClassification.ANDROID_HUB_VALUE);
 
         createTabGroupSuggestion(OmniboxSuggestionType.TAB_GROUP);
-        PropertyModel model = mProcessor.createModel();
-
-        mProcessor.populateModel(mInput, mSuggestion, model, 0);
-        Assert.assertTrue(
-                ContextCompat.getDrawable(mContext, R.drawable.ic_features_24dp)
-                        .getConstantState()
-                        .equals(
-                                mModel.get(BaseSuggestionViewProperties.ICON)
-                                        .drawable
-                                        .getConstantState()));
+        Assert.assertEquals(
+                R.drawable.ic_features_24dp,
+                shadowOf(mModel.get(BaseSuggestionViewProperties.ICON).drawable)
+                        .getCreatedFromResId());
 
         SuggestionSpannable suggestion = mModel.get(SuggestionViewProperties.TEXT_LINE_1_TEXT);
         ImageSpan[] imageSpans = suggestion.getSpans(0, suggestion.length(), ImageSpan.class);

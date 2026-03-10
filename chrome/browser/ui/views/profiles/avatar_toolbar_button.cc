@@ -22,6 +22,8 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/avatar_menu.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_attributes_entry.h"
+#include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
@@ -68,11 +70,17 @@
 #include "ui/base/theme_provider.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/color/color_provider.h"
+#include "ui/color/color_provider_key.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/gfx/scoped_animation_duration_scale_mode.h"
+#include "ui/gfx/text_constants.h"
+#include "ui/native_theme/native_theme.h"
 #include "ui/views/accessibility/view_accessibility.h"
+#include "ui/views/animation/ink_drop.h"
+#include "ui/views/animation/ink_drop_host.h"
 #include "ui/views/controls/button/button_controller.h"
 #include "ui/views/controls/button/label_button_border.h"
 #include "ui/views/view_class_properties.h"
@@ -127,7 +135,8 @@ AvatarToolbarButton::AvatarToolbarButton(BrowserView* browser_view)
                                         base::Unretained(this),
                                         /*is_source_accelerator=*/false)),
       browser_(browser_view->browser()),
-      creation_time_(base::TimeTicks::Now()) {
+      creation_time_(base::TimeTicks::Now()),
+      slide_animation_(this) {
   CHECK(browser_);
   signin::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForProfile(browser_->profile());
@@ -168,6 +177,9 @@ AvatarToolbarButton::AvatarToolbarButton(BrowserView* browser_view)
   label()->SetSkipSubpixelRenderingOpacityCheck(true);
   label()->layer()->SetFillsBoundsOpaquely(false);
   label()->SetSubpixelRenderingEnabled(false);
+
+  // With default (EASE_OUT) tween type.
+  slide_animation_.SetSlideDuration(base::Milliseconds(200));
 }
 
 AvatarToolbarButton::~AvatarToolbarButton() = default;
@@ -187,13 +199,44 @@ void AvatarToolbarButton::UpdateIcon() {
   CHECK(color_provider);
   StateProvider* state_provider = state_manager_->GetActiveStateProvider();
   CHECK(state_provider);
-  ui::ImageModel icon = state_provider->GetAvatarIcon(
+  auto [icon, icon_type] = state_provider->GetAvatarIcon(
       icon_size, GetForegroundColor(ButtonState::STATE_NORMAL),
       *color_provider);
 
   SetImageModel(ButtonState::STATE_NORMAL, icon);
   SetImageModel(ButtonState::STATE_DISABLED,
                 ui::GetDefaultDisabledIconFromImageModel(icon));
+
+  // In forced-colors mode, re-color the placeholder avatar for
+  // hover/pressed/highlighted states so it remains visible against the
+  // opaque ink drop background. Cache both icons so
+  // OnInkDropHighlightedChanged() can swap them cheaply.
+  const ui::NativeTheme* theme = GetNativeTheme();
+  if (theme &&
+      theme->forced_colors() != ui::ColorProviderKey::ForcedColors::kNone &&
+      icon_type == AvatarIconType::kPlaceholder) {
+    forced_colors_normal_icon_ = icon;
+    const SkColor hovered_color =
+        color_provider->GetColor(ui::kColorIconHovered);
+    forced_colors_hovered_icon_ =
+        ui::ImageModel::FromImage(profiles::GetSizedAvatarIcon(
+            profiles::GetPlaceholderAvatarIconWithColors(
+                hovered_color, hovered_color, icon_size,
+                profiles::PlaceholderAvatarIconParams{.has_padding = false,
+                                                      .has_background = false}),
+            icon_size, icon_size, profiles::SHAPE_CIRCLE));
+    SetImageModel(ButtonState::STATE_HOVERED, forced_colors_hovered_icon_);
+    SetImageModel(ButtonState::STATE_PRESSED, forced_colors_hovered_icon_);
+
+    // Also override STATE_NORMAL when the ink drop is highlighted
+    // (e.g. profile menu bubble is open).
+    OnInkDropHighlightedChanged();
+  } else {
+    forced_colors_normal_icon_ = ui::ImageModel();
+    forced_colors_hovered_icon_ = ui::ImageModel();
+    SetImageModel(ButtonState::STATE_HOVERED, std::nullopt);
+    SetImageModel(ButtonState::STATE_PRESSED, std::nullopt);
+  }
 
   observer_list_.Notify(&Observer::OnIconUpdated);
 }
@@ -245,6 +288,51 @@ void AvatarToolbarButton::Layout(PassKey) {
   image->SetSize(image_size);
 }
 
+void AvatarToolbarButton::AnimateTextChange(
+    StateProvider* state_provider,
+    const ui::ColorProvider* color_provider) {
+  const std::u16string new_text = state_provider->GetText();
+  const std::u16string_view current_text = GetText();
+
+  if (new_text == current_text ||
+      gfx::ScopedAnimationDurationScaleMode::is_zero()) {
+    SetHighlight(new_text, state_provider->GetHighlightColor(*color_provider));
+    return;
+  }
+
+  label()->SetElideBehavior(gfx::NO_ELIDE);
+
+  if (!current_text.empty() && new_text.empty()) {
+    // Defer SetHighlight() to AnimationEnded() to avoid text disappearing and
+    // collapsing the animation immediately.
+    slide_animation_.Hide();
+    return;
+  }
+
+  SetHighlight(new_text, state_provider->GetHighlightColor(*color_provider));
+
+  if (current_text.empty()) {
+    slide_animation_.Show();
+    return;
+  }
+
+  // Animate resizing between two non-empty texts.
+  UpdateLayoutInsets();
+  const int icon_width =
+      ::GetLayoutInsets(TOOLBAR_BUTTON).width() + GetIconSize();
+  const int target_width =
+      ToolbarButton::CalculatePreferredSize(views::SizeBounds(width(), {}))
+          .width();
+  double start_value = 1.0;
+  if (target_width > icon_width) {
+    start_value =
+        static_cast<double>(width() - icon_width) / (target_width - icon_width);
+  }
+
+  slide_animation_.Reset(std::clamp(start_value, 0.0, 1.0));
+  slide_animation_.Show();
+}
+
 void AvatarToolbarButton::UpdateText() {
   CHECK(state_manager_);
   StateProvider* state_provider = state_manager_->GetActiveStateProvider();
@@ -252,9 +340,9 @@ void AvatarToolbarButton::UpdateText() {
   const auto* const color_provider = GetColorProvider();
   CHECK(color_provider);
 
+  AnimateTextChange(state_provider, color_provider);
+
   SetTooltipText(state_provider->GetAvatarTooltipText());
-  SetHighlight(state_provider->GetText(),
-               state_provider->GetHighlightColor(*color_provider));
   UpdateAccessibilityLabel();
   // Update the layout insets after `SetHighlight()` since
   // text might be updated by setting the highlight.
@@ -320,13 +408,54 @@ void AvatarToolbarButton::UpdateAccessibilityLabel() {
   GetViewAccessibility().SetDescription(description);
 }
 
+gfx::Size AvatarToolbarButton::CalculatePreferredSize(
+    const views::SizeBounds& available_size) const {
+  gfx::Size size = ToolbarButton::CalculatePreferredSize(available_size);
+  if (slide_animation_.is_animating()) {
+    int icon_width = ::GetLayoutInsets(TOOLBAR_BUTTON).width() + GetIconSize();
+    size.set_width(icon_width + (size.width() - icon_width) *
+                                    slide_animation_.GetCurrentValue());
+  }
+  return size;
+}
+
+void AvatarToolbarButton::AnimationProgressed(const gfx::Animation* animation) {
+  CHECK_EQ(animation, &slide_animation_);
+  PreferredSizeChanged();
+}
+
+void AvatarToolbarButton::AnimationEnded(const gfx::Animation* animation) {
+  CHECK_EQ(animation, &slide_animation_);
+  label()->SetElideBehavior(gfx::ELIDE_TAIL);
+  if (slide_animation_.GetCurrentValue() == 0.0) {
+    SetHighlight(std::u16string(), std::nullopt);
+    // When animation finishes hiding the pill update the layout.
+    UpdateText();
+  }
+}
+
 std::optional<SkColor> AvatarToolbarButton::GetHighlightTextColor() const {
   CHECK(state_manager_);
   StateProvider* state_provider = state_manager_->GetActiveStateProvider();
   CHECK(state_provider);
   const auto* const color_provider = GetColorProvider();
   CHECK(color_provider);
-  return state_provider->GetHighlightTextColor(*color_provider);
+
+  // For the identity pill hiding animation, text color is default foreground
+  // color to avoid defaulting to background color and text disappearing
+  // immediately.
+  std::optional<SkColor> color =
+      state_provider->GetHighlightTextColor(*color_provider);
+  if (color.has_value()) {
+    return color;
+  }
+
+  if (!GetText().empty()) {
+    return color_provider->GetColor(
+        kColorAvatarButtonHighlightDefaultForeground);
+  }
+
+  return std::nullopt;
 }
 
 std::optional<SkColor> AvatarToolbarButton::GetHighlightBorderColor() const {
@@ -422,7 +551,7 @@ void AvatarToolbarButton::MaybeShowSupervisedUserSignInIPH() {
 
   auto account_info = identity_manager->FindExtendedAccountInfoByAccountId(
       identity_manager->GetPrimaryAccountId(signin::ConsentLevel::kSignin));
-  if (account_info.capabilities.is_subject_to_parental_controls() !=
+  if (account_info.GetAccountCapabilities().is_subject_to_parental_controls() !=
       signin::Tribool::kTrue) {
     return;
   }
@@ -447,7 +576,8 @@ void AvatarToolbarButton::MaybeShowSupervisedUserSignInIPH() {
 
   user_education::FeaturePromoParams params(
       feature_engagement::kIPHSupervisedUserProfileSigninFeature);
-  params.title_params = base::UTF8ToUTF16(account_info.given_name);
+  params.title_params =
+      base::UTF8ToUTF16(account_info.GetGivenName().value_or(""));
   BrowserUserEducationInterface::From(browser_)->MaybeShowFeaturePromo(
       std::move(params));
 }
@@ -503,8 +633,9 @@ void AvatarToolbarButton::MaybeShowExplicitBrowserSigninPreferenceRememberedIPH(
     const AccountInfo& account_info) {
   user_education::FeaturePromoParams params(
       feature_engagement::kIPHExplicitBrowserSigninPreferenceRememberedFeature,
-      account_info.gaia.ToString());
-  params.title_params = base::UTF8ToUTF16(account_info.given_name);
+      account_info.GetGaiaId().ToString());
+  params.title_params =
+      base::UTF8ToUTF16(account_info.GetGivenName().value_or(""));
   BrowserUserEducationInterface::From(browser_)->MaybeShowFeaturePromo(
       std::move(params));
 }
@@ -528,6 +659,14 @@ void AvatarToolbarButton::OnThemeChanged() {
   UpdateProfileThemeColors(browser_, GetColorProvider());
   UpdateText();
   UpdateInkdrop();
+
+  // Update icon when ink drop highlight changes (for forced-colors mode).
+  if (auto* ink_drop_host = views::InkDrop::Get(this)) {
+    ink_drop_highlight_subscription_ =
+        ink_drop_host->AddHighlightedChangedCallback(base::BindRepeating(
+            &AvatarToolbarButton::OnInkDropHighlightedChanged,
+            base::Unretained(this)));
+  }
 }
 
 // static
@@ -614,17 +753,17 @@ void AvatarToolbarButton::OnPrimaryAccountChanged(
 
   AccountInfo account_info = identity_manager->FindExtendedAccountInfo(
       event_details.GetCurrentState().primary_account);
-  if (!account_info.given_name.empty()) {
+  if (account_info.GetGivenName().has_value()) {
     MaybeShowExplicitBrowserSigninPreferenceRememberedIPH(account_info);
   } else {
-    gaia_id_for_signin_choice_remembered_ = account_info.gaia;
+    gaia_id_for_signin_choice_remembered_ = account_info.GetGaiaId();
   }
 }
 
 void AvatarToolbarButton::OnExtendedAccountInfoUpdated(
     const AccountInfo& info) {
-  if (info.gaia == gaia_id_for_signin_choice_remembered_ &&
-      !info.given_name.empty()) {
+  if (info.GetGaiaId() == gaia_id_for_signin_choice_remembered_ &&
+      info.GetGivenName().has_value()) {
     gaia_id_for_signin_choice_remembered_ = GaiaId();
     MaybeShowExplicitBrowserSigninPreferenceRememberedIPH(info);
   }
@@ -660,10 +799,20 @@ void AvatarToolbarButton::UpdateLayoutInsets() {
       IsLabelPresentAndVisible() ? AVATAR_CHIP_PADDING : TOOLBAR_BUTTON));
 }
 
-int AvatarToolbarButton::GetIconSize() const {
-  return ui::TouchUiController::Get()->touch_ui()
-             ? kDefaultTouchableIconSize
-             : kDefaultIconSizeChromeRefresh;
+void AvatarToolbarButton::OnInkDropHighlightedChanged() {
+  // In forced-colors mode, swap STATE_NORMAL between the cached normal and
+  // hovered icons based on the ink drop highlight state.
+  if (forced_colors_hovered_icon_.IsEmpty()) {
+    return;
+  }
+  CHECK(!forced_colors_normal_icon_.IsEmpty());
+  const auto* ink_drop_host = views::InkDrop::Get(this);
+  CHECK(ink_drop_host);
+  if (ink_drop_host->GetHighlighted()) {
+    SetImageModel(ButtonState::STATE_NORMAL, forced_colors_hovered_icon_);
+  } else {
+    SetImageModel(ButtonState::STATE_NORMAL, forced_colors_normal_icon_);
+  }
 }
 
 void AvatarToolbarButton::AddObserver(Observer* observer) {
@@ -700,6 +849,12 @@ base::AutoReset<std::optional<base::TimeDelta>> AvatarToolbarButton::
 void AvatarToolbarButton::ForceShowingPromoForTesting() {
   CHECK(state_manager_);
   state_manager_->ForceShowingPromoForTesting();
+}
+
+bool AvatarToolbarButton::
+    GetStateAndFireSignedOutTriggerDelayTimerForTesting() {
+  CHECK(state_manager_);
+  return state_manager_->GetStateAndFireSignedOutTriggerDelayTimerForTesting();
 }
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 

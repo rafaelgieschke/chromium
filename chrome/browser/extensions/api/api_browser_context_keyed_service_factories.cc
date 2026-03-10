@@ -7,6 +7,7 @@
 #include "chrome/browser/extensions/api/cookies/cookies_api.h"
 #include "chrome/browser/extensions/api/developer_private/developer_private_api.h"
 #include "chrome/browser/extensions/api/font_settings/font_settings_api.h"
+#include "chrome/browser/extensions/api/gcm/extension_gcm_app_handler.h"
 #include "chrome/browser/extensions/api/history/history_api.h"
 #include "chrome/browser/extensions/api/identity/identity_api.h"
 #include "chrome/browser/extensions/api/messaging/incognito_connectability.h"
@@ -18,9 +19,8 @@
 #include "chrome/browser/extensions/api/reading_list/reading_list_event_router_factory.h"
 #include "chrome/browser/extensions/api/sessions/sessions_api.h"
 #include "chrome/browser/extensions/api/tab_capture/tab_capture_registry.h"
+#include "chrome/browser/extensions/api/tab_groups/tab_groups_event_router_factory.h"
 #include "chrome/browser/extensions/api/tabs/tabs_windows_api.h"
-#include "chrome/browser/extensions/api/web_authentication_proxy/web_authentication_proxy_api.h"
-#include "chrome/browser/extensions/api/web_authentication_proxy/web_authentication_proxy_service.h"
 #include "chrome/browser/extensions/api/web_navigation/web_navigation_api.h"
 #include "chrome/browser/extensions/api/webrtc_audio_private/webrtc_audio_private_api.h"
 #include "chrome/browser/extensions/commands/command_service.h"
@@ -46,7 +46,6 @@
 #include "chrome/browser/extensions/api/settings_overrides/settings_overrides_api.h"
 #include "chrome/browser/extensions/api/settings_private/settings_private_event_router_factory.h"
 #include "chrome/browser/extensions/api/side_panel/side_panel_service.h"
-#include "chrome/browser/extensions/api/tab_groups/tab_groups_event_router_factory.h"
 #include "components/safe_browsing/buildflags.h"
 #include "extensions/browser/api/bluetooth_low_energy/bluetooth_low_energy_api.h"
 #include "extensions/browser/api/networking_private/networking_private_delegate_factory.h"
@@ -57,6 +56,11 @@
 #endif  // BUILDFLAG(SAFE_BROWSING_AVAILABLE)
 
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+#include "chrome/browser/extensions/api/web_authentication_proxy/web_authentication_proxy_api.h"
+#include "chrome/browser/extensions/api/web_authentication_proxy/web_authentication_proxy_service.h"
+#endif
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "chrome/browser/chromeos/extensions/wm/wm_desks_private_events.h"
@@ -85,6 +89,7 @@ void EnsureApiBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::DeveloperPrivateAPI::GetFactoryInstance();
   extensions::ExtensionNotificationDisplayHelperFactory::GetInstance();
   extensions::FontSettingsAPI::GetFactoryInstance();
+  extensions::ExtensionGCMAppHandler::GetFactoryInstance();
   extensions::HistoryAPI::GetFactoryInstance();
   extensions::IdentityAPI::GetFactoryInstance();
   extensions::IncognitoConnectability::EnsureFactoryBuilt();
@@ -98,10 +103,8 @@ void EnsureApiBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::ReadingListEventRouterFactory::GetInstance();
   extensions::SessionsAPI::GetFactoryInstance();
   extensions::TabCaptureRegistry::GetFactoryInstance();
+  extensions::TabGroupsEventRouterFactory::GetInstance();
   extensions::TabsWindowsAPI::GetFactoryInstance();
-  extensions::WebAuthenticationProxyAPI::GetFactoryInstance();
-  extensions::WebAuthenticationProxyRegistrarFactory::GetInstance();
-  extensions::WebAuthenticationProxyServiceFactory::GetInstance();
   extensions::WebNavigationAPI::GetFactoryInstance();
   extensions::WebrtcAudioPrivateEventService::GetFactoryInstance();
 
@@ -137,7 +140,6 @@ void EnsureApiBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::SettingsPrivateEventRouterFactory::GetInstance();
   extensions::SettingsOverridesAPI::GetFactoryInstance();
   extensions::SidePanelService::GetFactoryInstance();
-  extensions::TabGroupsEventRouterFactory::GetInstance();
 #if BUILDFLAG(IS_CHROMEOS)
   extensions::TerminalPrivateAPI::GetFactoryInstance();
   extensions::VerifyTrustApiService::GetFactoryInstance();
@@ -146,6 +148,13 @@ void EnsureApiBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::WMDesksPrivateEventsAPI::GetFactoryInstance();
 #endif
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
+
+  // These APIs are intentionally not supported on desktop Android.
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+  extensions::WebAuthenticationProxyAPI::GetFactoryInstance();
+  extensions::WebAuthenticationProxyRegistrarFactory::GetInstance();
+  extensions::WebAuthenticationProxyServiceFactory::GetInstance();
+#endif
 }
 
 }  // namespace chrome_extensions

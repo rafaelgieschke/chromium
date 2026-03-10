@@ -121,7 +121,6 @@
 #include "services/device/public/cpp/device_features.h"
 #include "services/device/public/cpp/geolocation/geolocation_system_permission_manager.h"
 #include "services/device/public/cpp/geolocation/system_geolocation_source_win.h"
-#include "ui/accessibility/platform/ax_platform.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/l10n/l10n_util_win.h"
 #include "ui/base/ui_base_switches.h"
@@ -148,7 +147,7 @@ void InitializeWindowProcExceptions() {
   DCHECK(!exception_filter);
 }
 
-// TODO(siggi): Remove once https://crbug.com/806661 is resolved.
+// TODO(siggi): Remove once https://crbug.com/41367502 is resolved.
 void DumpHungRendererProcessImpl(const base::Process& renderer) {
   // Use a distinguishing process type for these reports.
   crash_reporter::DumpHungProcessWithPtype(renderer, "hung-renderer");
@@ -379,7 +378,7 @@ void MigratePinnedTaskBarShortcutsIfNeeded() {
   //
   // Note: If shortcut updates need to be done once after a future OS upgrade,
   // that should be done by re-versioning Active Setup (see //chrome/installer
-  // and https://crbug.com/577697 for details).
+  // and https://crbug.com/41234315 for details).
   const base::Version kLastVersionNeedingMigration({86, 0, 4231, 0});
 
   PrefService* local_state = g_browser_process->local_state();
@@ -473,7 +472,7 @@ void ReportParentProcessName() {
 // localization data files.
 const char kMissingLocaleDataTitle[] = "Missing File Error";
 
-// TODO(http://crbug.com/338969): This should be used on Linux Aura as well.
+// TODO(http://crbug.com/41086785): This should be used on Linux Aura as well.
 const char kMissingLocaleDataMessage[] =
     "Unable to find locale data files. Please reinstall.";
 
@@ -576,7 +575,7 @@ void ChromeBrowserMainPartsWin::PreCreateMainMessageLoop() {
 
 int ChromeBrowserMainPartsWin::PreCreateThreads() {
   // Set crash keys containing the registry values used to determine Chrome's
-  // update channel at process startup; see https://crbug.com/579504.
+  // update channel at process startup; see https://crbug.com/41235563.
   const auto& details = install_static::InstallDetails::Get();
 
   static crash_reporter::CrashKeyString<50> ap_value("ap");
@@ -588,19 +587,6 @@ int ChromeBrowserMainPartsWin::PreCreateThreads() {
   if (chrome::GetChannel() == version_info::Channel::CANARY) {
     content::RenderProcessHost::SetHungRendererAnalysisFunction(
         &DumpHungRendererProcessImpl);
-  }
-
-  // Pass the value of the UiAutomationProviderEnabled enterprise policy, if
-  // set, down to the accessibility platform after the platform is initialized
-  // in BrowserMainLoop::PostCreateMainMessageLoop() but before any UI is
-  // created.
-  if (auto* local_state = g_browser_process->local_state(); local_state) {
-    if (auto* pref =
-            local_state->FindPreference(prefs::kUiAutomationProviderEnabled);
-        pref && pref->IsManaged()) {
-      ui::AXPlatform::GetInstance().SetUiaProviderEnabled(
-          pref->GetValue()->GetBool());
-    }
   }
 
   return ChromeBrowserMainParts::PreCreateThreads();
@@ -724,7 +710,7 @@ void ChromeBrowserMainPartsWin::PostBrowserStart() {
   }
 
   // Some users are getting stuck in compatibility mode. Try to help them
-  // escape; see http://crbug.com/581499.
+  // escape; see http://crbug.com/41236791.
   base::ThreadPool::PostTask(
       FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
       base::BindOnce([]() {
@@ -841,7 +827,7 @@ bool ChromeBrowserMainPartsWin::CheckMachineLevelInstall() {
         // Setup is triggered on system-level Chrome's first run.
         // TODO(gab): Instead of having callers of Active Setup think about
         // other callers, have Active Setup itself register when it ran and
-        // no-op otherwise (http://crbug.com/346843).
+        // no-op otherwise (http://crbug.com/40353153).
         if (!first_run::IsChromeFirstRun())
           uninstall_cmd.AppendSwitch(installer::switches::kTriggerActiveSetup);
 

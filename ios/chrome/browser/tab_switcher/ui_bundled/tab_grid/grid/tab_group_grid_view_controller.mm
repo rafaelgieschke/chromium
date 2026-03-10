@@ -6,6 +6,7 @@
 
 #import "base/apple/foundation_util.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
+#import "ios/chrome/browser/shared/ui/util/color_palette/tab_group_color_palette.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_collection_drag_drop_handler.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/grid/grid_constants.h"
 #import "ios/chrome/browser/tab_switcher/ui_bundled/tab_grid/grid/grid_item_identifier.h"
@@ -33,6 +34,15 @@
   }
   _groupColor = groupColor;
   [self updateTabGroupHeader];
+}
+
+- (void)setTabGroupColorPalette:(TabGroupColorPalette*)tabGroupColorPalette {
+  if (_tabGroupColorPalette == tabGroupColorPalette) {
+    return;
+  }
+  _tabGroupColorPalette = tabGroupColorPalette;
+  [self updateTabGroupHeader];
+  [self reconfigureItems];
 }
 
 - (void)setGroupTitle:(NSString*)groupTitle {
@@ -179,6 +189,10 @@
 // Configures the tab group header according to the current state.
 - (void)configureTabGroupHeader:(TabGroupHeader*)header {
   header.title = self.groupTitle;
+  if (IsTabGroupColorOnSurfaceEnabled()) {
+    header.color = self.tabGroupColorPalette.commonColor;
+    return;
+  }
   header.color = self.groupColor;
 }
 
@@ -271,6 +285,14 @@
   [self.diffableDataSource applySnapshot:snapshot animatingDifferences:YES];
 }
 
+// Reconfigures items to refresh the UI.
+- (void)reconfigureItems {
+  NSDiffableDataSourceSnapshot* snapshot = [self.diffableDataSource snapshot];
+  [snapshot reconfigureItemsWithIdentifiers:snapshot.itemIdentifiers];
+
+  [self.diffableDataSource applySnapshot:snapshot animatingDifferences:NO];
+}
+
 #pragma mark - TabGroupActivitySummaryCellDelegate
 
 - (void)closeButtonForActivitySummaryTapped {
@@ -282,6 +304,16 @@
   [self.delegate didTapButtonInActivitySummary:self];
   [self removeActivitySummaryCell];
   [self.viewDelegate showRecentActivity];
+}
+
+- (void)configureCell:(GridCell*)cell
+             withItem:(TabSwitcherItem*)item
+              atIndex:(NSUInteger)index {
+  [super configureCell:cell withItem:item atIndex:index];
+  if (IsTabGroupColorOnSurfaceEnabled()) {
+    // Forward the palette to the cell.
+    cell.tabGroupColorPalette = self.tabGroupColorPalette;
+  }
 }
 
 @end

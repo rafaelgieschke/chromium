@@ -46,6 +46,7 @@
 #include "third_party/blink/renderer/platform/instrumentation/tracing/traced_value.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/scheduler/public/event_loop.h"
+#include "third_party/perfetto/include/perfetto/tracing/track_event_args.h"
 
 namespace blink {
 
@@ -76,9 +77,10 @@ std::unique_ptr<TracedValue> GetTraceArgsForScriptElement(
 }
 
 void DoExecuteScript(PendingScript* pending_script, Document& document) {
-  TRACE_EVENT_WITH_FLOW1(
+  TRACE_EVENT(
       "blink", "HTMLParserScriptRunner ExecuteScript",
-      pending_script->GetElement(), TRACE_EVENT_FLAG_FLOW_IN, "data",
+      perfetto::TerminatingFlow::FromPointer(pending_script->GetElement()),
+      "data",
       GetTraceArgsForScriptElement(document, pending_script->StartingPosition(),
                                    pending_script->UrlForTracing()));
   pending_script->ExecuteScriptBlock();
@@ -115,18 +117,18 @@ void TraceParserBlockingScript(const PendingScript* pending_script,
   };
   if (!pending_script->IsReady()) {
     if (waiting_for_resources) {
-      TRACE_EVENT_WITH_FLOW1(
-          "blink", "YieldParserForScriptLoadAndBlockingResources", element,
-          TRACE_EVENT_FLAG_FLOW_OUT, "data", script_element_trace_lambda());
+      TRACE_EVENT("blink", "YieldParserForScriptLoadAndBlockingResources",
+                  perfetto::Flow::FromPointer(element), "data",
+                  script_element_trace_lambda());
     } else {
-      TRACE_EVENT_WITH_FLOW1("blink", "YieldParserForScriptLoad", element,
-                             TRACE_EVENT_FLAG_FLOW_OUT, "data",
-                             script_element_trace_lambda());
+      TRACE_EVENT("blink", "YieldParserForScriptLoad",
+                  perfetto::Flow::FromPointer(element), "data",
+                  script_element_trace_lambda());
     }
   } else if (waiting_for_resources) {
-    TRACE_EVENT_WITH_FLOW1("blink", "YieldParserForScriptBlockingResources",
-                           element, TRACE_EVENT_FLAG_FLOW_OUT, "data",
-                           script_element_trace_lambda());
+    TRACE_EVENT("blink", "YieldParserForScriptBlockingResources",
+                perfetto::Flow::FromPointer(element), "data",
+                script_element_trace_lambda());
   }
 }
 
@@ -259,6 +261,12 @@ void HTMLParserScriptRunner::PendingScriptFinished(
     DCHECK_EQ(pending_script, ParserBlockingScript());
     parser_blocking_script_ = nullptr;
 
+    return;
+  }
+
+  if (!document_) {
+    // It's possible to get here after HTMLParserScriptRunner::Detach(), which
+    // clears `document_`. See crbug.com/466701271.
     return;
   }
 
@@ -553,7 +561,7 @@ void HTMLParserScriptRunner::ProcessScriptElementInternal(
     // FIXME: Align trace event name and function name.
     TRACE_EVENT1("blink", "HTMLParserScriptRunner::execute", "data",
                  GetTraceArgsForScriptElement(*document_, script_start_position,
-                                              NullURL()));
+                                              NullUrl()));
     DCHECK(script_loader->IsParserInserted());
 
     // <spec>... If the active speculative HTML parser is null and the

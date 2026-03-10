@@ -49,9 +49,12 @@
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/scoped_interface_endpoint_handle.h"
+#include "mojo/public/cpp/platform/platform_channel.h"
+#include "mojo/public/cpp/system/invitation.h"
 #include "net/base/network_change_notifier.h"
 #include "remoting/base/authentication_method.h"
 #include "remoting/base/auto_thread_task_runner.h"
+#include "remoting/base/branding.h"
 #include "remoting/base/cloud_session_authz_service_client_factory.h"
 #include "remoting/base/corp_session_authz_service_client_factory.h"
 #include "remoting/base/cpu_utils.h"
@@ -67,12 +70,11 @@
 #include "remoting/base/rsa_key_pair.h"
 #include "remoting/base/service_urls.h"
 #include "remoting/base/session_policies.h"
+#include "remoting/base/username.h"
 #include "remoting/host/base/desktop_environment_options.h"
 #include "remoting/host/base/host_exit_codes.h"
 #include "remoting/host/base/switches.h"
-#include "remoting/host/base/username.h"
 #include "remoting/host/basic_desktop_environment.h"
-#include "remoting/host/branding.h"
 #include "remoting/host/chromoting_host.h"
 #include "remoting/host/chromoting_host_context.h"
 #include "remoting/host/cloud_heartbeat_service_client.h"
@@ -93,6 +95,7 @@
 #include "remoting/host/host_power_save_blocker.h"
 #include "remoting/host/input_injector.h"
 #include "remoting/host/ipc_desktop_environment.h"
+#include "remoting/host/ipc_host_event_logger.h"
 #include "remoting/host/me2me_desktop_environment.h"
 #include "remoting/host/me2me_heartbeat_service_client.h"
 #include "remoting/host/mojom/desktop_session.mojom.h"
@@ -115,13 +118,13 @@
 #include "remoting/protocol/jingle_session_manager.h"
 #include "remoting/protocol/me2me_host_authenticator_factory.h"
 #include "remoting/protocol/pairing_registry.h"
-#include "remoting/protocol/session_config.h"
 #include "remoting/protocol/transport.h"
 #include "remoting/protocol/transport_context.h"
 #include "remoting/signaling/corp_messaging_constants.h"
 #include "remoting/signaling/corp_signal_strategy.h"
 #include "remoting/signaling/ftl_host_device_id_provider.h"
 #include "remoting/signaling/ftl_signal_strategy.h"
+#include "remoting/signaling/session_config.h"
 #include "remoting/signaling/signal_strategy.h"
 #include "remoting/signaling/signaling_id_util.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_capture_types.h"
@@ -175,12 +178,6 @@
 #include "remoting/host/host_wtmpdb_logger.h"
 #endif  // BUILDFLAG(IS_LINUX)
 
-#if defined(REMOTING_MULTI_PROCESS)
-#include "mojo/public/cpp/platform/platform_channel.h"
-#include "mojo/public/cpp/system/invitation.h"
-#include "remoting/host/ipc_host_event_logger.h"
-#endif  // defined(REMOTING_MULTI_PROCESS)
-
 using remoting::protocol::PairingRegistry;
 
 #if BUILDFLAG(IS_APPLE)
@@ -195,14 +192,12 @@ __attribute__((used)) __attribute__((section(
 
 namespace {
 
-#if !defined(REMOTING_MULTI_PROCESS)
 // This is used for tagging system event logs.
 const char kApplicationName[] = "chromoting";
 
 // Value used for --host-config option to indicate that the path must be read
 // from stdin.
-const char kStdinConfigPath[] = "-";
-#endif  // !defined(REMOTING_MULTI_PROCESS)
+constexpr base::FilePath::CharType kStdinConfigPath[] = FILE_PATH_LITERAL("-");
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 // The command line switch used to pass name of the pipe to capture audio on
@@ -272,6 +267,7 @@ class HostProcess : public ConfigWatcher::Delegate,
   // alive as long as possible until the process exits (since destroying the
   // watchdog disarms it).
   HostProcess(std::unique_ptr<ChromotingHostContext> context,
+              bool multi_process,
               int* exit_code_out,
               ShutdownWatchdog* shutdown_watchdog);
 
@@ -378,27 +374,27 @@ class HostProcess : public ConfigWatcher::Delegate,
 
   // Determines whether a new config should be applied and handles starting or
   // restarting the host process as necessary.
-  void OnConfigParsed(base::Value::Dict config);
+  void OnConfigParsed(base::DictValue config);
 
   // Applies the host config, returning true if successful.
-  bool ApplyConfig(const base::Value::Dict& config);
+  bool ApplyConfig(const base::DictValue& config);
 
   // Handles policy updates, by calling On*PolicyUpdate methods.
-  void OnPolicyUpdate(base::Value::Dict policies);
+  void OnPolicyUpdate(base::DictValue policies);
   void OnPolicyError();
   void ReportPolicyErrorAndRestartHost();
   void ApplyHostDomainListPolicy();
   void ApplyAllowRemoteAccessConnections();
-  bool OnClientDomainListPolicyUpdate(const base::Value::Dict& policies);
-  bool OnHostDomainListPolicyUpdate(const base::Value::Dict& policies);
-  bool OnPairingPolicyUpdate(const base::Value::Dict& policies);
-  bool OnGnubbyAuthPolicyUpdate(const base::Value::Dict& policies);
-  bool OnEnableUserInterfacePolicyUpdate(const base::Value::Dict& policies);
-  bool OnAllowRemoteAccessConnections(const base::Value::Dict& policies);
-  bool OnAllowPinAuthenticationUpdate(const base::Value::Dict& policies);
+  bool OnClientDomainListPolicyUpdate(const base::DictValue& policies);
+  bool OnHostDomainListPolicyUpdate(const base::DictValue& policies);
+  bool OnPairingPolicyUpdate(const base::DictValue& policies);
+  bool OnGnubbyAuthPolicyUpdate(const base::DictValue& policies);
+  bool OnEnableUserInterfacePolicyUpdate(const base::DictValue& policies);
+  bool OnAllowRemoteAccessConnections(const base::DictValue& policies);
+  bool OnAllowPinAuthenticationUpdate(const base::DictValue& policies);
 
   std::optional<ErrorCode> OnSessionPoliciesReceived(
-      const SessionPolicies& session_policies) const;
+      const SessionPolicies& session_policies);
 
   void InitializeSignaling();
 
@@ -427,23 +423,28 @@ class HostProcess : public ConfigWatcher::Delegate,
                     int line_number) override;
 
   // mojom::RemotingHostControl implementation.
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+  void ApplyHostConfig(base::DictValue serialized_config) override;
+#endif
 #if BUILDFLAG(IS_WIN)
-  void ApplyHostConfig(base::Value::Dict serialized_config) override;
   void InitializePairingRegistry(
       ::mojo::PlatformHandle privileged_handle,
       ::mojo::PlatformHandle unprivileged_handle) override;
 #endif
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
   void BindChromotingHostServices(
       mojo::PendingReceiver<mojom::ChromotingHostServices> receiver,
       int peer_pid) override;
-#endif
 
 #if BUILDFLAG(IS_MAC)
   void ConnectAgentProcessBroker();
   void OnAgentProcessTerminationRequested();
   void OnAgentProcessBrokerDisconnected();
 #endif
+
+  // Sets the required username on the daemon process based on
+  // `require_host_username_match_` and `current_host_owner_email_`. Must be
+  // called when `multi_process_` is true.
+  void SetRequiredUsernameOnDaemonProcess();
 
   std::unique_ptr<ChromotingHostContext> context_;
 
@@ -472,8 +473,9 @@ class HostProcess : public ConfigWatcher::Delegate,
   scoped_refptr<RsaKeyPair> key_pair_;
   std::string oauth_refresh_token_;
   std::string service_account_email_;
-  base::Value::Dict config_;
+  base::DictValue config_;
   std::set<std::string> host_owner_emails_;
+  std::string current_host_owner_email_;
 
   std::unique_ptr<PolicyWatcher> policy_watcher_;
   PolicyState policy_state_ = POLICY_INITIALIZING;
@@ -486,6 +488,7 @@ class HostProcess : public ConfigWatcher::Delegate,
   bool is_cloud_host_ = false;
   bool is_corp_host_ = false;
   bool require_session_authorization_ = false;
+  bool require_host_username_match_ = false;
   LocalSessionPoliciesProvider local_session_policies_provider_;
 
   DesktopEnvironmentOptions desktop_environment_options_;
@@ -495,17 +498,17 @@ class HostProcess : public ConfigWatcher::Delegate,
   // Used to specify which window to stream, if enabled.
   webrtc::WindowId window_id_ = 0;
 
-  // Must outlive |signal_strategy_| and |ftl_signaling_connector_|.
+  // Must outlive |ftl_signal_strategy_| and |ftl_signaling_connector_|.
   std::unique_ptr<OAuthTokenGetterImpl> oauth_token_getter_;
 
   // Must outlive |heartbeat_sender_| and |host_|.
   std::unique_ptr<InstanceIdentityTokenGetter> instance_identity_token_getter_;
 
-  // Must outlive |signal_strategy_| and |heartbeat_sender_|.
+  // Must outlive |ftl_signal_strategy_| and |heartbeat_sender_|.
   std::unique_ptr<ZombieHostDetector> zombie_host_detector_;
 
-  // |signal_strategy_| must outlive |ftl_signaling_connector_|.
-  std::unique_ptr<SignalStrategy> signal_strategy_;
+  // |ftl_signal_strategy_| must outlive |ftl_signaling_connector_|.
+  std::unique_ptr<FtlSignalStrategy> ftl_signal_strategy_;
   std::unique_ptr<FtlSignalingConnector> ftl_signaling_connector_;
 
   // |corp_signal_strategy_| must outlive |corp_signaling_connector_|.
@@ -533,7 +536,7 @@ class HostProcess : public ConfigWatcher::Delegate,
 
   std::unique_ptr<mojo::core::ScopedIPCSupport> ipc_support_;
 
-#if defined(REMOTING_MULTI_PROCESS)
+  // These members are only initialized when `multi_process_` is true.
 
   // Accessed on the UI thread.
   std::unique_ptr<IPC::ChannelProxy> daemon_channel_;
@@ -541,8 +544,10 @@ class HostProcess : public ConfigWatcher::Delegate,
   // Raw interface pointer which refers to the object owned by
   // |desktop_environment_factory_|.
   raw_ptr<DesktopSessionConnector> desktop_session_connector_ = nullptr;
-#endif  // defined(REMOTING_MULTI_PROCESS)
 
+  // End of multi-process-only members.
+
+  bool multi_process_;
   raw_ptr<int> exit_code_out_;
   bool signal_parent_ = false;
   std::string report_offline_reason_;
@@ -552,8 +557,8 @@ class HostProcess : public ConfigWatcher::Delegate,
   raw_ptr<ShutdownWatchdog> shutdown_watchdog_;
 
 // On Mac, `remoting_host_control_` is bound by the BindRemotingHostControl IPC,
-// so it's a regular mojo receiver, while on Windows, this is bound by the
-// legacy OnAssociatedInterfaceRequest, which requires using an associated
+// so it's a regular mojo receiver, while on other platforms, this is bound by
+// the legacy OnAssociatedInterfaceRequest, which requires using an associated
 // receiver.
 #if BUILDFLAG(IS_MAC)
   mojo::Receiver<mojom::RemotingHostControl> remoting_host_control_{this};
@@ -574,11 +579,13 @@ class HostProcess : public ConfigWatcher::Delegate,
 };
 
 HostProcess::HostProcess(std::unique_ptr<ChromotingHostContext> context,
+                         bool multi_process,
                          int* exit_code_out,
                          ShutdownWatchdog* shutdown_watchdog)
     : context_(std::move(context)),
       desktop_environment_options_(DesktopEnvironmentOptions::CreateDefault()),
       self_(this),
+      multi_process_(multi_process),
       exit_code_out_(exit_code_out),
       shutdown_watchdog_(shutdown_watchdog) {
   // TODO(zijiehe):
@@ -648,43 +655,42 @@ bool HostProcess::InitWithCommandLine(const base::CommandLine* cmd_line) {
       context_->network_task_runner()->task_runner(),
       mojo::core::ScopedIPCSupport::ShutdownPolicy::FAST);
 
-#if defined(REMOTING_MULTI_PROCESS)
-  auto endpoint =
-      mojo::PlatformChannel::RecoverPassedEndpointFromCommandLine(*cmd_line);
-  if (!endpoint.is_valid()) {
-    LOG(ERROR) << "IPC channel endpoint provided via command line param was "
-                  "missing or invalid";
-    return false;
-  }
-  auto invitation = mojo::IncomingInvitation::Accept(std::move(endpoint));
-
-  // Connect to the daemon process.
-  daemon_channel_ = IPC::ChannelProxy::Create(
-      invitation
-          .ExtractMessagePipe(cmd_line->GetSwitchValueASCII(kMojoPipeToken))
-          .release(),
-      IPC::Channel::MODE_CLIENT, this, context_->network_task_runner(),
-      base::SingleThreadTaskRunner::GetCurrentDefault());
-
-#else   // !defined(REMOTING_MULTI_PROCESS)
-  if (cmd_line->HasSwitch(kHostConfigSwitchName)) {
-    host_config_path_ = cmd_line->GetSwitchValuePath(kHostConfigSwitchName);
-
-    // Read config from stdin if necessary.
-    if (host_config_path_ == base::FilePath(kStdinConfigPath)) {
-      base::ReadStreamToString(stdin, &host_config_);
+  if (multi_process_) {
+    auto endpoint =
+        mojo::PlatformChannel::RecoverPassedEndpointFromCommandLine(*cmd_line);
+    if (!endpoint.is_valid()) {
+      LOG(ERROR) << "IPC channel endpoint provided via command line param was "
+                 << "missing or invalid";
+      return false;
     }
-  } else {
-    base::FilePath default_config_dir = remoting::GetConfigDir();
-    host_config_path_ = default_config_dir.Append(kDefaultHostConfigFile);
-  }
+    auto invitation = mojo::IncomingInvitation::Accept(std::move(endpoint));
 
-  if (host_config_path_ != base::FilePath(kStdinConfigPath) &&
-      !base::PathExists(host_config_path_)) {
-    LOG(ERROR) << "Can't find host config at " << host_config_path_.value();
-    return false;
+    // Connect to the daemon process.
+    daemon_channel_ = IPC::ChannelProxy::Create(
+        invitation
+            .ExtractMessagePipe(cmd_line->GetSwitchValueASCII(kMojoPipeToken))
+            .release(),
+        IPC::Channel::MODE_CLIENT, this, context_->network_task_runner(),
+        base::SingleThreadTaskRunner::GetCurrentDefault());
+  } else {  // Single-process
+    if (cmd_line->HasSwitch(kHostConfigSwitchName)) {
+      host_config_path_ = cmd_line->GetSwitchValuePath(kHostConfigSwitchName);
+
+      // Read config from stdin if necessary.
+      if (host_config_path_ == base::FilePath(kStdinConfigPath)) {
+        base::ReadStreamToString(stdin, &host_config_);
+      }
+    } else {
+      base::FilePath default_config_dir = remoting::GetConfigDir();
+      host_config_path_ = default_config_dir.Append(kDefaultHostConfigFile);
+    }
+
+    if (host_config_path_ != base::FilePath(kStdinConfigPath) &&
+        !base::PathExists(host_config_path_)) {
+      LOG(ERROR) << "Can't find host config at " << host_config_path_.value();
+      return false;
+    }
   }
-#endif  // !defined(REMOTING_MULTI_PROCESS)
 
   signal_parent_ = cmd_line->HasSwitch(kSignalParentSwitchName);
 
@@ -704,8 +710,7 @@ bool HostProcess::InitWithCommandLine(const base::CommandLine* cmd_line) {
 void HostProcess::OnConfigUpdated(const std::string& serialized_config) {
   HOST_LOG << "Parsing new host configuration.";
 
-  std::optional<base::Value::Dict> config(
-      HostConfigFromJson(serialized_config));
+  std::optional<base::DictValue> config(HostConfigFromJson(serialized_config));
   if (!config.has_value()) {
     LOG(ERROR) << "Invalid configuration.";
     ShutdownHost(kInvalidHostConfigurationExitCode);
@@ -715,7 +720,7 @@ void HostProcess::OnConfigUpdated(const std::string& serialized_config) {
   OnConfigParsed(std::move(*config));
 }
 
-void HostProcess::OnConfigParsed(base::Value::Dict config) {
+void HostProcess::OnConfigParsed(base::DictValue config) {
   if (!context_->network_task_runner()->BelongsToCurrentThread()) {
     context_->network_task_runner()->PostTask(
         FROM_HERE,
@@ -822,18 +827,18 @@ void HostProcess::StartOnNetworkThread() {
     return;
   }
 
-#if !defined(REMOTING_MULTI_PROCESS)
-  if (host_config_path_ == base::FilePath(kStdinConfigPath)) {
-    // Process config we've read from stdin.
-    OnConfigUpdated(host_config_);
-  } else {
-    // Start watching the host configuration file.
-    config_watcher_ = std::make_unique<ConfigFileWatcher>(
-        context_->network_task_runner(), context_->file_task_runner(),
-        host_config_path_);
-    config_watcher_->Watch(this);
+  if (!multi_process_) {
+    if (host_config_path_ == base::FilePath(kStdinConfigPath)) {
+      // Process config we've read from stdin.
+      OnConfigUpdated(host_config_);
+    } else {
+      // Start watching the host configuration file.
+      config_watcher_ = std::make_unique<ConfigFileWatcher>(
+          context_->network_task_runner(), context_->file_task_runner(),
+          host_config_path_);
+      config_watcher_->Watch(this);
+    }
   }
-#endif  // !defined(REMOTING_MULTI_PROCESS)
 
 #if BUILDFLAG(IS_POSIX)
   remoting::RegisterSignalHandler(
@@ -973,8 +978,12 @@ void HostProcess::CreateAuthenticatorFactory() {
           std::move(auth_config));
 
 #if BUILDFLAG(IS_POSIX)
-  // On Linux and Mac, perform a PAM authorization step after authentication.
-  factory = std::make_unique<PamAuthorizationFactory>(std::move(factory));
+  // For Linux and Mac single-process hosts, perform a PAM authorization step
+  // after authentication. For multi-process hosts, the check will be done by
+  // the daemon process.
+  if (!multi_process_) {
+    factory = std::make_unique<PamAuthorizationFactory>(std::move(factory));
+  }
 #endif  // BUILDFLAG(IS_POSIX)
   host_->SetAuthenticatorFactory(std::move(factory));
 }
@@ -992,9 +1001,20 @@ void HostProcess::OnChannelError() {
 void HostProcess::OnAssociatedInterfaceRequest(
     const std::string& interface_name,
     mojo::ScopedInterfaceEndpointHandle handle) {
+#if BUILDFLAG(IS_MAC)
+  // The Mac host currently doesn't support true multi-process, and
+  // `remoting_host_control_` is bound in BindRemotingHostControl().
+  NOTREACHED();
+#else
   DCHECK(context_->ui_task_runner()->BelongsToCurrentThread());
 
-#if defined(REMOTING_MULTI_PROCESS)
+  if (!multi_process_) {
+    LOG(ERROR) << "Unexpected call requesting an associated interface: "
+               << interface_name << ", crashing the network process";
+    CrashProcess(__FUNCTION__, __FILE__, __LINE__);
+    return;
+  }
+
   if (interface_name == mojom::RemotingHostControl::Name_) {
     if (remoting_host_control_.is_bound()) {
       LOG(ERROR) << "Receiver already bound for associated interface: "
@@ -1027,11 +1047,7 @@ void HostProcess::OnAssociatedInterfaceRequest(
                << ", crashing the network process";
     CrashProcess(__FUNCTION__, __FILE__, __LINE__);
   }
-#else   // !defined(REMOTING_MULTI_PROCESS)
-  LOG(ERROR) << "Unexpected call requesting an associated interface: "
-             << interface_name << ", crashing the network process";
-  CrashProcess(__FUNCTION__, __FILE__, __LINE__);
-#endif  // !defined(REMOTING_MULTI_PROCESS)
+#endif
 }
 
 void HostProcess::StartOnUiThread() {
@@ -1093,32 +1109,31 @@ void HostProcess::StartOnUiThread() {
 
   // Create a desktop environment factory appropriate to the build type &
   // platform.
-#if defined(REMOTING_MULTI_PROCESS)
-  // Set up the AssociatedRemote used to send requests to the Daemon process.
-  // We need to do a little dance here using a pending associated receiver so
-  // that the remote is associated with the proper task_runner since it will be
-  // invoked on the network thread.
-  mojo::AssociatedRemote<mojom::DesktopSessionManager> remote;
-  mojo::GenericPendingAssociatedReceiver pending_receiver =
-      remote.BindNewEndpointAndPassReceiver(context_->network_task_runner());
-  daemon_channel_->GetRemoteAssociatedInterface(std::move(pending_receiver));
+  if (multi_process_) {
+    // Set up the AssociatedRemote used to send requests to the Daemon process.
+    // We need to do a little dance here using a pending associated receiver so
+    // that the remote is associated with the proper task_runner since it will
+    // be invoked on the network thread.
+    mojo::AssociatedRemote<mojom::DesktopSessionManager> remote;
+    mojo::GenericPendingAssociatedReceiver pending_receiver =
+        remote.BindNewEndpointAndPassReceiver(context_->network_task_runner());
+    daemon_channel_->GetRemoteAssociatedInterface(std::move(pending_receiver));
 
-  IpcDesktopEnvironmentFactory* desktop_environment_factory =
-      new IpcDesktopEnvironmentFactory(
-          context_->audio_task_runner(), context_->network_task_runner(),
-          context_->network_task_runner(), std::move(remote));
-  desktop_session_connector_ = desktop_environment_factory;
-#else   // !defined(REMOTING_MULTI_PROCESS)
-  Me2MeDesktopEnvironmentFactory* desktop_environment_factory =
-      new Me2MeDesktopEnvironmentFactory(
-          context_->network_task_runner(), context_->ui_task_runner(),
-          CreateDesktopInteractionStrategyFactory(
-              context_->network_task_runner(), context_->ui_task_runner(),
-              context_->video_capture_task_runner(),
-              context_->input_task_runner()));
-#endif  // !defined(REMOTING_MULTI_PROCESS)
-
-  desktop_environment_factory_.reset(desktop_environment_factory);
+    auto desktop_environment_factory =
+        std::make_unique<IpcDesktopEnvironmentFactory>(
+            context_->audio_task_runner(), context_->network_task_runner(),
+            context_->network_task_runner(), std::move(remote));
+    desktop_session_connector_ = desktop_environment_factory.get();
+    desktop_environment_factory_ = std::move(desktop_environment_factory);
+  } else {
+    desktop_environment_factory_ =
+        std::make_unique<Me2MeDesktopEnvironmentFactory>(
+            context_->network_task_runner(), context_->ui_task_runner(),
+            CreateDesktopInteractionStrategyFactory(
+                context_->network_task_runner(), context_->ui_task_runner(),
+                context_->video_capture_task_runner(),
+                context_->input_task_runner()));
+  }
 
   context_->network_task_runner()->PostTask(
       FROM_HERE, base::BindOnce(&HostProcess::StartOnNetworkThread, this));
@@ -1133,11 +1148,8 @@ void HostProcess::ShutdownOnUiThread() {
   // Tear down resources that need to be torn down on the UI thread.
   desktop_environment_factory_.reset();
   policy_watcher_.reset();
-
-#if defined(REMOTING_MULTI_PROCESS)
   daemon_channel_.reset();
   desktop_session_connector_ = nullptr;
-#endif  // defined(REMOTING_MULTI_PROCESS)
 
   // Release the remotes after the daemon channel has been closed.
   remoting_host_control_.reset();
@@ -1185,13 +1197,17 @@ void HostProcess::OnUpdateHostOwner(const std::string& owner_email) {
   DCHECK(!owner_email.empty());
 
   // Use a canonical email form here for matching against FTL signaling IDs.
-  auto new_owner_email = GetCanonicalEmail(owner_email);
-  if (host_owner_emails_.contains(new_owner_email)) {
+  current_host_owner_email_ = GetCanonicalEmail(owner_email);
+  if (multi_process_) {
+    SetRequiredUsernameOnDaemonProcess();
+  }
+  if (host_owner_emails_.contains(current_host_owner_email_)) {
     return;
   }
 
-  LOG(INFO) << "Adding '" << new_owner_email << "' to host owner emails.";
-  host_owner_emails_.emplace(std::move(new_owner_email));
+  LOG(INFO) << "Adding '" << current_host_owner_email_
+            << "' to host owner emails.";
+  host_owner_emails_.emplace(current_host_owner_email_);
 
   ApplyHostDomainListPolicy();
 }
@@ -1247,12 +1263,14 @@ void HostProcess::BindRemotingHostControl(
 
 #endif
 
-#if BUILDFLAG(IS_WIN)
-void HostProcess::ApplyHostConfig(base::Value::Dict config) {
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+void HostProcess::ApplyHostConfig(base::DictValue config) {
   DCHECK(context_->ui_task_runner()->BelongsToCurrentThread());
   OnConfigParsed(std::move(config));
 }
+#endif
 
+#if BUILDFLAG(IS_WIN)
 void HostProcess::InitializePairingRegistry(
     ::mojo::PlatformHandle privileged_handle,
     ::mojo::PlatformHandle unprivileged_handle) {
@@ -1289,7 +1307,6 @@ void HostProcess::InitializePairingRegistry(
 
 #endif  // BUILDFLAG(IS_WIN)
 
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
 void HostProcess::BindChromotingHostServices(
     mojo::PendingReceiver<mojom::ChromotingHostServices> receiver,
     int peer_pid) {
@@ -1308,8 +1325,6 @@ void HostProcess::BindChromotingHostServices(
   }
   host_->BindChromotingHostServices(std::move(receiver), peer_pid);
 }
-
-#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
 
 #if BUILDFLAG(IS_MAC)
 
@@ -1342,8 +1357,28 @@ void HostProcess::OnAgentProcessBrokerDisconnected() {
 
 #endif  // BUILDFLAG(IS_MAC)
 
+void HostProcess::SetRequiredUsernameOnDaemonProcess() {
+  DCHECK(multi_process_);
+
+  if (current_host_owner_email_.empty()) {
+    // SetRequiredUsernameOnDaemonProcess() will be called again once
+    // `current_host_owner_email_` is set.
+    return;
+  }
+  if (!require_host_username_match_) {
+    desktop_session_connector_->SetRequiredUsername({});
+    return;
+  }
+  auto email_parts = base::SplitStringOnce(current_host_owner_email_, '@');
+  if (!email_parts.has_value()) {
+    LOG(ERROR) << current_host_owner_email_ << " is not a valid email address";
+    return;
+  }
+  desktop_session_connector_->SetRequiredUsername(email_parts->first);
+}
+
 // Applies the host config, returning true if successful.
-bool HostProcess::ApplyConfig(const base::Value::Dict& config) {
+bool HostProcess::ApplyConfig(const base::DictValue& config) {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
   const std::string* host_id = config.FindString(kHostIdConfigPath);
@@ -1361,7 +1396,13 @@ bool HostProcess::ApplyConfig(const base::Value::Dict& config) {
     return false;
   }
 
-  key_pair_ = RsaKeyPair::FromString(*key_base64);
+  bool generate_private_key = *key_base64 == "generate";
+  if (generate_private_key) {
+    HOST_LOG << "private_key is set to 'generate', generating a new key pair.";
+    key_pair_ = RsaKeyPair::Generate();
+  } else {
+    key_pair_ = RsaKeyPair::FromString(*key_base64);
+  }
   if (!key_pair_.get()) {
     LOG(ERROR) << "Host config has an invalid value for path: `"
                << kPrivateKeyConfigPath << "`";
@@ -1415,6 +1456,15 @@ bool HostProcess::ApplyConfig(const base::Value::Dict& config) {
     HOST_LOG << "Host config specifies that Session Authorization is required.";
     HOST_LOG << "PIN authentication is disabled.";
   } else if (host_secret_hash) {
+    if (generate_private_key) {
+      // Allowing PIN auth, based on the existence of `host_secret_hash`,
+      // requires a stable private_key to validate incoming connection requests.
+      // We should not allow both modes, otherwise PIN connections will fail for
+      // a non-obvious reason (to the client).
+      LOG(ERROR) << "Host config cannot define a host_secret_hash value when "
+                 << "using a dynamically generated KeyPair.";
+      return false;
+    }
     if (!ParsePinHashFromConfig(*host_secret_hash, host_id_, &pin_hash_)) {
       LOG(ERROR) << "Host config has an invalid value for path: `"
                  << kHostSecretHashConfigPath << "`";
@@ -1434,7 +1484,7 @@ bool HostProcess::ApplyConfig(const base::Value::Dict& config) {
   return true;
 }
 
-void HostProcess::OnPolicyUpdate(base::Value::Dict policies) {
+void HostProcess::OnPolicyUpdate(base::DictValue policies) {
   if (!context_->network_task_runner()->BelongsToCurrentThread()) {
     context_->network_task_runner()->PostTask(
         FROM_HERE, base::BindOnce(&HostProcess::OnPolicyUpdate, this,
@@ -1551,11 +1601,11 @@ void HostProcess::ApplyAllowRemoteAccessConnections() {
 }
 
 bool HostProcess::OnHostDomainListPolicyUpdate(
-    const base::Value::Dict& policies) {
+    const base::DictValue& policies) {
   // Returns false: never restart the host after this policy update.
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
-  const base::Value::List* list =
+  const base::ListValue* list =
       policies.FindList(policy::key::kRemoteAccessHostDomainList);
   if (!list) {
     return false;
@@ -1571,10 +1621,10 @@ bool HostProcess::OnHostDomainListPolicyUpdate(
 }
 
 bool HostProcess::OnClientDomainListPolicyUpdate(
-    const base::Value::Dict& policies) {
+    const base::DictValue& policies) {
   // Returns true if the host has to be restarted after this policy update.
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
-  const base::Value::List* list =
+  const base::ListValue* list =
       policies.FindList(policy::key::kRemoteAccessHostClientDomainList);
   if (!list) {
     return false;
@@ -1588,7 +1638,7 @@ bool HostProcess::OnClientDomainListPolicyUpdate(
   return true;
 }
 
-bool HostProcess::OnPairingPolicyUpdate(const base::Value::Dict& policies) {
+bool HostProcess::OnPairingPolicyUpdate(const base::DictValue& policies) {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
   std::optional<bool> allow_pairing =
@@ -1606,7 +1656,7 @@ bool HostProcess::OnPairingPolicyUpdate(const base::Value::Dict& policies) {
   return true;
 }
 
-bool HostProcess::OnGnubbyAuthPolicyUpdate(const base::Value::Dict& policies) {
+bool HostProcess::OnGnubbyAuthPolicyUpdate(const base::DictValue& policies) {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
   std::optional<bool> security_key_auth_policy_enabled =
@@ -1626,7 +1676,7 @@ bool HostProcess::OnGnubbyAuthPolicyUpdate(const base::Value::Dict& policies) {
 }
 
 bool HostProcess::OnAllowPinAuthenticationUpdate(
-    const base::Value::Dict& policies) {
+    const base::DictValue& policies) {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
   const base::Value* allow_pin_auth =
@@ -1655,7 +1705,7 @@ bool HostProcess::OnAllowPinAuthenticationUpdate(
 }
 
 bool HostProcess::OnEnableUserInterfacePolicyUpdate(
-    const base::Value::Dict& policies) {
+    const base::DictValue& policies) {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
   std::optional<bool> enable_user_interface =
@@ -1678,7 +1728,7 @@ bool HostProcess::OnEnableUserInterfacePolicyUpdate(
 }
 
 bool HostProcess::OnAllowRemoteAccessConnections(
-    const base::Value::Dict& policies) {
+    const base::DictValue& policies) {
   // Returns false: never restart the host after this policy update.
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
@@ -1695,20 +1745,27 @@ bool HostProcess::OnAllowRemoteAccessConnections(
 }
 
 std::optional<ErrorCode> HostProcess::OnSessionPoliciesReceived(
-    const SessionPolicies& session_policies) const {
+    const SessionPolicies& session_policies) {
   DCHECK(context_->network_task_runner()->BelongsToCurrentThread());
 
   // We currently only validate the host_username_match_required policy here.
   // Other policies are validated by ClientSession.
 
-  if (!session_policies.host_username_match_required.value_or(false)) {
+  require_host_username_match_ =
+      session_policies.host_username_match_required.value_or(false);
+  if (multi_process_) {
+    // For multi-process hosts, the host username match policy will be enforced
+    // by the daemon process.
+    SetRequiredUsernameOnDaemonProcess();
+    return std::nullopt;
+  }
+  if (!require_host_username_match_) {
     return std::nullopt;
   }
 
 #if BUILDFLAG(IS_WIN)
-  VLOG(1) << "Policy host_username_match_required ignored since it is not "
-          << "supported on Windows.";
-  return std::nullopt;
+  // The Windows host is always multi-process.
+  NOTREACHED();
 #else  // BUILDFLAG(IS_WIN) #else
 
 #if BUILDFLAG(IS_APPLE)
@@ -1745,7 +1802,7 @@ std::optional<ErrorCode> HostProcess::OnSessionPoliciesReceived(
 
 void HostProcess::InitializeSignaling() {
   DCHECK(!host_id_.empty());  // ApplyConfig() should already have been run.
-  DCHECK(!signal_strategy_);
+  DCHECK(!ftl_signal_strategy_);
   DCHECK(!corp_signal_strategy_);
   DCHECK(!oauth_token_getter_);
   DCHECK(!ftl_signaling_connector_);
@@ -1777,14 +1834,14 @@ void HostProcess::InitializeSignaling() {
   }
 #endif
 
-  auto ftl_signal_strategy = std::make_unique<FtlSignalStrategy>(
+  ftl_signal_strategy_ = std::make_unique<FtlSignalStrategy>(
       std::make_unique<OAuthTokenGetterProxy>(
           oauth_token_getter_->GetWeakPtr()),
       context_->url_loader_factory(),
       std::make_unique<FtlHostDeviceIdProvider>(host_id_),
       zombie_host_detector_.get());
   ftl_signaling_connector_ = std::make_unique<FtlSignalingConnector>(
-      ftl_signal_strategy.get(),
+      ftl_signal_strategy_.get(),
       base::BindOnce(&HostProcess::OnAuthFailed, base::Unretained(this)));
   ftl_signaling_connector_->Start();
 
@@ -1816,10 +1873,9 @@ void HostProcess::InitializeSignaling() {
   }
 
   heartbeat_sender_ = std::make_unique<HeartbeatSender>(
-      this, host_id_, ftl_signal_strategy.get(), oauth_token_getter_.get(),
+      this, host_id_, ftl_signal_strategy_.get(), oauth_token_getter_.get(),
       std::move(service_client), zombie_host_detector_.get(),
       context_->url_loader_factory(), is_corp_host_);
-  signal_strategy_ = std::move(ftl_signal_strategy);
 
   zombie_host_detector_->Start();
 }
@@ -1913,15 +1969,14 @@ void HostProcess::StartHost() {
           webrtc::ThreadWrapper::current()->SocketServer(),
           std::move(ice_config_fetcher), protocol::TransportRole::SERVER);
   std::unique_ptr<protocol::SessionManager> session_manager(
-      new protocol::JingleSessionManager(signal_strategy_.get()));
+      new protocol::JingleSessionManager(ftl_signal_strategy_.get()));
   std::unique_ptr<protocol::SessionManager> corp_session_manager;
   if (corp_signal_strategy_) {
     corp_session_manager = std::make_unique<protocol::JingleSessionManager>(
         corp_signal_strategy_.get());
   }
 
-  std::unique_ptr<protocol::CandidateSessionConfig> protocol_config =
-      protocol::CandidateSessionConfig::CreateDefault();
+  auto protocol_config = CandidateSessionConfig::CreateDefault();
   if (!desktop_environment_factory_->SupportsAudioCapture()) {
     protocol_config->DisableAudioChannel();
   }
@@ -1986,22 +2041,22 @@ void HostProcess::StartHost() {
 
   ftl_host_change_notification_listener_ =
       std::make_unique<FtlHostChangeNotificationListener>(
-          this, signal_strategy_.get());
+          this, ftl_signal_strategy_.get());
 
   ftl_echo_message_listener_ = std::make_unique<FtlEchoMessageListener>(
       base::BindRepeating(&HostProcess::CheckAccessPermission, this),
-      signal_strategy_.get());
+      ftl_signal_strategy_.get());
 
   // Set up reporting the host status notifications.
-#if defined(REMOTING_MULTI_PROCESS)
-  mojo::AssociatedRemote<mojom::HostStatusObserver> remote;
-  daemon_channel_->GetRemoteAssociatedInterface(&remote);
-  host_event_logger_ = std::make_unique<IpcHostEventLogger>(
-      host_->status_monitor(), std::move(remote));
-#else   // !defined(REMOTING_MULTI_PROCESS)
-  host_event_logger_ =
-      HostEventLogger::Create(host_->status_monitor(), kApplicationName);
-#endif  // !defined(REMOTING_MULTI_PROCESS)
+  if (multi_process_) {
+    mojo::AssociatedRemote<mojom::HostStatusObserver> remote;
+    daemon_channel_->GetRemoteAssociatedInterface(&remote);
+    host_event_logger_ = std::make_unique<IpcHostEventLogger>(
+        host_->status_monitor(), std::move(remote));
+  } else {
+    host_event_logger_ =
+        HostEventLogger::Create(host_->status_monitor(), kApplicationName);
+  }
 
   // The email provided here is only used for logging via OnHostStarted().
   // TODO: joedow - Update host observer interface to handle multiple email
@@ -2009,9 +2064,12 @@ void HostProcess::StartHost() {
   host_->Start(*host_owner_emails_.begin());
 
 #if BUILDFLAG(IS_LINUX)
-  // For Windows and Mac, ChromotingHostServices connections are handled by
-  // another process, then the message pipe is forwarded to the network process.
-  host_->StartChromotingHostServices();
+  // For Multi-process hosts and Mac, ChromotingHostServices connections are
+  // handled by another process, then the message pipe is forwarded to the
+  // network process.
+  if (!multi_process_) {
+    host_->StartChromotingHostServices();
+  }
 #endif
 
   CreateAuthenticatorFactory();
@@ -2089,7 +2147,7 @@ void HostProcess::GoOffline(const std::string& host_offline_reason) {
     OnHostOfflineReasonAck(true);
     return;
   } else if (!config_.empty()) {
-    if (!signal_strategy_) {
+    if (!ftl_signal_strategy_) {
       InitializeSignaling();
     }
 
@@ -2116,7 +2174,7 @@ void HostProcess::OnHostOfflineReasonAck(bool success) {
   instance_identity_token_getter_.reset();
   ftl_signaling_connector_.reset();
   ftl_echo_message_listener_.reset();
-  signal_strategy_.reset();
+  ftl_signal_strategy_.reset();
   corp_signal_strategy_.reset();
   corp_signaling_connector_.reset();
   zombie_host_detector_.reset();
@@ -2151,29 +2209,35 @@ void HostProcess::CrashProcess(const std::string& function_name,
   ::remoting::CrashProcess(function_name, file_name, line_number);
 }
 
-int HostProcessMain() {
-  HOST_LOG << "Starting host process: version " << STRINGIZE(VERSION);
+int HostProcessMain(bool multi_process) {
+  HOST_LOG << "Starting host process: version "
+           << STRINGIZE(VERSION) << (multi_process ? " (multi-process)"
+                                                   : " (single-process)");
   const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+  // For the multi-process host, screen capturing and UI rendering should be
+  // done by the desktop process.
+  if (!multi_process) {
 #if defined(REMOTING_USE_X11)
-  // Initialize Xlib for multi-threaded use, allowing non-Chromium code to
-  // use X11 safely (such as the WebRTC capturer, GTK ...)
-  x11::InitXlib();
+    // Initialize Xlib for multi-threaded use, allowing non-Chromium code to
+    // use X11 safely (such as the WebRTC capturer, GTK ...)
+    x11::InitXlib();
 #endif  // defined(REMOTING_USE_X11)
 
 #if defined(REMOTING_USE_X11)
-  if (!cmd_line->HasSwitch(kReportOfflineReasonSwitchName)) {
-    // Required for any calls into GTK functions, such as the Disconnect and
-    // Continue windows, though these should not be used for the Me2Me case
-    // (crbug.com/104377).
+    if (!cmd_line->HasSwitch(kReportOfflineReasonSwitchName)) {
+      // Required for any calls into GTK functions, such as the Disconnect and
+      // Continue windows, though these should not be used for the Me2Me case
+      // (crbug.com/104377).
 #if GTK_CHECK_VERSION(3, 90, 0)
-    gtk_init();
+      gtk_init();
 #else
-    gtk_init(nullptr, nullptr);
+      gtk_init(nullptr, nullptr);
 #endif
-  }
+    }
 #endif  // defined(REMOTING_USE_X11)
+  }  // !multi_process
 
   // Need to prime the host OS version value for linux to prevent IO on the
   // network thread. base::GetLinuxDistro() caches the result.
@@ -2236,7 +2300,8 @@ int HostProcessMain() {
   // Remove this hack as part of the multi-process refactoring.
   int exit_code = kSuccessExitCode;
   ShutdownWatchdog shutdown_watchdog(base::Seconds(kShutdownTimeoutSeconds));
-  new HostProcess(std::move(context), &exit_code, &shutdown_watchdog);
+  new HostProcess(std::move(context), multi_process, &exit_code,
+                  &shutdown_watchdog);
 
   // Run the main (also UI) task executor until the host no longer needs it.
   run_loop.Run();
@@ -2249,6 +2314,15 @@ int HostProcessMain() {
   }
 
   return exit_code;
+}
+
+int SingleProcessHostProcessMain() {
+  return HostProcessMain(false);
+}
+
+int NetworkProcessMain() {
+  // The network process is just the host process running in multi-process mode.
+  return HostProcessMain(true);
 }
 
 }  // namespace remoting

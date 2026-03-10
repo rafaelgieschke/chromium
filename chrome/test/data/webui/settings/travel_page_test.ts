@@ -44,7 +44,10 @@ suite('TravelPage', function() {
    {travelOptIn: false},
   ].forEach(({travelOptIn}) => {
     test(`Toggle should show current opt-in status`, async function() {
-      loadTimeData.overrideValues({userEligibleForAutofillAi: true});
+      loadTimeData.overrideValues({
+        userEligibleForAutofillAi: true,
+        autofillAiAvailableByDefault: false,
+      });
 
       entityDataManager.setGetOptInStatusResponse(true);
 
@@ -108,6 +111,33 @@ suite('TravelPage', function() {
         });
   });
 
+  [{canEnableOrDisableAutofillAi: true},
+   {canEnableOrDisableAutofillAi: false},
+  ].forEach(({canEnableOrDisableAutofillAi}) => {
+    test(
+        'When Autofill AI is available by default ' +
+            '(autofillAiAvailableByDefault is true) the toggle ' +
+            'availability depends on ' +
+            'canEnableOrDisableAutofillAi, not on the opt-in status: ' +
+            `canEnableOrDisableAutofillAi(${canEnableOrDisableAutofillAi})`,
+        async function() {
+          loadTimeData.overrideValues({
+            userEligibleForAutofillAi: false,
+            autofillAiAvailableByDefault: true,
+            canEnableOrDisableAutofillAi: canEnableOrDisableAutofillAi,
+          });
+
+          entityDataManager = new TestEntityDataManagerProxy();
+          EntityDataManagerProxyImpl.setInstance(entityDataManager);
+          entityDataManager.setGetOptInStatusResponse(false);
+
+          const page = await setupPage();
+
+          assertEquals(
+              page.$.optInToggle.disabled, !canEnableOrDisableAutofillAi);
+        });
+  });
+
   [{travelOptIn: true},
    {travelOptIn: false},
   ].forEach(({travelOptIn}) => {
@@ -160,7 +190,8 @@ suite('TravelPage', function() {
         async function() {
           loadTimeData.overrideValues({
             userEligibleForAutofillAi: true,
-            AutofillAiIgnoresWhetherAddressFillingIsEnabled: experimentEnabled,
+            AutofillAddOtherDatatypesPrefIsEnabled: experimentEnabled,
+            autofillAiAvailableByDefault: false,
           });
 
           entityDataManager.setGetOptInStatusResponse(true);
@@ -175,4 +206,96 @@ suite('TravelPage', function() {
           assertEquals(page.$.optInToggle.disabled, toggleDisabled);
         });
   });
+
+  test(
+      'Policy controlled icon is shown when autofillProfileEnabled is ' +
+          'controlled by policy',
+      async function() {
+        loadTimeData.overrideValues({
+          userEligibleForAutofillAi: true,
+          AutofillAddOtherDatatypesPrefIsEnabled: false,
+          autofillAiAvailableByDefault: true,
+          canEnableOrDisableAutofillAi: true,
+          enableYourSavedInfoPolicyAndExtentionToggleIndicators: true,
+        });
+
+        settingsPrefs.set(
+            'prefs.autofill.autofill_ai.travel_entities_enabled.value', true);
+        settingsPrefs.set('prefs.autofill.profile_enabled', {
+          value: false,
+          enforcement: chrome.settingsPrivate.Enforcement.ENFORCED,
+          controlledBy: chrome.settingsPrivate.ControlledBy.USER_POLICY,
+        });
+
+        const page = await setupPage();
+        const policyIndicator = page.$.optInToggle.shadowRoot!.querySelector(
+            'cr-policy-pref-indicator');
+        const extensionControlledIndicator =
+            page.shadowRoot!.querySelector('#autofillExtensionIndicator');
+
+        assertTrue(!!policyIndicator);
+        assertFalse(!!extensionControlledIndicator);
+        assertFalse(page.$.optInToggle.checked);
+      });
+
+  test(
+      'Extension indicator is shown when autofillProfileEnabled is ' +
+          'controlled by extension',
+      async function() {
+        loadTimeData.overrideValues({
+          userEligibleForAutofillAi: true,
+          AutofillAddOtherDatatypesPrefIsEnabled: false,
+          autofillAiAvailableByDefault: true,
+          canEnableOrDisableAutofillAi: true,
+          enableYourSavedInfoPolicyAndExtentionToggleIndicators: true,
+        });
+
+        settingsPrefs.set(
+            'prefs.autofill.autofill_ai.travel_entities_enabled.value', true);
+        settingsPrefs.set('prefs.autofill.profile_enabled', {
+          value: false,
+          enforcement: chrome.settingsPrivate.Enforcement.ENFORCED,
+          controlledBy: chrome.settingsPrivate.ControlledBy.EXTENSION,
+          extensionId: 'test-extension-id',
+        });
+
+        const page = await setupPage();
+        const policyIndicator = page.$.optInToggle.shadowRoot!.querySelector(
+            'cr-policy-pref-indicator');
+        const extensionControlledIndicator =
+            page.shadowRoot!.querySelector('#autofillExtensionIndicator');
+
+        assertFalse(!!policyIndicator);
+        assertTrue(!!extensionControlledIndicator);
+        assertFalse(page.$.optInToggle.checked);
+      });
+
+  test(
+      'Extension indicator is not shown when autofillProfileEnabled is ' +
+          'controlled by extension and forced true',
+      async function() {
+        loadTimeData.overrideValues({
+          userEligibleForAutofillAi: true,
+          AutofillAddOtherDatatypesPrefIsEnabled: false,
+          autofillAiAvailableByDefault: true,
+          canEnableOrDisableAutofillAi: true,
+          enableYourSavedInfoPolicyAndExtentionToggleIndicators: true,
+        });
+
+        settingsPrefs.set(
+            'prefs.autofill.autofill_ai.travel_entities_enabled.value', false);
+        settingsPrefs.set('prefs.autofill.profile_enabled', {
+          value: true,
+          enforcement: chrome.settingsPrivate.Enforcement.ENFORCED,
+          controlledBy: chrome.settingsPrivate.ControlledBy.EXTENSION,
+          extensionId: 'test-extension-id',
+        });
+
+        const page = await setupPage();
+        const extensionControlledIndicator =
+            page.shadowRoot!.querySelector('#autofillExtensionIndicator');
+
+        assertFalse(!!extensionControlledIndicator);
+        assertFalse(page.$.optInToggle.checked);
+      });
 });

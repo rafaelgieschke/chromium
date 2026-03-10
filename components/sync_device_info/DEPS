@@ -4,6 +4,7 @@ include_rules = [
   "+components/keyed_service",
   "+components/metrics",
   "+components/prefs",
+  "+components/strings/grit/components_strings.h",
   "+components/sync/base",
   "+components/sync/engine",
   "+components/sync/invalidations",
@@ -12,5 +13,4 @@ include_rules = [
   "+components/sync/test",
   "+components/version_info",
   "+ui/base",
-  "+absl/container",
 ]

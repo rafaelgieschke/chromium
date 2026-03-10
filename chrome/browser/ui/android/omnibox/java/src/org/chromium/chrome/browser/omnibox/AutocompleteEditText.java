@@ -8,6 +8,7 @@ import static org.chromium.build.NullUtil.assumeNonNull;
 
 import android.content.Context;
 import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextUtils;
@@ -235,15 +236,18 @@ public class AutocompleteEditText extends EditTextWithLeading
      * @param inlineAutocompleteText The suggested autocompletion for the user's text.
      * @param additionalText This string is displayed adjacent to the omnibox if this match is the
      *     default. Will usually be URL when autocompleting a title, and empty otherwise.
+     * @param siteSearchLabel The site search label to be shown.
      */
     public void setAutocompleteText(
             CharSequence userText,
             @Nullable CharSequence inlineAutocompleteText,
-            @Nullable String additionalText) {
+            @Nullable String additionalText,
+            @Nullable String siteSearchLabel) {
         boolean emptyAutocomplete = TextUtils.isEmpty(inlineAutocompleteText);
         if (!emptyAutocomplete) mDisableTextScrollingFromAutocomplete = true;
         if (mModel != null) {
-            mModel.setAutocompleteText(userText, inlineAutocompleteText, additionalText);
+            mModel.setAutocompleteText(
+                    userText, inlineAutocompleteText, additionalText, siteSearchLabel);
         }
     }
 
@@ -396,5 +400,17 @@ public class AutocompleteEditText extends EditTextWithLeading
 
     /* package */ @Nullable AutocompleteEditTextModelBase getModelForTesting() {
         return mModel;
+    }
+
+    @Override
+    public void setSiteSearchChip(@Nullable String keyword) {
+        SiteSearchChipDrawable drawable = null;
+        if (keyword != null) {
+            // TODO(crbug.com/459590224): convert keyword to templateUrl.FullName() or equivalent.
+            drawable = new SiteSearchChipDrawable(getContext(), keyword);
+            drawable.setBounds(0, 0, drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight());
+        }
+        Drawable[] drawables = getCompoundDrawablesRelative();
+        setCompoundDrawablesRelative(drawable, drawables[1], drawables[2], drawables[3]);
     }
 }

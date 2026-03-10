@@ -21,12 +21,12 @@ namespace views {
 class FocusManager;
 }  // namespace views
 
-// ExtensionsContainer with views-specific additional methods.
+// An interface with views-specific methods for the toolbar.
 //
 // While ExtensionsContainer provides a minimal set of APIs for non-UI code,
-// this interface provides additional methods for views-specific extension UI
-// subcomponents to interact with the extension toolbar.
-class ExtensionsContainerViews : public ExtensionsContainer {
+// this interface provides methods for views-specific extension UI subcomponents
+// to interact with the extension toolbar.
+class ExtensionsContainerViews {
  public:
   // Get the currently popped out action id, if any.
   // TODO(pbos): Consider supporting multiple popped out actions for bubbles
@@ -74,7 +74,7 @@ class ExtensionsContainerViews : public ExtensionsContainer {
   // Returns the reference button for the extension action's popup. Rather than
   // relying on the button being a MenuButton, the button returned should have a
   // MenuButtonController. This is part of the ongoing work from
-  // http://crbug.com/901183 to simplify the button hierarchy by migrating
+  // http://crbug.com/41423998 to simplify the button hierarchy by migrating
   // controller logic into a separate class leaving MenuButton as an empty class
   // to be deprecated.
   virtual views::BubbleAnchor GetReferenceButtonForPopup(

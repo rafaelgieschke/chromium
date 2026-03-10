@@ -165,6 +165,9 @@ source_set("renderer") {
     "native_handler.h",
     "object_backed_native_handler.cc",
     "object_backed_native_handler.h",
+    "policy_activity_log_filter.h",
+    "polyfill_util.cc",
+    "polyfill_util.h",
     "process_info_native_handler.cc",
     "process_info_native_handler.h",
     "programmatic_script_injector.cc",
@@ -396,6 +399,7 @@ source_set("unit_tests") {
     "bindings/listener_tracker_unittest.cc",
     "bindings/returns_async_builder.cc",
     "bindings/returns_async_builder.h",
+    "dom_activity_logger_unittest.cc",
     "extension_localization_throttle_unittest.cc",
     "extension_throttle_simulation_unittest.cc",
     "extension_throttle_test_support.cc",
@@ -440,7 +444,7 @@ source_set("unit_tests") {
   # in the desktop-android build when the related extensions APIs are enabled.
   if (enable_extensions) {
     sources += [
-      "api/automation/automation_internal_custom_bindings_unittests.cc",
+      "api/automation/automation_internal_custom_bindings_unittest.cc",
       "api/feedback_private_hooks_delegate_unittest.cc",
     ]
   }

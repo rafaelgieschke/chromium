@@ -4,19 +4,18 @@
 
 #include "content/child/memory_coordinator/child_memory_consumer_registry.h"
 
+#include <map>
+#include <optional>
 #include <string>
-#include <utility>
+#include <string_view>
+#include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory_coordinator/mock_memory_consumer.h"
 #include "base/memory_coordinator/traits.h"
-#include "base/strings/string_number_conversions.h"
-#include "base/strings/string_util.h"
-#include "base/test/run_until.h"
 #include "base/test/task_environment.h"
-#include "base/test/test_future.h"
-#include "mojo/public/cpp/bindings/pending_remote.h"
-#include "mojo/public/cpp/bindings/receiver_set.h"
-#include "mojo/public/cpp/bindings/remote_set.h"
+#include "content/common/memory_coordinator/memory_consumer_group_controller.h"
+#include "content/common/memory_coordinator/memory_consumer_group_host.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -24,137 +23,103 @@ namespace content {
 
 namespace {
 
-using ConsumerInfo = ChildMemoryConsumerRegistry::ConsumerInfo;
+using ::testing::Mock;
+using ::testing::NiceMock;
+using ::testing::Test;
 
-class DummyBrowserMemoryConsumerRegistry
-    : public mojom::BrowserMemoryConsumerRegistry {
- public:
-  explicit DummyBrowserMemoryConsumerRegistry(
-      mojo::PendingReceiver<mojom::BrowserMemoryConsumerRegistry> receiver)
-      : receiver_(this, std::move(receiver)) {}
-
-  // mojom::BrowserMemoryConsumerRegistry:
-  void RegisterChildMemoryConsumer(
-      const std::string& consumer_id,
-      base::MemoryConsumerTraits traits,
-      mojo::PendingRemote<mojom::ChildMemoryConsumer> remote_consumer)
-      override {
-    remote_set_.Add(std::move(remote_consumer));
-  }
-
-  mojo::PendingRemote<mojom::BrowserMemoryConsumerRegistry>
-  BindNewPipeAndPassRemote() {
-    return receiver_.BindNewPipeAndPassRemote();
-  }
-
- private:
-  mojo::Receiver<mojom::BrowserMemoryConsumerRegistry> receiver_;
-
-  mojo::RemoteSet<mojom::ChildMemoryConsumer> remote_set_;
+struct ConsumerEntry {
+  std::string consumer_id;
+  std::optional<base::MemoryConsumerTraits> traits;
+  ProcessType process_type;
+  ChildProcessId child_process_id;
+  raw_ptr<MemoryConsumerGroupHost> host;
 };
 
-const base::MemoryConsumerTraits kTestTraits1{};
+const std::optional<base::MemoryConsumerTraits> kTestTraits1 = std::nullopt;
 
 }  // namespace
 
-class ChildMemoryConsumerRegistryTest : public testing::Test {
+class ChildMemoryConsumerRegistryTest : public Test,
+                                        public MemoryConsumerGroupController {
  protected:
-  ChildMemoryConsumerRegistry* registry() { return &registry_; }
+  ChildMemoryConsumerRegistryTest() : registry_(*this) {}
 
-  std::unique_ptr<DummyBrowserMemoryConsumerRegistry> CreateBrowserRegistry() {
-    return std::make_unique<DummyBrowserMemoryConsumerRegistry>(
-        registry_.BindAndPassReceiverForTesting());
+  ChildMemoryConsumerRegistry& registry() { return registry_.Get(); }
+
+  std::vector<ConsumerEntry>& entries() { return entries_; }
+
+  // MemoryConsumerGroupController:
+  void AddMemoryConsumerGroupHost(ChildProcessId child_process_id,
+                                  MemoryConsumerGroupHost* host) override {
+    hosts_[child_process_id] = host;
+  }
+
+  void RemoveMemoryConsumerGroupHost(ChildProcessId child_process_id) override {
+    hosts_.erase(child_process_id);
+  }
+
+  void OnConsumerGroupAdded(std::string_view consumer_id,
+                            std::optional<base::MemoryConsumerTraits> traits,
+                            ProcessType process_type,
+                            ChildProcessId child_process_id) override {
+    entries_.push_back({std::string(consumer_id), traits, process_type,
+                        child_process_id, hosts_.at(child_process_id)});
+  }
+
+  void OnConsumerGroupRemoved(std::string_view consumer_id,
+                              ChildProcessId child_process_id) override {
+    std::erase_if(entries_, [&](const auto& entry) {
+      return entry.consumer_id == consumer_id &&
+             entry.child_process_id == child_process_id;
+    });
   }
 
  private:
-  base::test::SingleThreadTaskEnvironment task_environment_;
-
-  ChildMemoryConsumerRegistry registry_;
+  base::test::TaskEnvironment task_environment_;
+  std::map<ChildProcessId, MemoryConsumerGroupHost*> hosts_;
+  base::ScopedMemoryConsumerRegistry<ChildMemoryConsumerRegistry> registry_;
+  std::vector<ConsumerEntry> entries_;
 };
 
-TEST_F(ChildMemoryConsumerRegistryTest, LocalConsumer) {
+TEST_F(ChildMemoryConsumerRegistryTest, AddRemoveConsumer) {
   base::MockMemoryConsumer consumer;
 
-  // Add the consumer.
-  registry()->AddMemoryConsumer("consumer", kTestTraits1, &consumer);
-  ASSERT_EQ(registry()->size(), 1u);
+  registry().AddMemoryConsumer("consumer", kTestTraits1, &consumer);
+  ASSERT_EQ(registry().size(), 1u);
+  ASSERT_EQ(entries().size(), 1u);
 
-  ConsumerInfo& consumer_info = *registry()->begin();
+  // Verify group creation notification
+  EXPECT_EQ(entries().front().consumer_id, "consumer");
+  EXPECT_EQ(entries().front().process_type, PROCESS_TYPE_UNKNOWN);
 
-  // // Notify the consumer.
+  // Release memory propagation
   EXPECT_CALL(consumer, OnReleaseMemory());
-  consumer_info.consumer.ReleaseMemory();
-  testing::Mock::VerifyAndClearExpectations(&consumer);
+  entries().front().host->ReleaseMemory("consumer");
+  Mock::VerifyAndClearExpectations(&consumer);
 
-  // Remove the consumer.
-  registry()->RemoveMemoryConsumer("consumer", &consumer);
-  ASSERT_EQ(registry()->size(), 0u);
+  registry().RemoveMemoryConsumer("consumer", &consumer);
+  ASSERT_EQ(registry().size(), 0u);
+  ASSERT_EQ(entries().size(), 0u);
 }
 
-TEST_F(ChildMemoryConsumerRegistryTest, Iterator) {
-  base::MockMemoryConsumer consumer;
+TEST_F(ChildMemoryConsumerRegistryTest, InheritMemoryLimit) {
+  base::MockMemoryConsumer consumer1;
+  base::MockMemoryConsumer consumer2;
 
-  // Add the consumer.
-  registry()->AddMemoryConsumer("consumer", kTestTraits1, &consumer);
-  ASSERT_EQ(registry()->size(), 1u);
+  registry().AddMemoryConsumer("consumer", kTestTraits1, &consumer1);
 
-  // // Notify the consumer.
-  EXPECT_CALL(consumer, OnReleaseMemory());
+  const int kNewLimit = 50;
+  EXPECT_CALL(consumer1, OnUpdateMemoryLimit());
+  entries().front().host->UpdateMemoryLimit("consumer", kNewLimit);
+  EXPECT_EQ(consumer1.memory_limit(), kNewLimit);
 
-  for (ConsumerInfo& consumer_info : *registry()) {
-    consumer_info.consumer.ReleaseMemory();
-  }
-  testing::Mock::VerifyAndClearExpectations(&consumer);
+  // New consumer should inherit limit
+  EXPECT_CALL(consumer2, OnUpdateMemoryLimit());
+  registry().AddMemoryConsumer("consumer", kTestTraits1, &consumer2);
+  EXPECT_EQ(consumer2.memory_limit(), kNewLimit);
 
-  // Remove the consumer.
-  registry()->RemoveMemoryConsumer("consumer", &consumer);
-}
-
-// Same as ChildMemoryConsumerRegistryTest.LocalConsumer, but the consumer is
-// added after the bind to the browser registry, and removed while the receiver
-// still exists.
-TEST_F(ChildMemoryConsumerRegistryTest, BindBrowser_Initial) {
-  auto browser_registry = CreateBrowserRegistry();
-
-  base::MockMemoryConsumer consumer;
-
-  // Add the consumer.
-  registry()->AddMemoryConsumer("consumer", kTestTraits1, &consumer);
-  ASSERT_EQ(registry()->size(), 1u);
-
-  ConsumerInfo& consumer_info = *registry()->begin();
-
-  // // Notify the consumer.
-  EXPECT_CALL(consumer, OnReleaseMemory());
-  consumer_info.consumer.ReleaseMemory();
-  testing::Mock::VerifyAndClearExpectations(&consumer);
-
-  // Remove the consumer.
-  registry()->RemoveMemoryConsumer("consumer", &consumer);
-  ASSERT_EQ(registry()->size(), 0u);
-}
-
-// Same as ChildMemoryConsumerRegistryTest.LocalConsumer, but the consumer is
-// added before the bind to the browser registry, but removed after.
-TEST_F(ChildMemoryConsumerRegistryTest, BindBrowser_AfterRegisteredConsumer) {
-  base::MockMemoryConsumer consumer;
-
-  // Add the consumer.
-  registry()->AddMemoryConsumer("consumer", kTestTraits1, &consumer);
-  ASSERT_EQ(registry()->size(), 1u);
-
-  ConsumerInfo& consumer_info = *registry()->begin();
-
-  // // Notify the consumer.
-  EXPECT_CALL(consumer, OnReleaseMemory());
-  consumer_info.consumer.ReleaseMemory();
-  testing::Mock::VerifyAndClearExpectations(&consumer);
-
-  auto browser_registry = CreateBrowserRegistry();
-
-  // Remove the consumer.
-  registry()->RemoveMemoryConsumer("consumer", &consumer);
-  ASSERT_EQ(registry()->size(), 0u);
+  registry().RemoveMemoryConsumer("consumer", &consumer1);
+  registry().RemoveMemoryConsumer("consumer", &consumer2);
 }
 
 }  // namespace content

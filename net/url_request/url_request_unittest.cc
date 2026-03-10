@@ -6647,6 +6647,28 @@ TEST_F(URLRequestTestHTTP, DataRedirect) {
   EXPECT_EQ(1, d.received_redirect_count());
 }
 
+// Test that redirects to data: URLs are allowed when
+// treat_all_redirects_as_safe is set. This is used by fetch() with
+// redirect: "manual" to return opaque-redirect responses per the Fetch spec.
+TEST_F(URLRequestTestHTTP, DataRedirectAllowedWhenTreatAllRedirectsAsSafe) {
+  ASSERT_TRUE(http_test_server()->Start());
+
+  TestDelegate d;
+  std::unique_ptr<URLRequest> req(default_context().CreateRequest(
+      http_test_server()->GetURL("/redirect-to-data.html"), DEFAULT_PRIORITY,
+      &d, TRAFFIC_ANNOTATION_FOR_TESTS));
+  req->set_treat_all_redirects_as_safe(true);
+  req->Start();
+  d.RunUntilComplete();
+
+  // With treat_all_redirects_as_safe, the redirect is reported to the caller
+  // instead of being rejected with ERR_UNKNOWN_URL_SCHEME.
+  EXPECT_EQ(1, d.received_redirect_count());
+  // The request will still fail because data: URLs are not supported by
+  // URLRequest, but the redirect itself was allowed.
+  EXPECT_EQ(ERR_UNKNOWN_URL_SCHEME, d.request_status());
+}
+
 TEST_F(URLRequestTestHTTP, RestrictUnsafeRedirect) {
   ASSERT_TRUE(http_test_server()->Start());
 
@@ -13608,7 +13630,7 @@ class StorageAccessHeaderURLRequestTest : public URLRequestTestHTTP {
   static std::unique_ptr<test_server::HttpResponse> HandleAuthChallenge(
       const test_server::HttpRequest& request,
       std::unique_ptr<test_server::BasicHttpResponse> http_response) {
-    EXPECT_FALSE(base::Contains(request.headers, "Authorization"));
+    EXPECT_FALSE(request.headers.contains("Authorization"));
 
     http_response->set_code(HTTP_UNAUTHORIZED);
     http_response->AddCustomHeader("WWW-Authenticate", "Basic realm=\"REALM\"");
@@ -13622,9 +13644,9 @@ class StorageAccessHeaderURLRequestTest : public URLRequestTestHTTP {
     // //net/test/embedded_test_server/default_handlers.cc
     // (HandleBasicAuth).
 
-    EXPECT_TRUE(base::Contains(request.headers, "Authorization"));
+    EXPECT_TRUE(request.headers.contains("Authorization"));
     std::string auth = request.headers.at("Authorization");
-    EXPECT_TRUE(base::Contains(auth, "Basic"));
+    EXPECT_TRUE(auth.contains("Basic"));
     std::string b64str = auth.substr(std::string("Basic ").size());
     std::string userpass;
     base::Base64Decode(b64str, &userpass);

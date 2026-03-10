@@ -31,11 +31,10 @@ import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.Robolectric;
 import org.robolectric.annotation.Config;
-import org.robolectric.annotation.LooperMode;
-import org.robolectric.shadows.ShadowLog;
 
 import org.chromium.base.Callback;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.chrome.browser.feed.v2.FeedUserActionType;
 import org.chromium.chrome.browser.feed.webfeed.WebFeedBridge;
@@ -69,8 +68,6 @@ import java.util.function.Supplier;
 /** Unit tests for {@link FeedStream}. */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE)
-// TODO(crbug.com/40182398): Rewrite using paused loop. See crbug for details.
-@LooperMode(LooperMode.Mode.LEGACY)
 @EnableFeatures(ChromeFeatureList.FEED_LOADING_PLACEHOLDER)
 public class SingleWebFeedStreamTest {
     private static final int LOAD_MORE_TRIGGER_LOOKAHEAD = 5;
@@ -166,7 +163,6 @@ public class SingleWebFeedStreamTest {
         when(mRenderer.getAdapter()).thenReturn(mAdapter);
 
         // Print logs to stdout.
-        ShadowLog.stream = System.out;
     }
 
     @Test
@@ -210,6 +206,7 @@ public class SingleWebFeedStreamTest {
                 (FeedStream.FeedSurfaceActionsHandler)
                         mContentManager.getContextValues(0).get(SurfaceActionsHandler.KEY);
         handler.openUrl(OpenMode.SAME_TAB, TEST_URL, DEFAULT_OPEN_URL_OPTIONS);
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mActionDelegate)
                 .openSuggestionUrl(
                         eq(org.chromium.ui.mojom.WindowOpenDisposition.CURRENT_TAB),
@@ -241,6 +238,7 @@ public class SingleWebFeedStreamTest {
                         return "someWebFeedName";
                     }
                 });
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mActionDelegate)
                 .openSuggestionUrl(
                         eq(org.chromium.ui.mojom.WindowOpenDisposition.CURRENT_TAB),
@@ -279,6 +277,7 @@ public class SingleWebFeedStreamTest {
                         return "someWebFeedName";
                     }
                 });
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mActionDelegate)
                 .openSuggestionUrl(
                         eq(org.chromium.ui.mojom.WindowOpenDisposition.CURRENT_TAB),
@@ -326,6 +325,7 @@ public class SingleWebFeedStreamTest {
                         mContentManager.getContextValues(0).get(SurfaceActionsHandler.KEY);
 
         handler.openUrl(OpenMode.NEW_TAB, TEST_URL, DEFAULT_OPEN_URL_OPTIONS);
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mActionDelegate)
                 .openSuggestionUrl(
                         eq(org.chromium.ui.mojom.WindowOpenDisposition.NEW_BACKGROUND_TAB),
@@ -345,6 +345,7 @@ public class SingleWebFeedStreamTest {
                         mContentManager.getContextValues(0).get(SurfaceActionsHandler.KEY);
 
         handler.openUrl(OpenMode.NEW_TAB_IN_GROUP, TEST_URL, DEFAULT_OPEN_URL_OPTIONS);
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mActionDelegate)
                 .openSuggestionUrl(
                         eq(org.chromium.ui.mojom.WindowOpenDisposition.NEW_BACKGROUND_TAB),
@@ -363,6 +364,7 @@ public class SingleWebFeedStreamTest {
                 (FeedStream.FeedSurfaceActionsHandler)
                         mContentManager.getContextValues(0).get(SurfaceActionsHandler.KEY);
         handler.openUrl(OpenMode.INCOGNITO_TAB, TEST_URL, DEFAULT_OPEN_URL_OPTIONS);
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mActionDelegate)
                 .openSuggestionUrl(
                         eq(org.chromium.ui.mojom.WindowOpenDisposition.OFF_THE_RECORD),
@@ -427,7 +429,7 @@ public class SingleWebFeedStreamTest {
 
         verify(mWebFeedBridgeJni)
                 .followWebFeedById(
-                        eq("webFeed1".getBytes("UTF8")),
+                        eq("webFeed1".getBytes(StandardCharsets.UTF_8)),
                         eq(false),
                         eq(WebFeedBridge.CHANGE_REASON_WEB_PAGE_MENU),
                         mFollowResultsCallbackCaptor.capture());
@@ -495,7 +497,7 @@ public class SingleWebFeedStreamTest {
 
         verify(mWebFeedBridgeJni)
                 .followWebFeedById(
-                        eq("webFeed1".getBytes("UTF8")),
+                        eq("webFeed1".getBytes(StandardCharsets.UTF_8)),
                         eq(true),
                         eq(WebFeedBridge.CHANGE_REASON_WEB_PAGE_MENU),
                         mFollowResultsCallbackCaptor.capture());
@@ -522,6 +524,7 @@ public class SingleWebFeedStreamTest {
                         return title;
                     }
                 });
+        RobolectricUtil.runAllBackgroundAndUi();
 
         verify(mFeedSurfaceRendererBridgeMock)
                 .reportOtherUserAction(eq(FeedUserActionType.TAPPED_ADD_TO_READING_LIST));
@@ -561,6 +564,7 @@ public class SingleWebFeedStreamTest {
         verify(mMockRunnable, times(0)).run();
 
         mSnackbarController.mOnActionFinished.run();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mMockRunnable, times(1)).run();
     }
 
@@ -584,6 +588,7 @@ public class SingleWebFeedStreamTest {
         verify(mMockRunnable, times(0)).run();
 
         mSnackbarController.mOnDismissNoActionFinished.run();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mMockRunnable, times(1)).run();
     }
 

@@ -13,7 +13,7 @@
 #include "ash/constants/ash_switches.h"
 #include "base/auto_reset.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
+#include "base/containers/span.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_file.h"
 #include "base/strings/string_number_conversions.h"
@@ -23,7 +23,6 @@
 #include "device/udev_linux/fake_udev_loader.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/events/ash/mojom/meta_key.mojom-shared.h"
-#include "ui/events/ash/mojom/modifier_key.mojom-shared.h"
 #include "ui/events/ash/mojom/modifier_key.mojom.h"
 #include "ui/events/ash/top_row_action_keys.h"
 #include "ui/events/devices/device_data_manager.h"
@@ -1130,7 +1129,7 @@ TEST_P(KeyboardCapabilityTest, TopRowLayout1) {
        action_key =
            static_cast<TopRowActionKey>(static_cast<int>(action_key) + 1)) {
     EXPECT_EQ(
-        base::Contains(kLayout1TopRowActionKeys, action_key),
+        std::ranges::contains(kLayout1TopRowActionKeys, action_key),
         keyboard_capability_->HasTopRowActionKey(input_device, action_key))
         << "Action Key: " << static_cast<int>(action_key);
   }
@@ -1158,7 +1157,7 @@ TEST_P(KeyboardCapabilityTest, TopRowLayout2) {
        action_key =
            static_cast<TopRowActionKey>(static_cast<int>(action_key) + 1)) {
     EXPECT_EQ(
-        base::Contains(kLayout2TopRowActionKeys, action_key),
+        std::ranges::contains(kLayout2TopRowActionKeys, action_key),
         keyboard_capability_->HasTopRowActionKey(input_device, action_key))
         << "Action Key: " << static_cast<int>(action_key);
   }
@@ -1192,11 +1191,11 @@ TEST_P(KeyboardCapabilityTest, TopRowLayoutWilco) {
        action_key =
            static_cast<TopRowActionKey>(static_cast<int>(action_key) + 1)) {
     EXPECT_EQ(
-        base::Contains(kLayoutWilcoDrallionTopRowActionKeys, action_key),
+        std::ranges::contains(kLayoutWilcoDrallionTopRowActionKeys, action_key),
         keyboard_capability_->HasTopRowActionKey(wilco_device, action_key))
         << "Action Key: " << static_cast<int>(action_key);
     EXPECT_EQ(
-        base::Contains(kLayoutWilcoDrallionTopRowActionKeys, action_key),
+        std::ranges::contains(kLayoutWilcoDrallionTopRowActionKeys, action_key),
         keyboard_capability_->HasTopRowActionKey(drallion_device, action_key))
         << "Action Key: " << static_cast<int>(action_key);
   }
@@ -1261,8 +1260,8 @@ class TopRowLayoutCustomTest
     custom_scan_codes.reserve(top_row_action_keys_.size());
     for (const auto& action_key : top_row_action_keys_) {
       const uint32_t scan_code = ConvertTopRowActionKeyToScanCode(action_key);
-      custom_scan_codes.push_back(
-          base::ToLowerASCII(base::HexEncode(&scan_code, 1)));
+      custom_scan_codes.push_back(base::ToLowerASCII(
+          base::HexEncode(base::byte_span_from_ref(scan_code).first<1>())));
     }
 
     custom_layout_string_ = base::JoinString(custom_scan_codes, " ");
@@ -1389,7 +1388,7 @@ TEST_P(TopRowLayoutCustomTest, TopRowLayout) {
        action_key <= TopRowActionKey::kMaxValue;
        action_key =
            static_cast<TopRowActionKey>(static_cast<int>(action_key) + 1)) {
-    EXPECT_EQ(base::Contains(top_row_action_keys_, action_key),
+    EXPECT_EQ(std::ranges::contains(top_row_action_keys_, action_key),
               keyboard_capability_->HasTopRowActionKey(keyboard, action_key))
         << "Action Key: " << static_cast<int>(action_key);
   }

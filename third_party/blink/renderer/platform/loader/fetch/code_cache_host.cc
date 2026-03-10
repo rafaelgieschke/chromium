@@ -9,6 +9,7 @@
 
 #include "base/check.h"
 #include "base/check_op.h"
+#include "base/containers/span.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -17,6 +18,7 @@
 #include "base/task/bind_post_task.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
+#include "components/persistent_cache/client.h"
 #include "components/persistent_cache/pending_backend.h"
 #include "components/persistent_cache/persistent_cache.h"
 #include "components/persistent_cache/transaction_error.h"
@@ -253,8 +255,9 @@ class CodeCacheWithPersistentCacheHostImpl
             };
 
             // Query the PersistentCache.
+            const std::string cache_key = UrlToCodeCacheKey(GURL(url));
             if (auto metadata_or_error = cache_->Find(
-                    UrlToCodeCacheKey(GURL(url)), std::move(buffer_provider));
+                    base::as_byte_span(cache_key), std::move(buffer_provider));
                 !metadata_or_error.has_value()) {
               switch (metadata_or_error.error()) {
                 case persistent_cache::TransactionError::kTransient:
@@ -330,7 +333,7 @@ class CodeCacheWithPersistentCacheHostImpl
           return;
         }
         cache_ = persistent_cache::PersistentCache::Bind(
-            *std::move(pending_backend));
+            persistent_cache::Client::kCodeCache, *std::move(pending_backend));
         if (!cache_) {  // Failed to open the cache.
           InvalidateAndRejectPendingRequests();
           return;

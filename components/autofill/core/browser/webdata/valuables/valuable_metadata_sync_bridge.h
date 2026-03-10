@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include "base/memory/raw_ptr.h"
 #include "base/scoped_observation.h"
@@ -79,6 +80,9 @@ class ValuableMetadataSyncBridge
   void ServerEntityInstanceMetadataChanged(
       const EntityInstanceMetadataChange& change) override;
 
+  // AutofillWebDataServiceObserverOnDBSequence:
+  void ValuableMetadataChanged(const ValuableMetadataChange& change) override;
+
  private:
   // Merges remote changes, specified in `entity_data`, with the local DB and,
   // potentially, writes changes to the local DB and/or commits updates of
@@ -91,6 +95,12 @@ class ValuableMetadataSyncBridge
   // during initial `MergeFullSyncData()`.
   void UploadInitialLocalData(syncer::MetadataChangeList* metadata_change_list,
                               const syncer::EntityChangeList& entity_data);
+
+  // If available, returns cached possibly trimmed
+  // `AutofillValuableMetadataSpecifics` for given `storage_key`. By default,
+  // empty `AutofillValuableMetadataSpecifics` is returned.
+  const sync_pb::AutofillValuableMetadataSpecifics&
+  GetPossiblyTrimmedValuableMetadataSpecifics(std::string_view storage_key);
 
   // This routine performs cleanup by deleting old metadata records that have
   // become orphaned (i.e., they have no matching data entity). It's primarily
@@ -118,6 +128,13 @@ class ValuableMetadataSyncBridge
 
   // Returns a const `EntityTable` associated with the `web_data_backend_`.
   const EntityTable* GetEntityTable() const;
+
+  // Returns the `PassType` of the entity associated with the metadata.
+  std::optional<sync_pb::AutofillValuableMetadataSpecifics::PassType>
+  GetPassTypeForEntityId(const EntityInstance::EntityId& guid);
+
+  // Returns the `ValuablesTable` associated with the `web_data_backend_`.
+  ValuablesTable* GetValuablesTable();
 
   AutofillSyncMetadataTable* GetSyncMetadataStore();
 

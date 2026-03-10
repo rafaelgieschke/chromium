@@ -84,7 +84,9 @@ bool PendingAnimations::Update(
     // handle the other events in CompositorAnimationDelegate.
     bool use_compositor_group =
         !animation->StartTimeInternal() && has_monotonic_timeline;
-    if (animation->PreCommit(use_compositor_group ? compositor_group : 1,
+    if (animation->PreCommit(use_compositor_group
+                                 ? compositor_group
+                                 : kCompositorGroupHasStartTime,
                              paint_artifact_compositor, start_on_compositor)) {
       if (animation->HasActiveAnimationsOnCompositor() &&
           !had_compositor_animation && use_compositor_group) {
@@ -138,7 +140,7 @@ bool PendingAnimations::Update(
   // thread.
   if (started_synchronized_on_compositor) {
     FlushWaitingNonCompositedAnimations();
-    waiting_for_compositor_animation_start_.AppendVector(
+    waiting_for_compositor_animation_start_.append_range(
         waiting_for_start_time);
   } else {
     // Main-threaded animations previously held up for sync with the compositor
@@ -233,11 +235,11 @@ void PendingAnimations::NotifyCompositorAnimationStarted(
 
 int PendingAnimations::NextCompositorGroup() {
   do {
-    // Wrap around, skipping 0, 1.
-    // * 0 is reserved for automatic assignment
-    // * 1 is used for animations with a specified start time
+    // Wrap around, skipping reserved groups.
     ++compositor_group_;
-  } while (compositor_group_ == 0 || compositor_group_ == 1);
+  } while (compositor_group_ == kCompositorGroupAutoAssign ||
+           compositor_group_ == kCompositorGroupHasStartTime ||
+           compositor_group_ == kCompositorGroupTriggered);
 
   return compositor_group_;
 }

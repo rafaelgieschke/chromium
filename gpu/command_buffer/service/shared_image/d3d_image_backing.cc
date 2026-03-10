@@ -452,14 +452,17 @@ std::unique_ptr<D3DImageBacking> D3DImageBacking::CreateFromSwapChainBuffers(
 }
 
 // static
-std::unique_ptr<D3DImageBacking> D3DImageBacking::CreateFromD3D12Resource(
+std::unique_ptr<D3DImageBacking> D3DImageBacking::CreateFromD3D12Buffer(
     const Mailbox& mailbox,
     const gfx::Size& size,
     gpu::SharedImageUsageSet usage,
     std::string debug_label,
-    Microsoft::WRL::ComPtr<ID3D12Resource> d3d12_resource) {
+    Microsoft::WRL::ComPtr<ID3D12Resource> d3d12_buffer,
+    Microsoft::WRL::ComPtr<ID3D12Heap> d3d12_heap,
+    bool is_thread_safe) {
   auto backing = base::WrapUnique(new D3DImageBacking(
-      mailbox, size, usage, std::move(debug_label), std::move(d3d12_resource)));
+      mailbox, size, usage, std::move(debug_label), std::move(d3d12_buffer),
+      std::move(d3d12_heap), is_thread_safe));
   return backing;
 }
 
@@ -550,7 +553,9 @@ D3DImageBacking::D3DImageBacking(
     const gfx::Size& size,
     gpu::SharedImageUsageSet usage,
     std::string debug_label,
-    Microsoft::WRL::ComPtr<ID3D12Resource> d3d12_resource)
+    Microsoft::WRL::ComPtr<ID3D12Resource> d3d12_buffer,
+    Microsoft::WRL::ComPtr<ID3D12Heap> d3d12_heap,
+    bool is_thread_safe)
     : ClearTrackingSharedImageBacking(mailbox,
                                       viz::SharedImageFormat(),
                                       size,
@@ -560,8 +565,9 @@ D3DImageBacking::D3DImageBacking(
                                       usage,
                                       std::move(debug_label),
                                       size.width(),
-                                      /*is_thread_safe=*/false),
-      d3d12_resource_(std::move(d3d12_resource)),
+                                      is_thread_safe),
+      d3d12_heap_(std::move(d3d12_heap)),
+      d3d12_buffer_(std::move(d3d12_buffer)),
       texture_target_(0),
       array_slice_(0),
       use_update_subresource1_(false),
@@ -620,6 +626,10 @@ void D3DImageBacking::Update(std::unique_ptr<gfx::GpuFence> in_fence) {
 bool D3DImageBacking::UploadFromMemory(const std::vector<SkPixmap>& pixmaps) {
   AutoLock auto_lock(this);
   DCHECK_EQ(pixmaps.size(), static_cast<size_t>(format().NumberOfPlanes()));
+
+  // Flush any previously deferred Graphite commands before uploading to the
+  // D3D11 texture to ensure correct ordering.
+  FlushGraphiteCommandsIfNeeded();
 
   if (use_update_subresource1_ && CanUseUpdateSubresource(pixmaps)) {
     CHECK(texture_d3d11_device_);
@@ -681,6 +691,9 @@ bool D3DImageBacking::UploadFromMemory(const std::vector<SkPixmap>& pixmaps) {
 
 bool D3DImageBacking::CopyToStagingTexture() {
   TRACE_EVENT0("gpu", "D3DImageBacking::CopyToStagingTexture");
+  // Flush any previously deferred Graphite commands to ensure the readback
+  // doesn't contain stale data.
+  FlushGraphiteCommandsIfNeeded();
   ID3D11Texture2D* staging_texture = GetOrCreateStagingTexture();
   if (!staging_texture) {
     return false;
@@ -1545,7 +1558,7 @@ std::unique_ptr<DawnBufferRepresentation> D3DImageBacking::ProduceDawnBuffer(
     wgpu::BackendType backend_type,
     scoped_refptr<SharedContextState> context_state) {
   DCHECK(usage().Has(SHARED_IMAGE_USAGE_WEBGPU_SHARED_BUFFER));
-  DCHECK(d3d12_resource_.Get() != nullptr);
+  DCHECK(d3d12_buffer_.Get() != nullptr);
 
   if (backend_type != wgpu::BackendType::D3D12) {
     LOG(ERROR) << "Unsupported Dawn backend: "
@@ -1557,13 +1570,8 @@ std::unique_ptr<DawnBufferRepresentation> D3DImageBacking::ProduceDawnBuffer(
     AutoLock auto_lock(this);
     // Persistently open the shared handle by caching it on this backing.
     if (!dawn_shared_buffer_memory_) {
-      Microsoft::WRL::ComPtr<ID3D12Device> dawn_d3d12_device;
-      if (backend_type == wgpu::BackendType::D3D12) {
-        dawn_d3d12_device = dawn::native::d3d12::GetD3D12Device(device.Get());
-      }
-
       dawn_shared_buffer_memory_ =
-          CreateDawnSharedBufferMemory(device, d3d12_resource_);
+          CreateDawnSharedBufferMemory(device, d3d12_buffer_);
 
       if (!dawn_shared_buffer_memory_) {
         LOG(ERROR) << "Failed to create shared_buffer_memory.";
@@ -1631,6 +1639,7 @@ wgpu::Buffer D3DImageBacking::BeginAccessDawnBuffer(
 }
 
 void D3DImageBacking::EndAccessDawnBuffer(const wgpu::Device& device,
+                                          wgpu::BackendType backend_type,
                                           wgpu::Buffer buffer) {
   AutoLock auto_lock(this);
   DCHECK(buffer);
@@ -1650,8 +1659,17 @@ void D3DImageBacking::EndAccessDawnBuffer(const wgpu::Device& device,
     fence.ExportInfo(&export_info);
     DCHECK_EQ(export_info.type, wgpu::SharedFenceType::DXGISharedHandle);
 
-    scoped_refptr<gfx::D3DSharedFence> signaled_fence =
-        gfx::D3DSharedFence::CreateFromUnownedHandle(shared_handle_info.handle);
+    scoped_refptr<gfx::D3DSharedFence> signaled_fence;
+    if (backend_type == wgpu::BackendType::D3D12) {
+      Microsoft::WRL::ComPtr<ID3D12Device> dawn_d3d12_device =
+          dawn::native::d3d12::GetD3D12Device(device.Get());
+      signaled_fence =
+          gfx::D3DSharedFence::CreateFromUnownedHandleAndOpenD3D12Fence(
+              dawn_d3d12_device.Get(), shared_handle_info.handle);
+    } else {
+      signaled_fence = gfx::D3DSharedFence::CreateFromUnownedHandle(
+          shared_handle_info.handle);
+    }
 
     if (signaled_fence) {
       signaled_fence->Update(signaled_value);
@@ -1690,7 +1708,7 @@ std::unique_ptr<WebNNTensorRepresentation> D3DImageBacking::ProduceWebNNTensor(
     SharedImageManager* manager,
     MemoryTypeTracker* tracker) {
   CHECK(usage().Has(SHARED_IMAGE_USAGE_WEBNN_SHARED_TENSOR));
-  DCHECK(d3d12_resource_.Get() != nullptr);
+  DCHECK(d3d12_buffer_.Get() != nullptr);
   return std::make_unique<WebNND3DTensorRepresentation>(manager, this, tracker);
 }
 
@@ -1909,7 +1927,7 @@ D3DImageBacking::GetDCLayerOverlayImage() {
 }
 
 Microsoft::WRL::ComPtr<ID3D12Resource> D3DImageBacking::GetD3D12Buffer() const {
-  return d3d12_resource_;
+  return d3d12_buffer_;
 }
 
 bool D3DImageBacking::HasStagingTextureForTesting() const {

@@ -13,6 +13,7 @@
 #include "base/logging.h"
 #include "base/notimplemented.h"
 #include "base/values.h"
+#include "remoting/base/branding.h"
 #include "remoting/base/file_path_util_linux.h"
 #include "remoting/base/is_google_email.h"
 #include "remoting/host/config_file_watcher.h"
@@ -25,8 +26,8 @@ bool GetUsageStatsConsent(bool* allowed, bool* set_by_policy) {
   *allowed = false;
 
   std::string filename = GetHostHash() + ".json";
-  base::FilePath config_path = GetConfigDirectoryPath().Append(filename);
-  std::optional<base::Value::Dict> config(HostConfigFromJsonFile(config_path));
+  base::FilePath config_path = GetConfigDir().Append(filename);
+  std::optional<base::DictValue> config(HostConfigFromJsonFile(config_path));
   if (!config.has_value()) {
     LOG(ERROR) << "No host config file found.";
     return false;

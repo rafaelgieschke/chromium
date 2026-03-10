@@ -24,6 +24,7 @@
 #include "chrome/browser/ash/settings/scoped_testing_cros_settings.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
+#include "chrome/browser/global_features.h"
 #include "chrome/browser/ui/ash/login/mock_login_display_host.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chromeos/ash/components/dbus/dbus_thread_manager.h"
@@ -36,6 +37,7 @@
 #include "chromeos/dbus/power/fake_power_manager_client.h"
 #include "chromeos/dbus/power/power_policy_controller.h"
 #include "components/account_id/account_id.h"
+#include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_manager.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_service.h"
@@ -146,19 +148,23 @@ class DemoLoginControllerTest : public testing::Test {
         chromeos::FakePowerManagerClient::Get());
     policy_controller_ = chromeos::PowerPolicyController::Get();
 
-    base::Value::Dict account;
+    base::DictValue account;
     account.Set(kAccountsPrefDeviceLocalAccountsKeyId, kPublicAccountUserId);
     account.Set(
         kAccountsPrefDeviceLocalAccountsKeyType,
         static_cast<int>(policy::DeviceLocalAccountType::kPublicSession));
-    base::Value::List accounts;
+    base::ListValue accounts;
     accounts.Append(std::move(account));
     settings_helper_.Set(kAccountsPrefDeviceLocalAccounts,
                          base::Value(std::move(accounts)));
 
     auth_events_recorder_ = ash::AuthEventsRecorder::CreateForTesting();
 
-    existing_user_controller_ = std::make_unique<ExistingUserController>();
+    existing_user_controller_ = std::make_unique<ExistingUserController>(
+        TestingBrowserProcess::GetGlobal()->local_state(),
+        TestingBrowserProcess::GetGlobal()
+            ->GetFeatures()
+            ->application_locale_storage());
 
     TestingBrowserProcess::GetGlobal()->SetSharedURLLoaderFactory(
         test_url_loader_factory_.GetSafeWeakWrapper());
@@ -179,9 +185,11 @@ class DemoLoginControllerTest : public testing::Test {
   void SetUpPolicyClient(std::string dm_token = "fake-dm-token",
                          std::string client_id = "fake-client-id") {
     std::unique_ptr<policy::MockCloudPolicyStore> store =
-        std::make_unique<policy::MockCloudPolicyStore>();
+        std::make_unique<policy::MockCloudPolicyStore>(
+            policy::dm_protocol::GetChromeUserPolicyType());
     std::unique_ptr<policy::MockCloudPolicyStore> extension_install_store =
-        std::make_unique<policy::MockCloudPolicyStore>();
+        std::make_unique<policy::MockCloudPolicyStore>(
+            policy::dm_protocol::kChromeExtensionInstallUserCloudPolicyType);
     std::unique_ptr<policy::MockCloudPolicyClient> cloud_policy_client =
         std::make_unique<policy::MockCloudPolicyClient>();
     policy::CloudPolicyClient* client_ptr = cloud_policy_client.get();
@@ -371,7 +379,7 @@ TEST_F(DemoLoginControllerTest,
   // `policy_connector_ash->GetDeviceCloudPolicyManager()` is null. We remove
   // the fake one here so `DemoLoginController::GetDeviceIntegrity()` cannot
   // find any policy managers, and it will return failure (an empty
-  // base::Value::Dict), causing the request to fail.
+  // base::DictValue), causing the request to fail.
   GetDemoLoginController()->SetDeviceCloudPolicyManagerForTesting(nullptr);
 
   // Verify demo account login gets triggered by `ExistingUserController`.

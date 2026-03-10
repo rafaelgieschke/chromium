@@ -9,7 +9,7 @@
 #include "chrome/browser/signin/e2e_tests/signin_util.h"
 #include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
-#include "chrome/browser/ui/tabs/saved_tab_groups/tab_group_action_context_desktop.h"
+#include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/ui_features.h"
@@ -127,7 +127,7 @@ class DataSharingLiveTest : public signin::test::LiveTest {
         browser()->profile());
   }
 
-  void SignInAndTurnOnSync() {
+  void SignIn() {
     signin::test::SignInFunctions sign_in_functions =
         signin::test::SignInFunctions(
             base::BindLambdaForTesting(
@@ -142,13 +142,12 @@ class DataSharingLiveTest : public signin::test::LiveTest {
         GetTestAccounts()->GetAccount("DATA_SHARING_1");
     CHECK(test_account);
     sign_in_functions.SignInFromSettings(*test_account, 0);
-    sign_in_functions.TurnOnSync(*test_account, 0);
 
     const CoreAccountInfo& primary_account =
-        identity_manager()->GetPrimaryAccountInfo(signin::ConsentLevel::kSync);
+        identity_manager()->GetPrimaryAccountInfo(
+            signin::ConsentLevel::kSignin);
     EXPECT_FALSE(primary_account.IsEmpty());
     EXPECT_TRUE(gaia::AreEmailsSame(test_account->user, primary_account.email));
-    EXPECT_TRUE(sync_service()->IsSyncFeatureEnabled());
   }
 
   std::optional<tab_groups::TabGroupId> OpenTabGroupByTitle(
@@ -158,10 +157,9 @@ class DataSharingLiveTest : public signin::test::LiveTest {
     for (const tab_groups::SavedTabGroup& group :
          tab_group_service->GetAllGroups()) {
       if (group.title() == title) {
-        tab_group_service->OpenTabGroup(
-            group.saved_guid(),
-            std::make_unique<tab_groups::TabGroupActionContextDesktop>(
-                browser(), tab_groups::OpeningSource::kUnknown));
+        tab_groups::SavedTabGroupUtils::OpenSavedTabGroup(
+            browser(), group.saved_guid(), tab_groups::OpeningSource::kUnknown,
+            tab_group_service);
         open = true;
       }
     }
@@ -197,8 +195,9 @@ class DataSharingLiveTest : public signin::test::LiveTest {
 };
 
 // Open the share dialog of a unshared the tab group.
-IN_PROC_BROWSER_TEST_F(DataSharingLiveTest, ShareUnsharedTabGroup) {
-  SignInAndTurnOnSync();
+// TODO(crbug.com/481412280): Re-enable this test.
+IN_PROC_BROWSER_TEST_F(DataSharingLiveTest, DISABLED_ShareUnsharedTabGroup) {
+  SignIn();
 
   const std::u16string unshared_group_title = u"TEST UNSHARED GROUP";
   SavedTabGroupServiceWaiter waiter(tab_group_service(), unshared_group_title);
@@ -217,7 +216,7 @@ IN_PROC_BROWSER_TEST_F(DataSharingLiveTest, ShareUnsharedTabGroup) {
 // Open the manage dialog of a shared tab group.
 // TODO(crbug.com/451733093): Re-enable this test.
 IN_PROC_BROWSER_TEST_F(DataSharingLiveTest, DISABLED_ManageSharedTabGroup) {
-  SignInAndTurnOnSync();
+  SignIn();
 
   const std::u16string shared_group_title = u"TEST SHARED GROUP";
   SavedTabGroupServiceWaiter waiter(tab_group_service(), shared_group_title);

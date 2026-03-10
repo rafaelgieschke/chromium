@@ -20,7 +20,7 @@
 #include "base/logging.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
-#include "remoting/host/branding.h"
+#include "remoting/base/branding.h"
 
 namespace {
 
@@ -40,8 +40,8 @@ PairingRegistryDelegateLinux::PairingRegistryDelegateLinux() = default;
 
 PairingRegistryDelegateLinux::~PairingRegistryDelegateLinux() = default;
 
-base::Value::List PairingRegistryDelegateLinux::LoadAll() {
-  base::Value::List pairings;
+base::ListValue PairingRegistryDelegateLinux::LoadAll() {
+  base::ListValue pairings;
 
   // Enumerate all pairing files in the pairing registry.
   base::FilePath registry_path = GetRegistryPath();

@@ -5,10 +5,15 @@
 package org.chromium.chrome.browser.autofill.options;
 
 import static org.chromium.build.NullUtil.assumeNonNull;
+import static org.chromium.chrome.browser.autofill.options.AutofillOptionsProperties.FRAGMENT_TITLE;
+import static org.chromium.chrome.browser.autofill.options.AutofillOptionsProperties.ON_AUTOFILL_AI_REAUTH_SETTING_TOGGLED;
+import static org.chromium.chrome.browser.autofill.options.AutofillOptionsProperties.ON_AUTOFILL_AI_SETTING_TOGGLED;
+import static org.chromium.chrome.browser.autofill.options.AutofillOptionsProperties.ON_THIRD_PARTY_TOGGLE_CHANGED;
 import static org.chromium.chrome.browser.autofill.options.AutofillOptionsProperties.THIRD_PARTY_AUTOFILL_ENABLED;
 import static org.chromium.chrome.browser.autofill.options.AutofillOptionsProperties.THIRD_PARTY_TOGGLE_HINT;
 import static org.chromium.chrome.browser.autofill.options.AutofillOptionsProperties.THIRD_PARTY_TOGGLE_IS_READ_ONLY;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
@@ -27,9 +32,16 @@ import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.autofill.AndroidAutofillAvailabilityStatus;
 import org.chromium.chrome.browser.autofill.AutofillClientProviderUtils;
 import org.chromium.chrome.browser.autofill.R;
+import org.chromium.chrome.browser.autofill.autofill_ai.EntityDataManager;
+import org.chromium.chrome.browser.autofill.autofill_ai.EntityDataManagerFactory;
 import org.chromium.chrome.browser.autofill.options.AutofillOptionsFragment.AutofillOptionsReferrer;
+import org.chromium.chrome.browser.device_reauth.BiometricStatus;
+import org.chromium.chrome.browser.device_reauth.DeviceAuthSource;
+import org.chromium.chrome.browser.device_reauth.ReauthenticatorBridge;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.components.autofill.autofill_ai.AutofillAiOptInStatus;
 import org.chromium.components.prefs.PrefService;
 import org.chromium.components.user_prefs.UserPrefs;
 import org.chromium.ui.modaldialog.DialogDismissalCause;
@@ -47,7 +59,7 @@ import java.util.function.Supplier;
  * (in either direction).
  */
 @NullMarked
-class AutofillOptionsMediator implements ModalDialogProperties.Controller {
+public class AutofillOptionsMediator implements ModalDialogProperties.Controller {
     private static final String NON_PACKAGE_NAME = "package:not.a.package.so.all.providers.show";
 
     @VisibleForTesting
@@ -67,6 +79,8 @@ class AutofillOptionsMediator implements ModalDialogProperties.Controller {
     private final Supplier<PropertyModel> mRestartConfirmationDialogModelSupplier;
     private PropertyModel mModel;
     private Context mContext;
+    private Activity mActivity;
+    private @Nullable ReauthenticatorBridge mReauthenticatorBridge;
 
     AutofillOptionsMediator(
             Profile profile,
@@ -106,16 +120,137 @@ class AutofillOptionsMediator implements ModalDialogProperties.Controller {
     }
 
     @Initializer
-    void initialize(PropertyModel model, @AutofillOptionsReferrer int referrer, Context context) {
-        mModel = model;
+    void initialize(@AutofillOptionsReferrer int referrer, Context context, Activity activity) {
         mContext = context;
+        mActivity = activity;
+        mModel =
+                new PropertyModel.Builder(AutofillOptionsProperties.ALL_KEYS)
+                        .with(FRAGMENT_TITLE, getFragmentTitle(context))
+                        .with(ON_THIRD_PARTY_TOGGLE_CHANGED, this::onThirdPartyToggleChanged)
+                        .with(ON_AUTOFILL_AI_SETTING_TOGGLED, this::onAutofillAiSettingToggled)
+                        .with(
+                                ON_AUTOFILL_AI_REAUTH_SETTING_TOGGLED,
+                                this::onAutofillAiReauthSettingToggled)
+                        .build();
         updateToggleStateFromPref();
+        mModel.set(AutofillOptionsProperties.AUTOFILL_AI_VISIBLE, isAutofillAiVisible(referrer));
+        mModel.set(
+                AutofillOptionsProperties.AUTOFILL_AI_SETTING_ELIGIBLE, isEligibleToAutofillAi());
+        mModel.set(
+                AutofillOptionsProperties.AUTOFILL_AI_REAUTH_TOGGLE_VISIBLE,
+                isAutofillAiReauthToggleVisible(referrer));
+        mModel.set(AutofillOptionsProperties.AUTOFILL_AI_SETTING_ON, isAutofillAiOn());
+        mModel.set(AutofillOptionsProperties.AUTOFILL_AI_REAUTH_SETTING_ON, isAutofillAiReauthOn());
         RecordHistogram.recordEnumeratedHistogram(
                 HISTOGRAM_REFERRER, referrer, AutofillOptionsReferrer.COUNT);
     }
 
+    void destroy() {
+        if (mReauthenticatorBridge != null) {
+            mReauthenticatorBridge.destroy();
+            mReauthenticatorBridge = null;
+        }
+    }
+
     boolean isInitialized() {
         return mModel != null;
+    }
+
+    PropertyModel getModel() {
+        return mModel;
+    }
+
+    /**
+     * Returns the fragment's title to display depending on the enabled state of Autofill AI.
+     *
+     * <p>TODO: crbug.com/467563385 - Make the method private and the class package-private once the
+     * feature is launched.
+     *
+     * @param context The application context to use to construct the fragment's title.
+     * @return The fragment's title.
+     */
+    public static String getFragmentTitle(Context context) {
+        return isAutofillAiEnabled()
+                ? context.getString(R.string.autofill_settings_title)
+                : context.getString(R.string.autofill_options_title);
+    }
+
+    private boolean isAutofillAiVisible(@AutofillOptionsReferrer int referrer) {
+        // Autofill AI related preferences are not shown if the fragment is opened using a deep
+        // link to show only the 3p Autofill services toggle.
+        return referrer != AutofillOptionsReferrer.DEEP_LINK_TO_SETTINGS && isAutofillAiEnabled();
+    }
+
+    private static boolean isAutofillAiEnabled() {
+        // LINT.IfChange(AutofillEnabledCheckMediator)
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_AI_WITH_DATA_SCHEMA);
+        // LINT.ThenChange(AutofillEnabledCheckFragment)
+    }
+
+    private static boolean isAutofillAiReauthEnabled() {
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_AI_REAUTH_REQUIRED);
+    }
+
+    private boolean isAutofillAiReauthToggleVisible(int referrer) {
+        return isAutofillAiVisible(referrer) && isAutofillAiReauthEnabled();
+    }
+
+    private boolean isEligibleToAutofillAi() {
+        @Nullable EntityDataManager manager = EntityDataManagerFactory.getForProfile(mProfile);
+        return isAutofillAiEnabled() && manager != null && manager.isEligibleToAutofillAi();
+    }
+
+    private boolean isAutofillAiOn() {
+        @Nullable EntityDataManager manager = EntityDataManagerFactory.getForProfile(mProfile);
+        return isAutofillAiEnabled() && manager != null && manager.getAutofillAiOptInStatus();
+    }
+
+    private void onAutofillAiSettingToggled(boolean isOn) {
+        @AutofillAiOptInStatus
+        int optInStatus = isOn ? AutofillAiOptInStatus.OPTED_IN : AutofillAiOptInStatus.OPTED_OUT;
+        @Nullable EntityDataManager manager = EntityDataManagerFactory.getForProfile(mProfile);
+        if (manager == null || !manager.setAutofillAiOptInStatus(optInStatus)) {
+            // If failed to set, reset the switch to match current status.
+            mModel.set(AutofillOptionsProperties.AUTOFILL_AI_SETTING_ON, isAutofillAiOn());
+        }
+    }
+
+    private boolean isAutofillAiReauthOn() {
+        return prefs().getBoolean(Pref.AUTOFILL_AI_REAUTH_BEFORE_VIEWING_SENSITIVE_DATA);
+    }
+
+    private void onAutofillAiReauthSettingToggled(boolean isOn) {
+        if (isOn == isAutofillAiReauthOn()) {
+            return;
+        }
+
+        if (mReauthenticatorBridge == null) {
+            mReauthenticatorBridge =
+                    ReauthenticatorBridge.create(mActivity, mProfile, DeviceAuthSource.AUTOFILL);
+        }
+
+        if (mReauthenticatorBridge.getBiometricAvailabilityStatus()
+                == BiometricStatus.UNAVAILABLE) {
+            prefs().setBoolean(Pref.AUTOFILL_AI_REAUTH_BEFORE_VIEWING_SENSITIVE_DATA, isOn);
+            mModel.set(
+                    AutofillOptionsProperties.AUTOFILL_AI_REAUTH_SETTING_ON,
+                    isAutofillAiReauthOn());
+            return;
+        }
+
+        mReauthenticatorBridge.reauthenticate(
+                (success) -> {
+                    if (success) {
+                        prefs().setBoolean(
+                                        Pref.AUTOFILL_AI_REAUTH_BEFORE_VIEWING_SENSITIVE_DATA,
+                                        isOn);
+                    }
+                    // Always sync the model to either the new value or back to the old one on
+                    // failure.
+                    mModel.set(
+                            AutofillOptionsProperties.AUTOFILL_AI_REAUTH_SETTING_ON,
+                            isAutofillAiReauthOn());
+                });
     }
 
     /**
@@ -127,7 +262,7 @@ class AutofillOptionsMediator implements ModalDialogProperties.Controller {
      * @return true if the toggle should be read-only.
      */
     boolean should3pToggleBeReadOnly() {
-        if (prefs().getBoolean(Pref.AUTOFILL_USING_VIRTUAL_VIEW_STRUCTURE)) {
+        if (prefs().getBoolean(Pref.AUTOFILL_USING_PLATFORM_AUTOFILL)) {
             return false; // Always allow to flip back to built-in password management.
         }
         switch (AutofillClientProviderUtils.getAndroidAutofillFrameworkAvailability(prefs())) {
@@ -149,12 +284,12 @@ class AutofillOptionsMediator implements ModalDialogProperties.Controller {
         assert isInitialized();
         mModel.set(
                 THIRD_PARTY_AUTOFILL_ENABLED,
-                prefs().getBoolean(Pref.AUTOFILL_USING_VIRTUAL_VIEW_STRUCTURE));
+                prefs().getBoolean(Pref.AUTOFILL_USING_PLATFORM_AUTOFILL));
         mModel.set(THIRD_PARTY_TOGGLE_IS_READ_ONLY, should3pToggleBeReadOnly());
         mModel.set(THIRD_PARTY_TOGGLE_HINT, getHintSummary());
     }
 
-    void onThirdPartyToggleChanged(boolean optIntoThirdPartyFilling) {
+    private void onThirdPartyToggleChanged(boolean optIntoThirdPartyFilling) {
         if (mModel.get(THIRD_PARTY_AUTOFILL_ENABLED) == optIntoThirdPartyFilling) {
             return; // Ignore redundant event.
         }
@@ -192,8 +327,10 @@ class AutofillOptionsMediator implements ModalDialogProperties.Controller {
 
     private void onConfirmWithRestart() {
         prefs().setBoolean(
-                        Pref.AUTOFILL_USING_VIRTUAL_VIEW_STRUCTURE,
+                        Pref.AUTOFILL_USING_PLATFORM_AUTOFILL,
                         mModel.get(THIRD_PARTY_AUTOFILL_ENABLED));
+        AutofillClientProviderUtils.updatePackageUsedForAutofill(
+                prefs(), mModel.get(THIRD_PARTY_AUTOFILL_ENABLED));
         RecordHistogram.recordBooleanHistogram(
                 HISTOGRAM_USE_THIRD_PARTY_FILLING, mModel.get(THIRD_PARTY_AUTOFILL_ENABLED));
         mRestartRunnable.run();

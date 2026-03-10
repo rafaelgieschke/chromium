@@ -22,10 +22,10 @@
 #include <utility>
 
 #include "base/check_op.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/format_macros.h"
 #include "base/functional/bind.h"
+#include "base/memory/safety_checks.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
@@ -41,7 +41,7 @@
 #include "base/timer/elapsed_timer.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
-#include "components/history_embeddings/history_embeddings_features.h"
+#include "components/history_embeddings/core/history_embeddings_features.h"
 #include "components/lens/lens_features.h"
 #include "components/omnibox/browser/actions/contextual_search_action.h"
 #include "components/omnibox/browser/actions/omnibox_action_in_suggest.h"
@@ -343,12 +343,6 @@ std::u16string GetDomain(const AutocompleteMatch& match) {
   return url_domain;
 }
 
-std::string EncodeURIComponent(const std::string& component) {
-  url::RawCanonOutputT<char> encoded;
-  url::EncodeURIComponent(component, &encoded);
-  return std::string(encoded.view());
-}
-
 // Returns whether contextual suggestions can be shown to the user.
 // If the page has a paywall signal, contextual suggestions cannot be shown.
 // If the page paywall signal could not be determined (this `paywall_signal` is
@@ -625,6 +619,10 @@ void AutocompleteController::RemoveObserver(Observer* observer) {
 void AutocompleteController::Start(const AutocompleteInput& input) {
   TRACE_EVENT1("omnibox", "AutocompleteController::Start", "text",
                base::UTF16ToUTF8(input.text()));
+  // Autocomplete is a critical user journey for Omnibox interaction, we exclude
+  // it from additional memory safety checks.
+  // TODO(crbug.com/478634529): Optimize and remove if possible.
+  base::ScopedSafetyChecksExclusion excluded;
 
   // Providers assume synchronous inputs (`omit_asynchronous_matches() ==
   // true`) are not zero-suggest ones. See crbug.com/1339425.
@@ -751,6 +749,10 @@ void AutocompleteController::Start(const AutocompleteInput& input) {
 void AutocompleteController::StartPrefetch(const AutocompleteInput& input) {
   TRACE_EVENT1("omnibox", "AutocompleteController::StartPrefetch", "text",
                base::UTF16ToUTF8(input.text()));
+  // Autocomplete is a critical user journey for Omnibox interaction, we exclude
+  // it from additional memory safety checks.
+  // TODO(crbug.com/478634529): Optimize and remove if possible.
+  base::ScopedSafetyChecksExclusion excluded;
   if (!OmniboxFieldTrial::IsZeroSuggestPrefetchingEnabledInContext(
           input.current_page_classification()) &&
       !omnibox_feature_configs::OmniboxUrlSuggestionsOnFocus::Get()
@@ -780,6 +782,10 @@ void AutocompleteController::StartPrefetch(const AutocompleteInput& input) {
 }
 
 void AutocompleteController::Stop(AutocompleteStopReason stop_reason) {
+  // Autocomplete is a critical user journey for Omnibox interaction, we exclude
+  // it from additional memory safety checks.
+  // TODO(crbug.com/478634529): Optimize and remove if possible.
+  base::ScopedSafetyChecksExclusion excluded;
   // Must be called before `expire_timer_.Stop()`, modifying `done_`, or
   // modifying `AutocompleteProvider::done_` below. If the current request has
   // not completed, and therefore has not been logged yet, will log it now.
@@ -849,6 +855,10 @@ void AutocompleteController::OnProviderUpdate(
     bool updated_matches,
     const AutocompleteProvider* provider) {
   TRACE_EVENT0("omnibox", "AutocompleteController::OnProviderUpdate");
+  // Autocomplete is a critical user journey for Omnibox interaction, we exclude
+  // it from additional memory safety checks.
+  // TODO(crbug.com/478634529): Optimize and remove if possible.
+  base::ScopedSafetyChecksExclusion excluded;
   // Should be called even if `sync_pass_done_` is false in order to include
   // early exited async providers. If the provider is done, will log how long
   // the provider took.
@@ -1014,13 +1024,14 @@ void AutocompleteController::SetMatchDestinationURL(
   TRACE_EVENT0("omnibox", "AutocompleteController::SetMatchDestinationURL");
 
   // Convert search terms to UTF8 and URI-component encode the string.
-  const std::string encoded_search_terms = EncodeURIComponent(
+  const std::string encoded_search_terms = url::EncodeUriComponent(
       base::UTF16ToUTF8(match->search_terms_args->search_terms));
 
   // Append an extra header to navigations from the @gemini scope.
   const TemplateURL* turl = match->GetTemplateURL(template_url_service_);
   if (turl &&
-      turl->starter_pack_id() == template_url_starter_pack_data::kGemini &&
+      turl->starter_pack_id() ==
+          template_url_starter_pack_data::StarterPackId::kGemini &&
       !encoded_search_terms.empty() &&
       net::HttpUtil::IsValidHeaderValue(encoded_search_terms)) {
     DCHECK(net::HttpUtil::IsValidHeaderName(kOmniboxGeminiHeader));
@@ -1117,11 +1128,12 @@ bool AutocompleteController::ShouldRunProvider(
             template_url_service_, &keyword_input);
 
     if (keyword_turl &&
-        (keyword_turl->starter_pack_id() > 0 ||
+        (keyword_turl->starter_pack_id() !=
+             template_url_starter_pack_data::StarterPackId::kNone ||
          keyword_turl->policy_origin() ==
              TemplateURLData::PolicyOrigin::kSearchAggregator)) {
       if (keyword_turl->starter_pack_id() ==
-          template_url_starter_pack_data::kPage) {
+          template_url_starter_pack_data::StarterPackId::kPage) {
         return provider->type() == AutocompleteProvider::TYPE_CONTEXTUAL_SEARCH;
       }
       switch (provider->type()) {
@@ -1139,7 +1151,7 @@ bool AutocompleteController::ShouldRunProvider(
         // @Bookmarks starter pack scope - run only the bookmarks provider.
         case AutocompleteProvider::TYPE_BOOKMARK:
           return (keyword_turl->starter_pack_id() ==
-                  template_url_starter_pack_data::kBookmarks);
+                  template_url_starter_pack_data::StarterPackId::kBookmarks);
 
         // @History starter pack scope - run the history providers & featured
         // search for embeddings IPH suggestions.
@@ -1148,12 +1160,12 @@ bool AutocompleteController::ShouldRunProvider(
         case AutocompleteProvider::TYPE_HISTORY_EMBEDDINGS:
         case AutocompleteProvider::TYPE_FEATURED_SEARCH:
           return (keyword_turl->starter_pack_id() ==
-                  template_url_starter_pack_data::kHistory);
+                  template_url_starter_pack_data::StarterPackId::kHistory);
 
         // @Tabs starter pack scope - run the open tab provider.
         case AutocompleteProvider::TYPE_OPEN_TAB:
           return (keyword_turl->starter_pack_id() ==
-                  template_url_starter_pack_data::kTabs);
+                  template_url_starter_pack_data::StarterPackId::kTabs);
 
         case AutocompleteProvider::TYPE_ENTERPRISE_SEARCH_AGGREGATOR:
           return keyword_turl->policy_origin() ==
@@ -1235,7 +1247,7 @@ GURL AutocompleteController::ComputeURLFromSearchTermsArgs(
   // TODO(crbug.com/41494524): Replace this logic with a proper fix to support
   // keywords that do not do search term replacement in omnibox.
   if (template_url->starter_pack_id() ==
-      template_url_starter_pack_data::kGemini) {
+      template_url_starter_pack_data::StarterPackId::kGemini) {
     return GURL(OmniboxFieldTrial::kGeminiUrlOverride.Get());
   }
 
@@ -1526,7 +1538,8 @@ void AutocompleteController::UpdateResult(UpdateType update_type,
   const bool is_lens_enabled = autocomplete_provider_client()->IsLensEnabled();
 
   internal_result_.set_has_contextual_chips(
-      mia_enabled && (is_lens_enabled || can_show_contextual_suggestions));
+      autocomplete_provider_client()->IsOmniboxNextAimPopupEnabled() &&
+      (is_lens_enabled || can_show_contextual_suggestions));
 
   bool default_match_changed = CheckWhetherDefaultMatchChanged(
       old_result.last_default_match,
@@ -1636,9 +1649,9 @@ void AutocompleteController::PostProcessMatches() {
   internal_result_.Validate();
 #endif  // DCHECK_IS_ON()
 
-  AttachActions();
   UpdateKeywordDescriptions(&internal_result_);
   UpdateAssociatedKeywords(&internal_result_);
+  AttachActions();
   UpdateSearchboxStats(&internal_result_);
   UpdateShownInSession(&internal_result_);
   UpdateTailSuggestPrefix(&internal_result_);
@@ -1738,8 +1751,9 @@ void AutocompleteController::AttachActions() {
             template_url_service_, &keyword_input);
     // Attach the contextual search fulfillment actions in the @page keyword
     // mode.
-    if (keyword_turl && keyword_turl->starter_pack_id() ==
-                            template_url_starter_pack_data::kPage) {
+    if (keyword_turl &&
+        keyword_turl->starter_pack_id() ==
+            template_url_starter_pack_data::StarterPackId::kPage) {
       internal_result_.AttachContextualSearchFulfillmentActionToMatches();
 
       // This should intentionally override the fulfillment action if present.
@@ -1771,6 +1785,10 @@ void AutocompleteController::AttachActions() {
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   internal_result_.SplitActionsToSuggestions();
 #endif
+
+#if BUILDFLAG(IS_ANDROID)
+  internal_result_.AttachSiteSearchActionToMatches(template_url_service_);
+#endif  // BUILDFLAG(IS_ANDROID)
 }
 
 void AutocompleteController::UpdateAssociatedKeywords(
@@ -1840,7 +1858,9 @@ void AutocompleteController::UpdateAssociatedKeywords(
     // on the match, except for starter packed keywords or those featured by
     // policy.
     if (input_turl && !added_keywords.count(input_turl->keyword()) &&
-        !input_turl->starter_pack_id() && !input_turl->featured_by_policy()) {
+        input_turl->starter_pack_id() ==
+            template_url_starter_pack_data::StarterPackId::kNone &&
+        !input_turl->featured_by_policy()) {
       add_keyword(match, input_turl->keyword());
       continue;
     }
@@ -1859,7 +1879,9 @@ void AutocompleteController::UpdateAssociatedKeywords(
 
     // Add keyword hints for non-featured keyword matches.
     if (match_turl && !added_keywords.count(match_turl->keyword()) &&
-        !match_turl->starter_pack_id() && !match_turl->featured_by_policy()) {
+        match_turl->starter_pack_id() ==
+            template_url_starter_pack_data::StarterPackId::kNone &&
+        !match_turl->featured_by_policy()) {
       add_keyword(match, match_turl->keyword());
     }
   }
@@ -1891,7 +1913,7 @@ void AutocompleteController::UpdateKeywordDescriptions(
       }
 
 #if BUILDFLAG(IS_ANDROID)
-      if (i->keyword == default_engine->keyword()) {
+      if (default_engine && i->keyword == default_engine->keyword()) {
         continue;
       }
 #endif
@@ -1912,7 +1934,7 @@ void AutocompleteController::UpdateKeywordDescriptions(
           if (is_contextual) {
             i->description = l10n_util::GetStringUTF16(
                 IDS_AUTOCOMPLETE_SEARCH_IN_SIDE_PANEL_DESCRIPTION);
-          } else if (template_url->is_ask_starter_pack()) {
+          } else if (template_url->is_ask_type()) {
             i->description = l10n_util::GetStringFUTF16(
                 IDS_AUTOCOMPLETE_ASK_DESCRIPTION, i->description);
           } else if (template_url->type() !=
@@ -2166,6 +2188,10 @@ void AutocompleteController::UpdateTailSuggestPrefix(
 
 void AutocompleteController::NotifyChanged() {
   TRACE_EVENT0("omnibox", "AutocompleteController::NotifyChanged");
+  // Autocomplete is a critical user journey for Omnibox interaction, we exclude
+  // it from additional memory safety checks.
+  // TODO(crbug.com/478634529): Optimize and remove if possible.
+  base::ScopedSafetyChecksExclusion excluded;
   // Will log metrics for how many matches changed. Will also log timing metrics
   // for the current request if it's complete; otherwise, will just update
   // timestamps of when the last update changed any or the default suggestion.

@@ -9,6 +9,7 @@
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "third_party/blink/public/mojom/permissions/permission.mojom-blink.h"
 #include "third_party/blink/public/mojom/permissions/permission_status.mojom-blink-forward.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink-forward.h"
 #include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
@@ -48,11 +49,6 @@ enum class RequestStorageResult {
   REJECTED_INVALID_ORIGIN = 14,
   kMaxValue = REJECTED_INVALID_ORIGIN,
 };
-
-void FireRequestStorageAccessHistogram(RequestStorageResult result) {
-  base::UmaHistogramEnumeration("API.StorageAccess.RequestStorageAccess2",
-                                result);
-}
 
 void FireRequestStorageAccessForMetrics(RequestStorageResult result,
                                         ExecutionContext* context) {
@@ -247,8 +243,6 @@ ScriptPromise<T> DocumentStorageAccess::RequestStorageAccessImpl(
     bool request_unpartitioned_cookie_access,
     base::OnceCallback<void(ScriptPromiseResolver<T>*)> on_resolve) {
   if (!GetSupplementable()->GetFrame()) {
-    FireRequestStorageAccessHistogram(RequestStorageResult::REJECTED_NO_ORIGIN);
-
     // Note that in detached frames, resolvers are not able to return a promise.
     return ScriptPromise<T>::RejectWithDOMException(
         script_state, MakeGarbageCollected<DOMException>(
@@ -274,8 +268,6 @@ ScriptPromise<T> DocumentStorageAccess::RequestStorageAccessImpl(
     GetSupplementable()->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
         ConsoleMessage::Source::kSecurity, ConsoleMessage::Level::kError,
         "requestStorageAccess: May not be used in an insecure context."));
-    FireRequestStorageAccessHistogram(
-        RequestStorageResult::REJECTED_INSECURE_CONTEXT);
 
     resolver->Reject(V8ThrowDOMException::CreateOrEmpty(
         script_state->GetIsolate(), DOMExceptionCode::kNotAllowedError,
@@ -286,8 +278,6 @@ ScriptPromise<T> DocumentStorageAccess::RequestStorageAccessImpl(
   // If this is the outermost frame we no longer need to make a request and
   // can resolve the promise.
   if (GetSupplementable()->IsInOutermostMainFrame()) {
-    FireRequestStorageAccessHistogram(
-        RequestStorageResult::APPROVED_PRIMARY_FRAME);
     resolver->Resolve();
     return promise;
   }
@@ -296,8 +286,6 @@ ScriptPromise<T> DocumentStorageAccess::RequestStorageAccessImpl(
     GetSupplementable()->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
         ConsoleMessage::Source::kSecurity, ConsoleMessage::Level::kError,
         "requestStorageAccess: Cannot be used by opaque origins."));
-    FireRequestStorageAccessHistogram(
-        RequestStorageResult::REJECTED_OPAQUE_ORIGIN);
 
     resolver->Reject(V8ThrowDOMException::CreateOrEmpty(
         script_state->GetIsolate(), DOMExceptionCode::kNotAllowedError,
@@ -309,8 +297,6 @@ ScriptPromise<T> DocumentStorageAccess::RequestStorageAccessImpl(
     GetSupplementable()->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
         ConsoleMessage::Source::kSecurity, ConsoleMessage::Level::kError,
         "requestStorageAccess: May not be used in a credentialless iframe"));
-    FireRequestStorageAccessHistogram(
-        RequestStorageResult::REJECTED_CREDENTIALLESS_IFRAME);
 
     resolver->Reject(V8ThrowDOMException::CreateOrEmpty(
         script_state->GetIsolate(), DOMExceptionCode::kNotAllowedError,
@@ -330,10 +316,6 @@ ScriptPromise<T> DocumentStorageAccess::RequestStorageAccessImpl(
               "is sandboxed, and the 'allow-storage-access-by-user-activation' "
               "keyword is not set."));
 
-    FireRequestStorageAccessHistogram(
-        GetSupplementable()->dom_window_->GetFrame()->IsInFencedFrameTree()
-            ? RequestStorageResult::REJECTED_FENCED_FRAME
-            : RequestStorageResult::REJECTED_SANDBOXED);
 
     resolver->Reject(V8ThrowDOMException::CreateOrEmpty(
         script_state->GetIsolate(), DOMExceptionCode::kNotAllowedError,
@@ -393,8 +375,6 @@ void DocumentStorageAccess::ProcessStorageAccessPermissionState(
   }
 
   if (status == mojom::blink::PermissionStatus::GRANTED) {
-    FireRequestStorageAccessHistogram(
-        RequestStorageResult::APPROVED_NEW_OR_EXISTING_GRANT);
     if (request_unpartitioned_cookie_access) {
       GetSupplementable()->dom_window_->SetStorageAccessApiStatus(
           net::StorageAccessApiStatus::kAccessViaAPI,
@@ -403,8 +383,6 @@ void DocumentStorageAccess::ProcessStorageAccessPermissionState(
     std::move(on_resolve).Run(resolver);
   } else {
     LocalFrame::ConsumeTransientUserActivation(GetSupplementable()->GetFrame());
-    FireRequestStorageAccessHistogram(
-        RequestStorageResult::REJECTED_GRANT_DENIED);
     GetSupplementable()->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
         ConsoleMessage::Source::kSecurity, ConsoleMessage::Level::kError,
         "requestStorageAccess: Permission denied."));
@@ -557,6 +535,11 @@ void DocumentStorageAccess::ProcessTopLevelStorageAccessPermissionState(
     FireRequestStorageAccessForMetrics(
         RequestStorageResult::APPROVED_NEW_OR_EXISTING_GRANT,
         ExecutionContext::From(script_state));
+
+    UseCounter::Count(
+        GetSupplementable(),
+        mojom::blink::WebFeature::
+            kStorageAccessAPI_requestStorageAccessFor_Method_AsyncSuccess);
     resolver->Resolve();
   } else {
     LocalFrame::ConsumeTransientUserActivation(GetSupplementable()->GetFrame());

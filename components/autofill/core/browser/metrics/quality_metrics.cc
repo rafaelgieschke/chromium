@@ -7,11 +7,11 @@
 #include <memory>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/span.h"
 #include "base/i18n/char_iterator.h"
 #include "base/metrics/histogram_functions.h"
+#include "components/autofill/core/browser/autofill_browser_util.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/data_quality/autofill_data_util.h"
 #include "components/autofill/core/browser/data_quality/validation.h"
@@ -54,7 +54,7 @@ void LogPerfectFillingMetric(const FormStructure& form) {
   // without subsequent changes. This means that in a perfect filling
   // scenario, a field is either autofilled, empty, has value at page load or
   // has value set by JS.
-  const bool perfect_filling = IsFormPerfectlyFilled(form.ToFormData());
+  const bool perfect_filling = IsFormStructurePerfectlyFilled(form);
 
   // The perfect filling metric is only recorded if Autofill was used on at
   // least one field. This conditions this metric on Assistance, Readiness and
@@ -72,17 +72,21 @@ void LogPerfectFillingMetric(const FormStructure& form) {
 
 // Logs metrics related to how long it took the user from load/interaction time
 // till form submission.
-void LogDurationMetrics(const FormStructure& form,
-                        base::TimeTicks load_time,
-                        base::TimeTicks interaction_time,
-                        base::TimeTicks now) {
+void LogDurationMetrics(
+    const FormStructure& form,
+    base::TimeTicks load_time,
+    base::TimeTicks interaction_time,
+    base::TimeTicks now,
+    AutocompleteUnrecognizedBehavior ac_unrecognized_behavior) {
   size_t num_detected_field_types =
       std::ranges::count_if(form, &FieldHasMeaningfulPossibleFieldTypes,
                             &std::unique_ptr<AutofillField>::operator*);
   bool form_has_autofilled_fields = std::ranges::any_of(
-      form, [](const auto& field) { return field->is_autofilled(); });
-  bool has_observed_one_time_code_field =
-      std::ranges::any_of(form, [](const auto& field) {
+      form.fields(), [](const std::unique_ptr<AutofillField>& field) {
+        return field->last_modifier() == FieldModifier::kAutofill;
+      });
+  bool has_observed_one_time_code_field = std::ranges::any_of(
+      form.fields(), [](const std::unique_ptr<AutofillField>& field) {
         return field->html_type() == HtmlFieldType::kOneTimeCode;
       });
   if (num_detected_field_types >= kMinRequiredFieldsForHeuristics ||
@@ -108,7 +112,8 @@ void LogDurationMetrics(const FormStructure& form,
     if (!interaction_time.is_null() && now >= interaction_time) {
       base::TimeDelta elapsed = now - interaction_time;
       AutofillMetrics::LogFormFillDurationFromInteraction(
-          form.GetFormTypes(), form_has_autofilled_fields, elapsed);
+          form.GetFormTypes(ac_unrecognized_behavior),
+          form_has_autofilled_fields, elapsed);
     }
   }
   if (has_observed_one_time_code_field) {
@@ -178,6 +183,7 @@ void LogPredictionMetrics(
   const QualityMetricType metric_type =
       observed_submission ? TYPE_SUBMISSION : TYPE_NO_SUBMISSION;
   for (const std::unique_ptr<AutofillField>& field : form) {
+    LogFieldTypeAtSubmissionMetrics(*field);
     LogHeuristicPredictionQualityMetrics(form_interactions_ukm_logger,
                                          source_id, form, *field, metric_type,
                                          now);
@@ -187,25 +193,17 @@ void LogPredictionMetrics(
                                        form, *field, metric_type, now);
     LogEmailFieldPredictionMetrics(*field);
     LogFieldPredictionOverlapMetrics(*field);
-#if BUILDFLAG(BUILD_WITH_TFLITE_LIB)
-    // If ML predictions are the active heuristic source, don't record samples
-    // as these would be redundant to the ".Heuristic" sub-metric of
-    // `LogHeuristicPredictionQualityMetrics()`.
-    if (base::FeatureList::IsEnabled(features::kAutofillModelPredictions) &&
-        GetActiveHeuristicSource() !=
-            HeuristicSource::kAutofillMachineLearning) {
-      LogMlPredictionQualityMetrics(form_interactions_ukm_logger, source_id,
-                                    form, *field, metric_type, now);
-    }
-#endif
+    LogPhoneNumberDetectionExperimentMetrics(*field);
   }
 }
 
-void LogFillingMetrics(const FormStructure& form,
-                       FormInteractionsUkmLogger& form_interactions_ukm_logger,
-                       ukm::SourceId source_id,
-                       bool observed_submission,
-                       base::TimeTicks now) {
+void LogFillingMetrics(
+    const FormStructure& form,
+    FormInteractionsUkmLogger& form_interactions_ukm_logger,
+    ukm::SourceId source_id,
+    bool observed_submission,
+    base::TimeTicks now,
+    AutocompleteUnrecognizedBehavior ac_unrecognized_behavior) {
   const QualityMetricType metric_type =
       observed_submission ? TYPE_SUBMISSION : TYPE_NO_SUBMISSION;
   for (const std::unique_ptr<AutofillField>& field : form) {
@@ -216,21 +214,22 @@ void LogFillingMetrics(const FormStructure& form,
     return;
   }
   LogPerfectFillingMetric(form);
-  LogFieldFillingStatsAndScore(form);
-  LogFillingQualityMetrics(form);
+  LogFieldFillingStatsAndScore(form, ac_unrecognized_behavior);
+  LogFillingQualityMetrics(form, ac_unrecognized_behavior);
 
   FieldTypeSet autofilled_field_types;
   for (const std::unique_ptr<AutofillField>& field : form) {
-    if (field->is_autofilled() || field->previously_autofilled()) {
+    if (field->all_modifiers().contains(FieldModifier::kAutofill)) {
       AutofillMetrics::LogEditedAutofilledFieldAtSubmission(
           form_interactions_ukm_logger, source_id, form, *field);
     }
     if (FieldHasMeaningfulPossibleFieldTypes(*field) &&
-        field->is_autofilled()) {
+        field->last_modifier() == FieldModifier::kAutofill) {
       autofilled_field_types.insert_all(field->Type().GetTypes());
     }
   }
-  if (base::Contains(form.GetFormTypes(), FormType::kCreditCardForm)) {
+  if (form.GetFormTypes(ac_unrecognized_behavior)
+          .contains(FormType::kCreditCardForm)) {
     AutofillMetrics::LogCreditCardSeamlessnessAtSubmissionTime(
         autofilled_field_types);
   }
@@ -238,25 +237,27 @@ void LogFillingMetrics(const FormStructure& form,
 
 }  // namespace
 
-void LogQualityMetrics(const FormStructure& form_structure,
-                       base::TimeTicks load_time,
-                       base::TimeTicks interaction_time,
-                       base::TimeTicks submission_time,
-                       FormInteractionsUkmLogger& form_interactions_ukm_logger,
-                       ukm::SourceId source_id,
-                       bool observed_submission) {
+void LogQualityMetrics(
+    const FormStructure& form_structure,
+    base::TimeTicks load_time,
+    base::TimeTicks interaction_time,
+    base::TimeTicks submission_time,
+    FormInteractionsUkmLogger& form_interactions_ukm_logger,
+    ukm::SourceId source_id,
+    bool observed_submission,
+    AutocompleteUnrecognizedBehavior ac_unrecognized_behavior) {
   base::TimeTicks now = base::TimeTicks::Now();
   LogPredictionMetrics(form_structure, form_interactions_ukm_logger, source_id,
                        observed_submission, now);
   LogFillingMetrics(form_structure, form_interactions_ukm_logger, source_id,
-                    observed_submission, now);
+                    observed_submission, now, ac_unrecognized_behavior);
   if (observed_submission) {
     // TODO(crbug.com/359768803): Remove this metric once the feature is
     // launched.
     LogSubmittedAlternativeNameCharacterSetValues(form_structure);
     LogExtractionMetrics(form_structure);
     LogDurationMetrics(form_structure, load_time, interaction_time,
-                       submission_time);
+                       submission_time, ac_unrecognized_behavior);
   }
 }
 

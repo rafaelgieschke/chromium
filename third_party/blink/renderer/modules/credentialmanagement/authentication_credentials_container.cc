@@ -1024,7 +1024,7 @@ const char* validateGetPublicKeyCredentialPRFExtension(
     for (const auto& pair : prf.evalByCredential()) {
       Vector<uint8_t> cred_id;
       if (!pair.first.Is8Bit() ||
-          !Base64UnpaddedURLDecode(pair.first, cred_id)) {
+          !Base64UnpaddedUrlDecode(pair.first, cred_id)) {
         return "'prf' extension contains invalid base64url data in "
                "'evalByCredential'";
       }
@@ -1046,12 +1046,10 @@ const char* validateGetPublicKeyCredentialPRFExtension(
   return nullptr;
 }
 
-void EmitImmediateMediationUseCounters(
-    ExecutionContext* context,
-    const CredentialRequestOptions* options) {
-  CHECK(options->hasMediation() &&
-        options->mediation() ==
-            V8CredentialMediationRequirement::Enum::kImmediate);
+void EmitImmediateUiModeUseCounters(ExecutionContext* context,
+                                    const CredentialRequestOptions* options) {
+  CHECK(options->hasUiMode() &&
+        options->uiMode() == V8CredentialUiModeRequirement::Enum::kImmediate);
   if (options->hasPublicKey() && options->password()) {
     UseCounter::Count(
         context,
@@ -1068,11 +1066,7 @@ void EmitImmediateMediationUseCounters(
 
 bool IsImmediateGetRequest(const ExecutionContext& context,
                            const CredentialRequestOptions& options) {
-  if (options.mediation() ==
-      V8CredentialMediationRequirement::Enum::kImmediate) {
-    return true;
-  }
-  if (RuntimeEnabledFeatures::WebAuthenticationUiModeEnabled(&context) &&
+  if (RuntimeEnabledFeatures::WebAuthenticationImmediateGetEnabled(&context) &&
       options.hasUiMode() &&
       options.uiMode() == V8CredentialUiModeRequirement::Enum::kImmediate) {
     return true;
@@ -1451,26 +1445,6 @@ ScriptPromise<IDLNullable<Credential>> AuthenticationCredentialsContainer::get(
                       WebFeature::kCredentialManagerGetPasswordCredential);
   }
 
-  // TODO(crbug.com/358119268): For prototyping, any conditionally-mediated
-  // request that contains both password and publicKey credential types is
-  // assumed to be ambient, when the flag is on. This will change.
-  if (RuntimeEnabledFeatures::WebAuthenticationAmbientEnabled() &&
-      options->hasPublicKey() && options->hasPassword() &&
-      options->password() &&
-      options->mediation() ==
-          V8CredentialMediationRequirement::Enum::kConditional) {
-    // Unsupported ambient credential types:
-    if (options->hasOtp() || options->hasIdentity() ||
-        (options->publicKey()->hasExtensions() &&
-         options->publicKey()->extensions()->hasPayment()) ||
-        options->hasFederated()) {
-      resolver->Reject(MakeGarbageCollected<DOMException>(
-          DOMExceptionCode::kNotSupportedError,
-          "Unsupported combination of credential types requested."));
-      return promise;
-    }
-  }
-
   if (options->hasPublicKey()) {
     ForwardRequestToAuthenticator(script_state, resolver, options);
     return promise;
@@ -1510,7 +1484,7 @@ ScriptPromise<IDLNullable<Credential>> AuthenticationCredentialsContainer::get(
   Vector<KURL> providers;
   if (options->hasFederated() && options->federated()->hasProviders()) {
     for (const auto& provider : options->federated()->providers()) {
-      KURL url = KURL(NullURL(), provider);
+      KURL url = KURL(NullUrl(), provider);
       if (url.IsValid()) {
         providers.push_back(std::move(url));
       }
@@ -1525,27 +1499,21 @@ ScriptPromise<IDLNullable<Credential>> AuthenticationCredentialsContainer::get(
     return promise;
   }
   if (IsImmediateGetRequest(*context, *options)) {
-    if (RuntimeEnabledFeatures::WebAuthenticationImmediateGetEnabled(context)) {
-      if (options->password()) {
-        if (RuntimeEnabledFeatures::
-                AuthenticatorPasswordsOnlyImmediateRequestsEnabled(context)) {
-          ForwardRequestToAuthenticator(script_state, resolver, options);
-          return promise;
-        }
-        resolver->Reject(MakeGarbageCollected<DOMException>(
-            DOMExceptionCode::kNotSupportedError,
-            "Immediate mediation is not yet implemented for requests that do "
-            "not accept PublicKeyCredential. An Immediate request for "
-            "passwords must also include a request for passkeys."));
-      } else {
-        resolver->Reject(MakeGarbageCollected<DOMException>(
-            DOMExceptionCode::kNotSupportedError,
-            "Immediate mediation is not supported for this credential type"));
+    if (options->password()) {
+      if (RuntimeEnabledFeatures::
+              AuthenticatorPasswordsOnlyImmediateRequestsEnabled(context)) {
+        ForwardRequestToAuthenticator(script_state, resolver, options);
+        return promise;
       }
+      resolver->Reject(MakeGarbageCollected<DOMException>(
+          DOMExceptionCode::kNotSupportedError,
+          "Immediate mediation is not yet implemented for requests that do "
+          "not accept PublicKeyCredential. An Immediate request for "
+          "passwords must also include a request for passkeys."));
     } else {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNotSupportedError,
-          "Immediate mediation not implemented"));
+          "Immediate mediation is not supported for this credential type"));
     }
     return promise;
   }
@@ -1566,7 +1534,6 @@ ScriptPromise<IDLNullable<Credential>> AuthenticationCredentialsContainer::get(
       requirement = CredentialMediationRequirement::kRequired;
       break;
     case V8CredentialMediationRequirement::Enum::kConditional:
-    case V8CredentialMediationRequirement::Enum::kImmediate:
       NOTREACHED();
   }
 
@@ -1780,13 +1747,6 @@ AuthenticationCredentialsContainer::create(
         }
       }
     }
-    if (options->publicKey()->extensions()->hasCableAuthentication()) {
-      resolver->Reject(MakeGarbageCollected<DOMException>(
-          DOMExceptionCode::kNotSupportedError,
-          "The 'cableAuthentication' extension is only valid when requesting "
-          "an assertion"));
-      return promise;
-    }
     if (options->publicKey()->extensions()->hasLargeBlob()) {
       if (options->publicKey()->extensions()->largeBlob()->hasRead()) {
         resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -1980,11 +1940,9 @@ AuthenticationCredentialsContainer::create(
                    std::move(user_id_for_payment_extension)));
     }
   } else {
-    if (RuntimeEnabledFeatures::WebAuthenticationConditionalCreateEnabled()) {
-      mojo_options->is_conditional =
-          options->mediation() ==
-          V8CredentialMediationRequirement::Enum::kConditional;
-    }
+    mojo_options->is_conditional =
+        options->mediation() ==
+        V8CredentialMediationRequirement::Enum::kConditional;
     authenticator->MakeCredential(
         std::move(mojo_options),
         BindOnce(&OnMakePublicKeyCredentialComplete,
@@ -2050,8 +2008,23 @@ void AuthenticationCredentialsContainer::ForwardRequestToAuthenticator(
   }
 
   Mediation mediation = Mediation::MODAL;
-  if (options->mediation() ==
-      V8CredentialMediationRequirement::Enum::kConditional) {
+  if (RuntimeEnabledFeatures::WebAuthenticationAmbientEnabled() &&
+      options->uiMode() == V8CredentialUiModeRequirement::Enum::kPassive &&
+      options->mediation() ==
+          V8CredentialMediationRequirement::Enum::kConditional) {
+    // Unsupported ambient credential types:
+    if (options->hasOtp() || options->hasIdentity() ||
+        (options->publicKey()->hasExtensions() &&
+         options->publicKey()->extensions()->hasPayment()) ||
+        options->hasFederated()) {
+      resolver->Reject(MakeGarbageCollected<DOMException>(
+          DOMExceptionCode::kNotSupportedError,
+          "Unsupported combination of credential types requested."));
+      return;
+    }
+    mediation = Mediation::AMBIENT;
+  } else if (options->mediation() ==
+             V8CredentialMediationRequirement::Enum::kConditional) {
     if (IsImmediateGetRequest(*context, *options)) {
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNotSupportedError,
@@ -2062,15 +2035,8 @@ void AuthenticationCredentialsContainer::ForwardRequestToAuthenticator(
     CredentialMetrics::From(script_state).RecordWebAuthnConditionalUiCall();
     mediation = Mediation::CONDITIONAL;
   } else if (IsImmediateGetRequest(*context, *options)) {
-    if (RuntimeEnabledFeatures::WebAuthenticationImmediateGetEnabled(context)) {
-      mediation = Mediation::IMMEDIATE;
-      EmitImmediateMediationUseCounters(context, options);
-    } else {
-      resolver->Reject(MakeGarbageCollected<DOMException>(
-          DOMExceptionCode::kNotSupportedError,
-          "Immediate mediation not implemented"));
-      return;
-    }
+    mediation = Mediation::IMMEDIATE;
+    EmitImmediateUiModeUseCounters(context, options);
   }
   if (mediation == Mediation::IMMEDIATE) {
     if (options->hasPublicKey() &&
@@ -2252,6 +2218,12 @@ void AuthenticationCredentialsContainer::GetForIdentity(
     ScriptPromiseResolver<IDLNullable<Credential>>* resolver,
     const CredentialRequestOptions& options,
     const IdentityCredentialRequestOptions& identity_options) {
+  // FedCM is disabled in webview, check this early to avoid unnecessary work.
+  if (!RuntimeEnabledFeatures::FedCmEnabled(resolver->GetExecutionContext())) {
+    resolver->Reject(MakeGarbageCollected<DOMException>(
+        DOMExceptionCode::kNotSupportedError, "FedCM is not supported."));
+    return;
+  }
   // Common errors for FedCM and WebIdentityDigitalCredential.
   if (identity_options.providers().size() == 0) {
     resolver->RejectWithTypeError("Need at least one identity provider.");
@@ -2383,8 +2355,6 @@ void AuthenticationCredentialsContainer::GetForIdentity(
     case V8CredentialMediationRequirement::Enum::kOptional:
       mediation_requirement = CredentialMediationRequirement::kOptional;
       break;
-    case V8CredentialMediationRequirement::Enum::kImmediate:
-      NOTREACHED();
   }
 
   if (identity_options.hasMediation()) {

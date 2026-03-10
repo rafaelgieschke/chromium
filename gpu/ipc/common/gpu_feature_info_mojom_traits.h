@@ -13,7 +13,6 @@
 #include "gpu/config/gpu_feature_info.h"
 #include "gpu/ipc/common/gpu_feature_info.mojom.h"
 #include "gpu/ipc/common/gpu_ipc_common_export.h"
-#include "ui/gfx/mojom/buffer_types_mojom_traits.h"
 
 namespace mojo {
 
@@ -99,12 +98,6 @@ struct GPU_IPC_COMMON_EXPORT StructTraits<gpu::mojom::GpuFeatureInfoDataView,
   static const std::vector<uint32_t>& applied_gpu_driver_bug_list_entries(
       const gpu::GpuFeatureInfo& info) {
     return info.applied_gpu_driver_bug_list_entries;
-  }
-
-  static std::vector<gfx::BufferFormat>
-  supported_buffer_formats_for_allocation_and_texturing(
-      const gpu::GpuFeatureInfo& input) {
-    return input.supported_buffer_formats_for_allocation_and_texturing;
   }
 };
 

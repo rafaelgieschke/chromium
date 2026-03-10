@@ -7,7 +7,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/containers/flat_set.h"
 #include "base/functional/bind.h"
 #include "base/trace_event/trace_event.h"
@@ -21,6 +20,7 @@
 #include "third_party/inspector_protocol/crdtp/cbor.h"
 #include "third_party/inspector_protocol/crdtp/dispatch.h"
 #include "third_party/inspector_protocol/crdtp/json.h"
+#include "third_party/perfetto/include/perfetto/tracing/track_event_args.h"
 
 namespace content {
 namespace {
@@ -95,6 +95,9 @@ const char kSessionId[] = "sessionId";
 // Clients match against this error message verbatim (http://crbug.com/1001678).
 const char kTargetClosedMessage[] = "Inspected target navigated or closed";
 const char kTargetCrashedMessage[] = "Target crashed";
+
+std::atomic<int> g_root_session_count{0};
+
 }  // namespace
 
 DevToolsSession::PendingMessage::PendingMessage(PendingMessage&&) = default;
@@ -107,8 +110,15 @@ DevToolsSession::PendingMessage::PendingMessage(int call_id,
 
 DevToolsSession::PendingMessage::~PendingMessage() = default;
 
+// static
+int DevToolsSession::GetRootSessionCount() {
+  return g_root_session_count.load();
+}
+
 DevToolsSession::DevToolsSession(DevToolsAgentHostClient* client, Mode mode)
-    : client_(client), mode_(mode) {}
+    : client_(client), mode_(mode) {
+  ++g_root_session_count;
+}
 
 DevToolsSession::DevToolsSession(DevToolsAgentHostClient* client,
                                  const std::string& session_id,
@@ -123,6 +133,10 @@ DevToolsSession::DevToolsSession(DevToolsAgentHostClient* client,
 }
 
 DevToolsSession::~DevToolsSession() {
+  if (!root_session_) {
+    --g_root_session_count;
+    CHECK_GE(g_root_session_count, 0);
+  }
   if (proxy_delegate_)
     proxy_delegate_->Detach(this);
   // It is Ok for session to be deleted without the dispose -
@@ -374,9 +388,9 @@ void DevToolsSession::HandleCommandInternal(crdtp::Dispatchable dispatchable,
   crdtp::UberDispatcher::DispatchResult dispatched =
       dispatcher_->Dispatch(dispatchable);
   if (browser_only_ || dispatched.MethodFound()) {
-    TRACE_EVENT_WITH_FLOW2(
+    TRACE_EVENT(
         "devtools", "DevToolsSession::HandleCommand in Browser",
-        dispatchable.CallId(), TRACE_EVENT_FLAG_FLOW_OUT, "method",
+        perfetto::Flow::ProcessScoped(dispatchable.CallId()), "method",
         std::string(dispatchable.Method().begin(), dispatchable.Method().end()),
         "call_id", dispatchable.CallId());
     dispatched.Run();
@@ -392,7 +406,7 @@ void DevToolsSession::FallThrough(int call_id,
   // In browser-only mode, we should've handled everything in dispatcher.
   DCHECK(!browser_only_);
 
-  if (base::Contains(waiting_for_response_, call_id)) {
+  if (waiting_for_response_.contains(call_id)) {
     DispatchProtocolMessageToClient(
         crdtp::CreateErrorResponse(call_id,
                                    crdtp::DispatchResponse::InvalidRequest(
@@ -445,19 +459,17 @@ void DevToolsSession::DispatchToAgent(const PendingMessage& message) {
   // Debugger.pause don't get stuck behind other blocking messages.
   if (ShouldSendOnIO(crdtp::SpanFrom(message.method)) || use_io_session_) {
     if (io_session_) {
-      TRACE_EVENT_WITH_FLOW2(
-          "devtools", "DevToolsSession::DispatchToAgent on IO", message.call_id,
-          TRACE_EVENT_FLAG_FLOW_OUT, "method", message.method, "call_id",
-          message.call_id);
+      TRACE_EVENT("devtools", "DevToolsSession::DispatchToAgent on IO",
+                  perfetto::Flow::ProcessScoped(message.call_id), "method",
+                  message.method, "call_id", message.call_id);
       io_session_->DispatchProtocolCommand(message.call_id, message.method,
                                            message.payload);
     }
   } else {
     if (session_) {
-      TRACE_EVENT_WITH_FLOW2("devtools", "DevToolsSession::DispatchToAgent",
-                             message.call_id, TRACE_EVENT_FLAG_FLOW_OUT,
-                             "method", message.method, "call_id",
-                             message.call_id);
+      TRACE_EVENT("devtools", "DevToolsSession::DispatchToAgent",
+                  perfetto::Flow::ProcessScoped(message.call_id), "method",
+                  message.method, "call_id", message.call_id);
       session_->DispatchProtocolCommand(message.call_id, message.method,
                                         message.payload);
     }
@@ -536,9 +548,9 @@ void DevToolsSession::DispatchProtocolResponse(
     blink::mojom::DevToolsMessagePtr message,
     int call_id,
     blink::mojom::DevToolsSessionStatePtr updates) {
-  TRACE_EVENT_WITH_FLOW1("devtools",
-                         "DevToolsSession::DispatchProtocolResponse", call_id,
-                         TRACE_EVENT_FLAG_FLOW_IN, "call_id", call_id);
+  TRACE_EVENT("devtools", "DevToolsSession::DispatchProtocolResponse",
+              perfetto::TerminatingFlow::ProcessScoped(call_id), "call_id",
+              call_id);
   ApplySessionStateUpdates(std::move(updates));
   auto it = waiting_for_response_.find(call_id);
   // TODO(johannes): Consider shutting down renderer instead of just
@@ -630,7 +642,7 @@ void DevToolsSession::DetachChildSession(const std::string& session_id) {
 }
 
 bool DevToolsSession::HasChildSession(const std::string& session_id) {
-  return base::Contains(child_sessions_, session_id);
+  return child_sessions_.contains(session_id);
 }
 
 void DevToolsSession::AddObserver(ChildObserver* obs) {

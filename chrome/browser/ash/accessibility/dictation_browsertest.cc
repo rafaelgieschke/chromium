@@ -25,6 +25,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/test/test_future.h"
 #include "chrome/browser/ash/accessibility/accessibility_feature_browsertest.h"
 #include "chrome/browser/ash/accessibility/accessibility_manager.h"
 #include "chrome/browser/ash/accessibility/accessibility_test_utils.h"
@@ -38,6 +39,7 @@
 #include "chrome/browser/ash/accessibility/switch_access_test_utils.h"
 #include "chrome/browser/ash/base/locale_util.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/global_features.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/speech/speech_recognition_constants.h"
 #include "chrome/browser/ui/browser.h"
@@ -46,6 +48,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/application_locale_storage/application_locale_storage.h"
 #include "components/metrics/content/subprocess_metrics_provider.h"
 #include "components/prefs/pref_service.h"
 #include "components/soda/soda_installer.h"
@@ -61,6 +64,7 @@
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/clipboard_buffer.h"
+#include "ui/base/clipboard/test/clipboard_test_util.h"
 #include "ui/events/test/event_generator.h"
 
 namespace ash {
@@ -172,10 +176,6 @@ class DictationTestBase : public AccessibilityFeatureBrowserTest,
                                                   editable_type());
     std::vector<base::test::FeatureRef> enabled_features =
         utils_->GetEnabledFeatures();
-    enabled_features.push_back(
-        ::features::kAccessibilityManifestV3AccessibilityCommon);
-    enabled_features.push_back(
-        ::features::kAccessibilityManifestV3SwitchAccess);
     scoped_feature_list_.InitWithFeatures(enabled_features,
                                           utils_->GetDisabledFeatures());
     AccessibilityFeatureBrowserTest::SetUpCommandLine(command_line);
@@ -260,10 +260,9 @@ class DictationTestBase : public AccessibilityFeatureBrowserTest,
   }
 
   std::string GetClipboardText() {
-    std::u16string text;
-    ui::Clipboard::GetForCurrentThread()->ReadText(
-        ui::ClipboardBuffer::kCopyPaste, /*data_dst=*/nullptr, &text);
-    return base::UTF16ToUTF8(text);
+    return base::UTF16ToUTF8(ui::clipboard_test_util::ReadText(
+        ui::Clipboard::GetForCurrentThread(), ui::ClipboardBuffer::kCopyPaste,
+        /*data_dst=*/nullptr));
   }
 
   void PressTab() {
@@ -346,7 +345,7 @@ IN_PROC_BROWSER_TEST_P(DictationTest, GetAllSupportedLocales) {
       EXPECT_TRUE(installed);
     } else {
       EXPECT_FALSE(installed) << " for locale " << locale;
-      if (base::Contains(kOfflineNotSupportedLocaleSet, locale)) {
+      if (kOfflineNotSupportedLocaleSet.contains(locale)) {
         EXPECT_FALSE(works_offline) << " for locale " << locale;
       }
     }
@@ -372,7 +371,7 @@ IN_PROC_BROWSER_TEST_P(DictationTest, GetAllSupportedLocales) {
       EXPECT_FALSE(installed);
     } else {
       EXPECT_FALSE(installed) << " for locale " << locale;
-      if (base::Contains(kOfflineNotSupportedLocaleSet, locale)) {
+      if (kOfflineNotSupportedLocaleSet.contains(locale)) {
         EXPECT_FALSE(works_offline) << " for locale " << locale;
       }
     }
@@ -841,10 +840,18 @@ class DictationJaTest : public DictationTestBase {
 
  protected:
   void SetUpOnMainThread() override {
-    locale_util::SwitchLanguage("ja", /*enable_locale_keyboard_layouts=*/true,
-                                /*login_layouts_only*/ false, base::DoNothing(),
-                                GetProfile());
-    g_browser_process->SetApplicationLocale("ja");
+    base::test::TestFuture<const ash::locale_util::LanguageSwitchResult&>
+        future;
+    locale_util::SwitchLanguage(
+        g_browser_process->GetFeatures()->application_locale_storage(), "ja",
+        /*enable_locale_keyboard_layouts=*/true,
+        /*login_layouts_only*/ false, future.GetCallback(), GetProfile());
+    auto result = future.Get();
+    ASSERT_TRUE(result.success);
+    ASSERT_EQ(
+        g_browser_process->GetFeatures()->application_locale_storage()->Get(),
+        "ja");
+
     GetActiveUserPrefs()->SetString(prefs::kAccessibilityDictationLocale, "ja");
 
     DictationTestBase::SetUpOnMainThread();

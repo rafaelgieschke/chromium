@@ -27,7 +27,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/enterprise/util/managed_browser_utils.h"
 #include "chrome/browser/extensions/forced_extensions/force_installed_tracker.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/notifications/system_notification_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/ash/security_token_restriction/security_token_session_restriction_view.h"
@@ -150,7 +149,7 @@ void LoadStoredChallengeResponseSpkiKeysForUser(
     base::flat_set<std::string>* extension_ids) {
   // TODO(crbug.com/1164373) This approach does not work for ephemeral users.
   // Instead, only get the certificate that was actually used on the last login.
-  const base::Value::List known_user_value =
+  const base::ListValue known_user_value =
       user_manager::KnownUser(local_state).GetChallengeResponseKeys(account_id);
   std::vector<DeserializedChallengeResponseKey>
       deserialized_challenge_response_keys;
@@ -162,12 +161,11 @@ void LoadStoredChallengeResponseSpkiKeysForUser(
       continue;
 
     extension_ids->insert(challenge_response_key.extension_id);
-    if (!extension_to_spkis->contains(challenge_response_key.extension_id)) {
-      (*extension_to_spkis)[challenge_response_key.extension_id] = {};
-    }
-    if (!challenge_response_key.public_key_spki_der.empty()) {
-      (*extension_to_spkis)[challenge_response_key.extension_id].push_back(
-          challenge_response_key.public_key_spki_der);
+    if (auto it =
+            extension_to_spkis->try_emplace(challenge_response_key.extension_id)
+                .first;
+        !challenge_response_key.public_key_spki_der.empty()) {
+      it->second.push_back(challenge_response_key.public_key_spki_der);
     }
   }
 }
@@ -254,19 +252,20 @@ void SecurityTokenSessionController::OnCertificatesUpdated(
   if (!observed_extensions_.contains(extension_id))
     return;
 
-  if (extension_to_spkis_[extension_id].empty())
+  auto& expected_spkis = extension_to_spkis_[extension_id];
+  if (expected_spkis.empty()) {
     return;
+  }
 
   bool extension_provides_all_required_certificates = true;
 
   std::vector<std::string> provided_spki_vector;
+  provided_spki_vector.reserve(certificate_infos.size());
   for (auto certificate_info : certificate_infos) {
     provided_spki_vector.emplace_back(
         GetSubjectPublicKeyInfo(*certificate_info.certificate.get()));
   }
-  base::flat_set<std::string> provided_spkis(provided_spki_vector.begin(),
-                                             provided_spki_vector.end());
-  auto& expected_spkis = extension_to_spkis_[extension_id];
+  base::flat_set<std::string> provided_spkis(std::move(provided_spki_vector));
   for (const auto& expected_spki : expected_spkis) {
     if (!provided_spkis.contains(expected_spki)) {
       extension_provides_all_required_certificates = false;
@@ -347,10 +346,10 @@ void SecurityTokenSessionController::RegisterLocalStatePrefs(
 }
 
 // static
-void SecurityTokenSessionController::MaybeDisplayLoginScreenNotification() {
-  PrefService* local_state = g_browser_process->local_state();
+void SecurityTokenSessionController::MaybeDisplayLoginScreenNotification(
+    PrefService& local_state) {
   const PrefService::Preference* scheduled_notification_domain =
-      local_state->FindPreference(
+      local_state.FindPreference(
           prefs::kSecurityTokenSessionNotificationScheduledDomain);
   if (!scheduled_notification_domain ||
       scheduled_notification_domain->IsDefaultValue() ||
@@ -361,7 +360,7 @@ void SecurityTokenSessionController::MaybeDisplayLoginScreenNotification() {
   // Sanitize `scheduled_notification_domain`, as values coming from local state
   // are not trusted.
   std::string domain = scheduled_notification_domain->GetValue()->GetString();
-  local_state->ClearPref(
+  local_state.ClearPref(
       prefs::kSecurityTokenSessionNotificationScheduledDomain);
   std::string sanitized_domain;
   if (!SanitizeDomain(domain, sanitized_domain)) {
@@ -446,7 +445,7 @@ void SecurityTokenSessionController::TriggerAction() {
       AddLockNotification();
       return;
     case Behavior::kLogout:
-      chrome::AttemptExit();
+      session_manager::SessionManager::Get()->RequestSignOut();
       ScheduleLogoutNotification();
       return;
   }

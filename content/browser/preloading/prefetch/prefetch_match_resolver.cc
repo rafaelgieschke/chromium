@@ -9,6 +9,7 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/notreached.h"
 #include "base/timer/timer.h"
+#include "base/trace_event/named_trigger.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/preloading/prefetch/prefetch_container.h"
 #include "content/browser/preloading/prefetch/prefetch_features.h"
@@ -52,6 +53,7 @@ PrefetchMatchResolver::PrefetchMatchResolver(
     PrefetchServiceWorkerState expected_service_worker_state,
     bool is_nav_prerender,
     base::WeakPtr<PrerenderHost> prerender_host,
+    scoped_refptr<PreloadPipelineInfoImpl> preload_pipeline_info,
     Callback callback,
     perfetto::Flow flow)
     : navigation_request_for_metrics_(std::move(navigation_request)),
@@ -62,6 +64,7 @@ PrefetchMatchResolver::PrefetchMatchResolver(
       flow_(std::move(flow)),
       is_nav_prerender_(is_nav_prerender),
       prerender_host_for_metrics_(std::move(prerender_host)),
+      preload_pipeline_info_(std::move(preload_pipeline_info)),
       prefetch_match_metrics_(std::make_unique<PrefetchMatchMetrics>()) {
   switch (expected_service_worker_state_) {
     case PrefetchServiceWorkerState::kAllowed:
@@ -124,10 +127,6 @@ void PrefetchMatchResolver::FindPrefetch(
   })();
 
   auto prerender_host = ([&]() -> base::WeakPtr<PrerenderHost> {
-    if (!PreloadServingMetricsCapsule::IsFeatureEnabled()) {
-      return nullptr;
-    }
-
     PrerenderHostRegistry* prerender_host_registry =
         frame_tree_node->current_frame_host()
             ->delegate()
@@ -136,14 +135,19 @@ void PrefetchMatchResolver::FindPrefetch(
       return nullptr;
     }
 
+    PrerenderHostId prerender_host_id =
+        frame_tree_node->frame_tree().delegate()->GetPrerenderHostId();
     PrerenderHost* prerender_host =
-        prerender_host_registry->FindNonReservedHostById(frame_tree_node_id);
+        prerender_host_registry->FindNonReservedHostById(prerender_host_id);
     if (!prerender_host) {
       return nullptr;
     }
 
     return prerender_host->GetWeakPtr();
   })();
+  scoped_refptr<PreloadPipelineInfoImpl> preload_pipeline_info =
+      prerender_host ? prerender_host->preload_pipeline_info_scoped_refptr()
+                     : nullptr;
 
   TRACE_EVENT_END("loading");
 
@@ -151,8 +155,9 @@ void PrefetchMatchResolver::FindPrefetch(
       std::move(navigation_request), prefetch_service, std::move(navigated_key),
       expected_service_worker_state,
       frame_tree_node->frame_tree().is_prerendering(),
-      std::move(prerender_host), std::move(serving_page_metrics_container),
-      std::move(callback), std::move(flow));
+      std::move(prerender_host), std::move(preload_pipeline_info),
+      std::move(serving_page_metrics_container), std::move(callback),
+      std::move(flow));
 }
 
 // static
@@ -167,8 +172,9 @@ void PrefetchMatchResolver::FindPrefetchForTesting(
   PrefetchMatchResolver::FindPrefetchInternal1(
       /*navigation_request=*/nullptr, prefetch_service,
       std::move(navigated_key), expected_service_worker_state, is_nav_prerender,
-      /*prerender_host=*/nullptr, std::move(serving_page_metrics_container),
-      std::move(callback), perfetto::Flow::ProcessScoped(0));
+      /*prerender_host=*/nullptr, /*preload_pipeline_info=*/nullptr,
+      std::move(serving_page_metrics_container), std::move(callback),
+      perfetto::Flow::ProcessScoped(0));
 }
 
 // static
@@ -179,20 +185,94 @@ void PrefetchMatchResolver::FindPrefetchInternal1(
     PrefetchServiceWorkerState expected_service_worker_state,
     bool is_nav_prerender,
     base::WeakPtr<PrerenderHost> prerender_host,
+    scoped_refptr<PreloadPipelineInfoImpl> preload_pipeline_info,
     base::WeakPtr<PrefetchServingPageMetricsContainer>
         serving_page_metrics_container,
     Callback callback,
     perfetto::Flow flow) {
+  // TODO(crbug.com/342089123): Remove it when we don't need it.
+  if (is_nav_prerender) {
+    base::trace_event::EmitNamedTrigger(
+        "prefetch-matching-start-for-prerender");
+  }
+
   // See the comment of `self_`.
   auto prefetch_match_resolver = base::WrapUnique(new PrefetchMatchResolver(
       std::move(navigation_request), prefetch_service.GetWeakPtr(),
       std::move(navigated_key), expected_service_worker_state, is_nav_prerender,
-      std::move(prerender_host), std::move(callback), std::move(flow)));
+      std::move(prerender_host), std::move(preload_pipeline_info),
+      std::move(callback), std::move(flow)));
   PrefetchMatchResolver& ref = *prefetch_match_resolver.get();
   ref.self_ = std::move(prefetch_match_resolver);
 
   ref.FindPrefetchInternal2(prefetch_service,
                             std::move(serving_page_metrics_container));
+}
+
+std::ostream& operator<<(
+    std::ostream& ostream,
+    PrefetchPotentialCandidateCollectResult collect_result) {
+  switch (collect_result) {
+    case PrefetchPotentialCandidateCollectResult::kUninitialized:
+      return ostream << "kUninitialized";
+    case PrefetchPotentialCandidateCollectResult::kAvailable:
+      return ostream << "kAvailable";
+    case PrefetchPotentialCandidateCollectResult::
+        kUnavailablePrefetchIsNotInPrefetchService:
+      return ostream << "kUnavailablePrefetchIsNotInPrefetchService";
+    case PrefetchPotentialCandidateCollectResult::kUnavailableNotServable:
+      return ostream << "kUnavailableNotServable";
+    case PrefetchPotentialCandidateCollectResult::
+        kUnavailableNavigationIsNotPrerenderAndPrefetchEligibilityNotGotYet:
+      return ostream << "kUnavailableNavigationIsNotPrerenderAndPrefetchEligibi"
+                        "lityNotGotYet";
+    case PrefetchPotentialCandidateCollectResult::kUnavailablePrefetchIsDecoy:
+      return ostream << "kUnavailablePrefetchIsDecoy";
+    case PrefetchPotentialCandidateCollectResult::
+        kUnavailablePrefetchStatusNotUsedCookiesChanged:
+      return ostream << "kUnavailablePrefetchStatusNotUsedCookiesChanged";
+  }
+}
+
+std::ostream& operator<<(
+    std::ostream& ostream,
+    PrefetchPotentialCandidateServingResult serving_result) {
+  switch (serving_result) {
+    case PrefetchPotentialCandidateServingResult::kServed:
+      return ostream << "kServed";
+    case PrefetchPotentialCandidateServingResult::
+        kNotServedOtherCandidatesAreMatched:
+      return ostream << "kNotServedOtherCandidatesAreMatched";
+    case PrefetchPotentialCandidateServingResult::kNotServedCookiesChanged:
+      return ostream << "kNotServedCookiesChanged";
+    case PrefetchPotentialCandidateServingResult::
+        kNotServedPrefetchWillBeDestroyed:
+      return ostream << "kNotServedPrefetchWillBeDestroyed";
+    case PrefetchPotentialCandidateServingResult::kNotServedIneligiblePrefetch:
+      return ostream << "kNotServedIneligiblePrefetch";
+    case PrefetchPotentialCandidateServingResult::
+        kNotServedPrefetchServiceWorkerStateMismatch:
+      return ostream << "kNotServedPrefetchServiceWorkerStateMismatch";
+    case PrefetchPotentialCandidateServingResult::
+        kNotServedDeterminedNVSHeaderMismatch:
+      return ostream << "kNotServedDeterminedNVSHeaderMismatch";
+    case PrefetchPotentialCandidateServingResult::
+        kNotServedBlockUntilHeadTimeout:
+      return ostream << "kNotServedBlockUntilHeadTimeout";
+    case PrefetchPotentialCandidateServingResult::
+        kNotServedOnDeterminedHeadWithShouldBlockUntilHeadReceived:
+      return ostream
+             << "kNotServedOnDeterminedHeadWithShouldBlockUntilHeadReceived";
+    case PrefetchPotentialCandidateServingResult::
+        kNotServedOnDeterminedHeadWithServableExpired:
+      return ostream << "kNotServedOnDeterminedHeadWithServableExpired";
+    case PrefetchPotentialCandidateServingResult::kNotServedIneligibleRedirect:
+      return ostream << "kNotServedIneligibleRedirect";
+    case PrefetchPotentialCandidateServingResult::kNotServedLoadFailed:
+      return ostream << "kNotServedLoadFailed";
+    case PrefetchPotentialCandidateServingResult::kNotServedNoCandidates:
+      return ostream << "kNotServedNoCandidates";
+  }
 }
 
 void PrefetchMatchResolver::FindPrefetchInternal2(
@@ -237,6 +317,11 @@ void PrefetchMatchResolver::FindPrefetchInternal2(
       // not matching.
       CHECK(base::FeatureList::IsEnabled(features::kPrefetchServiceWorker));
       RegisterCandidate(*prefetch_container);
+    } else {
+      DVLOG(1) << "Serving " << *prefetch_container
+               << ": dropped due to ServiceWorkerState ("
+               << prefetch_container->service_worker_state() << " vs. "
+               << expected_service_worker_state_ << ")";
     }
   }
   prefetch_match_metrics_->n_initial_candidates = candidates_.size();
@@ -334,21 +419,18 @@ void PrefetchMatchResolver::RegisterCandidate(
 
   // If the navigation is prerender initial navigation and a prefetch ahead of
   // prerender is a candidate, capture it for `PreloadServingMetrics`.
-  if (PreloadServingMetricsCapsule::IsFeatureEnabled()) {
-    if (prerender_host_for_metrics_ &&
-        prefetch_container.HasPreloadPipelineInfoForMetrics(
-            prerender_host_for_metrics_->preload_pipeline_info())) {
-      // We expect at most one potentially matching prefetch-ahead-of-prerender
-      // to exist for a given prerender. The pipeline normally won't trigger a
-      // new prefetch if one already exists. Furthermore, even if another is
-      // triggered, it should be deduplicated against the existing one as they
-      // would share the same PrefetchKey. Therefore, this check should always
-      // be satisfied.
-      CHECK(!prefetch_ahead_of_prerender_for_metrics_);
+  if (prerender_host_for_metrics_ &&
+      prefetch_container.HasPreloadPipelineInfoForMetrics(
+          prerender_host_for_metrics_->preload_pipeline_info())) {
+    // We expect at most one potentially matching prefetch-ahead-of-prerender
+    // to exist for a given prerender. The pipeline normally won't trigger a
+    // new prefetch if one already exists. Furthermore, even if another is
+    // triggered, it should be deduplicated against the existing one as they
+    // would share the same PrefetchKey. Therefore, this check should always
+    // be satisfied.
+    CHECK(!prefetch_ahead_of_prerender_for_metrics_);
 
-      prefetch_ahead_of_prerender_for_metrics_ =
-          prefetch_container.GetWeakPtr();
-    }
+    prefetch_ahead_of_prerender_for_metrics_ = prefetch_container.GetWeakPtr();
   }
 }
 
@@ -366,7 +448,7 @@ void PrefetchMatchResolver::StartWaitFor(const PrefetchKey& prefetch_key,
 
   // `kServable` -> `kNotServable` is the only possible change during
   // `FindPrefetchInternal()` call.
-  CHECK_EQ(prefetch_container.GetServableState(PrefetchCacheableDuration()),
+  CHECK_EQ(prefetch_container.GetMatchResolverAction().ToServableState(),
            servable_state);
   switch (servable_state) {
     case PrefetchServableState::kServable:
@@ -413,25 +495,26 @@ void PrefetchMatchResolver::UnregisterCandidate(
   CHECK(candidate_data->prefetch_container);
   PrefetchContainer& prefetch_container = *candidate_data->prefetch_container;
 
-  if (PreloadServingMetricsCapsule::IsFeatureEnabled()) {
-    if (&prefetch_container == prefetch_ahead_of_prerender_for_metrics_.get()) {
-      prefetch_match_metrics_
-          ->prefetch_potential_candidate_serving_result_ahead_of_prerender =
-          serving_result;
-      prefetch_match_metrics_->prefetch_container_metrics_ahead_of_prerender =
-          std::make_unique<PrefetchContainerMetrics>(
-              prefetch_container.GetPrefetchContainerMetrics());
-    }
+  DVLOG(1) << "Serving " << prefetch_container
+           << ": Unregistered from PMR: " << serving_result;
 
-    // While `PrefetchMatchResolver` works well with multiple candidates, we
-    // have at most one candidate in almost all cases. So, we record the last
-    // `PrefetchPotentialCandidateServingResult`.
-    //
-    // For more details, see
-    // https://docs.google.com/document/d/1ITMr_qyysUPIMZpLkmpQABwtVseMBduRqxHGZxIJ1R0/edit?resourcekey=0-ccZ-G6JV4WO-1bP4TiNvjQ&tab=t.x99jls7s2xug
-    prefetch_match_metrics_->prefetch_potential_candidate_serving_result_last =
+  if (&prefetch_container == prefetch_ahead_of_prerender_for_metrics_.get()) {
+    prefetch_match_metrics_
+        ->prefetch_potential_candidate_serving_result_ahead_of_prerender =
         serving_result;
+    prefetch_match_metrics_->prefetch_container_metrics_ahead_of_prerender =
+        std::make_unique<PrefetchContainerMetrics>(
+            prefetch_container.GetPrefetchContainerMetrics());
   }
+
+  // While `PrefetchMatchResolver` works well with multiple candidates, we
+  // have at most one candidate in almost all cases. So, we record the last
+  // `PrefetchPotentialCandidateServingResult`.
+  //
+  // For more details, see
+  // https://docs.google.com/document/d/1ITMr_qyysUPIMZpLkmpQABwtVseMBduRqxHGZxIJ1R0/edit?resourcekey=0-ccZ-G6JV4WO-1bP4TiNvjQ&tab=t.x99jls7s2xug
+  prefetch_match_metrics_->prefetch_potential_candidate_serving_result_last =
+      serving_result;
 
   prefetch_container.OnUnregisterCandidate(navigated_key_.url(), is_served,
                                            serving_result, is_nav_prerender_,
@@ -441,14 +524,14 @@ void PrefetchMatchResolver::UnregisterCandidate(
 }
 
 void PrefetchMatchResolver::OnWillBeDestroyed(
-    PrefetchContainer& prefetch_container) {
+    const PrefetchContainer& prefetch_container) {
   MaybeUnblockForUnmatch(prefetch_container,
                          PrefetchPotentialCandidateServingResult::
                              kNotServedPrefetchWillBeDestroyed);
 }
 
 void PrefetchMatchResolver::OnGotInitialEligibility(
-    PrefetchContainer& prefetch_container,
+    const PrefetchContainer& prefetch_container,
     PreloadingEligibility eligibility) {
   CHECK(features::UsePrefetchPrerenderIntegration());
 
@@ -460,7 +543,7 @@ void PrefetchMatchResolver::OnGotInitialEligibility(
 }
 
 void PrefetchMatchResolver::OnDeterminedHead(
-    PrefetchContainer& prefetch_container) {
+    const PrefetchContainer& prefetch_container) {
   CHECK(candidates_.contains(prefetch_container.key()));
   CHECK(!prefetch_container.is_in_dtor());
 
@@ -487,63 +570,61 @@ void PrefetchMatchResolver::OnDeterminedHead(
     return;
   }
 
-  PrefetchServableState servable_state =
-      prefetch_container.GetServableState(PrefetchCacheableDuration());
   PrefetchMatchResolverAction match_resolver_action =
-      prefetch_container.GetMatchResolverAction(PrefetchCacheableDuration());
+      prefetch_container.GetMatchResolverAction();
+  PrefetchServableState servable_state =
+      match_resolver_action.ToServableState();
   switch (servable_state) {
     case PrefetchServableState::kShouldBlockUntilEligibilityGot:
       // All callsites of `PrefetchContainer::OnDeterminedHead()` are
       // `PrefetchStreamingURLLoader`, which implies the prefetch passed
       // eligibility check.
       NOTREACHED();
+    case PrefetchServableState::kShouldBlockUntilHeadReceived:
+      // Previously, this case was hit because the old
+      // `PrefetchContainer::GetServableState()` returned
+      // `PrefetchServableState::kShouldBlockUntilHeadReceived`, because
+      // `OnDeterminedHead()` is called when redirect is judged as ineligible,
+      // with `GetNonRedirectResponseReader()` null. On the other hand, the
+      // match resolver action is `(kDrop, kFailedDeterminedHead)` and the
+      // servable state of it is `kNotServable`.
+      //
+      // So, we expect that this clause is not hit.
+      NOTREACHED();
     case PrefetchServableState::kServable:
       // proceed
       break;
     // Otherwise, `MaybeUnblockForUnmatch()`.
-    case PrefetchServableState::kShouldBlockUntilHeadReceived:
     case PrefetchServableState::kNotServable:
       auto potential_candidate_serving_result = [&]() {
-        switch (servable_state) {
-          case PrefetchServableState::kShouldBlockUntilEligibilityGot:
-          case PrefetchServableState::kServable:
+        switch (match_resolver_action.kind()) {
+          case PrefetchMatchResolverAction::ActionKind::kWait:
+            // Contradicts to `PrefetchServableState::kNotServable`.
             NOTREACHED();
-            // `kShouldBlockUntilHeadReceived` case occurs if a prefetch is
-            // redirected and the redirect is not eligible.
-            //
-            //    PrefetchService::OnGotEligibilityForRedirect()
-            // -> PrefetchStreamingURLLoader::HandleRedirect(kFail)
-            // -> PrefetchContainer::OnDeterminedHead()
-            // -> here
-          case PrefetchServableState::kShouldBlockUntilHeadReceived:
-            return PrefetchPotentialCandidateServingResult::
-                kNotServedOnDeterminedHeadWithShouldBlockUntilHeadReceived;
-          case PrefetchServableState::kNotServable:
-            if (match_resolver_action.kind() ==
-                    PrefetchMatchResolverAction::ActionKind::kMaybeServe &&
-                match_resolver_action.is_expired() == true) {
+          case PrefetchMatchResolverAction::ActionKind::kMaybeServe:
+            if (match_resolver_action.is_expired()) {
               return PrefetchPotentialCandidateServingResult::
                   kNotServedOnDeterminedHeadWithServableExpired;
             } else {
-              CHECK_EQ(match_resolver_action.kind(),
-                       PrefetchMatchResolverAction::ActionKind::kDrop);
-
-              switch (match_resolver_action.prefetch_container_load_state()) {
-                case PrefetchContainer::LoadState::kFailedIneligible:
-                  return PrefetchPotentialCandidateServingResult::
-                      kNotServedIneligibleRedirect;
-                case PrefetchContainer::LoadState::kFailedDeterminedHead:
-                case PrefetchContainer::LoadState::kFailed:
-                  return PrefetchPotentialCandidateServingResult::
-                      kNotServedLoadFailed;
-                case PrefetchContainer::LoadState::kNotStarted:
-                case PrefetchContainer::LoadState::kEligible:
-                case PrefetchContainer::LoadState::kStarted:
-                case PrefetchContainer::LoadState::kDeterminedHead:
-                case PrefetchContainer::LoadState::kCompleted:
-                case PrefetchContainer::LoadState::kFailedHeldback:
-                  NOTREACHED();
-              }
+              // Contradicts to `PrefetchServableState::kNotServable`.
+              NOTREACHED();
+            }
+          case PrefetchMatchResolverAction::ActionKind::kDrop:
+            switch (match_resolver_action.prefetch_container_load_state()) {
+              case PrefetchContainer::LoadState::kFailedIneligible:
+                return PrefetchPotentialCandidateServingResult::
+                    kNotServedIneligibleRedirect;
+              case PrefetchContainer::LoadState::kFailedDeterminedHead:
+              case PrefetchContainer::LoadState::kFailed:
+                return PrefetchPotentialCandidateServingResult::
+                    kNotServedLoadFailed;
+              case PrefetchContainer::LoadState::kNotStarted:
+              case PrefetchContainer::LoadState::kEligible:
+              case PrefetchContainer::LoadState::kStarted:
+              case PrefetchContainer::LoadState::kDeterminedHead:
+              case PrefetchContainer::LoadState::kCompleted:
+              case PrefetchContainer::LoadState::kFailedHeldback:
+                NOTREACHED();
             }
         }
       }();
@@ -575,8 +656,8 @@ void PrefetchMatchResolver::OnDeterminedHead(
       return;
   }
 
-  if (prefetch_container.CreateServingHandle()
-          .HaveDefaultContextCookiesChanged()) {
+  if (prefetch_container.CreateConstServingHandle()
+          ->HaveDefaultContextCookiesChanged()) {
     UnblockForCookiesChanged(prefetch_container.key());
     return;
   }
@@ -598,9 +679,8 @@ void PrefetchMatchResolver::OnDeterminedHead(
 }
 
 void PrefetchMatchResolver::OnPrefetchCompletedOrFailed(
-    PrefetchContainer& prefetch_container,
-    const network::URLLoaderCompletionStatus& completion_status,
-    const std::optional<int>& response_code) {}
+    const PrefetchContainer& prefetch_container,
+    const network::URLLoaderCompletionStatus& completion_status) {}
 
 void PrefetchMatchResolver::OnTimeout(PrefetchKey prefetch_key) {
   // `timeout_timer` is alive, which implies `candidate` is alive.
@@ -640,6 +720,13 @@ void PrefetchMatchResolver::UnblockForMatch(const PrefetchKey& prefetch_key) {
 
   // Postprocess for success case.
 
+  // If this is for a prerender initial navigation, mark its preload pipeline is
+  // using a prefetch. Note that the prefetch may not be the prefetch ahead of
+  // prerender.
+  if (preload_pipeline_info_) {
+    preload_pipeline_info_->MarkPrerenderMatchedWithPrefetch();
+  }
+
   PrefetchServingHandle serving_handle =
       prefetch_container.CreateServingHandle();
 
@@ -653,14 +740,8 @@ void PrefetchMatchResolver::UnblockForMatch(const PrefetchKey& prefetch_key) {
   // So, the below condition is satisfied.
   CHECK(!serving_handle.HaveDefaultContextCookiesChanged());
 
-  if (!serving_handle.HasIsolatedCookieCopyStarted()) {
-    // Basically, we can assume `PrefetchService` is available as waiting
-    // `PrefetchContainer` is owned by it. But in unit tests, we use invalid
-    // frame tree node id and this `prefetch_service` is not available.
-    if (prefetch_service_) {
-      prefetch_service_->CopyIsolatedCookies(serving_handle);
-    }
-  }
+  serving_handle.CopyIsolatedCookies();
+
   CHECK(serving_handle);
 
   TRACE_EVENT_END("loading");
@@ -679,6 +760,9 @@ void PrefetchMatchResolver::UnblockForNoCandidates() {
           navigated_key_);
     }
   }
+
+  DVLOG(1) << "Serving PrefetchContainer: No candidate at PMR for "
+           << navigated_key_;
 
   UnblockInternal({});
 }
@@ -733,26 +817,23 @@ void PrefetchMatchResolver::UnblockInternal(
   // been unblocking.
   CHECK_EQ(candidates_.size(), 0u);
 
-  if (PreloadServingMetricsCapsule::IsFeatureEnabled()) {
-    PrefetchContainer* prefetch_container =
-        serving_handle.GetPrefetchContainer();
-    prefetch_match_metrics_->prefetch_container_metrics =
-        prefetch_container
-            ? std::make_unique<PrefetchContainerMetrics>(
-                  prefetch_container->GetPrefetchContainerMetrics())
-            : std::unique_ptr<PrefetchContainerMetrics>(nullptr);
+  PrefetchContainer* prefetch_container = serving_handle.GetPrefetchContainer();
+  prefetch_match_metrics_->prefetch_container_metrics =
+      prefetch_container
+          ? std::make_unique<PrefetchContainerMetrics>(
+                prefetch_container->GetPrefetchContainerMetrics())
+          : std::unique_ptr<PrefetchContainerMetrics>(nullptr);
 
-    AttachPrefetchMatchPrerenderDebugMetrics();
+  AttachPrefetchMatchPrerenderDebugMetrics();
 
-    prefetch_match_metrics_->time_match_end = base::TimeTicks::Now();
+  prefetch_match_metrics_->time_match_end = base::TimeTicks::Now();
 
-    if (navigation_request_for_metrics_) {
-      auto& preload_serving_metrics_holder =
-          *PreloadServingMetricsHolder::GetOrCreateForNavigationHandle(
-              *navigation_request_for_metrics_.get());
-      preload_serving_metrics_holder.AddPrefetchMatchMetrics(
-          std::move(prefetch_match_metrics_));
-    }
+  if (navigation_request_for_metrics_) {
+    auto& preload_serving_metrics_holder =
+        *PreloadServingMetricsHolder::GetOrCreateForNavigationHandle(
+            *navigation_request_for_metrics_.get());
+    preload_serving_metrics_holder.AddPrefetchMatchMetrics(
+        std::move(prefetch_match_metrics_));
   }
 
   auto callback = std::move(callback_);
@@ -766,10 +847,6 @@ void PrefetchMatchResolver::UnblockInternal(
 }
 
 void PrefetchMatchResolver::AttachPrefetchMatchPrerenderDebugMetrics() {
-  if (!UsePrefetchScheduler()) {
-    return;
-  }
-
   if (!prerender_host_for_metrics_) {
     return;
   }
@@ -792,14 +869,38 @@ void PrefetchMatchResolver::AttachPrefetchMatchPrerenderDebugMetrics() {
       return;
     }
 
+    // Prevent mysterious crash of `GetPrefetchStatus()`
+    //
+    // To reach here and `GetPrefetchStatus()` crash, the following conditions
+    // must be satisfied:
+    //
+    // - The navigation is prerender.
+    // - The corresponding prefetch ahead of prerender is triggered and exists
+    //   in `PrefetchService`. (It implies that
+    //   `features::kPrerender2FallbackPrefetchSpecRules` is enabled.)
+    // - The prefetch hasn't passed the initial eligibility check.
+    //   (`PrefetchContainer::prefetch_status_` in null.)
+    //
+    // On the other hand, if `features::kPrerender2FallbackPrefetchSpecRules` is
+    // enabled, `PrefetchMatchResolver` waits for the eligibility check. So,
+    // basically we don't expect the crash happens.
+    //
+    // To prevent crash, we check `HasPrefetchStatus()` and ignore the false
+    // case.
+    //
+    // TODO(crbug.com/479983093): Fix the root cause.
+    if (!prefetch_container->HasPrefetchStatus()) {
+      return;
+    }
+
     metrics->prefetch_ahead_of_prerender_debug_metrics =
         std::make_unique<PrefetchMatchPrefetchAheadOfPrerenderDebugMetrics>();
     metrics->prefetch_ahead_of_prerender_debug_metrics->prefetch_status =
         prefetch_container->GetPrefetchStatus();
     metrics->prefetch_ahead_of_prerender_debug_metrics->servable_state =
-        prefetch_container->GetServableState(PrefetchCacheableDuration());
+        prefetch_container->GetMatchResolverAction().ToServableState();
     metrics->prefetch_ahead_of_prerender_debug_metrics->match_resolver_action =
-        prefetch_container->GetMatchResolverAction(PrefetchCacheableDuration());
+        prefetch_container->GetMatchResolverAction();
     metrics->prefetch_ahead_of_prerender_debug_metrics->queue_size =
         prefetch_service_->GetPrefetchSchedulerForMetrics()
             .GetQueueSizeForMetrics();
@@ -808,6 +909,10 @@ void PrefetchMatchResolver::AttachPrefetchMatchPrerenderDebugMetrics() {
             *prefetch_container);
     metrics->prefetch_ahead_of_prerender_debug_metrics->collect_result =
         collect_result_ahead_of_prerender_for_metrics_;
+    metrics->prefetch_ahead_of_prerender_debug_metrics->prefetch_key_navigated =
+        navigated_key_;
+    metrics->prefetch_ahead_of_prerender_debug_metrics
+        ->prefetch_key_ahead_of_prerender = prefetch_container->key();
   }();
 
   prefetch_match_metrics_->prerender_debug_metrics = std::move(metrics);

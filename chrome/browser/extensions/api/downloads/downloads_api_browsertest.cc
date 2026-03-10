@@ -193,12 +193,12 @@ class DownloadsEventsListener : public EventRouter::TestObserver {
     // [ { "filename": { "current": "content://...." } } ].
     void MaybeCacheFilename() {
       CHECK(args_.is_list());
-      const base::Value::List& arg_list = args_.GetList();
+      const base::ListValue& arg_list = args_.GetList();
       if (arg_list.empty() || !arg_list[0].is_dict()) {
         return;
       }
-      const base::Value::Dict& main_dict = arg_list[0].GetDict();
-      const base::Value::Dict* filename_dict = main_dict.FindDict("filename");
+      const base::DictValue& main_dict = arg_list[0].GetDict();
+      const base::DictValue* filename_dict = main_dict.FindDict("filename");
       if (!filename_dict) {
         return;
       }
@@ -234,8 +234,8 @@ class DownloadsEventsListener : public EventRouter::TestObserver {
           return false;
         }
 
-        const base::Value::Dict& left_dict = left_value.GetDict();
-        const base::Value::Dict& right_dict = right_value.GetDict();
+        const base::DictValue& left_dict = left_value.GetDict();
+        const base::DictValue& right_dict = right_value.GetDict();
         // Expect that all keys present in both dictionaries are equal. If a key
         // is only present in one of the dictionaries, ignore it. This allows us
         // to verify the properties we care about in the test without needing to
@@ -274,8 +274,9 @@ class DownloadsEventsListener : public EventRouter::TestObserver {
   void OnWillDispatchEvent(const extensions::Event& event) override {
     // TestObserver receives notifications for all events but only needs to
     // check download events.
-    if (!base::StartsWith(event.event_name, "downloads"))
+    if (!base::StartsWith(event.event_name, "downloads")) {
       return;
+    }
 
     Event* new_event = new Event(
         Profile::FromBrowserContext(event.restrict_to_browser_context),
@@ -387,7 +388,7 @@ class DownloadOpenObserver : public download::DownloadItem::Observer {
   base::ScopedObservation<download::DownloadItem,
                           download::DownloadItem::Observer>
       open_observation_{this};
-  raw_ptr<download::DownloadItem, DanglingUntriaged> item_;
+  raw_ptr<download::DownloadItem> item_;
   base::OnceClosure completion_closure_;
 };
 
@@ -493,8 +494,9 @@ class DownloadExtensionTest : public ExtensionApiTest {
   void GoOnTheRecord() {
     current_browser_ = browser_window_interface();
     current_profile_ = profile();
-    if (events_listener_.get())
+    if (events_listener_.get()) {
       events_listener_->UpdateProfile(current_profile());
+    }
   }
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
@@ -520,8 +522,9 @@ class DownloadExtensionTest : public ExtensionApiTest {
                                                false);
     current_browser_ = incognito_browser_;
     current_profile_ = incognito_profile_;
-    if (events_listener_.get())
+    if (events_listener_.get()) {
       events_listener_->UpdateProfile(current_profile());
+    }
   }
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
@@ -532,8 +535,9 @@ class DownloadExtensionTest : public ExtensionApiTest {
   bool WaitForInterruption(DownloadItem* item,
                            download::DownloadInterruptReason expected_error,
                            const std::string& on_created_event) {
-    if (!WaitFor(downloads::OnCreated::kEventName, on_created_event))
+    if (!WaitFor(downloads::OnCreated::kEventName, on_created_event)) {
       return false;
+    }
     // Now, onCreated is always fired before interruption.
     return WaitFor(
         downloads::OnChanged::kEventName,
@@ -649,8 +653,9 @@ class DownloadExtensionTest : public ExtensionApiTest {
 
     EXPECT_EQ(0, manager->BlockingShutdownCount());
     EXPECT_EQ(0, manager->InProgressCount());
-    if (manager->InProgressCount() != 0)
+    if (manager->InProgressCount() != 0) {
       return nullptr;
+    }
     return CreateSlowTestDownload(first_download_.get(), kFirstDownloadUrl);
   }
 
@@ -661,8 +666,9 @@ class DownloadExtensionTest : public ExtensionApiTest {
   DownloadItem* CreateSlowTestDownload(
       net::test_server::ControllableHttpResponse* response,
       const std::string& path) {
-    if (!embedded_test_server()->Started())
+    if (!embedded_test_server()->Started()) {
       StartEmbeddedTestServer();
+    }
     std::unique_ptr<content::DownloadTestObserver> observer(
         CreateInProgressDownloadObserver(1));
     DownloadManager* manager = GetCurrentManager();
@@ -963,8 +969,9 @@ class ScopedItemVectorCanceller {
   ~ScopedItemVectorCanceller() {
     for (DownloadManager::DownloadVector::const_iterator item = items_->begin();
          item != items_->end(); ++item) {
-      if ((*item)->GetState() == DownloadItem::IN_PROGRESS)
+      if ((*item)->GetState() == DownloadItem::IN_PROGRESS) {
         (*item)->Cancel(true);
+      }
       content::DownloadUpdatedObserver observer(
           (*item), base::BindRepeating(&ItemNotInProgress));
       observer.WaitForEvent();
@@ -1030,7 +1037,7 @@ class HTML5FileWriter {
 }  // namespace
 
 // Tests that Number/double properties in query are parsed correctly.
-// Regression test for https://crbug.com/617435.
+// Regression test for https://crbug.com/41257260.
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest, ParseSearchQuery) {
   ASSERT_TRUE(
       RunFunction(new DownloadsSearchFunction, "[{\"totalBytesLess\":1}]"));
@@ -1082,7 +1089,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest, DownloadExtensionTest_Open) {
 
   open_function = base::MakeRefCounted<DownloadsOpenFunction>();
   open_function->set_user_gesture(true);
-  base::Value::List args_list;
+  base::ListValue args_list;
   args_list.Append(static_cast<int>(download_item->GetId()));
   open_function->SetArgs(std::move(args_list));
   open_function->set_extension(extension());
@@ -1117,7 +1124,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   EXPECT_TRUE(download_item->IsPaused());
 
   // Calling removeFile on a non-active download yields kNotComplete
-  // and should not crash. http://crbug.com/319984
+  // and should not crash. http://crbug.com/41074456
   error = RunFunctionAndReturnError(
       base::MakeRefCounted<DownloadsRemoveFileFunction>(),
       DownloadItemIdAsArgList(download_item));
@@ -1190,7 +1197,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   ASSERT_TRUE(result);
   download_item = nullptr;
   ASSERT_TRUE(result->is_list());
-  const base::Value::List& result_list = result->GetList();
+  const base::ListValue& result_list = result->GetList();
   ASSERT_EQ(1UL, result_list.size());
   ASSERT_TRUE(result_list[0].is_int());
   EXPECT_EQ(id, result_list[0].GetInt());
@@ -1548,7 +1555,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
   // no sorters, DownloadQuery does not call sort(), so the order of the results
   // depends on the order of the items in DownloadManagerImpl::downloads_,
   // which is unspecified and differs between libc++ and libstdc++.
-  // http://crbug.com/365334
+  // http://crbug.com/40361797
 }
 
 // Test the |danger| option for search().
@@ -1689,7 +1696,7 @@ IN_PROC_BROWSER_TEST_F(
   ASSERT_TRUE(result_value->is_list());
   ASSERT_EQ(2UL, result_value->GetList().size());
   {
-    const base::Value::Dict& result_dict = result_value->GetList()[0].GetDict();
+    const base::DictValue& result_dict = result_value->GetList()[0].GetDict();
     const std::string* filename = result_dict.FindString("filename");
     ASSERT_TRUE(filename);
     std::optional<bool> is_incognito = result_dict.FindBool("incognito");
@@ -1699,7 +1706,7 @@ IN_PROC_BROWSER_TEST_F(
     EXPECT_FALSE(is_incognito.value());
   }
   {
-    const base::Value::Dict& result_dict = result_value->GetList()[1].GetDict();
+    const base::DictValue& result_dict = result_value->GetList()[1].GetDict();
     const std::string* filename = result_dict.FindString("filename");
     ASSERT_TRUE(filename);
     std::optional<bool> is_incognito = result_dict.FindBool("incognito");
@@ -1718,7 +1725,7 @@ IN_PROC_BROWSER_TEST_F(
   ASSERT_TRUE(result_value->is_list());
   ASSERT_EQ(1UL, result_value->GetList().size());
   {
-    const base::Value::Dict& result_dict = result_value->GetList()[0].GetDict();
+    const base::DictValue& result_dict = result_value->GetList()[0].GetDict();
     const std::string* filename = result_dict.FindString("filename");
     ASSERT_TRUE(filename);
     EXPECT_TRUE(on_item->GetTargetFilePath() ==
@@ -3128,7 +3135,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
 #endif
 }
 
-// Disabled due to cross-platform flakes; http://crbug.com/370531.
+// Disabled due to cross-platform flakes; http://crbug.com/41105685.
 IN_PROC_BROWSER_TEST_F(
     DownloadExtensionTest,
     DISABLED_DownloadExtensionTest_OnDeterminingFilename_Timeout) {
@@ -3266,7 +3273,7 @@ IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
 }
 
 // Tests downloadsInternal.determineFilename.
-// Regression test for https://crbug.com/815362.
+// Regression test for https://crbug.com/40564481.
 IN_PROC_BROWSER_TEST_F(DownloadExtensionTest,
                        DownloadsInternalDetermineFilename) {
   GoOnTheRecord();

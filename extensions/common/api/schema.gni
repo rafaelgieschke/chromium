@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/chromeos/ui_mode.gni")
+import("//components/guest_view/buildflags/buildflags.gni")
 import("//extensions/buildflags/buildflags.gni")
 
 # APIs and features included in both normal desktop builds and the experimental
@@ -10,27 +11,27 @@ import("//extensions/buildflags/buildflags.gni")
 # TODO(https://crbug.com/356905053): Continue moving more here.
 extensions_api_schema_files_ = [
   "alarms.webidl",
-  "declarative_net_request.idl",
+  "declarative_net_request.webidl",
   "dns.webidl",
   "events.json",
   "extension_types.json",
   "file_handlers.webidl",
-  "icon_variants.idl",
   "i18n.json",
   "idle.json",
   "management.json",
   "metrics_private.json",
-  "offscreen.idl",
-  "power.idl",
+  "offscreen.webidl",
+  "power.webidl",
   "protocol_handlers.webidl",
   "runtime.json",
   "storage.json",
   "system_cpu.webidl",
+  "system_display.webidl",
   "system_memory.webidl",
   "system_network.webidl",
   "test.json",
   "types.json",
-  "user_scripts.idl",
+  "user_scripts.webidl",
   "web_request.json",
 ]
 
@@ -39,7 +40,7 @@ extensions_api_schema_files_ = [
 # parsing.
 extensions_types_only_schema_files_ = [
   "chrome_url_overrides.webidl",
-  "content_scripts.idl",
+  "content_scripts.webidl",
   "cross_origin_isolation.webidl",
   "extensions_manifest_types.json",
   "incognito.json",
@@ -50,6 +51,15 @@ extensions_types_only_schema_files_ = [
   "web_accessible_resources.webidl",
 ]
 
+if (enable_guest_view) {
+  extensions_api_schema_files_ += [
+    "extension_options_internal.webidl",
+    "guest_view_internal.json",
+    "icon_variants.idl",
+    "web_view_internal.json",
+  ]
+}
+
 # APIs that are not currently supported on the experimental desktop-android.
 if (enable_extensions) {
   extensions_api_schema_files_ += [
@@ -58,43 +68,39 @@ if (enable_extensions) {
     "app_view_guest_internal.json",
     "app_window.idl",
     "audio.webidl",
-    "automation_internal.idl",
+    "automation_internal.webidl",
     "automation.idl",
     "bluetooth_low_energy.webidl",
-    "bluetooth_private.idl",
+    "bluetooth_private.webidl",
     "bluetooth_socket.webidl",
     "bluetooth.webidl",
     "cec_private.webidl",
     "clipboard.webidl",
-    "extension_options_internal.webidl",
-    "feedback_private.idl",
+    "feedback_private.webidl",
     "file_system.idl",
-    "guest_view_internal.json",
     "hid.idl",
     "mime_handler_private.idl",
     "mime_handler_view_guest_internal.json",
-    "mojo_private.idl",
-    "networking_private.idl",
-    "printer_provider_internal.idl",
-    "printer_provider.idl",
-    "scripts_internal.idl",
-    "serial.idl",
+    "mojo_private.webidl",
+    "networking_private.webidl",
+    "printer_provider_internal.webidl",
+    "printer_provider.webidl",
+    "scripts_internal.webidl",
     "socket.idl",
     "sockets_tcp_server.idl",
     "sockets_tcp.idl",
     "sockets_udp.idl",
-    "system_display.webidl",
     "system_storage.webidl",
     "usb.webidl",
     "virtual_keyboard_private.json",
     "virtual_keyboard.webidl",
-    "web_view_internal.json",
   ]
 
   if (is_chromeos) {
     extensions_api_schema_files_ += [
       "diagnostics.webidl",
-      "media_perception_private.idl",
+      "media_perception_private.webidl",
+      "serial.webidl",
       "webcam_private.webidl",
     ]
   }
@@ -107,8 +113,7 @@ if (enable_extensions) {
 if (enable_desktop_android_extensions) {
   extensions_types_only_schema_files_ += [
     "clipboard.webidl",
-    "scripts_internal.idl",
-    "system_display.webidl",
+    "scripts_internal.webidl",
     "usb.webidl",
     "virtual_keyboard_private.json",
     "virtual_keyboard.webidl",

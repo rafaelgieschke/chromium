@@ -10,6 +10,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "components/viz/common/resources/shared_image_format.h"
 #include "media/base/video_transformation.h"
+#include "third_party/blink/renderer/platform/graphics/canvas_snapshot_provider.h"
 #include "third_party/blink/renderer/platform/graphics/image_orientation.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/skia/include/core/SkAlphaType.h"
@@ -34,7 +35,6 @@ class PaintFlags;
 }  // namespace cc
 
 namespace blink {
-class CanvasSnapshotProvider;
 class StaticBitmapImage;
 
 // Converts a media orientation into a blink one or vice versa.
@@ -48,28 +48,57 @@ ImageOrientationToVideoTransformation(ImageOrientationEnum orientation);
 // `snapshot_provider` is given to CreateImageFromVideoFrame().
 PLATFORM_EXPORT bool WillCreateAcceleratedImagesFromVideoFrame();
 
-// Returns a StaticBitmapImage for the given frame. Accelerated images will be
-// preferred if possible. `snapshot_provider` must be non-null and should have a
-// size equal to frame->natural_size() and color space equal to
-// frame->CompatRGBColorSpace().
+// Returns an accelerated StaticBitmapImage for the given frame.
+// `snapshot_provider` should have a size equal to frame->natural_size() and
+// color space equal to frame->CompatRGBColorSpace().
 //
 // `video_renderer` may optionally be provided in cases where the same frame may
 // end up repeatedly converted.
 //
-// If `prefer_tagged_orientation` is true, CreateImageFromVideoFrame() will just
-// tag the StaticBitmapImage with the correct orientation ("soft flip") instead
-// of drawing the frame with the correct orientation ("hard flip").
+// If `prefer_tagged_orientation` is true, the method will just tag the
+// StaticBitmapImage with the correct orientation ("soft flip") instead of
+// drawing the frame with the correct orientation ("hard flip").
 //
 // If `reinterpret_video_as_srgb` true, then the video will be reinterpreted as
 // being originally having been in sRGB.
 //
 // Returns nullptr if a StaticBitmapImage can't be created.
-PLATFORM_EXPORT scoped_refptr<StaticBitmapImage> CreateImageFromVideoFrame(
+PLATFORM_EXPORT scoped_refptr<StaticBitmapImage>
+CreateAcceleratedImageFromVideoFrame(
     scoped_refptr<media::VideoFrame> frame,
-    CanvasSnapshotProvider* snapshot_provider,
+    CanvasNon2DResourceProviderSharedImage* snapshot_provider,
     media::PaintCanvasVideoRenderer* video_renderer = nullptr,
     bool prefer_tagged_orientation = true,
     bool reinterpret_video_as_srgb = false);
+
+// Returns an unaccelerated StaticBitmapImage for the given frame.
+//
+// `video_renderer` may optionally be provided in cases where the same frame may
+// end up repeatedly converted.
+//
+// If `prefer_tagged_orientation` is true, the method will just tag the
+// StaticBitmapImage with the correct orientation ("soft flip") instead of
+// drawing the frame with the correct orientation ("hard flip").
+//
+// If `reinterpret_video_as_srgb` true, then the video will be reinterpreted as
+// being originally having been in sRGB.
+//
+// The client may optionally provide a cached SkSurface for the software draw to
+// occur into; if not provided, the draw will create a new SkSurface to draw
+// into.
+//
+// Returns nullptr if a StaticBitmapImage can't be created.
+PLATFORM_EXPORT scoped_refptr<StaticBitmapImage>
+CreateUnacceleratedImageFromVideoFrame(
+    scoped_refptr<media::VideoFrame> frame,
+    const CanvasSnapshotProvider::Info& draw_info,
+    sk_sp<SkSurface> cached_draw_surface,
+    media::PaintCanvasVideoRenderer* video_renderer = nullptr,
+    bool prefer_tagged_orientation = true,
+    bool reinterpret_video_as_srgb = false);
+
+PLATFORM_EXPORT bool ShouldCreateAcceleratedImages(
+    viz::RasterContextProvider* raster_context_provider);
 
 PLATFORM_EXPORT void DrawVideoFrameIntoCanvas(
     scoped_refptr<media::VideoFrame> frame,
@@ -81,17 +110,22 @@ PLATFORM_EXPORT void DrawVideoFrameIntoCanvas(
 PLATFORM_EXPORT scoped_refptr<viz::RasterContextProvider>
 GetRasterContextProvider();
 
-// Creates a CanvasSnapshotProvider which is appropriate for drawing VideoFrame
-// objects into. Some callers to CreateImageFromVideoFrame() may choose to cache
-// their snapshot providers. If `raster_context_provider` is null a software
-// snapshot provider will be returned.
-PLATFORM_EXPORT std::unique_ptr<CanvasSnapshotProvider>
-CreateSnapshotProviderForVideoFrame(
-    gfx::Size size,
-    viz::SharedImageFormat format,
-    SkAlphaType alpha_type,
-    const gfx::ColorSpace& color_space,
-    viz::RasterContextProvider* raster_context_provider);
+// Helper function for creating a CanvasSnapshotProvider from a VideoFrame. The
+// returned info structure will be filled as follows:
+//   alpha_type: kOpaque_SkAlphaType for opaque frames, kPremul_SkAlphaType
+//   otherwise.
+//
+//   color_space: If `reinterpret_video_as_srgb` was true, then this
+//   is sRGB, otherwise frame.CompatRGBColorSpace().
+//
+//   format: Always GetN32FormatForCanvas() at the time of writing.
+//
+//   size: Set to frame.natural_size() unless `scaled_size` is provided.
+PLATFORM_EXPORT CanvasSnapshotProvider::Info
+CreateSnapshotProviderInfoForVideoFrame(
+    const media::VideoFrame& frame,
+    std::optional<gfx::Size> scaled_size = std::nullopt,
+    bool reinterpret_video_as_srgb = false);
 
 }  // namespace blink
 

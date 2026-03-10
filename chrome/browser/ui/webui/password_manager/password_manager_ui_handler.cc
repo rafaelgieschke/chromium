@@ -10,8 +10,8 @@
 #include "chrome/browser/extensions/api/passwords_private/passwords_private_delegate.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/sync_service_factory.h"
-#include "chrome/browser/ui/webui/password_manager/password_manager.mojom-forward.h"
 #include "chrome/browser/ui/webui/password_manager/password_manager.mojom.h"
+#include "chrome/common/extensions/api/passwords_private.h"
 #include "components/password_manager/core/browser/password_ui_utils.h"
 #include "components/password_manager/core/browser/ui/actor_login_permission.h"
 #include "components/password_manager/core/browser/ui/credential_ui_entry.h"
@@ -76,7 +76,7 @@ void PasswordManagerUIHandler::GetActorLoginPermissions(
 void PasswordManagerUIHandler::RevokeActorLoginPermission(
     password_manager::mojom::ActorLoginPermissionPtr site) {
   GetSavedPasswordsPresenter()->RevokeActorLoginPermission(
-      base::UTF8ToUTF16(site->username), site->domain_info->signon_realm);
+      site->domain_info->signon_realm);
 }
 
 void PasswordManagerUIHandler::ChangePasswordManagerPin(
@@ -100,9 +100,9 @@ PasswordManagerUIHandler::GetSavedPasswordsPresenter() {
   return passwords_private_delegate_->GetSavedPasswordsPresenter();
 }
 
-void PasswordManagerUIHandler::IsAccountStorageEnabled(
-    IsAccountStorageEnabledCallback callback) {
-  bool result = passwords_private_delegate_->IsAccountStorageEnabled();
+void PasswordManagerUIHandler::IsAccountStorageActive(
+    IsAccountStorageActiveCallback callback) {
+  bool result = passwords_private_delegate_->IsAccountStorageActive();
   std::move(callback).Run(result);
 }
 
@@ -120,4 +120,9 @@ void PasswordManagerUIHandler::SwitchBiometricAuthBeforeFillingState(
     SwitchBiometricAuthBeforeFillingStateCallback callback) {
   passwords_private_delegate_->SwitchBiometricAuthBeforeFillingState(
       web_contents_, std::move(callback));
+}
+
+void PasswordManagerUIHandler::StartPasswordChange(int credential_id) {
+  passwords_private_delegate_->StartPasswordChange(credential_id,
+                                                   web_contents_);
 }

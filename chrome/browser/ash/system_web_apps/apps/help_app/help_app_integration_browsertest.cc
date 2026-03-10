@@ -9,6 +9,7 @@
 
 #include "ash/constants/ash_features.h"
 #include "ash/constants/ash_switches.h"
+#include "ash/constants/webui_url_constants.h"
 #include "ash/shell.h"
 #include "ash/webui/help_app_ui/buildflags.h"
 #include "ash/webui/help_app_ui/help_app_manager.h"
@@ -27,10 +28,8 @@
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
 #include "base/values.h"
-#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/apps/app_service/app_install/app_install_service_ash.h"
-#include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/apps/app_service/launch_utils.h"
@@ -57,13 +56,13 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/pref_test_utils.h"
+#include "components/services/app_service/public/cpp/app_launch_params.h"
 #include "components/services/app_service/public/cpp/app_launch_util.h"
 #include "components/services/app_service/public/cpp/package_id.h"
 #include "components/supervised_user/core/common/pref_names.h"
@@ -105,8 +104,7 @@ class HelpAppIntegrationTest : public SystemWebAppIntegrationTest {
             net::EmbeddedTestServer::TYPE_HTTPS)} {
     scoped_feature_list_.InitWithFeatures(
         {chromeos::features::kUploadOfficeToCloud,
-         features::kReleaseNotesNotificationAllChannels,
-         features::kHelpAppLauncherSearch},
+         features::kReleaseNotesNotificationAllChannels},
         {features::kHelpAppOpensInsteadOfReleaseNotesNotification});
     https_server()->AddDefaultHandlers(GetChromeTestDataDir());
   }
@@ -399,14 +397,16 @@ IN_PROC_BROWSER_TEST_P(HelpAppIntegrationTest,
                 prefs::kReleaseNotesSuggestionChipTimesLeftToShow),
             0);
 
-  Browser* browser = chrome::FindBrowserWithTab(web_contents);
+  BrowserWindowInterface* help_app_browser =
+      chrome::FindBrowserWithTab(web_contents);
+  ui_test_utils::BrowserDestroyedObserver observer(help_app_browser);
   // Close the web contents we just created to simulate what would happen in
   // production with a background page. This helps us ensure that our
   // notification shows up and can be interacted with even after the web ui
   // that triggered it has died.
   web_contents->Close();
   // Wait until the browser with the web contents closes.
-  ui_test_utils::WaitForBrowserToClose(browser);
+  observer.Wait();
   // Assert that the notification really is there.
   auto notifications = display_service->GetDisplayedNotificationsForType(
       NotificationHandler::Type::TRANSIENT);
@@ -900,8 +900,9 @@ IN_PROC_BROWSER_TEST_P(HelpAppIntegrationTest,
 
     // The Help app renderer process crashed. Close the browser window so that
     // we can relaunch it in another browser window.
+    ui_test_utils::BrowserDestroyedObserver observer(help_app_browser);
     chrome::CloseWindow(help_app_browser);
-    ui_test_utils::WaitForBrowserToClose(help_app_browser);
+    observer.Wait();
 
     // There should only be 1 regular browser.
     EXPECT_EQ(1u, chrome::GetTotalBrowserCount());
@@ -931,8 +932,7 @@ IN_PROC_BROWSER_TEST_P(HelpAppIntegrationTest, HelpAppV2CanOpenMS365Setup) {
                 SandboxedWebUiAppTestBase::GetAppFrame(web_contents), kScript));
 
   ash::SystemWebDialogDelegate* dialog =
-      ash::SystemWebDialogDelegate::FindInstance(
-          chrome::kChromeUICloudUploadURL);
+      ash::SystemWebDialogDelegate::FindInstance(ash::kChromeUICloudUploadURL);
   EXPECT_TRUE(dialog);
 }
 

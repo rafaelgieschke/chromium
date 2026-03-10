@@ -12,6 +12,8 @@
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_cookie_access_policy.h"
 #include "android_webview/browser/cookie_manager.h"
+#include "android_webview/common/aw_features.h"
+#include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -24,7 +26,7 @@
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "net/cookies/parsed_cookie.h"
 #include "net/storage_access_api/status.h"
-#include "services/network/public/mojom/restricted_cookie_manager.mojom-forward.h"
+#include "services/network/public/mojom/restricted_cookie_manager.mojom-shared.h"
 #include "url/gurl.h"
 
 namespace android_webview {
@@ -137,12 +139,11 @@ void AwProxyingRestrictedCookieManager::GetAllForUrl(
 }
 
 void AwProxyingRestrictedCookieManager::SetCanonicalCookie(
-    const net::CanonicalCookie& cookie,
+    network::mojom::RestrictedCanonicalCookieParamsPtr cookie_params,
     const GURL& url,
     const net::SiteForCookies& site_for_cookies,
     const url::Origin& top_frame_origin,
     net::StorageAccessApiStatus storage_access_api_status,
-    net::CookieInclusionStatus status,
     bool is_ad_tagged,
     bool apply_devtools_overrides,
     SetCanonicalCookieCallback callback) {
@@ -155,11 +156,13 @@ void AwProxyingRestrictedCookieManager::SetCanonicalCookie(
     return;
   }
 
-  if (cookie.IsPartitioned() || cookieState == PrivacySetting::kStateAllowed) {
+  if (cookie_params->partitioned ==
+          network::mojom::RestrictedCookiePartition::PARTITIONED ||
+      cookieState == PrivacySetting::kStateAllowed) {
     underlying_restricted_cookie_manager_->SetCanonicalCookie(
-        cookie, url, site_for_cookies, top_frame_origin,
-        storage_access_api_status, status, is_ad_tagged,
-        apply_devtools_overrides, std::move(callback));
+        std::move(cookie_params), url, site_for_cookies, top_frame_origin,
+        storage_access_api_status, is_ad_tagged, apply_devtools_overrides,
+        std::move(callback));
   } else {
     std::move(callback).Run(false);
   }
@@ -218,10 +221,15 @@ void AwProxyingRestrictedCookieManager::SetCookieFromString(
   if (cookieState == PrivacySetting::kStateAllowed ||
       (parsed_cookie.IsValid() && parsed_cookie.IsPartitioned() &&
        parsed_cookie.IsSecure())) {
+    // When using latched cookie policy, enable shared memory versioning.
+    const bool use_shared_memory =
+        base::FeatureList::IsEnabled(features::kWebViewLatchedCookiePolicy) &&
+        get_version_shared_memory;
+
     underlying_restricted_cookie_manager_->SetCookieFromString(
         url, site_for_cookies, top_frame_origin, storage_access_api_status,
-        get_version_shared_memory, is_ad_tagged, apply_devtools_overrides,
-        cookie, std::move(callback));
+        use_shared_memory, is_ad_tagged, apply_devtools_overrides, cookie,
+        std::move(callback));
   } else {
     std::move(callback).Run(/*response=*/nullptr);
   }
@@ -252,15 +260,19 @@ void AwProxyingRestrictedCookieManager::GetCookiesString(
       force_disable_third_party_cookies ||
       cookieState == PrivacySetting::kPartitionedStateAllowedOnly;
 
-  // In Android Webview the access to cookies can change dynamically. For
-  // now never request a shared memory region so that a full IPC is issued
-  // every time. This prevents a client retaining access to the cookie value
-  // past the moment where it was denied. (crbug.com/1393050): Implement a
-  // strategy so that the shared memory access can be revoked from here.
+  // When using latched cookie policy, enable shared memory versioning since
+  // the policy won't change during this RCM's lifetime. When the feature is
+  // disabled, never request shared memory so that a full IPC is issued every
+  // time, preventing clients from retaining access past the moment where access
+  // was denied. See crbug.com/1393050 for original issue.
+  const bool use_shared_memory =
+      base::FeatureList::IsEnabled(features::kWebViewLatchedCookiePolicy) &&
+      get_version_shared_memory;
+
   underlying_restricted_cookie_manager_->GetCookiesString(
       url, site_for_cookies, top_frame_origin, storage_access_api_status,
-      /*get_version_shared_memory=*/false, is_ad_tagged,
-      apply_devtools_overrides, disable_3pcs, std::move(callback));
+      use_shared_memory, is_ad_tagged, apply_devtools_overrides, disable_3pcs,
+      std::move(callback));
 }
 
 void AwProxyingRestrictedCookieManager::CookiesEnabledFor(
@@ -289,6 +301,16 @@ AwProxyingRestrictedCookieManager::AwProxyingRestrictedCookieManager(
       global_frame_token_(global_frame_token),
       cookie_access_policy_(*cookie_access_policy) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+
+  // Latch cookie policy settings when feature is enabled. This allows shared
+  // memory cookie versioning to work since the policy won't change during this
+  // RCM's lifetime.
+  if (base::FeatureList::IsEnabled(features::kWebViewLatchedCookiePolicy)) {
+    latched_accept_cookies_ = cookie_access_policy_->GetShouldAcceptCookies();
+    latched_accept_third_party_ =
+        cookie_access_policy_->GetShouldAcceptThirdPartyCookies(
+            global_frame_token_);
+  }
 }
 
 // static
@@ -310,6 +332,29 @@ PrivacySetting AwProxyingRestrictedCookieManager::AllowCookies(
     const GURL& url,
     const net::SiteForCookies& site_for_cookies,
     net::StorageAccessApiStatus storage_access_api_status) const {
+  // When feature is enabled, use latched cookie policy state captured at
+  // construction time. This enables shared memory cookie versioning.
+  if (base::FeatureList::IsEnabled(features::kWebViewLatchedCookiePolicy)) {
+    if (is_service_worker_) {
+      // Service worker cookies are always first-party, so only need to check
+      // the global toggle.
+      //
+      // Note: For service workers, cookie policy updates may be slightly
+      // delayed. Service workers are only killed after some seconds of
+      // inactivity (no controlled fetch events). This means a cookie policy
+      // change may apply to a new page, but a reused service worker will still
+      // have the old cookie policy until it is terminated and recreated. We
+      // accept this as a limited edge case unlikely to cause issues in
+      // practice.
+      return latched_accept_cookies_ ? PrivacySetting::kStateAllowed
+                                     : PrivacySetting::kStateDisallowed;
+    }
+    return AwCookieAccessPolicy::CanAccessCookies(
+        url, site_for_cookies, latched_accept_cookies_,
+        latched_accept_third_party_, storage_access_api_status);
+  }
+
+  // Original dynamic behavior.
   if (is_service_worker_) {
     // Service worker cookies are always first-party, so only need to check
     // the global toggle.

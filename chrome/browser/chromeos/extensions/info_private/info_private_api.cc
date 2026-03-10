@@ -31,7 +31,6 @@
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/common/pref_names.h"
 #include "chromeos/ash/components/network/device_state.h"
 #include "chromeos/ash/components/network/network_handler.h"
 #include "chromeos/ash/components/network/network_state_handler.h"
@@ -427,7 +426,7 @@ std::unique_ptr<base::Value> GetValue(const std::string& property_name) {
     if (ash::system::PerUserTimezoneEnabled()) {
       const PrefService::Preference* timezone =
           ProfileManager::GetPrimaryUserProfile()->GetPrefs()->FindPreference(
-              prefs::kUserTimezone);
+              ash::prefs::kUserTimezone);
       return std::make_unique<base::Value>(timezone->GetValue()->Clone());
     }
     // TODO(crbug.com/40508978): Convert CrosSettings::Get to take a unique_ptr.
@@ -453,7 +452,7 @@ std::unique_ptr<base::Value> GetValue(const std::string& property_name) {
 
 base::Value GetSystemProperties(
     const std::vector<std::string>& property_names) {
-  base::Value::Dict result;
+  base::DictValue result;
   for (const std::string& property_name : property_names) {
     std::unique_ptr<base::Value> value = GetValue(property_name);
     if (value) {
@@ -467,7 +466,7 @@ base::Value GetSystemProperties(
 void SetTimezone(const std::string& value) {
   if (ash::system::PerUserTimezoneEnabled()) {
     ProfileManager::GetPrimaryUserProfile()->GetPrefs()->SetString(
-        prefs::kUserTimezone, value);
+        ash::prefs::kUserTimezone, value);
   } else {
     const user_manager::User* user =
         ash::ProfileHelper::Get()->GetUserByProfile(
@@ -499,7 +498,7 @@ ChromeosInfoPrivateGetFunction::~ChromeosInfoPrivateGetFunction() = default;
 
 ExtensionFunction::ResponseAction ChromeosInfoPrivateGetFunction::Run() {
   EXTENSION_FUNCTION_VALIDATE(!args().empty() && args()[0].is_list());
-  const base::Value::List& list = args()[0].GetList();
+  const base::ListValue& list = args()[0].GetList();
 
   std::vector<std::string> property_names;
   for (const auto& property : list) {

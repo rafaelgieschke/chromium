@@ -150,15 +150,17 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
 
    public:
     explicit DetachLayoutTreeScope(StyleEngine& engine)
-        : engine_(engine), in_detach_scope_(&engine.in_detach_scope_, true) {}
+        : engine_(engine),
+          in_detach_scope_(std::in_place, &engine.in_detach_scope_, true) {}
     ~DetachLayoutTreeScope() {
       engine_.MarkForLayoutTreeChangesAfterDetach();
+      in_detach_scope_.reset();
       engine_.InvalidateSVGResourcesAfterDetach();
     }
 
    private:
     StyleEngine& engine_;
-    base::AutoReset<bool> in_detach_scope_;
+    std::optional<base::AutoReset<bool>> in_detach_scope_;
   };
 
   class AttachScrollMarkersScope {
@@ -619,9 +621,6 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   void MarkLastSuccessfulPositionFallbackDirtyForElement(Element& element) {
     anchored_element_dirty_set_.insert(&element);
   }
-  void MarkForDefaultAnchorScrollShift(Element& element) {
-    anchored_element_dirty_set_.insert(&element);
-  }
   void MarkAnchorRememberedOffsetsChanged(Element& element) {
     anchored_element_dirty_set_.insert(&element);
   }
@@ -642,7 +641,7 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   // Resolve a tree-scoped reference to a @function rule.
   //
   // https://drafts.csswg.org/css-mixins-1/#function-rule
-  // https://drafts.csswg.org/css-scoping-1/#css-tree-scoped-reference
+  // https://drafts.csswg.org/css-shadow-1/#css-tree-scoped-reference
   std::pair<StyleRuleFunction*, const TreeScope*> FindFunctionAcrossScopes(
       const AtomicString& name,
       const TreeScope*) const;
@@ -746,6 +745,7 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
 
   void SetPageColorSchemes(const CSSValue* color_scheme);
   ColorSchemeFlags GetPageColorSchemes() const { return page_color_schemes_; }
+  bool SupportsDarkColorScheme() const;
   mojom::blink::PreferredColorScheme GetPreferredColorScheme() const {
     return preferred_color_scheme_;
   }
@@ -940,7 +940,6 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   CounterStyleMap& EnsureUserCounterStyleMap();
 
   void UpdateColorScheme();
-  bool SupportsDarkColorScheme();
   void UpdateForcedBackgroundColor();
 
   void UpdateColorSchemeMetrics();
@@ -1268,11 +1267,22 @@ class CORE_EXPORT StyleEngine final : public GarbageCollected<StyleEngine>,
   HeapHashMap<Member<const MediaQuerySet>, bool>
       functional_media_query_results_;
 
-  // Cache for random base values which are used for generating random values
-  // using CSS random() function.
+  // Caches for random base values which are used for generating random values
+  // for the CSS random() function. For element-shared values, that are not
+  // dependent on Element, we use `element_shared_random_base_value_cache_`. For
+  // values depending on Element, we use the `random_base_value_cache_`.
+  // To ensure that random base values associated with a removed element will
+  // also be removed, we use WeakMember keys and keep strong references to the
+  // keys in `element_keeps_random_cache_key_alive_`.
   // https://drafts.csswg.org/css-values-5/#random-caching
-  using RandomValueCache = HeapHashMap<Member<RandomCachingKey>, double>;
+  using RandomCachingKeyLifetimeCache =
+      HeapHashMap<WeakMember<const Element>,
+                  Member<GCedHeapHashSet<Member<RandomCachingKey>>>>;
+  RandomCachingKeyLifetimeCache element_keeps_random_caching_key_alive_;
+  using RandomValueCache = HeapHashMap<WeakMember<RandomCachingKey>, double>;
   RandomValueCache random_base_value_cache_;
+  using ElementSharedRandomValueCache = HashMap<AtomicString, double>;
+  ElementSharedRandomValueCache element_shared_random_base_value_cache_;
 };
 
 void PossiblyScheduleNthPseudoInvalidations(Node& node);

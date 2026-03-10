@@ -123,6 +123,7 @@ public class UrlBarViewBinderUnitTest {
         String text = "test";
         mUrlBar.setText(text);
         mUrlBar.setFocusable(true);
+        mUrlBar.setFocusableInTouchMode(true);
         Assert.assertFalse(mUrlBar.isFocused());
         Assert.assertFalse(mUrlBar.hasSelection());
 

@@ -19,7 +19,6 @@
 #include "chrome/browser/devtools/devtools_infobar_delegate.h"
 #include "chrome/browser/extensions/api/debugger/extension_dev_tools_infobar_delegate.h"
 #include "chrome/browser/extensions/api/messaging/incognito_connectability_infobar_delegate.h"
-#include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/theme_installed_infobar_delegate.h"
@@ -51,10 +50,12 @@
 #include "components/infobars/core/infobar.h"
 #include "content/public/common/buildflags.h"
 #include "content/public/test/browser_test.h"
+#include "extensions/browser/crx_installer.h"
 #include "extensions/browser/extension_dialog_auto_confirm.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/sandboxed_unpacker.h"
 #include "extensions/browser/test_extension_registry_observer.h"
+#include "extensions/strings/grit/extensions_strings.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "sandbox/policy/switches.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -371,7 +372,14 @@ IN_PROC_BROWSER_TEST_F(InfoBarUiTest, MAYBE_InvokeUi_dev_tools) {
   ShowAndVerifyUi();
 }
 
-IN_PROC_BROWSER_TEST_F(InfoBarUiTest, InvokeUi_extension_dev_tools) {
+#if BUILDFLAG(IS_WIN)
+// TODO(crbug.com/480154187): This test case has been frequently failing on
+// Windows bots since 2026-01-30.
+#define MAYBE_InvokeUi_extension_dev_tools DISABLED_InvokeUi_extension_dev_tools
+#else
+#define MAYBE_InvokeUi_extension_dev_tools InvokeUi_extension_dev_tools
+#endif
+IN_PROC_BROWSER_TEST_F(InfoBarUiTest, MAYBE_InvokeUi_extension_dev_tools) {
   ShowAndVerifyUi();
 }
 

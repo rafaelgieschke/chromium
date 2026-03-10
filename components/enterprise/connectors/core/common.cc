@@ -49,6 +49,8 @@ inline constexpr auto kUmaEnumToStringMap =
          kBrowserCrashUmaMetricName},
         {EnterpriseReportingEventType::kExtensionTelemetryEvent,
          kExtensionTelemetryUmaMetricName},
+        {EnterpriseReportingEventType::kSaasUsageReportEvent,
+         kSaasUsageUmaMetricName},
     });
 
 inline constexpr auto kEventCaseToUmaEnumMap =
@@ -76,6 +78,8 @@ inline constexpr auto kEventCaseToUmaEnumMap =
          EnterpriseReportingEventType::kBrowserCrashEvent},
         {EventCase::kExtensionTelemetryEvent,
          EnterpriseReportingEventType::kExtensionTelemetryEvent},
+        {EventCase::kSaasUsageReportEvent,
+         EnterpriseReportingEventType::kSaasUsageReportEvent},
     });
 
 ContentAnalysisAcknowledgement::FinalAction RuleActionToAckAction(
@@ -459,6 +463,27 @@ std::string DeepScanAccessPointToString(DeepScanAccessPoint access_point) {
       return "Print";
     case DeepScanAccessPoint::FILE_TRANSFER:
       return "FileTransfer";
+  }
+  NOTREACHED();
+}
+
+std::string FinalContentAnalysisResultToString(
+    FinalContentAnalysisResult result) {
+  switch (result) {
+    case FinalContentAnalysisResult::FAILURE:
+      return "Failure";
+    case FinalContentAnalysisResult::FAIL_CLOSED:
+      return "FailClosed";
+    case FinalContentAnalysisResult::LARGE_FILES:
+      return "LargeFiles";
+    case FinalContentAnalysisResult::ENCRYPTED_FILES:
+      return "EncryptedFiles";
+    case FinalContentAnalysisResult::WARNING:
+      return "Warning";
+    case FinalContentAnalysisResult::SUCCESS:
+      return "Success";
+    case FinalContentAnalysisResult::FORCE_SAVE_TO_CLOUD:
+      return "ForceSaveToCloud";
   }
   NOTREACHED();
 }

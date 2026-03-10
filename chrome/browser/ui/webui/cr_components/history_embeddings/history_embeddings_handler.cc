@@ -21,8 +21,8 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/url_constants.h"
 #include "components/history_clusters/core/history_clusters_util.h"
-#include "components/history_embeddings/history_embeddings_features.h"
-#include "components/history_embeddings/history_embeddings_service.h"
+#include "components/history_embeddings/content/history_embeddings_service.h"
+#include "components/history_embeddings/core/history_embeddings_features.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_formatter.h"
 #include "history_embeddings_handler.h"
@@ -271,7 +271,7 @@ void HistoryEmbeddingsHandler::SetUserFeedback(
         l10n_util::GetStringUTF8(IDS_HISTORY_EMBEDDINGS_FEEDBACK_PLACEHOLDER),
         /*category_tag=*/"genai_history",
         /*extra_diagnostics=*/std::string(),
-        /*autofill_metadata=*/base::Value::Dict(), base::Value::Dict());
+        /*autofill_metadata=*/base::DictValue(), base::DictValue());
   }
 }
 

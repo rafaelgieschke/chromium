@@ -12,15 +12,19 @@ import 'chrome://resources/cr_elements/cr_dialog/cr_dialog.js';
 import 'chrome://resources/cr_elements/cr_input/cr_input.js';
 import 'chrome://resources/cr_elements/cr_shared_style.css.js';
 import 'chrome://resources/cr_elements/cr_shared_vars.css.js';
+import 'chrome://resources/cr_elements/cr_spinner_style.css.js';
 import 'chrome://resources/cr_elements/md_select.css.js';
 import '../settings_shared.css.js';
 import './passwords_shared.css.js';
 
+import {getInstance as getAnnouncerInstance} from 'chrome://resources/cr_elements/cr_a11y_announcer/cr_a11y_announcer.js';
 import type {CrDialogElement} from 'chrome://resources/cr_elements/cr_dialog/cr_dialog.js';
 import {I18nMixin} from 'chrome://resources/cr_elements/i18n_mixin.js';
 import {assert} from 'chrome://resources/js/assert.js';
 import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 import type {DomRepeatEvent} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {loadTimeData} from '../i18n_setup.js';
 
 import {getTemplate} from './autofill_ai_add_or_edit_dialog.html.js';
 import type {CountryDetailManagerProxy} from './country_detail_manager_proxy.js';
@@ -105,6 +109,22 @@ export class SettingsAutofillAiAddOrEditDialogElement extends
       },
 
       /**
+       *  User email associated with the account.
+       */
+      userEmail_: {
+        type: String,
+        value: '',
+      },
+
+      /**
+       * Footer text shown in the view. If empty, no footer text is shown.
+       */
+      footerText_: {
+        type: String,
+        computed: 'computeFooterText_(entityInstance.*, userEmail_)',
+      },
+
+      /**
          True if all fields are empty. The first validation occurs when the user
          clicks the "Save" button for the first time. Subsequent validations
          occur any time an input field is changed. If true, the "Save" button
@@ -129,6 +149,23 @@ export class SettingsAutofillAiAddOrEditDialogElement extends
       userClickedSaveButton_: {
         type: Boolean,
         value: false,
+      },
+
+      /**
+         True if the feature flag to save entities to wallet from settings is
+         enabled.
+       */
+      saveToWalletFromSettingsEnabled_: {
+        type: Boolean,
+        value: () => loadTimeData.getBoolean('enableSaveToWalletFromSettings'),
+      },
+
+      /**
+         Holds the error to display (or empty string if valid).
+       */
+      validationError_: {
+        type: String,
+        value: '',
       },
 
       months_: {
@@ -159,6 +196,20 @@ export class SettingsAutofillAiAddOrEditDialogElement extends
               .map(String);
         },
       },
+
+      enableSavePrivatePassesToWallet_: {
+        type: Boolean,
+        value: () =>
+            loadTimeData.getBoolean('enableAutofillAiWalletPrivatePasses'),
+      },
+
+      /**
+       * True while waiting for the backend to respond from Wallet API call.
+       */
+      saveInProgress_: {
+        type: Boolean,
+        value: false,
+      },
     };
   }
 
@@ -170,10 +221,17 @@ export class SettingsAutofillAiAddOrEditDialogElement extends
   declare private allFieldsAreEmpty_: boolean;
   declare private canSave_: boolean;
   declare private userClickedSaveButton_: boolean;
+  declare private validationError_: string;
   declare private months_: string[];
   declare private days_: string[];
   declare private years_: string[];
+  declare private userEmail_: string;
+  declare private footerText_: string;
+  declare private saveToWalletFromSettingsEnabled_: boolean;
+  declare private enableSavePrivatePassesToWallet_: boolean;
+  declare private saveInProgress_: boolean;
 
+  private requiredAttributeTypes_: AttributeType[] = [];
   private entityDataManager_: EntityDataManagerProxy =
       EntityDataManagerProxyImpl.getInstance();
   private countryDetailManager_: CountryDetailManagerProxy =
@@ -181,14 +239,25 @@ export class SettingsAutofillAiAddOrEditDialogElement extends
 
   override async connectedCallback(): Promise<void> {
     super.connectedCallback();
+    assert(this.entityInstance);
 
     this.countryList_ = await this.countryDetailManager_.getCountryList(
         /*forAccountStorage=*/ false);
 
-    assert(this.entityInstance);
-    this.completeAttributeTypesList_ =
-        await this.entityDataManager_.getAllAttributeTypesForEntityTypeName(
-            this.entityInstance.type.typeName);
+    const [attributeTypes, requiredAttributes] = await Promise.all([
+      this.entityDataManager_.getAllAttributeTypesForEntityTypeName(
+          this.entityInstance.type.typeName),
+      this.entityDataManager_.getRequiredAttributeTypesForEntityTypeName(
+          this.entityInstance.type.typeName),
+    ]);
+
+    this.completeAttributeTypesList_ = attributeTypes;
+    this.requiredAttributeTypes_ = requiredAttributes;
+
+    const accountInfo = await chrome.autofillPrivate.getAccountInfo();
+    if (accountInfo && accountInfo.email) {
+      this.userEmail_ = accountInfo.email;
+    }
 
     // TODO(crbug.com/407794687): Decide whether the code should show a spinner
     // instead of delaying the display of the dialog. Keep this decision
@@ -196,6 +265,20 @@ export class SettingsAutofillAiAddOrEditDialogElement extends
     // etc.).
     // Open the modal only after all the properties are computed.
     this.$.dialog.showModal();
+  }
+
+  private checkRequiredFields_(): boolean {
+    if (this.requiredAttributeTypes_.length === 0 ||
+        !this.saveToWalletFromSettingsEnabled_) {
+      return true;
+    }
+
+    // At least one of the attributes in the list must be non-empty.
+    return this.requiredAttributeTypes_.some(req => {
+      const attribute = this.completeAttributeInstanceList_.find(
+          attr => attr.type.typeName === req.typeName);
+      return attribute && this.isAttributeInstanceNotEmpty(attribute);
+    });
   }
 
   private computeCompleteAttributeInstanceList_(): AttributeInstance[] {
@@ -316,7 +399,6 @@ export class SettingsAutofillAiAddOrEditDialogElement extends
     return (attributeInstance.value as DateValue).year === year;
   }
 
-
   private onCountrySelectChange_(e: DomRepeatEvent<AttributeInstance>): void {
     this.completeAttributeInstanceList_[e.model.index].value =
         (e.target as HTMLSelectElement).value;
@@ -347,7 +429,49 @@ export class SettingsAutofillAiAddOrEditDialogElement extends
     this.onAttributeInstanceFieldInput_(e);
   }
 
+  /**
+   * Returns '*' if the field is required.
+   */
+  private getRequiredIndicator_(attributeInstance: AttributeInstance): string {
+    if (!this.saveToWalletFromSettingsEnabled_) {
+      return '';
+    }
+    const isRequired = this.requiredAttributeTypes_.some(
+        req => req.typeName === attributeInstance.type.typeName);
+    return isRequired ? '*' : '';
+  }
 
+  /**
+   * Computes the label for cr-input fields.
+   * Appends '*' to the label text if required.
+   */
+  private computeInputLabel_(attributeInstance: AttributeInstance): string {
+    return attributeInstance.type.typeNameAsString +
+        this.getRequiredIndicator_(attributeInstance);
+  }
+
+  private computeFooterText_(): string {
+    if (!this.entityInstance || this.entityInstance.guid || !this.userEmail_ ||
+        !this.entityInstance?.type.supportsWalletStorage) {
+      return '';
+    }
+
+    if (loadTimeData.getBoolean('enableAutofillAiWalletPrivatePasses')) {
+      // Show footer only when it is a new entity and type supports Wallet
+      // storage. This is sufficient because the entities stored in Wallet are
+      // not editable from the settings.
+      return this.i18n(
+          'saveInfoToWalletSettingsAccountNotice',
+          this.i18n('googleWalletTitle'), this.userEmail_);
+    }
+
+    // Show footer only when it is a new entity and type supports Wallet
+    // storage. This is sufficient because the entities stored in Wallet are not
+    // editable from the settings.
+    return this.i18n(
+        'saveInfoToWalletAccountNotice', this.i18n('googleWalletTitle'),
+        this.userEmail_);
+  }
 
   private isExistingYearOutOfBounds_(
       attributeInstance: AttributeInstance, years: string[]): boolean {
@@ -374,6 +498,11 @@ export class SettingsAutofillAiAddOrEditDialogElement extends
         !this.userClickedSaveButton_) {
       return false;
     }
+
+    if (this.isFieldInvalid_(attributeInstance, this.validationError_)) {
+      return true;
+    }
+
     const value: DateValue = attributeInstance.value as DateValue;
     const month = value.month;
     const day = value.day;
@@ -404,6 +533,37 @@ export class SettingsAutofillAiAddOrEditDialogElement extends
   }
 
   /**
+   * Returns true if the field should be highlighted as invalid due to
+   * missing requirements.
+   */
+  private isFieldInvalid_(
+      attributeInstance: AttributeInstance, validationError: string): boolean {
+    // Don't show errors before the user tries to save.
+    if (!this.userClickedSaveButton_ || !validationError) {
+      return false;
+    }
+
+    if (!this.saveToWalletFromSettingsEnabled_) {
+      return false;
+    }
+
+    // Check if this specific field is one of the required candidates.
+    const isRequiredCandidate = this.requiredAttributeTypes_.some(
+        req => req.typeName === attributeInstance.type.typeName);
+
+    return isRequiredCandidate &&
+        !this.isAttributeInstanceNotEmpty(attributeInstance);
+  }
+
+  private shouldShowWalletBranding_(): boolean {
+    if (!this.saveToWalletFromSettingsEnabled_) {
+      return false;
+    }
+
+    return !!this.entityInstance?.type.supportsWalletStorage;
+  }
+
+  /**
    * Returns true if the value is not empty and it is not made out only of
    * whitespaces.
    * For dates, at least one of month, day and year has to be not empty. An
@@ -429,31 +589,101 @@ export class SettingsAutofillAiAddOrEditDialogElement extends
     this.allFieldsAreEmpty_ = !this.completeAttributeInstanceList_.some(
         attributeInstance =>
             this.isAttributeInstanceNotEmpty(attributeInstance));
+
     const invalidDateExists = this.completeAttributeInstanceList_.some(
         attributeInstance => this.isDateInvalid_(attributeInstance));
-    this.canSave_ = !this.allFieldsAreEmpty_ && !invalidDateExists;
+
+    const requiredFieldsMet = this.checkRequiredFields_();
+
+    if (!requiredFieldsMet) {
+      const requiredFieldNames =
+          this.requiredAttributeTypes_.map(type => type.typeNameAsString);
+
+      const formatter = new Intl.ListFormat(document.documentElement.lang, {
+        style: 'long',
+        type: 'disjunction',
+      });
+
+      const formattedList = formatter.format(requiredFieldNames);
+      this.validationError_ = this.i18n(
+          'autofillAiAddOrEditDialogRequiredFieldError', formattedList);
+    } else if (this.allFieldsAreEmpty_) {
+      this.validationError_ =
+          this.i18n('autofillAiAddOrEditDialogValidationError');
+    } else {
+      this.validationError_ = '';
+    }
+
+    this.canSave_ =
+        !this.allFieldsAreEmpty_ && !invalidDateExists && requiredFieldsMet;
+  }
+
+  /**
+   * Helper to determine if the spinner should be visible.
+   */
+  private shouldShowSpinner_(saving: boolean): boolean {
+    return this.enableSavePrivatePassesToWallet_ && saving;
   }
 
   private onCancelClick_(): void {
+    if (this.saveInProgress_) {
+      // Prevent canceling while a save is in progress to avoid state
+      // inconsistencies.
+      return;
+    }
     this.$.dialog.cancel();
   }
 
-  private onConfirmClick_(): void {
+  private onDialogCancel_(e: Event): void {
+    if (this.saveInProgress_) {
+      e.preventDefault();
+    }
+  }
+
+  private async onConfirmClick_(): Promise<void> {
+    if (this.saveInProgress_) {
+      return;
+    }
     this.userClickedSaveButton_ = true;
     this.validateForm_();
-    if (this.canSave_) {
-      this.dispatchEvent(new CustomEvent('autofill-ai-add-or-edit-done', {
-        bubbles: true,
-        composed: true,
-        detail: {
-          ...this.entityInstance,
-          attributeInstances: this.completeAttributeInstanceList_.filter(
-              attributeInstance =>
-                  this.isAttributeInstanceNotEmpty(attributeInstance)),
-        },
-      }));
-      this.$.dialog.close();
+    if (!this.canSave_) {
+      return;
     }
+
+    const entityToSave = {...this.entityInstance!};
+
+    entityToSave.attributeInstances =
+        this.completeAttributeInstanceList_.filter(
+            attributeInstance =>
+                this.isAttributeInstanceNotEmpty(attributeInstance));
+
+    // If the type supports Wallet storage, we default to saving to Wallet but
+    // only for new entities.
+    if (!entityToSave.guid && entityToSave.type.supportsWalletStorage) {
+      entityToSave.storedInWallet = true;
+    }
+
+    if (this.enableSavePrivatePassesToWallet_) {
+      this.saveInProgress_ = true;
+      getAnnouncerInstance().announce(
+          this.i18n('saveToWalletLoadingStateA11y'));
+
+      try {
+        await this.entityDataManager_.addOrUpdateEntityInstance(entityToSave);
+        this.saveInProgress_ = false;
+      } catch (e) {
+        this.saveInProgress_ = false;
+        return;
+      }
+    }
+
+    this.dispatchEvent(new CustomEvent('autofill-ai-add-or-edit-done', {
+      bubbles: true,
+      composed: true,
+      detail: entityToSave,
+    }));
+
+    this.$.dialog.close();
   }
 }
 

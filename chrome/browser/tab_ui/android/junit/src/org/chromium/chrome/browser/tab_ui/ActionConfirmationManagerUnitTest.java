@@ -224,7 +224,7 @@ public class ActionConfirmationManagerUnitTest {
         TextView descriptionTextView = customView.findViewById(R.id.description_text_view);
         assertEquals(
                 "This will permanently delete the group from your device",
-                descriptionTextView.getText());
+                descriptionTextView.getText().toString());
     }
 
     @Test
@@ -241,7 +241,7 @@ public class ActionConfirmationManagerUnitTest {
         TextView descriptionTextView = customView.findViewById(R.id.description_text_view);
         assertEquals(
                 "This will permanently delete the group from your device",
-                descriptionTextView.getText());
+                descriptionTextView.getText().toString());
     }
 
     @Test
@@ -258,7 +258,7 @@ public class ActionConfirmationManagerUnitTest {
         TextView descriptionTextView = customView.findViewById(R.id.description_text_view);
         assertEquals(
                 "This will permanently delete the group from your device",
-                descriptionTextView.getText());
+                descriptionTextView.getText().toString());
     }
 
     @Test
@@ -276,7 +276,7 @@ public class ActionConfirmationManagerUnitTest {
         TextView descriptionTextView = customView.findViewById(R.id.description_text_view);
         assertEquals(
                 "This will delete the group from all devices signed into test@gmail.com",
-                descriptionTextView.getText());
+                descriptionTextView.getText().toString());
     }
 
     @Test
@@ -289,6 +289,40 @@ public class ActionConfirmationManagerUnitTest {
                 mPropertyModelArgumentCaptor.getValue().get(ModalDialogProperties.CONTROLLER);
         controller.onClick(mPropertyModelArgumentCaptor.getValue(), ButtonType.POSITIVE);
         verify(mOnResult).onResult(ActionConfirmationResult.CONFIRMATION_POSITIVE);
+    }
+
+    @Test
+    public void testProcessActorTaskDeletionAttempt_Positive() {
+        ActionConfirmationManager actionConfirmationManager =
+                new ActionConfirmationManager(mProfile, mActivity, mModalDialogManager);
+        actionConfirmationManager.processActorTaskDeletionAttempt(mOnResult);
+        verify(mModalDialogManager).showDialog(mPropertyModelArgumentCaptor.capture(), anyInt());
+        Controller controller =
+                mPropertyModelArgumentCaptor.getValue().get(ModalDialogProperties.CONTROLLER);
+        controller.onClick(mPropertyModelArgumentCaptor.getValue(), ButtonType.POSITIVE);
+        verify(mOnResult).onResult(ActionConfirmationResult.CONFIRMATION_POSITIVE);
+
+        assertTrue(
+                mActionTester
+                        .getActions()
+                        .contains("ActorTaskTabConfirmation.StopActorTask.Proceed"));
+    }
+
+    @Test
+    public void testProcessActorTaskDeletionAttempt_Negative() {
+        ActionConfirmationManager actionConfirmationManager =
+                new ActionConfirmationManager(mProfile, mActivity, mModalDialogManager);
+        actionConfirmationManager.processActorTaskDeletionAttempt(mOnResult);
+        verify(mModalDialogManager).showDialog(mPropertyModelArgumentCaptor.capture(), anyInt());
+        Controller controller =
+                mPropertyModelArgumentCaptor.getValue().get(ModalDialogProperties.CONTROLLER);
+        controller.onClick(mPropertyModelArgumentCaptor.getValue(), ButtonType.NEGATIVE);
+        verify(mOnResult).onResult(ActionConfirmationResult.CONFIRMATION_NEGATIVE);
+
+        assertTrue(
+                mActionTester
+                        .getActions()
+                        .contains("ActorTaskTabConfirmation.StopActorTask.Abort"));
     }
 
     @Test

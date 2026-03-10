@@ -24,7 +24,7 @@ import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.OneshotSupplierImpl;
 import org.chromium.base.test.params.ParameterAnnotations;
 import org.chromium.base.test.params.ParameterProvider;
@@ -122,7 +122,7 @@ public class PageInfoDiscoverabilityTest {
             parameters.add(
                     new ParameterSet()
                             .name("RequestType.kGeolocation")
-                            .value(ContentSettingsType.GEOLOCATION, true));
+                            .value(ContentSettingsType.GEOLOCATION_WITH_OPTIONS, true));
             parameters.add(
                     new ParameterSet()
                             .name("RequestType.kHandTracking")
@@ -175,6 +175,10 @@ public class PageInfoDiscoverabilityTest {
                     new ParameterSet()
                             .name("RequestType.kProtectedMediaIdentifier")
                             .value(ContentSettingsType.PROTECTED_MEDIA_IDENTIFIER, true));
+            parameters.add(
+                    new ParameterSet()
+                            .name("RequestType.kSensors")
+                            .value(ContentSettingsType.SENSORS, true));
             parameters.add(
                     new ParameterSet()
                             .name("RequestType.kStorageAccess")
@@ -252,7 +256,7 @@ public class PageInfoDiscoverabilityTest {
                                     mLocationBarDataProvider,
                                     mPermissionDialogController,
                                     mTemplateUrlServiceSupplier,
-                                    new ObservableSupplierImpl(mProfile),
+                                    ObservableSuppliers.createNonNull(mProfile),
                                     mPageInfoIphController,
                                     sPermissionTestRule.getActivity().getWindowAndroid(),
                                     null);

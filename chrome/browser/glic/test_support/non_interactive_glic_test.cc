@@ -4,7 +4,7 @@
 
 #include "chrome/browser/glic/test_support/non_interactive_glic_test.h"
 
-#include "chrome/browser/glic/host/context/glic_focused_browser_manager.h"
+#include "chrome/browser/glic/host/context/glic_focused_browser_manager_impl.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "chromeos/constants/chromeos_features.h"
@@ -17,7 +17,7 @@ NonInteractiveGlicTest::NonInteractiveGlicTest() {
   features_.InitAndEnableFeature(chromeos::features::kFeatureManagementGlic);
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
-  GlicFocusedBrowserManager::SetTestingModeForTesting(true);
+  GlicFocusedBrowserManagerImpl::SetTestingModeForTesting(true);
 }
 
 NonInteractiveGlicTest::NonInteractiveGlicTest(
@@ -25,9 +25,29 @@ NonInteractiveGlicTest::NonInteractiveGlicTest(
     const GlicTestEnvironmentConfig& glic_config)
     : test::InteractiveGlicTestMixin<InteractiveBrowserTest>(glic_params,
                                                              glic_config) {
-  GlicFocusedBrowserManager::SetTestingModeForTesting(true);
+  GlicFocusedBrowserManagerImpl::SetTestingModeForTesting(true);
 }
 
 NonInteractiveGlicTest::~NonInteractiveGlicTest() = default;
+
+void NonInteractiveGlicTest::SetUpOnMainThread() {
+  test::InteractiveGlicTestMixin<InteractiveBrowserTest>::SetUpOnMainThread();
+#if defined(TOOLKIT_VIEWS)
+#if BUILDFLAG(ENABLE_DESKTOP_AURA) || BUILDFLAG(IS_MAC)
+  activation_controller_ =
+      std::make_unique<views::test::MockActivationController>();
+#endif
+#endif
+}
+
+void NonInteractiveGlicTest::TearDownOnMainThread() {
+#if defined(TOOLKIT_VIEWS)
+#if BUILDFLAG(ENABLE_DESKTOP_AURA) || BUILDFLAG(IS_MAC)
+  activation_controller_.reset();
+#endif
+#endif
+  test::InteractiveGlicTestMixin<
+      InteractiveBrowserTest>::TearDownOnMainThread();
+}
 
 }  // namespace glic

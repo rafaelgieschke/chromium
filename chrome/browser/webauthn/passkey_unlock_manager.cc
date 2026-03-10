@@ -11,18 +11,16 @@
 #include "base/notimplemented.h"
 #include "base/time/time.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/sync/sync_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/webauthn/enclave_manager.h"
-#include "chrome/browser/webauthn/enclave_manager_factory.h"
 #include "chrome/browser/webauthn/enclave_manager_interface.h"
-#include "chrome/browser/webauthn/passkey_model_factory.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/sync/service/sync_service.h"
 #include "components/sync/service/sync_user_settings.h"
+#include "content/public/browser/navigation_handle.h"
 #include "device/fido/public/features.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -32,16 +30,12 @@ namespace webauthn {
 static constexpr const char kPasskeyReadinessHistogram[] =
     "WebAuthentication.PasskeyReadiness";
 
-// TODO(crbug.com/456454164): Don't pass the profile directly to the
-// constructor.
-PasskeyUnlockManager::PasskeyUnlockManager(Profile* profile) {
-  EnclaveManagerInterface* enclave_manager =
-      EnclaveManagerFactory::GetForProfile(profile);
+PasskeyUnlockManager::PasskeyUnlockManager(
+    EnclaveManagerInterface* enclave_manager,
+    PasskeyModel* passkey_model,
+    syncer::SyncService* sync_service) {
   enclave_manager_observation_.Observe(enclave_manager);
-  passkey_model_observation_.Observe(
-      PasskeyModelFactory::GetForProfile(profile));
-  syncer::SyncService* sync_service =
-      SyncServiceFactory::GetForProfile(profile);
+  passkey_model_observation_.Observe(passkey_model);
   if (sync_service) {
     sync_service_observation_.Observe(sync_service);
   }
@@ -98,16 +92,29 @@ void PasskeyUnlockManager::ComputeShouldDisplayErrorUiAndNotifyObservers() {
 
 void PasskeyUnlockManager::NotifyObservers() {
   for (Observer& observer : observer_list_) {
-    observer.OnPasskeyUnlockManagerStateChanged();
+    observer.OnPasskeyErrorUiStateChanged();
   }
 }
 
-void PasskeyUnlockManager::OpenTabWithPasskeyUnlockChallenge(Browser* browser) {
+void PasskeyUnlockManager::OpenTabWithPasskeyUnlockChallenge(
+    Browser* browser,
+    trusted_vault::TrustedVaultUserActionTriggerForUMA trigger) {
   NavigateParams params(GetSingletonTabNavigateParams(
       browser, GaiaUrls::GetInstance()->signin_chrome_passkey_unlock_url()));
   // Allow the window to close itself.
   params.opened_by_another_window = true;
-  Navigate(&params);
+
+  base::WeakPtr<content::NavigationHandle> navigation_handle =
+      Navigate(&params);
+
+  if (navigation_handle) {
+    TrustedVaultEncryptionKeysTabHelper* encryption_keys_tab_helper =
+        TrustedVaultEncryptionKeysTabHelper::FromWebContents(
+            navigation_handle->GetWebContents());
+    if (encryption_keys_tab_helper) {
+      encryption_keys_tab_helper->SetUserActionTrigger(trigger);
+    }
+  }
 }
 
 std::u16string PasskeyUnlockManager::GetPasskeyErrorProfilePillTitle() const {

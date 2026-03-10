@@ -9,7 +9,6 @@
 <translation id="101823271612280837">Grabatzeari utzi zaio. Ezin da erabili joko-panela tableta moduan.</translation>
 <translation id="1024364763893396229">Gorde <ph name="NAME" /> gailua</translation>
 <translation id="1032891413405719768">Pila agortzen ari zaio arkatzari</translation>
-<translation id="1036073649888683237">Jakinarazpenak kudeatzeko, joan Ezarpenak atalera</translation>
 <translation id="1036348656032585052">Desaktibatu</translation>
 <translation id="1037492556044956303"><ph name="DEVICE_NAME" /> gehitu da</translation>
 <translation id="1038106730571050514">Erakutsi iradokizunak</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">Azkenaldiko <ph name="TOTAL_COUNT" /> argazkietatik <ph name="INDEX" />garrena.</translation>
 <translation id="2201687081523799384">Tolestu Google Zereginak</translation>
 <translation id="2208323208084708176">Mahaigain bateratuko modua</translation>
-<translation id="2210311543574621570">Ktrl + V sakatuta edukitzen baduzu, arbela ikusiko duzu. Lasterbide hori desaktibatzeko, desgaitu #clipboard-history-longpress eginbide esperimentala chrome://flags atalean.</translation>
 <translation id="2215920961700443347">Ez dago Interneteko konexiorik. Konektatu Internetera eta saiatu berriro.</translation>
 <translation id="2222841058024245321">7. lan-eremua</translation>
 <translation id="2223384056430485343">Pantaila zatituan</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">Instalatu aplikazioa</translation>
 <translation id="2482878487686419369">Jakinarazpenak</translation>
 <translation id="2484513351006226581">Teklatuaren diseinua aldatzeko, sakatu <ph name="KEYBOARD_SHORTCUT" />.</translation>
+<translation id="2485422356828889247">Desinstalatu</translation>
 <translation id="2486214324139475545"><ph name="DESK_NAME" /> lan-eremuaren aurrebista. Lan-eremu aktiboa.</translation>
 <translation id="2486405091093637109">"<ph name="DISPLAY_NAME" />" pantailari <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz) bereizmena ezarri zaio. Berresten ez baduzu, <ph name="TIMEOUT_SECONDS" /> barru leheneratuko da aurreko ezarpena.</translation>
 <translation id="2487915095798731898">Sartu</translation>
@@ -1450,7 +1449,7 @@ Ez dago gailurik konektatuta.</translation>
 <translation id="5779721926447984944">Ainguratutako fitxategiak</translation>
 <translation id="5785221443435874078">Kendu iradokizuna</translation>
 <translation id="5787431783058088906">Lortu abantaila</translation>
-<translation id="5788127256798019331">Play fitxategiak</translation>
+<translation id="5788127256798019331">Google Play-ko fitxategiak</translation>
 <translation id="5788535737706478207">Ireki berriro itxitako azken fitxa edo leihoa</translation>
 <translation id="5790085346892983794">Behar bezala egin da</translation>
 <translation id="5791926618942305301">Pantaila-kapturan, <ph name="TYPE" /> <ph name="SOURCE" />. Kaptura mota aldatzeko, sakatu tabuladorea. Kapturatzeko, sakatu Sartu. Kapturatu beharreko eremua hautatzeko, ezarri pantaila-argazki partzial gisa. Oraindik aktibo ez badago, sakatu zuriunea lurraldea hautatzeko.</translation>
@@ -1983,7 +1982,7 @@ Itzaltzeko, eduki sakatuta berriro gailuaren etengailua.</translation>
 <translation id="7579778809502851308">Pantaila-argazkia edo -bideoa</translation>
 <translation id="7588317312481506627">Kopiatu da arbelean.</translation>
 <translation id="7593891976182323525">Bilatu edo aldatu</translation>
-<translation id="7598054670902114203">PUZaren erabileraren laburpena: % <ph name="CPU_USEAGE" />. Tenperatura: <ph name="TEMPERATURE" /> gradu Celsius. Oraingo abiadura: <ph name="CPU_AVERAGE_CURRENT_FREQUENCY_GHZ" /> GHz.</translation>
+<translation id="7598054670902114203">PUZaren erabileraren laburpena: % <ph name="CPU_USEAGE" />. Tenperatura: <ph name="TEMPERATURE" /> Celsius gradu. Oraingo abiadura: <ph name="CPU_AVERAGE_CURRENT_FREQUENCY_GHZ" /> GHz.</translation>
 <translation id="7599378375976398913">Hautatutako emaitza txertatzen</translation>
 <translation id="7600875258240007829">Ikusi jakinarazpen guztiak</translation>
 <translation id="7601417191446344542">Mikrofonoa desaktibatuaren abisua aktibatu nahi duzu?</translation>
@@ -2196,7 +2195,6 @@ Itzaltzeko, eduki sakatuta berriro gailuaren etengailua.</translation>
 <translation id="8241650983304689286">Gehitu fitxa ikuspegi zatitu berrian</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />. Seinalearen indarra: <ph name="SIGNAL_STRENGTH" />. Telefonoaren bateria: <ph name="BATTERY_STATUS" />.</translation>
 <translation id="825129991941217170">Erakutsi Google Drive-ko eduki guztia</translation>
-<translation id="8257510091797044096">Konfiguratu gailua</translation>
 <translation id="8261506727792406068">Ezabatu</translation>
 <translation id="8262312463845990408">Erreproduzitu/Pausatu</translation>
 <translation id="8268302343625273732">Ikusi lan guztiak Google Classroom-en</translation>

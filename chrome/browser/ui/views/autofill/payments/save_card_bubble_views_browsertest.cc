@@ -53,6 +53,7 @@
 #include "components/autofill/core/browser/data_manager/addresses/address_data_manager.h"
 #include "components/autofill/core/browser/data_manager/personal_data_manager.h"
 #include "components/autofill/core/browser/form_import/form_data_importer.h"
+#include "components/autofill/core/browser/form_import/payments/payments_form_data_importer.h"
 #include "components/autofill/core/browser/foundations/browser_autofill_manager.h"
 #include "components/autofill/core/browser/foundations/test_autofill_manager_waiter.h"
 #include "components/autofill/core/browser/metrics/payments/credit_card_save_metrics.h"
@@ -180,17 +181,13 @@ class SaveCardBubbleViewsFullFormBrowserTest
     std::vector<base::test::FeatureRefAndParams> enabled_features = {};
     std::vector<base::test::FeatureRef> disabled_features = {};
 
-    if (is_page_action_migration_enabled) {
-      enabled_features.push_back({
-          ::features::kPageActionsMigration,
-          {{
-              ::features::kPageActionsMigrationSavePayments.name,
-              "true",
-          }},
-      });
-    } else {
-      disabled_features.emplace_back(::features::kPageActionsMigration);
-    }
+    enabled_features.push_back({
+        ::features::kPageActionsMigration,
+        {{
+            ::features::kPageActionsMigrationSavePayments.name,
+            is_page_action_migration_enabled ? "true" : "false",
+        }},
+    });
     feature_list_.InitWithFeaturesAndParameters(enabled_features,
                                                 disabled_features);
     CHECK_EQ(IsPageActionMigrationEnabled(), is_page_action_migration_enabled);
@@ -228,13 +225,11 @@ class SaveCardBubbleViewsFullFormBrowserTest
 
   // SyncTest::SetUpOnMainThread:
   void SetUpOnMainThread() override {
-    SyncTest::SetUpOnMainThread();
-
     // Set up the HTTPS server (uses the embedded_test_server).
-    ASSERT_TRUE(embedded_test_server()->InitializeAndListen());
     embedded_test_server()->ServeFilesFromSourceDirectory(
         "components/test/data/autofill");
-    embedded_test_server()->StartAcceptingConnections();
+
+    SyncTest::SetUpOnMainThread();
 
     ASSERT_TRUE(SetupClients());
 
@@ -302,7 +297,8 @@ class SaveCardBubbleViewsFullFormBrowserTest
     return autofill_manager() ? autofill_manager()
                                     ->client()
                                     .GetFormDataImporter()
-                                    ->GetCreditCardSaveManager()
+                                    ->GetPaymentsFormDataImporter()
+                                    .GetCreditCardSaveManager()
                               : nullptr;
   }
 
@@ -476,13 +472,8 @@ class SaveCardBubbleViewsFullFormBrowserTest
             ->payments_data_manager()
             .GetAccountInfoForPaymentsServer();
 
-    AccountInfo account_info;
-    account_info.account_id = core_info.account_id;
-    account_info.gaia = core_info.gaia;
-    account_info.email = core_info.email;
-    account_info.is_under_advanced_protection =
-        core_info.is_under_advanced_protection;
-    account_info.full_name = full_name;
+    AccountInfo account_info =
+        AccountInfo::Builder(core_info).SetFullName(full_name).Build();
     signin::UpdateAccountInfoForAccount(identity_manager, account_info);
   }
 
@@ -1238,7 +1229,6 @@ class SaveCardBubbleViewsSyncTransportFullFormBrowserTest
     ASSERT_TRUE(GetClient(0)->AwaitSyncTransportActive());
     ASSERT_EQ(syncer::SyncService::TransportState::ACTIVE,
               GetSyncService(0)->GetTransportState());
-    ASSERT_FALSE(GetSyncService(0)->IsSyncFeatureEnabled());
   }
 
  private:
@@ -1304,7 +1294,6 @@ IN_PROC_BROWSER_TEST_P(
   ASSERT_TRUE(GetClient(0)->AwaitSyncTransportActive());
   ASSERT_EQ(syncer::SyncService::TransportState::ACTIVE,
             GetSyncService(0)->GetTransportState());
-  ASSERT_FALSE(GetSyncService(0)->IsSyncFeatureEnabled());
 
   FillFormWithoutName();
   SubmitFormAndWaitForCardUploadSaveBubble();

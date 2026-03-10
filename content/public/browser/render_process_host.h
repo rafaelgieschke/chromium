@@ -24,8 +24,8 @@
 #include "build/build_config.h"
 #include "content/common/buildflags.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/child_process_id.h"
 #include "content/public/browser/web_exposed_isolation_level.h"
+#include "content/public/common/child_process_id.h"
 #include "ipc/ipc_listener.h"
 #include "media/media_buildflags.h"
 #include "media/mojo/mojom/video_decode_perf_history.mojom-forward.h"
@@ -230,10 +230,13 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Listener,
   virtual void OnImmersiveXrSessionStarted() = 0;
   virtual void OnImmersiveXrSessionStopped() = 0;
 
-#if !BUILDFLAG(IS_ANDROID)
-  // Returns true if the process is for an initial WebUI.
-  virtual bool IsForInitialWebUI() const = 0;
-#endif  // !BUILDFLAG(IS_ANDROID)
+  // Returns true if the process is hosting a Top Chrome WebUI, e.g., Tab
+  // Search, Side Panel, Initial WebUI. High-privilege WebUIs that share
+  // processes use this to ensure they don't share with non-Top Chrome WebUIs.
+  //
+  // This function is defined on all platforms, but is expected to always return
+  // false on platforms that do not support Top Chrome WebUIs, e.g., Android.
+  virtual bool IsForTopChromeWebUI() const = 0;
 
   // Indicates whether the current RenderProcessHost is exclusively hosting
   // guest RenderFrames. Not all guest RenderFrames are created equal.  A guest,
@@ -279,6 +282,11 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Listener,
   // non-zero |page_count| value is provided, then a fast shutdown will only
   // happen if the count matches the active view count. Returns true if it was
   // able to do fast shutdown.
+  // If `use_outermost_main_frame_check` is true `page_count` will check
+  // resident counts of outermost main frames, instead of resident
+  // RenderWidgetHosts.
+  // TODO(crbug.com/463513005): Make this behavior default and remove
+  // `page_count`.
   // If |skip_unload_handlers| is false and this renderer has any RenderViews
   // with unload handlers, then this function does nothing. Otherwise, the
   // function will ignore checking for those handlers.
@@ -289,10 +297,16 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Listener,
   // counts, then this function does nothing. Otherwise, the function will
   // ignore checking for keep-alive references. This can be removed once
   // keep-alive migration has landed (see crbug.com/40236167).
-  virtual bool FastShutdownIfPossible(size_t page_count = 0,
-                                      bool skip_unload_handlers = false,
-                                      bool ignore_workers = false,
-                                      bool ignore_keep_alive = false) = 0;
+  // If |ignore_pending_reuse| is false and this renderer has any pending reuse
+  // ref counts, then this function does nothing. Otherwise, the function will
+  // ignore checking for pending reuse references.
+  virtual bool FastShutdownIfPossible(
+      size_t page_count = 0,
+      bool skip_unload_handlers = false,
+      bool ignore_workers = false,
+      bool ignore_keep_alive = false,
+      bool ignore_pending_reuse = false,
+      bool use_outermost_main_frame_check = false) = 0;
 
   // Returns true if fast shutdown was started for the renderer.
   virtual bool FastShutdownStarted() = 0;
@@ -790,6 +804,11 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Listener,
   // read from the OS but is cached for a short duration so we don't incur
   // a cost on every call.
   virtual uint64_t GetPrivateMemoryFootprint() = 0;
+
+  // Returns whether the process is only hosting RFHs in prerendered pages
+  // or no RFHs at all. This is for internal use only, and is only exposed here
+  // to support MockRenderProcessHost usage in tests.
+  virtual bool IsOnlyHostingPrerenderedFramesOrEmpty() = 0;
 
   // Static management functions -----------------------------------------------
 

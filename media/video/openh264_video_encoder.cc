@@ -406,12 +406,12 @@ void OpenH264VideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
                                 frame->format() == PIXEL_FORMAT_XRGB ||
                                 frame->format() == PIXEL_FORMAT_ABGR ||
                                 frame->format() == PIXEL_FORMAT_ARGB;
-  if ((!frame->IsMappable() && !frame->HasMappableSharedImage()) ||
+  if ((!frame->HasDirectCpuAccess() && !frame->HasMappableSharedImage()) ||
       !supported_format) {
     std::move(done_cb).Run(
         EncoderStatus(EncoderStatus::Codes::kUnsupportedFrameFormat,
                       "Unexpected frame format.")
-            .WithData("IsMappable", frame->IsMappable())
+            .WithData("HasDirectCpuAccess", frame->HasDirectCpuAccess())
             .WithData("storage type", frame->storage_type())
             .WithData("format", frame->format()));
     return;
@@ -420,9 +420,9 @@ void OpenH264VideoEncoder::Encode(scoped_refptr<VideoFrame> frame,
   if (frame->format() == PIXEL_FORMAT_NV12 && frame->HasMappableSharedImage()) {
     frame = ConvertToMemoryMappedFrame(frame);
     if (!frame) {
-      std::move(done_cb).Run(
-          EncoderStatus(EncoderStatus::Codes::kSystemAPICallError,
-                        "Convert GMB frame to MemoryMappedFrame failed."));
+      std::move(done_cb).Run(EncoderStatus(
+          EncoderStatus::Codes::kSystemAPICallError,
+          "Convert MappableSI frame to MemoryMappedFrame failed."));
       return;
     }
   }

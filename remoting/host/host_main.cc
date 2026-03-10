@@ -45,16 +45,20 @@
 namespace remoting {
 
 // Known entry points.
-int HostProcessMain();
-#if BUILDFLAG(IS_WIN)
+int SingleProcessHostProcessMain();
+int NetworkProcessMain();
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
 int DaemonProcessMain();
 int DesktopProcessMain();
+#endif
+#if BUILDFLAG(IS_WIN)
 int FileChooserMain();
 int RdpDesktopSessionMain();
 int UrlForwarderConfiguratorMain();
 #endif  // BUILDFLAG(IS_WIN)
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 int XSessionChooserMain();
+int UserSystemdEnvMain();
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
 namespace {
@@ -143,13 +147,17 @@ int RunElevated() {
 MainRoutineFn SelectMainRoutine(const std::string& process_type) {
   MainRoutineFn main_routine = nullptr;
 
-  if (process_type == kProcessTypeHost) {
-    main_routine = &HostProcessMain;
-#if BUILDFLAG(IS_WIN)
+  if (process_type == kProcessTypeSingleProcessHost) {
+    main_routine = &SingleProcessHostProcessMain;
+  } else if (process_type == kProcessTypeNetwork) {
+    main_routine = &NetworkProcessMain;
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
   } else if (process_type == kProcessTypeDaemon) {
     main_routine = &DaemonProcessMain;
   } else if (process_type == kProcessTypeDesktop) {
     main_routine = &DesktopProcessMain;
+#endif
+#if BUILDFLAG(IS_WIN)
   } else if (process_type == kProcessTypeFileChooser) {
     main_routine = &FileChooserMain;
   } else if (process_type == kProcessTypeRdpDesktopSession) {
@@ -160,6 +168,8 @@ MainRoutineFn SelectMainRoutine(const std::string& process_type) {
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   } else if (process_type == kProcessTypeXSessionChooser) {
     main_routine = &XSessionChooserMain;
+  } else if (process_type == kProcessTypeUserSystemdEnv) {
+    main_routine = &UserSystemdEnvMain;
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   }
 
@@ -196,8 +206,8 @@ int HostMain(int argc, char** argv) {
   }
 #endif  // BUILDFLAG(IS_WIN)
 
-  // Assume the host process by default.
-  std::string process_type = kProcessTypeHost;
+  // Assume the single-process host process by default.
+  std::string process_type = kProcessTypeSingleProcessHost;
   if (command_line->HasSwitch(kProcessTypeSwitchName)) {
     process_type = command_line->GetSwitchValueASCII(kProcessTypeSwitchName);
   }
@@ -263,16 +273,18 @@ int HostMain(int argc, char** argv) {
 
   remoting::LoadResources("");
 
-  mojo::core::Init({
-#if BUILDFLAG(IS_WIN)
-      .is_broker_process = main_routine == &DaemonProcessMain
-#elif BUILDFLAG(IS_MAC)
-      // The broker process on Mac is the agent process broker.
-      .is_broker_process = false
-#else
-      .is_broker_process = main_routine == &HostProcessMain
+  bool is_broker_process = false;
+#if !BUILDFLAG(IS_MAC)
+  // The single-process host process should act as the mojo broker, except on
+  // Mac, where the broker process is the agent process broker.
+  is_broker_process |= main_routine == &SingleProcessHostProcessMain;
 #endif
-  });
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+  // For multi-process hosts, the daemon process acts as the broker.
+  is_broker_process |= main_routine == &DaemonProcessMain;
+#endif
+
+  mojo::core::Init({.is_broker_process = is_broker_process});
 
   // Invoke the entry point.
   int exit_code = main_routine();

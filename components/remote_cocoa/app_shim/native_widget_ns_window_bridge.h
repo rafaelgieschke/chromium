@@ -19,7 +19,6 @@
 #include "components/remote_cocoa/app_shim/native_widget_ns_window_fullscreen_controller.h"
 #include "components/remote_cocoa/app_shim/ns_view_ids.h"
 #include "components/remote_cocoa/app_shim/remote_cocoa_app_shim_export.h"
-#include "components/remote_cocoa/common/native_widget_ns_window.mojom-shared.h"
 #include "components/remote_cocoa/common/native_widget_ns_window.mojom.h"
 #include "components/remote_cocoa/common/text_input_host.mojom.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
@@ -205,7 +204,7 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   bool target_fullscreen_state() const {
     return fullscreen_controller_.GetTargetFullscreenState();
   }
-  bool window_visible() const;
+  bool window_visible() const { return window_visible_; }
   bool wants_to_be_visible() const { return wants_to_be_visible_; }
   bool in_fullscreen_transition() const {
     return fullscreen_controller_.IsInFullscreenTransition();
@@ -280,6 +279,7 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   void SetTransitionsToAnimate(
       remote_cocoa::mojom::VisibilityTransition transitions) override;
   void SetVisibleOnAllSpaces(bool always_visible) override;
+  void MoveToActiveFullscreenSpace() override;
   void SetZoomed(bool zoomed) override;
   void EnterFullscreen(int64_t target_display_id) override;
   void ExitFullscreen() override;
@@ -324,6 +324,8 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
                           mojo::PendingReceiver<mojom::Menu> receiver) override;
   void SetAllowScreenshots(bool allow) override;
   void SetColorMode(ui::ColorProviderKey::ColorMode color_mode) override;
+  void BeginFileDrag(mojom::FileDragDataPtr file_drag_data,
+                     const gfx::PointF& mouse_location) override;
 
   // Return true if [NSApp updateWindows] needs to be called after updating the
   // TextInputClient.
@@ -371,6 +373,10 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   // the clients.
   void CheckAndNotifyZoomedStateChanged();
 
+  // Check if the window's "visible on all workspaces" state has changed. If
+  // changes happen, notify the host.
+  void CheckAndNotifyAllWorkspacesStateChanged();
+
   // Notify descendants of a visibility change.
   void NotifyVisibilityChangeDown();
 
@@ -390,6 +396,10 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
 
   // Returns true if window restoration data exists from session restore.
   bool HasWindowRestorationData();
+
+  // Restores the initial collection behavior after temporarily changing it in
+  // `MoveToActiveFullscreenSpace()`.
+  void RestoreCollectionBehavior();
 
   // CocoaMouseCaptureDelegate:
   bool PostCapturedEvent(NSEvent* event) override;
@@ -455,6 +465,10 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   // state changes.
   bool window_zoomed_ = false;
 
+  // Stores the value last read from -[NSWindow collectionBehavior], to detect
+  // "visible on all spaces" state changes.
+  bool visible_on_all_spaces_ = false;
+
   // If true, the window is either visible, or wants to be visible but is
   // currently hidden due to having a hidden parent.
   bool wants_to_be_visible_ = false;
@@ -467,23 +481,12 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   // shadow needs to be invalidated when a frame is received for the new shape.
   bool invalidate_shadow_on_frame_swap_ = false;
 
-  // A blob representing the window's saved state, which is applied and cleared
-  // on the first call to SetVisibilityState().
-  std::vector<uint8_t> pending_restoration_data_;
+  // The window's saved state, which is applied and cleared on the first call to
+  // SetVisibilityState().
+  remote_cocoa::mojom::StateRestorationDataPtr pending_restoration_data_;
 
   // Manages immersive mode when in fullscreen.
   std::unique_ptr<ImmersiveModeControllerCocoa> immersive_mode_controller_;
-
-  // This tracks headless window visibility and fullscreen states.
-  // In headless mode the platform window is never made visible or change its
-  // state, so this structure holds the requested state for reporting.
-  struct HeadlessModeWindow {
-    bool visibility_state = false;
-    bool fullscreen_state = false;
-  };
-
-  // This is present iff the window has been created in headless mode.
-  std::optional<HeadlessModeWindow> headless_mode_window_;
 
   // This tracks whether current window can go back or go forward.
   bool can_go_back_ = false;
@@ -498,6 +501,10 @@ class REMOTE_COCOA_APP_SHIM_EXPORT NativeWidgetNSWindowBridge
   // ImmersiveFullscreenRevealUnlock() calls so locks can persist across
   // immersive_mode_controller_ resets.
   int immersive_fullscreen_reveal_lock_count_ = 0;
+
+  // Tracks the initial collection behavior to restore to when we temporarily
+  // change it to move to the active fullscreen space.
+  std::optional<NSWindowCollectionBehavior> collection_behavior_to_restore_;
 
   base::OnceCallback<void(NativeWidgetMacNSWindow*)> window_set_callback_;
 

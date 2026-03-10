@@ -11,6 +11,7 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/bind.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/time/time.h"
@@ -51,15 +52,23 @@
 
 namespace {
 
-using country_codes::CountryId;
-using search_engines::ChoiceMadeLocation;
-using search_engines::SearchEngineChoiceScreenConditions;
-using search_engines::SearchEngineChoiceWipeReason;
-using search_engines::SearchEnginesTestEnvironment;
-using search_engines::WipeSearchEngineChoicePrefs;
-using ChoiceStatus = search_engines::SearchEngineChoiceService::ChoiceStatus;
+using ::country_codes::CountryId;
+using ::regional_capabilities::SearchEngineChoiceScreenConditions;
+using ::search_engines::ChoiceMadeLocation;
+using ::search_engines::SearchEngineChoiceWipeReason;
+using ::search_engines::SearchEnginesTestEnvironment;
+using ::search_engines::WipeSearchEngineChoicePrefs;
+using ChoiceStatus = ::search_engines::SearchEngineChoiceService::ChoiceStatus;
 
 #if BUILDFLAG(CHOICE_SCREEN_IN_CHROME)
+constexpr regional_capabilities::ProgramSettings
+    kSettingsHighlightCurrentDefault{
+        .choice_screen_eligibility_config =
+            regional_capabilities::ChoiceScreenEligibilityConfig{
+                .highlight_current_default = true,
+            },
+    };
+
 constexpr regional_capabilities::ProgramSettings
     kSettingsManagedUsersCanBeEligible{
         .choice_screen_eligibility_config =
@@ -232,7 +241,7 @@ class SearchEngineChoiceEligibilityTest
 // overridden in the intial_preferences file.
 TEST_F(SearchEngineChoiceEligibilityTest,
        DoNotShowChoiceScreenWithProviderListOverride) {
-  base::Value::List override_list;
+  base::ListValue override_list;
   pref_service()->SetList(prefs::kSearchProviderOverrides,
                           override_list.Clone());
 
@@ -258,7 +267,7 @@ TEST_F(SearchEngineChoiceEligibilityTest,
                    policy::POLICY_LEVEL_MANDATORY, policy::POLICY_SCOPE_USER,
                    policy::POLICY_SOURCE_CLOUD, base::Value(false), nullptr);
 
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.Set(DefaultSearchManager::kDisabledByPolicy, true);
   pref_service()->SetManagedPref(
       DefaultSearchManager::kDefaultSearchProviderDataPrefName,
@@ -304,7 +313,7 @@ TEST_F(SearchEngineChoiceEligibilityTest,
 
   TemplateURLData data_from_policies;
   data_from_policies.SetURL("test");
-  base::Value::Dict dict = TemplateURLDataToDictionary(data_from_policies);
+  base::DictValue dict = TemplateURLDataToDictionary(data_from_policies);
   dict.Set(
       DefaultSearchManager::kPolicyOrigin,
       static_cast<int>(TemplateURLData::PolicyOrigin::kDefaultSearchProvider));
@@ -502,7 +511,8 @@ TEST_F(SearchEngineChoiceEligibilityTest,
   EXPECT_EQ(GetStaticConditions(),
             IfSupported(SearchEngineChoiceScreenConditions::kEligible));
   EXPECT_EQ(GetDynamicConditions(),
-            IfSupported(SearchEngineChoiceScreenConditions::kEligible));
+            IfSupported(SearchEngineChoiceScreenConditions::
+                            kHasNonHighlightablePrepopulatedSearchEngine));
 }
 
 TEST_F(SearchEngineChoiceEligibilityTest,
@@ -901,6 +911,23 @@ TEST_F(SearchEngineChoiceEligibilityOverriddenProgramSettingsTest,
             IfSupported(SearchEngineChoiceScreenConditions::kEligible));
   EXPECT_EQ(GetDynamicConditions(),
             IfSupported(SearchEngineChoiceScreenConditions::kEligible));
+}
+
+TEST_F(SearchEngineChoiceEligibilityOverriddenProgramSettingsTest,
+       CurrentEngineNotOfferedInChoiceScreen) {
+  SetProgram(kSettingsHighlightCurrentDefault);
+
+  // Naver is a prepopulated engine, but it is not available in the default set.
+  auto naver_turl_data =
+      TemplateURLDataFromPrepopulatedEngine(TemplateURLPrepopulateData::naver);
+  TemplateURL* naver_turl = template_url_service().Add(
+      std::make_unique<TemplateURL>(*naver_turl_data));
+  ASSERT_TRUE(naver_turl);
+  template_url_service().SetUserSelectedDefaultSearchProvider(naver_turl);
+
+  EXPECT_EQ(GetDynamicConditions(),
+            IfSupported(SearchEngineChoiceScreenConditions::
+                            kHasNonHighlightablePrepopulatedSearchEngine));
 }
 #endif  // BUILDFLAG(CHOICE_SCREEN_IN_CHROME)
 

@@ -45,16 +45,16 @@ export class AppItemElement extends CrLitElement {
   accessor appInfo: AppInfo = {
     appType: AppType.kWebApp,
     id: '',
-    startUrl: {url: ''},
+    startUrl: '',
     name: '',
-    iconUrl: {url: ''},
+    iconUrl: '',
     mayShowRunOnOsLoginMode: false,
     mayToggleRunOnOsLoginMode: false,
     runOnOsLoginMode: 0,
     isLocallyInstalled: false,
     openInWindow: false,
     mayUninstall: false,
-    storePageUrl: {url: ''},
+    storePageUrl: '',
   };
 
   override firstUpdated() {
@@ -68,7 +68,7 @@ export class AppItemElement extends CrLitElement {
       return;
     }
     this.$.menu.close();
-    this.fire_('on-menu-closed', {appItem: this});
+    this.fire('on-menu-closed', {appItem: this});
   }
 
   private handleContextMenu_(e: Event) {
@@ -76,9 +76,7 @@ export class AppItemElement extends CrLitElement {
     if (this.isValidPosition(position)) {
       // Show custom context menu only if it is inside the area of the item that
       // triggered it.
-      this.fire_('on-menu-open-triggered', {
-        appItem: this,
-      });
+      this.fire('on-menu-open-triggered', {appItem: this});
       this.$.menu.showAtPosition(position);
       recordUserAction(AppHomeUserAction.CONTEXT_MENU_TRIGGERED);
     }
@@ -144,11 +142,6 @@ export class AppItemElement extends CrLitElement {
 
     e.preventDefault();
     e.stopPropagation();
-  }
-
-  private fire_(eventName: string, detail?: any) {
-    this.dispatchEvent(
-        new CustomEvent(eventName, {bubbles: true, composed: true, detail}));
   }
 
   // The CrActionMenuElement is a modal that does not listen to any other
@@ -229,11 +222,11 @@ export class AppItemElement extends CrLitElement {
     event.stopPropagation();
   }
 
-  protected openStorePage_() {
+  protected onStorePageClick_() {
     if (!this.appInfo.storePageUrl) {
       return;
     }
-    window.open(new URL(this.appInfo.storePageUrl.url), '_blank');
+    window.open(new URL(this.appInfo.storePageUrl), '_blank');
     this.closeContextMenu();
   }
 
@@ -300,7 +293,7 @@ export class AppItemElement extends CrLitElement {
   }
 
   protected getIconUrl_() {
-    const url = new URL(this.appInfo.iconUrl.url);
+    const url = new URL(this.appInfo.iconUrl);
     // For web app, the backend serves grayscale image when the app is not
     // locally installed automatically and doesn't recognize this query param,
     // but we add a query param here to force browser to refetch the image.

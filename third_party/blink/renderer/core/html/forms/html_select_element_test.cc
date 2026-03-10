@@ -62,7 +62,7 @@ class HTMLSelectElementTest : public PageTestBase {
   bool FirstSelectIsConnectedAfterSelectMultiple(const Vector<int>& indices) {
     auto* select = To<HTMLSelectElement>(GetDocument().body()->firstChild());
     select->Focus();
-    select->SelectMultipleOptionsByPopup(indices);
+    select->SelectMultipleOptions(indices);
     return select->isConnected();
   }
 
@@ -70,21 +70,14 @@ class HTMLSelectElementTest : public PageTestBase {
     auto* select = To<HTMLSelectElement>(GetDocument().body()->firstChild());
     return select->InnerElement().textContent();
   }
-
- private:
-  bool original_delegates_flag_;
 };
 
 void HTMLSelectElementTest::SetUp() {
   PageTestBase::SetUp();
   GetDocument().SetMimeType(AtomicString("text/html"));
-  original_delegates_flag_ =
-      LayoutTheme::GetTheme().DelegatesMenuListRendering();
 }
 
 void HTMLSelectElementTest::TearDown() {
-  LayoutTheme::GetTheme().SetDelegatesMenuListRenderingForTesting(
-      original_delegates_flag_);
   PageTestBase::TearDown();
 }
 
@@ -182,7 +175,7 @@ TEST_F(HTMLSelectElementTest, RestoreUnmatchedFormControlState) {
 
   SetHtmlInnerHTML(R"HTML(
     <select id='sel'>
-    <option selected>Default</option>
+    <option id='1' selected>Default</option>
     <option id='2'>222</option>
     </select>
   )HTML");
@@ -202,8 +195,9 @@ TEST_F(HTMLSelectElementTest, RestoreUnmatchedFormControlState) {
 
   // Restore
   select->RestoreFormControlState(select_state);
-  EXPECT_EQ(-1, To<HTMLSelectElement>(element)->selectedIndex());
-  EXPECT_EQ(nullptr, To<HTMLSelectElement>(element)->OptionToBeShown());
+  EXPECT_EQ(0, To<HTMLSelectElement>(element)->selectedIndex());
+  EXPECT_EQ(GetElementById("1"),
+            To<HTMLSelectElement>(element)->OptionToBeShown());
 }
 
 TEST_F(HTMLSelectElementTest, VisibleBoundsInLocalRoot) {
@@ -552,9 +546,8 @@ TEST_F(HTMLSelectElementTest, SlotAssignmentRecalcDuringOptionRemoval) {
 }
 
 // crbug.com/1060039
-TEST_F(HTMLSelectElementTest, SelectMultipleOptionsByPopup) {
+TEST_F(HTMLSelectElementTest, SelectMultipleOptions) {
   GetDocument().GetSettings()->SetScriptEnabled(true);
-  LayoutTheme::GetTheme().SetDelegatesMenuListRenderingForTesting(true);
 
   // Select the same set of options.
   {
@@ -617,6 +610,15 @@ TEST_F(HTMLSelectElementTest, SelectMultipleOptionsByPopup) {
     EXPECT_EQ("2 selected", MenuListLabel());
     EXPECT_TRUE(FirstSelectIsConnectedAfterSelectMultiple(Vector<int>{1}));
     EXPECT_EQ("o1", MenuListLabel());
+  }
+
+  // 0 old selected options -> 1+ selected options (size attribute != 1)
+  {
+    SetHtmlInnerHTML(
+        "<select multiple onchange='this.remove();'>"
+        "<option>o0</option><option>o1</option></select>");
+    EXPECT_FALSE(FirstSelectIsConnectedAfterSelectMultiple(Vector<int>{0}))
+        << "Onchange handler should be executed.";
   }
 }
 
@@ -1082,6 +1084,27 @@ TEST_F(HTMLSelectElementTest, ListItemsNesting) {
   div->appendChild(div_optgroup);
   list_items.push_back(div_optgroup);
   check_selects();
+}
+
+TEST_F(HTMLSelectElementTest, InnerElementOverflow) {
+  SetHtmlInnerHTML(R"HTML(
+    <!DOCTYPE html>
+    <select id=select>
+      <option>option</option>
+    </select>
+  )HTML");
+  HTMLSelectElement* select = To<HTMLSelectElement>(GetElementById("select"));
+  Element& inner_element = select->InnerElement();
+
+  GetDocument().UpdateStyleAndLayoutTree();
+  EXPECT_EQ(inner_element.GetComputedStyle()->OverflowX(), EOverflow::kVisible);
+  EXPECT_EQ(inner_element.GetComputedStyle()->OverflowY(), EOverflow::kVisible);
+
+  select->SetInlineStyleProperty(CSSPropertyID::kTextOverflow,
+                                 CSSValueID::kEllipsis);
+  GetDocument().UpdateStyleAndLayoutTree();
+  EXPECT_EQ(inner_element.GetComputedStyle()->OverflowX(), EOverflow::kHidden);
+  EXPECT_EQ(inner_element.GetComputedStyle()->OverflowY(), EOverflow::kHidden);
 }
 
 class HTMLSelectElementSimTest : public SimTest {};

@@ -13,6 +13,10 @@
 #include <setupapi.h>
 #include <stddef.h>
 
+// LogSeverity is both a macro in setupapi.h and an enum in absl, which is used
+// indirectly via //base.
+#undef LogSeverity
+
 #include <utility>
 
 #include "base/command_line.h"
@@ -168,9 +172,9 @@ void AudioManagerWin::GetAudioDeviceNamesImpl(bool input,
   DCHECK(device_names->empty());
   // Enumerate all active audio-endpoint capture devices.
   if (input)
-    GetInputDeviceNamesWin(device_names);
+    GetInputDeviceNamesWin(device_names, GetEnumerationLogCallback());
   else
-    GetOutputDeviceNamesWin(device_names);
+    GetOutputDeviceNamesWin(device_names, GetEnumerationLogCallback());
 
   if (!device_names->empty()) {
     device_names->push_front(AudioDeviceName::CreateCommunications());
@@ -238,6 +242,7 @@ AudioOutputStream* AudioManagerWin::MakeLinearOutputStream(
                                          WAVE_MAPPER);
 }
 
+#if BUILDFLAG(ENABLE_PASSTHROUGH_AUDIO_CODECS)
 AudioOutputStream* AudioManagerWin::MakeBitstreamOutputStream(
     const AudioParameters& params,
     const std::string& device_id,
@@ -248,6 +253,7 @@ AudioOutputStream* AudioManagerWin::MakeBitstreamOutputStream(
   return nullptr;
 #endif  // BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
 }
+#endif
 
 // Factory for the implementations of AudioOutputStream for
 // AUDIO_PCM_LOW_LATENCY mode. Two implementations should suffice most
@@ -258,13 +264,7 @@ AudioOutputStream* AudioManagerWin::MakeLowLatencyOutputStream(
     const AudioParameters& params,
     const std::string& device_id,
     const LogCallback& log_callback) {
-#if BUILDFLAG(ENABLE_PLATFORM_DTS_AUDIO)
-  DCHECK(params.format() == AudioParameters::AUDIO_BITSTREAM_DTS ||
-         params.format() == AudioParameters::AUDIO_PCM_LOW_LATENCY)
-      << params.format();
-#else
   DCHECK_EQ(params.format(), AudioParameters::AUDIO_PCM_LOW_LATENCY);
-#endif
 
   if (params.channels() > kWinMaxChannels)
     return nullptr;

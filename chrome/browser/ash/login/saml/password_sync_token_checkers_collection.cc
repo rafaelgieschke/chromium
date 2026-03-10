@@ -7,9 +7,8 @@
 #include <memory>
 #include <string>
 
-#include "base/containers/contains.h"
+#include "base/check_deref.h"
 #include "chrome/browser/ash/login/saml/password_sync_token_login_checker.h"
-#include "chrome/browser/browser_process.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
@@ -28,8 +27,10 @@ const net::BackoffEntry::Policy
         true,            // Use initial delay in the first retry.
 };
 
-PasswordSyncTokenCheckersCollection::PasswordSyncTokenCheckersCollection()
-    : sync_token_retry_backoff_(&kFetchTokenRetryBackoffPolicy) {}
+PasswordSyncTokenCheckersCollection::PasswordSyncTokenCheckersCollection(
+    PrefService* local_state)
+    : local_state_(CHECK_DEREF(local_state)),
+      sync_token_retry_backoff_(&kFetchTokenRetryBackoffPolicy) {}
 
 PasswordSyncTokenCheckersCollection::~PasswordSyncTokenCheckersCollection() =
     default;
@@ -43,11 +44,11 @@ void PasswordSyncTokenCheckersCollection::StartPasswordSyncCheckers(
     if (!user->using_saml() || user->force_online_signin())
       continue;
 
-    user_manager::KnownUser known_user(g_browser_process->local_state());
+    user_manager::KnownUser known_user(&local_state_.get());
     const std::string* sync_token =
         known_user.GetPasswordSyncToken(user->GetAccountId());
     if (sync_token && !sync_token->empty() &&
-        !base::Contains(sync_token_checkers_, *sync_token)) {
+        !sync_token_checkers_.contains(*sync_token)) {
       sync_token_checkers_.insert(
           {*sync_token,
            std::make_unique<PasswordSyncTokenLoginChecker>(
@@ -63,11 +64,11 @@ void PasswordSyncTokenCheckersCollection::StartPasswordSyncCheckers(
 
 void PasswordSyncTokenCheckersCollection::OnInvalidSyncToken(
     const AccountId& account_id) {
-  user_manager::KnownUser known_user(g_browser_process->local_state());
+  user_manager::KnownUser known_user(&local_state_.get());
   const std::string* sync_token = known_user.GetPasswordSyncToken(account_id);
   if (!sync_token)
     return;
-  if (base::Contains(sync_token_checkers_, *sync_token)) {
+  if (sync_token_checkers_.contains(*sync_token)) {
     sync_token_checkers_.erase(*sync_token);
   }
 }

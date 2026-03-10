@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/metrics/field_trial.h"
@@ -19,11 +20,11 @@
 #include "base/strings/escape.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
+#include "base/values.h"
 #include "components/variations/client_filterable_state.h"
 #include "components/variations/field_trial_config/fieldtrial_testing_config.h"
 #include "components/variations/study_filtering.h"
 #include "components/variations/variations_seed_processor.h"
-#include "components/variations/variations_switches.h"
 
 namespace variations {
 namespace {
@@ -79,16 +80,6 @@ bool IsEnabledForBenchmarking(const FieldTrialTestingExperiment& experiment,
          !experiment.disable_benchmarking.value_or(false);
 }
 
-// Records the override ui string config. Mainly used for testing.
-void ApplyUIStringOverrides(
-    const FieldTrialTestingExperiment& experiment,
-    const VariationsSeedProcessor::UIStringOverrideCallback& callback) {
-  for (const auto& override_ui_string : experiment.override_ui_string) {
-    callback.Run(override_ui_string.name_hash,
-                 base::UTF8ToUTF16(override_ui_string.value));
-  }
-}
-
 // Determines whether an experiment should be skipped or not. An experiment
 // should be skipped if it enables or disables a feature that is already
 // overridden through the command line.
@@ -110,7 +101,6 @@ bool ShouldSkipExperiment(const FieldTrialTestingExperiment& experiment,
 void AssociateParamsFromExperiment(
     const std::string& study_name,
     const FieldTrialTestingExperiment& experiment,
-    const VariationsSeedProcessor::UIStringOverrideCallback& callback,
     base::FeatureList* feature_list) {
   if (ShouldSkipExperiment(experiment, feature_list)) {
     return;
@@ -137,8 +127,6 @@ void AssociateParamsFromExperiment(
     feature_list->RegisterFieldTrialOverride(
         disabled_feature, base::FeatureList::OVERRIDE_DISABLE_FEATURE, trial);
   }
-
-  ApplyUIStringOverrides(experiment, callback);
 }
 
 Study::Filter CreateFilter(const FieldTrialTestingExperiment& experiment) {
@@ -168,14 +156,13 @@ Study::Filter CreateFilter(const FieldTrialTestingExperiment& experiment) {
 // - If no experiments match this platform, do not associate any of them.
 void ChooseExperiment(
     const FieldTrialTestingStudy& study,
-    const VariationsSeedProcessor::UIStringOverrideCallback& callback,
     Study::Platform platform,
     Study::FormFactor current_form_factor,
     base::FeatureList* feature_list) {
   const auto& command_line = *base::CommandLine::ForCurrentProcess();
   std::string hardware_class = ClientFilterableState::GetHardwareClass();
   const bool is_benchmarking_enabled =
-      command_line.HasSwitch(switches::kEnableBenchmarking);
+      command_line.HasSwitch(::switches::kEnableBenchmarking);
   const FieldTrialTestingExperiment* chosen_experiment = nullptr;
   for (const FieldTrialTestingExperiment& experiment : study.experiments) {
     if (HasPlatform(experiment, platform)) {
@@ -199,8 +186,7 @@ void ChooseExperiment(
     }
   }
   if (chosen_experiment) {
-    AssociateParamsFromExperiment(study.name, *chosen_experiment, callback,
-                                  feature_list);
+    AssociateParamsFromExperiment(study.name, *chosen_experiment, feature_list);
   }
 }
 
@@ -235,23 +221,20 @@ bool AssociateParamsFromString(const std::string& varations_string) {
 
 void AssociateParamsFromFieldTrialConfig(
     const FieldTrialTestingConfig& config,
-    const VariationsSeedProcessor::UIStringOverrideCallback& callback,
     Study::Platform platform,
     Study::FormFactor current_form_factor,
     base::FeatureList* feature_list) {
   for (const FieldTrialTestingStudy& study : config.studies) {
     CHECK(!study.experiments.empty());
-    ChooseExperiment(study, callback, platform, current_form_factor,
-                     feature_list);
+    ChooseExperiment(study, platform, current_form_factor, feature_list);
   }
 }
 
 void AssociateDefaultFieldTrialConfig(
-    const VariationsSeedProcessor::UIStringOverrideCallback& callback,
     Study::Platform platform,
     Study::FormFactor current_form_factor,
     base::FeatureList* feature_list) {
-  AssociateParamsFromFieldTrialConfig(kFieldTrialConfig, callback, platform,
+  AssociateParamsFromFieldTrialConfig(kFieldTrialConfig, platform,
                                       current_form_factor, feature_list);
 }
 

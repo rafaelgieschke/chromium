@@ -166,10 +166,14 @@ linux_memory_builder(
                 ),
             ),
             "browser_tests": targets.mixin(
+                args = [
+                    "--test-launcher-filter-file=../../testing/buildbot/filters/linux.asan.browser_tests.filter",
+                ],
                 ci_only = True,
                 # These are very slow on the ASAN trybot for some reason.
                 # crbug.com/1257927
                 swarming = targets.swarming(
+                    hard_timeout_sec = 5400,  # 90 minutes,
                     shards = 70,
                 ),
             ),
@@ -323,8 +327,7 @@ linux_memory_builder(
         per_test_modifications = {
             "browser_tests": targets.mixin(
                 swarming = targets.swarming(
-                    # https://crbug.com/1361973
-                    shards = 30,
+                    shards = 45,
                 ),
             ),
             "crashpad_tests": targets.remove(
@@ -842,10 +845,7 @@ linux_memory_builder(
                 reason = "https://crbug.com/crashpad/304",
             ),
             "gl_tests_passthrough": [
-                "gpu-swarming-pool",
-                "no_gpu",
-                "linux-jammy",
-                "x86-64",
+                "gpu_linux_gce_stable",
                 targets.mixin(
                     args = [
                         "--test-launcher-filter-file=../../testing/buildbot/filters/linux.swiftshader.tsan.gl_tests_passthrough.filter",
@@ -1366,7 +1366,7 @@ ci.builder(
                 # These are very slow on the ASAN trybot for some reason.
                 # crbug.com/1257927
                 swarming = targets.swarming(
-                    shards = 80,
+                    shards = 120,
                 ),
             ),
             "components_unittests": targets.mixin(
@@ -1412,13 +1412,18 @@ ci.builder(
                     "--test-launcher-jobs=3",
                 ],
                 swarming = targets.swarming(
-                    shards = 2,
+                    shards = 3,
                 ),
             ),
             "unit_tests": targets.mixin(
                 swarming = targets.swarming(
                     # ASAN bot is slow: https://crbug.com/1484550#c4
                     shards = 4,
+                ),
+            ),
+            "updater_tests": targets.mixin(
+                swarming = targets.swarming(
+                    shards = 2,
                 ),
             ),
             "updater_tests_system": targets.mixin(

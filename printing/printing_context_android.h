@@ -32,7 +32,7 @@ class COMPONENT_EXPORT(PRINTING) PrintingContextAndroid
   // descriptor specified, or when the printing operation failed. On success,
   // the PDF has `page_count` pages. Non-positive `page_count` indicates
   // failure.
-  static void PdfWritingDone(int page_count);
+  static void PdfWritingDone(int page_count, ui::WindowAndroid* window);
 
   static void SetPendingPrint(
       ui::WindowAndroid* window,
@@ -42,8 +42,7 @@ class COMPONENT_EXPORT(PRINTING) PrintingContextAndroid
 
   // Called from Java, when printing settings from the user are ready or the
   // printing operation is canceled.
-  void AskUserForSettingsReply(JNIEnv* env,
-                               jboolean success);
+  void AskUserForSettingsReply(JNIEnv* env, bool success);
 
   // Called from Java, when a printing process initiated by a script finishes.
   void ShowSystemDialogDone(JNIEnv* env);

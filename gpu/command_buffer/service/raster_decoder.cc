@@ -36,6 +36,7 @@
 #include "cc/paint/paint_cache.h"
 #include "cc/paint/paint_op.h"
 #include "cc/paint/paint_op_buffer.h"
+#include "cc/paint/paint_op_writer.h"
 #include "cc/paint/transfer_cache_deserialize_helper.h"
 #include "cc/paint/transfer_cache_entry.h"
 #include "components/viz/common/resources/shared_image_format_utils.h"
@@ -67,7 +68,6 @@
 #include "gpu/command_buffer/service/shared_image/shared_image_factory.h"
 #include "gpu/command_buffer/service/shared_image/shared_image_format_service_utils.h"
 #include "gpu/command_buffer/service/shared_image/shared_image_representation.h"
-#include "gpu/command_buffer/service/shared_image/wrapped_sk_image_backing_factory.h"
 #include "gpu/command_buffer/service/skia_utils.h"
 #include "gpu/config/gpu_finch_features.h"
 #include "gpu/vulkan/buildflags.h"
@@ -106,10 +106,6 @@
 #include "gpu/vulkan/vulkan_util.h"
 #endif  // BUILDFLAG(ENABLE_VULKAN)
 
-#if BUILDFLAG(IS_WIN)
-#include "gpu/command_buffer/service/shared_image/d3d_image_backing_factory.h"
-#endif  // BUILDFLAG(IS_WIN)
-
 #if BUILDFLAG(SKIA_USE_DAWN)
 #include <dawn/webgpu_cpp.h>
 #include "gpu/command_buffer/service/dawn_context_provider.h"
@@ -118,6 +114,10 @@
 #if BUILDFLAG(SKIA_USE_DAWN) && BUILDFLAG(IS_CHROMEOS)
 #include "gpu/command_buffer/service/drm_modifiers_filter_dawn.h"
 #endif  // BUILDFLAG(SKIA_USE_DAWN) && BUILDFLAG(IS_CHROMEOS)
+
+#if BUILDFLAG(IS_CHROMEOS)
+#include "ui/gfx/linux/drm_util_linux.h"  // nogncheck
+#endif                                    // BUILDFLAG(IS_CHROMEOS)
 
 // Local versions of the SET_GL_ERROR macros
 #define LOCAL_SET_GL_ERROR(error, function_name, msg) \
@@ -559,6 +559,7 @@ class RasterDecoderImpl final : public RasterDecoder,
 
   gles2::ContextGroup* GetContextGroup() override;
   gles2::ErrorState* GetErrorState() override;
+  void BindFramebuffer(unsigned target, uint32_t service_id) const override;
 
   bool IsCompressedTextureFormat(unsigned format) override;
   bool ClearLevel(gles2::Texture* texture,
@@ -1140,10 +1141,10 @@ gl::GLSurface* RasterDecoderImpl::GetGLSurface() {
 Capabilities RasterDecoderImpl::GetCapabilities() {
   // TODO(enne): reconcile this with gles2_cmd_decoder's capability settings.
   Capabilities caps;
-  caps.gpu_memory_buffer_formats =
-      feature_info()->feature_flags().gpu_memory_buffer_formats;
   caps.texture_format_bgra8888 =
       feature_info()->feature_flags().ext_texture_format_bgra8888;
+  caps.disable_mac_swangle_rgbx =
+      feature_info()->feature_flags().disable_mac_swangle_rgbx;
   caps.texture_rg = feature_info()->feature_flags().ext_texture_rg;
   caps.max_texture_size = shared_context_state_->GetMaxTextureSize();
   caps.using_vulkan_context =
@@ -1152,16 +1153,11 @@ Capabilities RasterDecoderImpl::GetCapabilities() {
   caps.texture_format_etc1_npot =
       feature_info()->feature_flags().oes_compressed_etc1_rgb8_texture &&
       !feature_info()->workarounds().etc1_power_of_two_only;
-  caps.image_ycbcr_420v =
-      feature_info()->feature_flags().chromium_image_ycbcr_420v;
   caps.image_ar30 = feature_info()->feature_flags().chromium_image_ar30;
   caps.image_ab30 = feature_info()->feature_flags().chromium_image_ab30;
-  caps.image_ycbcr_p010 =
-      feature_info()->feature_flags().chromium_image_ycbcr_p010;
   caps.render_buffer_format_bgra8888 =
       feature_info()->feature_flags().ext_render_buffer_format_bgra8888;
 
-  caps.chromium_gpu_fence = feature_info()->feature_flags().chromium_gpu_fence;
   caps.mesa_framebuffer_flip_y =
       feature_info()->feature_flags().mesa_framebuffer_flip_y;
 
@@ -1190,11 +1186,6 @@ Capabilities RasterDecoderImpl::GetCapabilities() {
       caps.texture_norm16 =
           shared_context_state_->dawn_context_provider()->SupportsFeature(
               wgpu::FeatureName::Unorm16TextureFormats);
-    }
-#endif
-#if BUILDFLAG(SKIA_USE_METAL)
-    if (shared_context_state_->IsGraphiteMetal()) {
-      caps.texture_norm16 = true;
     }
 #endif
   } else {
@@ -1232,7 +1223,7 @@ Capabilities RasterDecoderImpl::GetCapabilities() {
                                           caps.drm_formats_and_modifiers);
   }
 #endif  // BUILDFLAG(ENABLE_VULKAN)
-#if BUILDFLAG(SKIA_USE_DAWN)
+#if BUILDFLAG(SKIA_USE_DAWN) && BUILDFLAG(IS_CHROMEOS)
   else if (shared_context_state_->IsGraphiteDawnVulkan()) {
     auto adapter = shared_context_state_->dawn_context_provider()
                        ->GetDevice()
@@ -1244,6 +1235,11 @@ Capabilities RasterDecoderImpl::GetCapabilities() {
   else {
     NOTREACHED();
   }
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+#if BUILDFLAG(IS_CHROMEOS)
+  gles2::PopulateMappableDrmFormatsForExo(caps.drm_formats_and_modifiers,
+                                          feature_info());
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
   return caps;
@@ -1596,6 +1592,11 @@ gles2::ErrorState* RasterDecoderImpl::GetErrorState() {
   return error_state_.get();
 }
 
+void RasterDecoderImpl::BindFramebuffer(unsigned target,
+                                        uint32_t service_id) const {
+  NOTREACHED();
+}
+
 bool RasterDecoderImpl::IsCompressedTextureFormat(unsigned format) {
   return feature_info()->validators()->compressed_texture_format.IsValid(
       format);
@@ -1646,7 +1647,7 @@ ServiceTransferCache* RasterDecoderImpl::GetTransferCacheForTest() {
 
 void RasterDecoderImpl::SetUpForRasterCHROMIUMForTest() {
   // Some tests use mock GL which doesn't work with skia. Just use a bitmap
-  // backed surface for OOP raster commands.
+  // backed surface for raster commands.
   auto info = SkImageInfo::MakeN32(10, 10, kPremul_SkAlphaType,
                                    SkColorSpace::MakeSRGB());
   SkSurfaceProps props = skia::LegacyDisplayGlobals::GetSkSurfaceProps();
@@ -3148,6 +3149,12 @@ void RasterDecoderImpl::DoCreateTransferCacheEntryINTERNAL(
   if (entry_type == cc::TransferCacheEntryType::kSkottie && !is_privileged_) {
     LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glCreateTransferCacheEntryINTERNAL",
                        "Attempt to use skottie on a non privileged channel");
+    return;
+  }
+
+  if (data_shm_offset % cc::PaintOpWriter::kMaxAlignment != 0) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glCreateTransferCacheEntryINTERNAL",
+                       "Transfer cache entry offset not aligned.");
     return;
   }
 

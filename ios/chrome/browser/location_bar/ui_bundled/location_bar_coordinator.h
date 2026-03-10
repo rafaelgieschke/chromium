@@ -8,6 +8,8 @@
 #import "ios/chrome/browser/location_bar/ui_bundled/location_bar_url_loader.h"
 #import "ios/chrome/browser/omnibox/model/omnibox_position/omnibox_state_provider.h"
 #import "ios/chrome/browser/shared/coordinator/chrome_coordinator/chrome_coordinator.h"
+#import "ios/chrome/browser/shared/public/commands/contextual_panel_entrypoint_commands.h"
+#import "ios/chrome/browser/shared/public/commands/location_bar_badge_commands.h"
 #import "ios/chrome/browser/shared/public/commands/omnibox_commands.h"
 
 @protocol BrowserCoordinatorCommands;
@@ -19,19 +21,13 @@
 @protocol OmniboxFocusDelegate;
 @protocol ToolbarOmniboxConsumer;
 
-// Delegate for height change.
-@protocol LocationBarCoordinatorHeightDelegate <NSObject>
-
-// Location bar in edit state required `height` changed.
-- (void)locationBarCoordinator:(LocationBarCoordinator*)coordinator
-      didChangeEditStateHeight:(CGFloat)height;
-
-@end
-
 // Location bar coordinator.
-@interface LocationBarCoordinator : ChromeCoordinator <LocationBarURLLoader,
-                                                       OmniboxCommands,
-                                                       OmniboxStateProvider>
+@interface LocationBarCoordinator
+    : ChromeCoordinator <ContextualPanelEntrypointCommands,
+                         LocationBarBadgeCommands,
+                         LocationBarURLLoader,
+                         OmniboxCommands,
+                         OmniboxStateProvider>
 
 // View controller containing the omnibox.
 @property(nonatomic, strong, readonly)
@@ -39,9 +35,6 @@
 // Delegate for this coordinator.
 // TODO(crbug.com/41363340): Change this.
 @property(nonatomic, weak) id<OmniboxFocusDelegate> delegate;
-// Delegate for height changes.
-@property(nonatomic, weak) id<LocationBarCoordinatorHeightDelegate>
-    heightDelegate;
 
 @property(nonatomic, weak) id<OmniboxPopupPresenterDelegate>
     popupPresenterDelegate;
@@ -84,6 +77,9 @@
 
 // Sets command dispatcher for page action menu entry point.
 - (void)setPageActionMenuEntryPointDispatcher;
+
+// Highlights or un-highlights the entry point for page action menu.
+- (void)togglePageActionMenuEntryPointHighlight:(BOOL)highlight;
 
 // Creates a visual copy of the location bar steady view.
 - (UIView*)locationBarSteadyViewVisualCopy;

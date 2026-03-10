@@ -129,7 +129,7 @@ class LoginScreenClientImpl : public ash::LoginScreenClient,
   void LoginAsGuest();
   void SetPublicSessionKeyboardLayout(const AccountId& account_id,
                                       const std::string& locale,
-                                      base::Value::List keyboard_layouts);
+                                      base::ListValue keyboard_layouts);
 
   void MakePreAuthenticationChecks(const AccountId& account_id,
                                    base::OnceClosure continuation);
@@ -146,7 +146,7 @@ class LoginScreenClientImpl : public ash::LoginScreenClient,
   // Captures authentication related user metrics for login screen.
   std::unique_ptr<ash::LoginAuthRecorder> auth_recorder_;
 
-  base::ObserverList<ash::SystemTrayObserver>::Unchecked system_tray_observers_;
+  base::ObserverList<ash::SystemTrayObserver> system_tray_observers_;
 
   base::ObserverList<LoginScreenShownObserver> login_screen_shown_observers_;
 

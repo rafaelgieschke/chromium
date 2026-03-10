@@ -91,10 +91,12 @@ std::string ToString(SearchEngineChoiceScreenConditions condition) {
       return "AccountNotEligible";
     case SearchEngineChoiceScreenConditions::kIneligibleSurface:
       return "IneligibleSurface";
+    case SearchEngineChoiceScreenConditions::
+        kHasNonHighlightablePrepopulatedSearchEngine:
+      return "HasNonHighlightablePrepopulatedSearchEngine";
     case SearchEngineChoiceScreenConditions::kManaged:
       return "Managed";
-    case search_engines::SearchEngineChoiceScreenConditions::
-        kEligibleForRestore:
+    case SearchEngineChoiceScreenConditions::kEligibleForRestore:
       return "EligibleForRestore";
   }
   NOTREACHED();
@@ -125,6 +127,8 @@ bool IsEligible(SearchEngineChoiceScreenConditions condition) {
     case SearchEngineChoiceScreenConditions::kIncompatibleCurrentLocation:
     case SearchEngineChoiceScreenConditions::kAccountNotEligible:
     case SearchEngineChoiceScreenConditions::kIneligibleSurface:
+    case SearchEngineChoiceScreenConditions::
+        kHasNonHighlightablePrepopulatedSearchEngine:
     case SearchEngineChoiceScreenConditions::kManaged:
       return false;
   }

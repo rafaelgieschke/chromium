@@ -88,12 +88,11 @@ class TestDelegate : public permissions::PermissionPrompt::Delegate {
     return GURL("https://embedder.example.com");
   }
 
-  void Accept() override {}
-  void AcceptThisTime() override {}
-  void Deny() override {}
-  void Dismiss() override {}
-  void Ignore() override {}
-  void SetPromptOptions(PromptOptions prompt_options) override {}
+  void Accept(const PromptOptions& prompt_options) override {}
+  void AcceptThisTime(const PromptOptions& prompt_options) override {}
+  void Deny(const PromptOptions& prompt_options) override {}
+  void Dismiss(const PromptOptions& prompt_options) override {}
+  void Ignore(const PromptOptions& prompt_options) override {}
   GeolocationAccuracy GetInitialGeolocationAccuracySelection() const override {
     NOTREACHED();
   }
@@ -103,6 +102,7 @@ class TestDelegate : public permissions::PermissionPrompt::Delegate {
   void SetManageClicked() override {}
   void SetLearnMoreClicked() override {}
   void SetHatsShownCallback(base::OnceCallback<void()> callback) override {}
+  void SwitchToLoudPrompt() override {}
 
   bool WasCurrentRequestAlreadyDisplayed() override { return false; }
   bool ShouldDropCurrentRequestIfCannotShowQuietly() const override {

@@ -56,6 +56,7 @@
 #include "components/autofill/core/browser/suggestions/suggestion.h"
 #include "components/autofill/core/browser/ui/payments/autofill_error_dialog_controller_impl.h"
 #include "components/autofill/core/browser/ui/payments/autofill_progress_dialog_controller_impl.h"
+#include "components/autofill/core/browser/ui/payments/autofill_progress_ui_type.h"
 #include "components/autofill/core/browser/ui/payments/bubble_show_options.h"
 #include "components/autofill/core/browser/ui/payments/card_unmask_authentication_selection_dialog_controller_impl.h"
 #include "components/autofill/core/browser/ui/payments/card_unmask_otp_input_dialog_controller_impl.h"
@@ -112,7 +113,7 @@
 #include "chrome/browser/ui/autofill/payments/webauthn_dialog_state.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"  // nogncheck
-#include "chrome/browser/ui/promos/ios_promos_utils.h"
+#include "chrome/browser/ui/desktop_to_mobile_promos/ios_promos_utils.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "components/autofill/core/browser/payments/desktop_bnpl_strategy.h"
 #include "components/autofill/core/common/autofill_payments_features.h"
@@ -411,7 +412,8 @@ void ChromePaymentsAutofillClient::CreditCardUploadCompleted(
     }
 
     controller->ShowConfirmationBubbleView(
-        card_saved, std::move(on_confirmation_closed_callback));
+        card_saved, /*is_for_save_and_fill=*/false,
+        std::move(on_confirmation_closed_callback));
   }
 #endif
 }
@@ -584,7 +586,7 @@ void ChromePaymentsAutofillClient::IbanUploadCompleted(bool iban_saved,
 }
 
 void ChromePaymentsAutofillClient::ShowAutofillProgressDialog(
-    AutofillProgressDialogType autofill_progress_dialog_type,
+    AutofillProgressUiType autofill_progress_dialog_type,
     base::OnceClosure cancel_callback) {
   autofill_progress_dialog_controller_ =
       std::make_unique<AutofillProgressDialogControllerImpl>(
@@ -955,7 +957,7 @@ bool ChromePaymentsAutofillClient::ShowTouchToFillIban(
 #endif
 }
 
-bool ChromePaymentsAutofillClient::ShowTouchToFillLoyaltyCard(
+bool ChromePaymentsAutofillClient::ShowTouchToFillAffiliatedLoyaltyCard(
     base::WeakPtr<TouchToFillDelegate> delegate,
     std::vector<autofill::LoyaltyCard> loyalty_cards_to_suggest) {
 #if BUILDFLAG(IS_ANDROID)
@@ -978,7 +980,7 @@ bool ChromePaymentsAutofillClient::ShowTouchToFillLoyaltyCard(
           feature_engagement::kIPHAutofillEnableLoyaltyCardsFeature);
 
   const bool loyalty_cards_shown =
-      GetTouchToFillPaymentMethodController()->ShowLoyaltyCards(
+      GetTouchToFillPaymentMethodController()->ShowAffiliatedLoyaltyCards(
           std::make_unique<TouchToFillPaymentMethodViewImpl>(web_contents()),
           delegate, std::move(affiliated_loyalty_cards),
           std::move(loyalty_cards_to_suggest), first_time_usage);
@@ -986,6 +988,19 @@ bool ChromePaymentsAutofillClient::ShowTouchToFillLoyaltyCard(
     tracker->NotifyEvent("keyboard_accessory_loyalty_cards_autofilled");
   }
   return loyalty_cards_shown;
+#else
+  // Touch To Fill is not supported on Desktop.
+  NOTREACHED();
+#endif
+}
+
+bool ChromePaymentsAutofillClient::ShowTouchToFillForAllLoyaltyCards(
+    base::WeakPtr<TouchToFillDelegate> delegate,
+    std::vector<autofill::LoyaltyCard> loyalty_cards_to_suggest) {
+#if BUILDFLAG(IS_ANDROID)
+  return GetTouchToFillPaymentMethodController()->ShowAllLoyaltyCards(
+      std::make_unique<TouchToFillPaymentMethodViewImpl>(web_contents()),
+      delegate, std::move(loyalty_cards_to_suggest));
 #else
   // Touch To Fill is not supported on Desktop.
   NOTREACHED();
@@ -1301,7 +1316,7 @@ std::u16string ChromePaymentsAutofillClient::GetAccountHolderName() const {
   }
   AccountInfo primary_account_info = identity_manager->FindExtendedAccountInfo(
       identity_manager->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin));
-  return base::UTF8ToUTF16(primary_account_info.full_name);
+  return base::UTF8ToUTF16(primary_account_info.GetFullName().value_or(""));
 }
 
 void ChromePaymentsAutofillClient::OnRiskDataLoaded(

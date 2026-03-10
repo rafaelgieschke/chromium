@@ -23,6 +23,7 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/paint/timing/paint_timing_utils.h"
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/core/timing/performance_entry.h"
 #include "third_party/blink/renderer/core/timing/window_performance.h"
@@ -138,7 +139,7 @@ bool ShouldLog(const LocalFrame& frame) {
 
   DCHECK(frame.GetDocument());
   const String& url = frame.GetDocument()->Url().GetString();
-  return !url.StartsWith("devtools:");
+  return !url.starts_with("devtools:");
 }
 
 }  // namespace
@@ -851,9 +852,8 @@ void LayoutShiftTracker::AttributionsToTracedValue(TracedValue& value) const {
   if (!*it)
     return;
 
-  bool should_include_names;
-  TRACE_EVENT_CATEGORY_GROUP_ENABLED(
-      TRACE_DISABLED_BY_DEFAULT("layout_shift.debug"), &should_include_names);
+  bool should_include_names = TRACE_EVENT_CATEGORY_ENABLED(
+      TRACE_DISABLED_BY_DEFAULT("layout_shift.debug"));
 
   value.BeginArray("impacted_nodes");
   while (it != attributions_.end() && it->node_id != kInvalidDOMNodeId) {
@@ -875,20 +875,15 @@ void LayoutShiftTracker::AttributionsToTracedValue(TracedValue& value) const {
 
 void LayoutShiftTracker::SendLayoutShiftRectsToHud(
     const Vector<gfx::Rect>& int_rects) {
-  // Store the layout shift rects in the HUD layer.
-  auto* cc_layer = frame_view_->RootCcLayer();
-  if (cc_layer && cc_layer->layer_tree_host()) {
-    if (!cc_layer->layer_tree_host()->GetDebugState().show_layout_shift_regions)
-      return;
-    if (cc_layer->layer_tree_host()->hud_layer()) {
-      std::vector<gfx::Rect> rects;
-      cc::Region blink_region;
-      for (const gfx::Rect& rect : int_rects)
-        blink_region.Union(rect);
-      for (gfx::Rect rect : blink_region)
-        rects.emplace_back(rect);
-      cc_layer->layer_tree_host()->hud_layer()->SetLayoutShiftRects(rects);
-      cc_layer->layer_tree_host()->hud_layer()->SetNeedsPushProperties();
+  if (auto* hud_layer =
+          paint_timing::GetHUDLayerIfLayoutShiftRectsEnabled(frame_view_)) {
+    cc::Region blink_region;
+    for (const gfx::Rect& rect : int_rects) {
+      blink_region.Union(rect);
+    }
+    for (gfx::Rect rect : blink_region) {
+      hud_layer->AddWebVitalsDebugRect(
+          {cc::WebVitalMetricType::kLayoutShift, rect});
     }
   }
 }

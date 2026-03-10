@@ -26,7 +26,6 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/view_ids.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_launcher_utils.h"
@@ -1430,7 +1429,7 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsWithPrerenderingBrowserTest,
   {
     NonPrimaryPageCookieAccessObserver cookie_observer(GetWebContents());
     prerender_test_helper().AddPrerender(prerender_url);
-    content::FrameTreeNodeId host_id =
+    content::PrerenderHostId host_id =
         prerender_test_helper().GetHostForUrl(prerender_url);
     content::RenderFrameHost* prerender_frame =
         prerender_test_helper().GetPrerenderedMainFrameHost(host_id);
@@ -1474,7 +1473,7 @@ IN_PROC_BROWSER_TEST_F(ContentSettingsWithPrerenderingBrowserTest,
   ASSERT_FALSE(main_pscs->IsContentAllowed(ContentSettingsType::COOKIES));
 
   prerender_test_helper().AddPrerender(prerender_url);
-  content::FrameTreeNodeId host_id =
+  content::PrerenderHostId host_id =
       prerender_test_helper().GetHostForUrl(prerender_url);
   content::RenderFrameHost* prerender_frame =
       prerender_test_helper().GetPrerenderedMainFrameHost(host_id);

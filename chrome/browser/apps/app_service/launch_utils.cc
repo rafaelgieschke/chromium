@@ -4,6 +4,7 @@
 
 #include "chrome/browser/apps/app_service/launch_utils.h"
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -242,6 +243,7 @@ extensions::AppLaunchSource GetAppLaunchSource(LaunchSource launch_source) {
     case LaunchSource::kFromInstaller:
     case LaunchSource::kFromNavigationCapturing:
     case LaunchSource::kFromWebInstallApi:
+    case LaunchSource::kFromMigration:
       return extensions::AppLaunchSource::kSourceNone;
   }
 }
@@ -312,7 +314,7 @@ AppIdsToLaunchForUrl FindAppIdsToLaunchForUrl(AppServiceProxy* proxy,
 
   std::optional<std::string> preferred =
       proxy->PreferredAppsList().FindPreferredAppForUrl(url);
-  if (preferred && base::Contains(result.candidates, *preferred)) {
+  if (preferred && std::ranges::contains(result.candidates, *preferred)) {
     result.preferred = std::move(preferred);
   }
 

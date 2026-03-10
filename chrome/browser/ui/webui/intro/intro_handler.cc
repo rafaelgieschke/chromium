@@ -12,6 +12,7 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/enterprise/browser_management/management_identity.h"
 #include "chrome/browser/policy/chrome_browser_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/profiles/profile.h"
@@ -210,12 +211,12 @@ void IntroHandler::OnJavascriptAllowed() {
       &IntroHandler::FireManagedDisclaimerUpdate, base::Unretained(this)));
 }
 
-void IntroHandler::HandleContinueWithAccount(const base::Value::List& args) {
+void IntroHandler::HandleContinueWithAccount(const base::ListValue& args) {
   CHECK(args.empty());
   intro_callback_.Run(IntroChoice::kContinueWithAccount);
 }
 
-void IntroHandler::HandleContinueWithoutAccount(const base::Value::List& args) {
+void IntroHandler::HandleContinueWithoutAccount(const base::ListValue& args) {
   CHECK(args.empty());
   intro_callback_.Run(IntroChoice::kContinueWithoutAccount);
 }
@@ -226,12 +227,12 @@ void IntroHandler::ResetIntroButtons() {
   }
 }
 
-void IntroHandler::HandleInitializeMainView(const base::Value::List& args) {
+void IntroHandler::HandleInitializeMainView(const base::ListValue& args) {
   CHECK(args.empty());
   AllowJavascript();
 }
 
-void IntroHandler::HandleSetAsDefaultBrowser(const base::Value::List& args) {
+void IntroHandler::HandleSetAsDefaultBrowser(const base::ListValue& args) {
   CHECK(args.empty());
   if (default_browser_callback_) {
     std::move(default_browser_callback_)
@@ -239,7 +240,7 @@ void IntroHandler::HandleSetAsDefaultBrowser(const base::Value::List& args) {
   }
 }
 
-void IntroHandler::HandleSkipDefaultBrowser(const base::Value::List& args) {
+void IntroHandler::HandleSkipDefaultBrowser(const base::ListValue& args) {
   CHECK(args.empty());
   if (default_browser_callback_) {
     std::move(default_browser_callback_).Run(DefaultBrowserChoice::kSkip);
@@ -254,7 +255,7 @@ void IntroHandler::ResetDefaultBrowserButtons() {
 
 void IntroHandler::SetCanPinToTaskbar(bool can_pin) {
   if (can_pin) {
-    base::Value::Dict update;
+    base::DictValue update;
     update.Set(
         "defaultBrowserTitle",
         l10n_util::GetStringUTF16(IDS_FRE_DEFAULT_BROWSER_AND_PINNING_TITLE));

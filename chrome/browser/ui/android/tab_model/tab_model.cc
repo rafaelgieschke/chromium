@@ -9,20 +9,19 @@
 #include "build/android_buildflags.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/flags/android/chrome_feature_list.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/synced_window_delegate_android.h"
 #include "chrome/browser/sync/session_sync_service_factory.h"
 #include "chrome/browser/sync/sessions/sync_sessions_web_contents_router.h"
 #include "chrome/browser/sync/sessions/sync_sessions_web_contents_router_factory.h"
+#include "chrome/browser/ui/android/tab_model/tab_model_list.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "components/omnibox/browser/location_bar_model_impl.h"
 #include "components/sessions/core/session_id.h"
 #include "components/sync_sessions/open_tabs_ui_delegate.h"
 #include "components/sync_sessions/session_sync_service.h"
 #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
-
-#if BUILDFLAG(IS_DESKTOP_ANDROID)
-#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"  // nogncheck
-#endif
 
 using chrome::android::ActivityType;
 
@@ -34,34 +33,25 @@ sync_sessions::OpenTabsUIDelegate* GetOpenTabsUIDelegate(Profile* profile) {
   return service->GetOpenTabsUIDelegate();
 }
 
-// Returns the initial |SessionID| for |TabModel|.
-//
-// On desktop Android, |BrowserWindowInterface| should be the source of truth
-// for |SessionID|, so we use the invalid value as the initial |SessionID| and
-// set a valid |SessionID| during
-// |TabModelJniBridge::AssociateWithBrowserWindow|. This aligns with the
-// implementation on other desktop platforms.
-//
-// On other Android platforms, there is no |BrowserWindowInterface|, and
-// |TabModel| has been the source of truth for |SessionID|, so we can use
-// |SessionID:NewUnique|.
-//
-// TODO(http://crbug.com/444518651): remove the if-def when
-// |BrowserWindowInterface| is compiled into all Android builds.
+// Returns the initial |SessionID| for |TabModel|. Currently behind a runtime
+// flag until support stabilizes on other platforms.
 SessionID GetInitialSessionId() {
-#if BUILDFLAG(IS_DESKTOP_ANDROID)
+  if (!TabModel::EnableBrowserWindowInterfaceMobile()) {
+    return SessionID::NewUnique();
+  }
   return SessionID::InvalidValue();
-#else
-  return SessionID::NewUnique();
-#endif
 }
 }  // namespace
 
-DEFINE_USER_DATA(TabModel);
-
-TabModel::TabModel(Profile* profile, ActivityType activity_type)
+TabModel::TabModel(Profile* profile,
+                   ActivityType activity_type,
+                   std::optional<chrome::android::CustomTabProfileType>
+                       custom_tab_profile_type,
+                   TabModelType tab_model_type)
     : profile_(profile),
       activity_type_(activity_type),
+      custom_tab_profile_type_(custom_tab_profile_type),
+      tab_model_type_(tab_model_type),
       live_tab_context_(new AndroidLiveTabContext(this)),
       synced_window_delegate_(new browser_sync::SyncedWindowDelegateAndroid(
           this,
@@ -156,18 +146,37 @@ void TabModel::RecordActualSyncedTabsHistogram() {
                                percent_synced);
 }
 
-// TODO(http://crbug.com/444518651): remove the if-def when
-// |BrowserWindowInterface| is compiled into all Android builds.
-#if BUILDFLAG(IS_DESKTOP_ANDROID)
 void TabModel::SetSessionId(SessionID session_id) {
+  if (!TabModel::EnableBrowserWindowInterfaceMobile()) {
+    LOG(ERROR) << "Setting session ID is not supported yet.";
+    return;
+  }
   session_id_ = session_id;
 }
 
 // static
-// From //chrome/browser/ui/tabs/tab_list_interface.h
-TabListInterface* TabListInterface::From(
-    BrowserWindowInterface* browser_window_interface) {
-  return ui::ScopedUnownedUserData<TabModel>::Get(
-      browser_window_interface->GetUnownedUserDataHost());
+// From //chrome/browser/tab_list/tab_list_interface.h
+bool TabListInterface::CanEditTabList(Profile& profile) {
+  for (TabModel* model : TabModelList::models()) {
+    if (model->GetProfile() != &profile ||
+        model->GetTabModelType() != TabModel::TabModelType::kStandard) {
+      continue;
+    }
+
+    if (!model->IsThisTabListEditable()) {
+      return false;
+    }
+  }
+
+  return true;
 }
-#endif
+
+// static
+bool TabModel::EnableBrowserWindowInterfaceMobile() {
+#if BUILDFLAG(IS_DESKTOP_ANDROID)
+  return true;
+#else   // !BUILDFLAG(IS_DESKTOP_ANDROID)
+  return base::FeatureList::IsEnabled(
+      chrome::android::kBrowserWindowInterfaceMobile);
+#endif  // BUILDFLAG(IS_DESKTOP_ANDROID)
+}

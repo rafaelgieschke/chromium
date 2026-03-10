@@ -13,7 +13,6 @@
 
 #include "base/barrier_closure.h"
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/containers/enum_set.h"
 #include "base/functional/bind.h"
 #include "base/memory/weak_ptr.h"
@@ -513,6 +512,50 @@ void MarkNoWithMultipleFeatures(BackForwardCacheCanStoreDocumentResult* result,
   DCHECK(features == features_added);
 }
 
+// Feature that controls if the BFCache reacts to memory pressure.
+BASE_FEATURE(kBFCachePerformanceManagerPolicy,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
+// The foregrounded tab's cache limit on moderate memory pressure. The negative
+// value means no limit.
+int ForegroundCacheSizeOnModeratePressure() {
+  static constexpr base::FeatureParam<int>
+      foreground_cache_size_on_moderate_pressure{
+          &kBFCachePerformanceManagerPolicy,
+          "foreground_cache_size_on_moderate_pressure", 3};
+  return foreground_cache_size_on_moderate_pressure.Get();
+}
+
+// The backgrounded tab's cache limit on moderate memory pressure. The negative
+// value means no limit.
+int BackgroundCacheSizeOnModeratePressure() {
+  static constexpr base::FeatureParam<int>
+      background_cache_size_on_moderate_pressure{
+          &kBFCachePerformanceManagerPolicy,
+          "background_cache_size_on_moderate_pressure", 1};
+  return background_cache_size_on_moderate_pressure.Get();
+}
+
+// The foregrounded tab's cache limit on critical memory pressure. The negative
+// value means no limit.
+int ForegroundCacheSizeOnCriticalPressure() {
+  static constexpr base::FeatureParam<int>
+      foreground_cache_size_on_critical_pressure{
+          &kBFCachePerformanceManagerPolicy,
+          "foreground_cache_size_on_critical_pressure", 0};
+  return foreground_cache_size_on_critical_pressure.Get();
+}
+
+// The backgrounded tab's cache limit on critical memory pressure. The negative
+// value means no limit.
+int BackgroundCacheSizeOnCriticalPressure() {
+  static constexpr base::FeatureParam<int>
+      background_cache_size_on_critical_pressure{
+          &kBFCachePerformanceManagerPolicy,
+          "background_cache_size_on_critical_pressure", 0};
+  return background_cache_size_on_critical_pressure.Get();
+}
+
 }  // namespace
 
 // static
@@ -642,6 +685,11 @@ BackForwardCacheImpl::BackForwardCacheImpl(BrowserContext* browser_context)
               browser_context) &&
       GetCacheControlNoStoreLevel() >
           CacheControlNoStoreExperimentLevel::kDoNotStore;
+
+  if (base::FeatureList::IsEnabled(kBFCachePerformanceManagerPolicy)) {
+    memory_pressure_listener_registration_.emplace(
+        base::MemoryPressureListenerTag::kBackForwardCacheImpl, this);
+  }
 }
 
 BackForwardCacheImpl::~BackForwardCacheImpl() {
@@ -822,10 +870,12 @@ void LogAndTraceResult(
 
 BackForwardCacheCanStoreDocumentResultWithTree
 BackForwardCacheImpl::GetCurrentBackForwardCacheEligibility(
-    RenderFrameHostImpl* rfh) {
+    RenderFrameHostImpl* rfh,
+    bool is_becoming_forward_entry) {
   BackForwardCacheCanStoreDocumentResult flattened;
   auto result =
-      PopulateReasonsForPage(rfh, flattened, RequestedFeatures::kAllIfAcked);
+      PopulateReasonsForPage(rfh, flattened, RequestedFeatures::kAllIfAcked,
+                             is_becoming_forward_entry);
   LogAndTraceResult(
       *rfh, result.flattened_reasons,
       "BackForwardCacheImpl::GetCurrentBackForwardCacheEligibility");
@@ -834,9 +884,11 @@ BackForwardCacheImpl::GetCurrentBackForwardCacheEligibility(
 
 BackForwardCacheCanStoreDocumentResultWithTree
 BackForwardCacheImpl::GetCompleteBackForwardCacheEligibilityForReporting(
-    RenderFrameHostImpl* rfh) {
+    RenderFrameHostImpl* rfh,
+    bool is_becoming_forward_entry) {
   BackForwardCacheCanStoreDocumentResult flattened;
-  auto result = PopulateReasonsForPage(rfh, flattened, RequestedFeatures::kAll);
+  auto result = PopulateReasonsForPage(rfh, flattened, RequestedFeatures::kAll,
+                                       is_becoming_forward_entry);
   LogAndTraceResult(*rfh, result.flattened_reasons,
                     "BackForwardCacheImpl::"
                     "GetCompleteBackForwardCacheEligibilityForReporting");
@@ -848,7 +900,8 @@ BackForwardCacheImpl::GetFutureBackForwardCacheEligibilityPotential(
     RenderFrameHostImpl* rfh) {
   BackForwardCacheCanStoreDocumentResult flattened;
   auto result =
-      PopulateReasonsForPage(rfh, flattened, RequestedFeatures::kOnlySticky);
+      PopulateReasonsForPage(rfh, flattened, RequestedFeatures::kOnlySticky,
+                             /*is_becoming_forward_entry=*/false);
   LogAndTraceResult(
       *rfh, result.flattened_reasons,
       "BackForwardCacheImpl::GetFutureBackForwardCacheEligibilityPotential");
@@ -859,7 +912,8 @@ BackForwardCacheCanStoreDocumentResultWithTree
 BackForwardCacheImpl::PopulateReasonsForPage(
     RenderFrameHostImpl* rfh,
     BackForwardCacheCanStoreDocumentResult& flattened_result,
-    RequestedFeatures requested_features) {
+    RequestedFeatures requested_features,
+    bool is_becoming_forward_entry) {
   // TODO(crbug.com/40207294): This function should only be called when |rfh| is
   // the primary main frame. Fix |ShouldProactivelySwapBrowsingInstance()| and
   // |UnloadOldFrame()| so that it will not check bfcache eligibility if not
@@ -885,7 +939,8 @@ BackForwardCacheImpl::PopulateReasonsForPage(
     result_tree = BackForwardCacheCanStoreTreeResult::CreateEmptyTree(rfh);
   } else {
     // Populate main document specific reasons.
-    PopulateReasonsForMainDocument(main_document_specific_result, rfh);
+    PopulateReasonsForMainDocument(main_document_specific_result, rfh,
+                                   is_becoming_forward_entry);
     NotRestoredReasonBuilder builder(rfh, requested_features);
     result_tree = builder.GetTreeResult();
     flattened_result.AddReasonsFrom(builder.GetFlattenedResult());
@@ -902,7 +957,8 @@ BackForwardCacheImpl::PopulateReasonsForPage(
 
 void BackForwardCacheImpl::PopulateReasonsForMainDocument(
     BackForwardCacheCanStoreDocumentResult& result,
-    RenderFrameHostImpl* rfh) {
+    RenderFrameHostImpl* rfh,
+    bool is_becoming_forward_entry) {
   bool main_frame_in_bfcache =
       rfh->IsInBackForwardCache() && !rfh->GetParentOrOuterDocumentOrEmbedder();
   DCHECK(rfh->IsInPrimaryMainFrame() || main_frame_in_bfcache);
@@ -1047,6 +1103,12 @@ void BackForwardCacheImpl::PopulateReasonsForMainDocument(
   if (!IsAllowed(rfh->GetLastCommittedURL())) {
     result.No(BackForwardCacheMetrics::NotRestoredReason::kDomainNotAllowed);
   }
+
+  // Do not store forward entries if they are not allowed.
+  if (!IsCachingForwardEntriesAllowed() && is_becoming_forward_entry) {
+    result.No(
+        BackForwardCacheMetrics::NotRestoredReason::kForwardCacheDisabled);
+  }
 }
 
 void BackForwardCacheImpl::NotRestoredReasonBuilder::
@@ -1177,7 +1239,8 @@ void BackForwardCacheImpl::NotRestoredReasonBuilder::
     }
   }
 
-  if (base::FeatureList::IsEnabled(blink::features::kBFCacheWithSharedWorker)) {
+  if (base::FeatureList::IsEnabled(blink::features::kBFCacheWithSharedWorker) &&
+      !base::FeatureList::IsEnabled(blink::features::kFreezeSharedWorker)) {
     // If this frame is a client of a Shared Worker and all other clients are in
     // this frame's frame-tree, block this frame from entering BFCache. Also,
     // other clients of the same worker that are already in BFCache will be
@@ -1300,8 +1363,10 @@ BackForwardCacheImpl::NotRestoredReasonBuilder::PopulateReasons(
 void BackForwardCacheImpl::StoreEntry(
     std::unique_ptr<BackForwardCacheImpl::Entry> entry) {
   TRACE_EVENT("navigation", "BackForwardCache::StoreEntry", "entry", entry);
-  DCHECK(GetCurrentBackForwardCacheEligibility(entry->render_frame_host())
-             .CanStore());
+  DCHECK(
+      GetCurrentBackForwardCacheEligibility(entry->render_frame_host(),
+                                            /*is_becoming_forward_entry=*/false)
+          .CanStore());
 
 #if BUILDFLAG(IS_ANDROID)
   if (!IsProcessBindingEnabled()) {
@@ -1453,6 +1518,40 @@ void BackForwardCacheImpl::SetEmbedderSuppliedTimeToLive(
   }
   embedder_supplied_time_to_live_ = embedder_supplied_time_to_live;
   Flush();
+}
+
+void BackForwardCacheImpl::SetEmbedderSuppliedCacheForwardEntriesAllowed(
+    bool embedder_supplied_cache_forward_entries_allowed) {
+  if (embedder_supplied_cache_forward_entries_allowed ==
+      IsCachingForwardEntriesAllowed()) {
+    return;
+  }
+
+  embedder_supplied_cache_forward_entries_allowed_ =
+      embedder_supplied_cache_forward_entries_allowed;
+  if (!embedder_supplied_cache_forward_entries_allowed && !entries_.empty()) {
+    PruneForwardEntries(GetNavigationController().GetLastCommittedEntryIndex());
+  }
+}
+
+bool BackForwardCacheImpl::IsCachingForwardEntriesAllowed() const {
+  if (embedder_supplied_cache_forward_entries_allowed_.has_value()) {
+    return embedder_supplied_cache_forward_entries_allowed_.value();
+  }
+  return true;
+}
+
+void BackForwardCacheImpl::PruneForwardEntries(int target_entry_index) {
+  if (entries_.empty()) {
+    return;
+  }
+  auto& controller = GetNavigationController();
+  for (std::unique_ptr<Entry>& entry : entries_) {
+    if (IsForwardEntry(entry, controller, target_entry_index)) {
+      entry->render_frame_host()->EvictFromBackForwardCacheWithReason(
+          BackForwardCacheMetrics::NotRestoredReason::kForwardCacheDisabled);
+    }
+  }
 }
 
 std::unique_ptr<BackForwardCacheImpl::Entry> BackForwardCacheImpl::RestoreEntry(
@@ -1617,6 +1716,15 @@ BackForwardCacheImpl::GetEntries() {
   return entries_;
 }
 
+NavigationControllerImpl& BackForwardCacheImpl::GetNavigationController() {
+  CHECK(!entries_.empty());
+  return entries_.front()
+      ->render_frame_host()
+      ->frame_tree_node()
+      ->navigator()
+      .controller();
+}
+
 std::list<BackForwardCacheImpl::Entry*>
 BackForwardCacheImpl::GetEntriesForRenderViewHostImpl(
     const RenderViewHostImpl* rvhi) const {
@@ -1658,7 +1766,9 @@ BackForwardCacheImpl::GetOrEvictEntry(int navigation_entry_id) {
   // if it hasn't been evicted up until this point, e.g. due to cache-control:
   // no-store preventing restoration but not storage
   BackForwardCacheCanStoreDocumentResultWithTree bfcache_eligibility =
-      GetCurrentBackForwardCacheEligibility(render_frame_host);
+      GetCurrentBackForwardCacheEligibility(
+          render_frame_host,
+          /*is_becoming_forward_entry=*/false);
   if (!bfcache_eligibility.CanRestore()) {
     render_frame_host->EvictFromBackForwardCacheWithFlattenedAndTreeReasons(
         bfcache_eligibility);
@@ -1711,6 +1821,129 @@ void BackForwardCacheImpl::RenderViewHostNoLongerStored(
     return;
   }
   RenderViewHostNoLongerStoredInternal(rvh);
+}
+
+bool BackForwardCacheImpl::IsForwardEntry(const std::unique_ptr<Entry>& entry,
+                                          NavigationControllerImpl& controller,
+                                          int current_nav_entry_index) {
+  int entry_index = controller.GetEntryIndexWithUniqueID(
+      entry->render_frame_host()->nav_entry_id());
+  return entry_index != -1 && entry_index > current_nav_entry_index;
+}
+
+void BackForwardCacheImpl::RecordForwardEntriesCount(
+    int current_nav_entry_index) {
+  int count = 0;
+  if (!entries_.empty()) {
+    auto& controller = GetNavigationController();
+    count = std::ranges::count_if(entries_, [&](const auto& entry) {
+      return IsForwardEntry(entry, controller, current_nav_entry_index);
+    });
+  }
+  base::UmaHistogramExactLinear("BackForwardCache.History.ForwardEntriesCount",
+                                count, 10);
+}
+
+void BackForwardCacheImpl::RecordEntryMatch(const GURL& new_url,
+                                            int target_nav_entry_index) {
+  if (entries_.empty()) {
+    base::UmaHistogramEnumeration("BackForwardCache.History.EntryMatch",
+                                  BackForwardCacheEntryMatchResult::kNoEntries);
+    return;
+  }
+  auto& controller = GetNavigationController();
+  bool match_found = false;
+  bool index_match_found = false;
+
+  // TODO(crbug.com/432396241): Support No-Vary-Search for URL matching.
+  for (const auto& entry : entries_) {
+    if (entry->render_frame_host()->GetLastCommittedURL() == new_url) {
+      match_found = true;
+      int entry_index = controller.GetEntryIndexWithUniqueID(
+          entry->render_frame_host()->nav_entry_id());
+      if (entry_index == target_nav_entry_index) {
+        index_match_found = true;
+        break;
+      }
+    }
+  }
+
+  BackForwardCacheEntryMatchResult result;
+  if (index_match_found) {
+    result = BackForwardCacheEntryMatchResult::kMatchIndex;
+  } else if (match_found) {
+    result = BackForwardCacheEntryMatchResult::kMatchNoIndex;
+  } else {
+    result = BackForwardCacheEntryMatchResult::kNoMatch;
+  }
+  base::UmaHistogramEnumeration("BackForwardCache.History.EntryMatch", result);
+}
+
+void BackForwardCacheImpl::OnMemoryPressure(
+    base::MemoryPressureLevel memory_pressure_level) {
+  if (memory_pressure_level == base::MEMORY_PRESSURE_LEVEL_NONE) {
+    return;
+  }
+
+  // Nothing to do if there is no entries.
+  if (entries_.empty()) {
+    return;
+  }
+
+  // Check if the page is backgrounded or has a pending navigation.
+  // Since BackForwardCacheImpl is instantiated per
+  // WebContents/NavigationController, we can just check the status of the first
+  // entry.
+  RenderFrameHostImpl* rfh = entries_.front()->render_frame_host();
+
+  int cache_size = -1;
+  BackForwardCache::NotRestoredReason reason;
+  bool foregrounded = rfh->delegate()->GetVisibility() == Visibility::VISIBLE;
+  switch (memory_pressure_level) {
+    case base::MEMORY_PRESSURE_LEVEL_MODERATE:
+      cache_size = foregrounded ? ForegroundCacheSizeOnModeratePressure()
+                                : BackgroundCacheSizeOnModeratePressure();
+      reason = BackForwardCache::NotRestoredReason::
+          kCacheLimitPrunedOnModerateMemoryPressure;
+      break;
+    case base::MEMORY_PRESSURE_LEVEL_CRITICAL:
+      cache_size = foregrounded ? ForegroundCacheSizeOnCriticalPressure()
+                                : BackgroundCacheSizeOnCriticalPressure();
+      reason = BackForwardCache::NotRestoredReason::
+          kCacheLimitPrunedOnCriticalMemoryPressure;
+      break;
+    default:
+      NOTREACHED();
+  }
+
+  // Do not flush BFCache if cache_size is negative (such as -1).
+  if (cache_size < 0) {
+    return;
+  }
+
+  // Do not flush the BFCache if there's a pending navigation as this could stop
+  // it.
+  // TODO(431957711): Check if this is really needed.
+  // TODO(431957711): `number_of_tabs` can only ever be 0 or 1. Consider fixing
+  // it or removing it the metric.
+  auto& navigation_controller =
+      rfh->frame_tree_node()->navigator().controller();
+  size_t number_of_tabs = 0;
+  size_t number_of_cached_entries = 0;
+  if (!navigation_controller.GetPendingEntry()) {
+    size_t count = Prune(cache_size, reason);
+    if (count > 0) {
+      number_of_tabs++;
+      number_of_cached_entries += count;
+    }
+  }
+
+  base::UmaHistogramCounts1000(
+      "BackForwardCache.Pruning.NumberOfTabsWithBackForwardCache",
+      number_of_tabs);
+  base::UmaHistogramCounts1000(
+      "BackForwardCache.Pruning.NumberOfBackForwardCacheEntries",
+      number_of_cached_entries);
 }
 
 void BackForwardCacheImpl::RenderViewHostNoLongerStoredInternal(
@@ -1807,7 +2040,7 @@ bool BackForwardCacheImpl::IsQueryAllowed(const GURL& current_url) {
       base::SplitString(current_url.query(), "&", base::TRIM_WHITESPACE,
                         base::SplitResult::SPLIT_WANT_NONEMPTY);
   for (const std::string& cgi_param : cgi_params) {
-    if (base::Contains(blocked_cgi_params_, cgi_param)) {
+    if (blocked_cgi_params_.contains(cgi_param)) {
       return false;
     }
   }
@@ -2013,7 +2246,7 @@ BackForwardCacheCanStoreTreeResult::GetWebExposedNotRestoredReasons() {
   DCHECK(is_root_outermost_main_frame_);
   uint32_t count = GetCrossOriginReachableFrameCount();
   int exposed_cross_origin_iframe_index =
-      count == 0 ? 0 : base::RandInt(0, count - 1);
+      count == 0 ? 0 : base::RandIntInclusive(0, count - 1);
   return GetWebExposedNotRestoredReasonsInternal(
       exposed_cross_origin_iframe_index);
 }

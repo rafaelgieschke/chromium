@@ -24,12 +24,14 @@
 #include "content/browser/android/select_popup.h"
 #include "content/browser/android/selection/selection_popup_controller.h"
 #include "content/browser/navigation_transitions/back_forward_transition_animation_manager_android.h"
+#include "content/browser/navigation_transitions/blur_transition_animation_manager.h"
 #include "content/browser/renderer_host/render_view_host_factory.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/common/features.h"
 #include "content/public/browser/android/synchronous_compositor.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/content_client.h"
@@ -136,7 +138,8 @@ void WebContentsViewAndroid::InstallCreateHookForTests(
 WebContentsViewAndroid::WebContentsViewAndroid(
     WebContentsImpl* web_contents,
     std::unique_ptr<WebContentsViewDelegate> delegate)
-    : web_contents_(web_contents),
+    : WebContentsObserver(web_contents),
+      web_contents_(web_contents),
       delegate_(std::move(delegate)),
       view_(ui::ViewAndroid::LayoutType::kNormal),
       synchronous_compositor_client_(nullptr) {
@@ -378,6 +381,24 @@ void WebContentsViewAndroid::DestroyBackForwardTransitionAnimationManager() {
   back_forward_animation_manager_.reset();
 }
 
+void WebContentsViewAndroid::ReadyToCommitNavigation(
+    NavigationHandle* navigation_handle) {
+  // Do nothing if the BlurTransitionAnimationManager is already instantiated.
+  if (BlurTransitionAnimationManager::FromWebContents(web_contents_)) {
+    return;
+  }
+
+  // Lazily instantiate the BlurTransitionAnimationManager.
+  if (ShouldShowBlurTransitionAnimation(navigation_handle)) {
+    BlurTransitionAnimationManager::CreateForWebContents(web_contents_);
+    // In this lazy instantiation flow, the ReadyToCommitNavigation notification
+    // was not received by the animation manager. We manually invoke to
+    // ensure we don't miss the animation.
+    BlurTransitionAnimationManager::FromWebContents(web_contents_)
+        ->ReadyToCommitNavigation(navigation_handle);
+  }
+}
+
 void WebContentsViewAndroid::ShowContextMenu(RenderFrameHost& render_frame_host,
                                              const ContextMenuParams& params) {
   if (is_active_drag_ && drag_exceeded_movement_threshold_) {
@@ -451,6 +472,31 @@ void WebContentsViewAndroid::StartDragging(
     return;
   }
 
+  GURL source_url = web_contents_->GetPrimaryMainFrame()->GetLastCommittedURL();
+  ui::DataTransferEndpoint data_endpoint(
+      source_url,
+      {.notify_if_restricted = true,
+       .off_the_record = web_contents_->GetBrowserContext()->IsOffTheRecord()});
+
+  // TODO(crbug.com/410835513): Unify with other declarations of
+  // CreateClipboardEndpoint.
+  ClipboardEndpoint source_endpoint(
+      base::optional_ref<const ui::DataTransferEndpoint>(data_endpoint),
+      base::BindRepeating(
+          [](GlobalRenderFrameHostId rfh_id) -> BrowserContext* {
+            auto* rfh = RenderFrameHost::FromID(rfh_id);
+            if (!rfh) {
+              return nullptr;
+            }
+            return rfh->GetBrowserContext();
+          },
+          web_contents_->GetPrimaryMainFrame()->GetGlobalId()),
+      *web_contents_->GetPrimaryMainFrame());
+
+  if (!IsDragAllowedByDataControlPolicy(source_endpoint, drop_data)) {
+    OnSystemDragEnded(source_rwh);
+    return;
+  }
   if (drag_drop_oopif_enabled_) {
     drag_security_info_.OnDragInitiated(source_rwh, drop_data);
   }
@@ -973,6 +1019,21 @@ void WebContentsViewAndroid::ShowInterestInElement(int nodeID) {
   if (rwhv) {
     rwhv->ShowInterestInElement(nodeID);
   }
+}
+
+bool WebContentsViewAndroid::ShouldShowBlurTransitionAnimation(
+    NavigationHandle* navigation_handle) {
+  if (delegate_) {
+    return delegate_->ShouldShowBlurTransitionAnimation(navigation_handle);
+  }
+  return false;
+}
+
+bool WebContentsViewAndroid::IsDragAllowedByDataControlPolicy(
+    const ClipboardEndpoint& source,
+    const DropData& drop_data) {
+  return GetContentClient()->browser()->IsDragAllowedByPolicy(source,
+                                                              drop_data);
 }
 
 }  // namespace content

@@ -7,6 +7,7 @@ package org.chromium.components.browser_ui.site_settings;
 import static org.chromium.build.NullUtil.assertNonNull;
 import static org.chromium.build.NullUtil.assumeNonNull;
 import static org.chromium.components.browser_ui.settings.SearchUtils.handleSearchNavigation;
+import static org.chromium.components.browser_ui.styles.SemanticColorUtils.getDefaultTextColorLink;
 
 import android.content.Context;
 import android.content.DialogInterface;
@@ -31,10 +32,11 @@ import androidx.preference.PreferenceManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.base.supplier.ObservableSuppliers;
-import org.chromium.base.supplier.SettableObservableSupplier;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.build.annotations.Initializer;
+import org.chromium.build.annotations.MonotonicNonNull;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.build.annotations.UsedByReflection;
@@ -44,6 +46,7 @@ import org.chromium.components.browser_ui.settings.ChromeBasePreference;
 import org.chromium.components.browser_ui.settings.CustomDividerFragment;
 import org.chromium.components.browser_ui.settings.EmbeddableSettingsPage;
 import org.chromium.components.browser_ui.settings.SearchUtils;
+import org.chromium.components.browser_ui.settings.SearchViewProvider;
 import org.chromium.components.browser_ui.settings.SettingsUtils;
 import org.chromium.components.browser_ui.util.TraceEventVectorDrawableCompat;
 import org.chromium.components.embedder_support.util.UrlUtilities;
@@ -73,6 +76,7 @@ public class AllSiteSettings extends BaseSiteSettingsFragment
         implements EmbeddableSettingsPage,
                 PreferenceManager.OnPreferenceTreeClickListener,
                 View.OnClickListener,
+                SearchViewProvider,
                 CustomDividerFragment {
     // The key to use to pass which category this preference should display,
     // should only be All Sites or Storage.
@@ -106,8 +110,9 @@ public class AllSiteSettings extends BaseSiteSettingsFragment
 
     private @Nullable Set<String> mSelectedDomains;
 
-    private final SettableObservableSupplier<String> mPageTitle =
+    private final SettableMonotonicObservableSupplier<String> mPageTitle =
             ObservableSuppliers.createMonotonic();
+    private @MonotonicNonNull SearchViewProvider.Observer mSearchViewObserver;
 
     private class ResultsPopulator implements WebsitePermissionsFetcher.WebsitePermissionsCallback {
         @Override
@@ -124,7 +129,7 @@ public class AllSiteSettings extends BaseSiteSettingsFragment
             if (mEmptyView == null) return;
 
             mEmptyView.setVisibility(hasEntries ? View.GONE : View.VISIBLE);
-            notifyPreferencesUpdated();
+            updateContainment();
         }
     }
 
@@ -369,8 +374,13 @@ public class AllSiteSettings extends BaseSiteSettingsFragment
     }
 
     @Override
-    public ObservableSupplier<String> getPageTitle() {
+    public MonotonicObservableSupplier<String> getPageTitle() {
         return mPageTitle;
+    }
+
+    @Override
+    public void setSearchViewObserver(SearchViewProvider.Observer observer) {
+        mSearchViewObserver = observer;
     }
 
     @Override
@@ -383,6 +393,7 @@ public class AllSiteSettings extends BaseSiteSettingsFragment
                 mSearchItem,
                 mSearch,
                 getActivity(),
+                assumeNonNull(mSearchViewObserver),
                 (query) -> {
                     boolean queryHasChanged =
                             mSearch == null
@@ -479,8 +490,7 @@ public class AllSiteSettings extends BaseSiteSettingsFragment
                     new SpannableString(
                             getResources().getString(R.string.clear_browsing_data_link));
             spannableString.setSpan(
-                    new ForegroundColorSpan(
-                            getContext().getColor(R.color.default_text_color_link_baseline)),
+                    new ForegroundColorSpan(getDefaultTextColorLink(getContext())),
                     0,
                     spannableString.length(),
                     Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
@@ -563,5 +573,11 @@ public class AllSiteSettings extends BaseSiteSettingsFragment
     @Override
     public @AnimationType int getAnimationType() {
         return AnimationType.PROPERTY;
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        if (mSearchViewObserver != null) mSearchViewObserver.onUpdated(false);
     }
 }

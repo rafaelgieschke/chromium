@@ -139,10 +139,10 @@ class MimeHandlerViewGuest
   int GetTaskPrefix() const final;
   void CreateInnerPage(std::unique_ptr<GuestViewBase> owned_this,
                        scoped_refptr<content::SiteInstance> site_instance,
-                       const base::Value::Dict& create_params,
+                       const base::DictValue& create_params,
                        GuestPageCreatedCallback callback) override;
   void DidAttachToEmbedder() override;
-  void DidInitialize(const base::Value::Dict& create_params) final;
+  void DidInitialize(const base::DictValue& create_params) final;
   void MaybeRecreateGuestContents(
       content::RenderFrameHost* outer_contents_frame) final;
   void EmbedderFullscreenToggled(bool entered_fullscreen) final;
@@ -167,8 +167,6 @@ class MimeHandlerViewGuest
                               content::InvalidateTypes changed_flags) final;
   bool HandleContextMenu(content::RenderFrameHost& render_frame_host,
                          const content::ContextMenuParams& params) final;
-  bool PreHandleGestureEvent(content::WebContents* source,
-                             const blink::WebGestureEvent& event) final;
   content::JavaScriptDialogManager* GetJavaScriptDialogManager(
       content::WebContents* source) final;
   bool GuestSaveFrame(content::WebContents* guest_web_contents) final;
@@ -196,6 +194,8 @@ class MimeHandlerViewGuest
       const GURL& opener_url,
       const std::string& frame_name,
       const GURL& target_url,
+      WindowOpenDisposition disposition,
+      const blink::mojom::WindowFeatures& window_features,
       const content::StoragePartitionConfig& partition_config,
       content::SessionStorageNamespace* session_storage_namespace) override;
 

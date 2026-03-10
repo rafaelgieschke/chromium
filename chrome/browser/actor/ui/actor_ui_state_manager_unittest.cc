@@ -9,7 +9,7 @@
 #include "chrome/browser/actor/actor_keyed_service_factory.h"
 #include "chrome/browser/actor/actor_keyed_service_fake.h"
 #include "chrome/browser/actor/ui/actor_ui_state_manager_interface.h"
-#include "chrome/browser/actor/ui/mocks/mock_actor_ui_tab_controller.h"
+#include "chrome/browser/actor/ui/test_support/mock_actor_ui_tab_controller.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/test/mock_browser_window_interface.h"
@@ -49,9 +49,12 @@ class ActorUiStateManagerTest : public testing::Test {
 
   // testing::Test:
   void SetUp() override {
-    scoped_feature_list_.InitWithFeatures(
-        /*enabled_features=*/{features::kGlicActorUi,
-                              features::kGlicHandoffButtonHiddenClientControl},
+    scoped_feature_list_.InitWithFeaturesAndParameters(
+        /*enabled_features=*/{{features::kGlicActorUi, {}},
+                              {features::kGlicActor,
+                               {{features::kGlicActorPolicyControlExemption
+                                     .name,
+                                 "true"}}}},
         /*disabled_features=*/{});
     profile_ = TestingProfile::Builder()
                    .AddTestingFactory(
@@ -193,10 +196,6 @@ TEST_F(ActorUiStateManagerTest, OnActorTaskState_kCreatedNewStateCrashes) {
 }
 
 TEST_F(ActorUiStateManagerTest, OnActorTaskState_FinalStateCrashes) {
-  base::test::ScopedFeatureList scoped_features;
-  scoped_features.InitAndEnableFeatureWithParameters(
-      features::kGlicActorUiGlobalTaskIndicator, {});
-
   EXPECT_DEATH(actor_ui_state_manager()->OnUiEvent(
                    TaskStateChanged(TaskId(123), ActorTask::State::kCancelled)),
                "");
@@ -344,16 +343,13 @@ TEST_F(ActorUiStateManagerUiEventUiTabScopedTest,
       .tab_indicator = TabIndicatorStatus::kDynamic,
       .border_glow_visible = true,
   };
-  VerifyUiEvent(MouseClick{mock_tab().GetHandle(), MouseClickType::kLeft,
-                           MouseClickCount::kSingle},
+  VerifyUiEvent(MouseClick{mock_tab().GetHandle(), mojom::ClickType::kLeft,
+                           mojom::ClickCount::kSingle},
                 expected_ui_tab_state);
 }
 
 TEST_F(ActorUiStateManagerUiEventUiTabScopedTest,
        GetsInactiveTaskInfoBeforeExpiry) {
-  base::test::ScopedFeatureList scoped_features;
-  scoped_features.InitAndEnableFeatureWithParameters(
-      features::kGlicActorUiGlobalTaskIndicator, {});
   TaskId task_id = actor_keyed_service()->CreateTaskForTesting();
   StartTask start_task_event(task_id);
   actor_ui_state_manager()->OnUiEvent(start_task_event);
@@ -363,13 +359,11 @@ TEST_F(ActorUiStateManagerUiEventUiTabScopedTest,
             ActorTask::State::kFinished);
   EXPECT_EQ(actor_ui_state_manager()->GetActorTaskTitle(task_id), "Test Task");
   EXPECT_EQ(actor_ui_state_manager()->GetLastActedOnTab(task_id), &mock_tab());
+  EXPECT_EQ(actor_ui_state_manager()->GetInactiveTaskCount(), 1u);
 }
 
 TEST_F(ActorUiStateManagerUiEventUiTabScopedTest,
        DoesNotGetInactiveTaskInfoAfterExpiry) {
-  base::test::ScopedFeatureList scoped_features;
-  scoped_features.InitAndEnableFeatureWithParameters(
-      features::kGlicActorUiGlobalTaskIndicator, {});
   TaskId task_id = actor_keyed_service()->CreateTaskForTesting();
   StartTask start_task_event(task_id);
   actor_ui_state_manager()->OnUiEvent(start_task_event);
@@ -380,12 +374,10 @@ TEST_F(ActorUiStateManagerUiEventUiTabScopedTest,
   EXPECT_EQ(actor_ui_state_manager()->GetActorTaskState(task_id), std::nullopt);
   EXPECT_EQ(actor_ui_state_manager()->GetActorTaskTitle(task_id), std::nullopt);
   EXPECT_EQ(actor_ui_state_manager()->GetLastActedOnTab(task_id), std::nullopt);
+  EXPECT_EQ(actor_ui_state_manager()->GetInactiveTaskCount(), 0u);
 }
 
 TEST_F(ActorUiStateManagerUiEventUiTabScopedTest, GetsActiveTaskInfo) {
-  base::test::ScopedFeatureList scoped_features;
-  scoped_features.InitAndEnableFeatureWithParameters(
-      features::kGlicActorUiGlobalTaskIndicator, {});
   TaskId task_id = actor_keyed_service()->CreateTaskForTesting();
 
   base::RunLoop loop;
@@ -404,6 +396,7 @@ TEST_F(ActorUiStateManagerUiEventUiTabScopedTest, GetsActiveTaskInfo) {
             ActorTask::State::kPausedByActor);
   EXPECT_EQ(actor_ui_state_manager()->GetActorTaskTitle(task_id), "Test Task");
   EXPECT_EQ(actor_ui_state_manager()->GetLastActedOnTab(task_id), &mock_tab());
+  EXPECT_EQ(actor_ui_state_manager()->GetInactiveTaskCount(), 0u);
 }
 
 }  // namespace

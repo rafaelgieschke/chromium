@@ -48,6 +48,7 @@
 #include "services/network/network_change_manager.h"
 #include "services/network/network_quality_estimator_manager.h"
 #include "services/network/public/cpp/network_service_buildflags.h"
+#include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/host_resolver.mojom.h"
 #include "services/network/public/mojom/key_pinning.mojom.h"
 #include "services/network/public/mojom/net_log.mojom.h"
@@ -55,6 +56,9 @@
 #include "services/network/public/mojom/network_change_manager.mojom.h"
 #include "services/network/public/mojom/network_quality_estimator_manager.mojom.h"
 #include "services/network/public/mojom/network_service.mojom.h"
+#if BUILDFLAG(IS_ANDROID)
+#include "services/network/public/mojom/network_context.mojom.h"
+#endif  // BUILDFLAG(IS_ANDROID)
 #include "services/network/public/mojom/system_dns_resolution.mojom.h"
 #include "services/network/public/mojom/trust_tokens.mojom.h"
 #include "services/network/public/mojom/url_loader_network_service_observer.mojom.h"
@@ -157,7 +161,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
   void StartNetLog(base::File file,
                    uint64_t max_total_size,
                    net::NetLogCaptureMode capture_mode,
-                   base::Value::Dict constants,
+                   base::DictValue constants,
                    std::optional<base::TimeDelta> duration) override;
   void AttachNetLogProxy(
       mojo::PendingRemote<mojom::NetLogProxySource> proxy_source,
@@ -178,7 +182,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
       mojom::HttpAuthStaticParamsPtr http_auth_static_params) override;
   void ConfigureHttpAuthPrefs(
       mojom::HttpAuthDynamicParamsPtr http_auth_dynamic_params) override;
-  void SetRawHeadersAccess(int32_t process_id,
+  void SetRawHeadersAccess(network::RendererProcessId process_id,
                            const std::vector<url::Origin>& origins) override;
   void SetMaxConnectionsPerProxyChain(uint32_t max_connections) override;
   void GetNetworkChangeManager(
@@ -194,8 +198,6 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
   void OnTrustStoreChanged() override;
   void OnClientCertStoreChanged() override;
   void SetEncryptionKey(const std::string& encryption_key) override;
-  void OnMemoryPressure(
-      base::MemoryPressureLevel memory_pressure_level) override;
   void OnPeerToPeerConnectionsCountChange(uint32_t count) override;
 #if BUILDFLAG(IS_ANDROID)
   void OnApplicationStateChange(base::android::ApplicationState state) override;
@@ -270,22 +272,29 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
   void AddDurableMessageCollector(
       mojo::PendingReceiver<mojom::DurableMessageCollector> receiver) override;
 
+#if BUILDFLAG(IS_MAC)
+  void CreateURLSessionURLLoaderAndStart(
+      const ResourceRequest& request,
+      mojo::PendingReceiver<mojom::URLLoader> loader_receiver,
+      mojo::PendingRemote<mojom::URLLoaderClient> client_remote) override;
+#endif
+
   void StartNetLogBounded(base::File file,
                           uint64_t max_total_size,
                           net::NetLogCaptureMode capture_mode,
-                          base::Value::Dict client_constants);
+                          base::DictValue client_constants);
 
   // Called after StartNetLogBounded() finishes creating a scratch dir.
   void OnStartNetLogBoundedScratchDirectoryCreated(
       base::File file,
       uint64_t max_total_size,
       net::NetLogCaptureMode capture_mode,
-      base::Value::Dict constants,
+      base::DictValue constants,
       const base::FilePath& in_progress_dir_path);
 
   void StartNetLogUnbounded(base::File file,
                             net::NetLogCaptureMode capture_mode,
-                            base::Value::Dict client_constants);
+                            base::DictValue client_constants);
 
   // Returns an HttpAuthHandlerFactory for the given NetworkContext.
   std::unique_ptr<net::HttpAuthHandlerFactory> CreateHttpAuthHandlerFactory(
@@ -297,7 +306,8 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
 #endif  // BUILDFLAG(IS_LINUX)
 
   bool quic_disabled() const { return quic_disabled_; }
-  bool HasRawHeadersAccess(int32_t process_id, const GURL& resource_url) const;
+  bool HasRawHeadersAccess(const network::OriginatingProcessId& process_id,
+                           const GURL& resource_url) const;
 
   net::NetworkQualityEstimator* network_quality_estimator() {
     return network_quality_estimator_manager_->GetNetworkQualityEstimator();
@@ -396,6 +406,14 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
     return durable_message_collector_manager_.get();
   }
 
+#if BUILDFLAG(IS_MAC)
+  inline void SetUseMockURLSessionURLLoaderForTesting(
+      bool use_mock_url_session_url_loader) {
+    use_mock_url_session_url_loader_for_testing_ =
+        use_mock_url_session_url_loader;
+  }
+#endif
+
  private:
   class DelayedDohProbeActivator;
 
@@ -439,7 +457,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
   std::unique_ptr<net::FileNetLogObserver> file_net_log_observer_;
   // When capturing NetLog events, this keeps a NetworkContext's polled data
   // on the destruction of the NetworkContext.
-  base::Value::List net_log_polled_data_list_;
+  base::ListValue net_log_polled_data_list_;
 
   net::TraceNetLogObserver trace_net_log_observer_;
 
@@ -490,6 +508,31 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
   std::set<std::unique_ptr<NetworkContext>, base::UniquePtrComparator>
       owned_network_contexts_;
 
+#if BUILDFLAG(IS_ANDROID)
+  // Holds state for a NetworkContext whose creation is deferred until
+  // CookieStoreReadyCallback::OnCookieStoreReady() is received.
+  struct PendingNetworkContext : public mojom::CookieStoreReadyCallback {
+    PendingNetworkContext(NetworkService* service,
+                          mojo::PendingReceiver<mojom::NetworkContext> receiver,
+                          mojom::NetworkContextParamsPtr params);
+    ~PendingNetworkContext() override;
+
+    // mojom::CookieStoreReadyCallback:
+    void OnCookieStoreReady() override;
+
+    raw_ptr<NetworkService> service;
+    mojo::PendingReceiver<mojom::NetworkContext> context_receiver;
+    mojom::NetworkContextParamsPtr params;
+    mojo::Receiver<mojom::CookieStoreReadyCallback> ready_receiver{this};
+  };
+
+  void OnPendingNetworkContextReady(PendingNetworkContext* pending);
+  void OnPendingNetworkContextDisconnected(PendingNetworkContext* pending);
+
+  std::set<std::unique_ptr<PendingNetworkContext>, base::UniquePtrComparator>
+      pending_network_contexts_;
+#endif  // BUILDFLAG(IS_ANDROID)
+
   // List of all NetworkContexts that are associated with the NetworkService,
   // including ones it does not own.
   // TODO(mmenke): Once the NetworkService always owns NetworkContexts, merge
@@ -498,7 +541,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
 
   // A per-process_id map of origins that are white-listed to allow
   // them to request raw headers for resources they request.
-  std::map<int32_t, base::flat_set<url::Origin>>
+  std::map<network::RendererProcessId, base::flat_set<url::Origin>>
       raw_headers_access_origins_by_pid_;
 
   bool quic_disabled_ = false;
@@ -540,8 +583,15 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
 
   bool exclusive_cookie_database_locking_ = true;
 
+  // When this is set, it overrides the default setting used by the net stack.
+  std::optional<bool> tls_13_early_data_enabled_;
+
   std::unique_ptr<DevtoolsDurableMessageCollectorManager>
       durable_message_collector_manager_;
+
+#if BUILDFLAG(IS_MAC)
+  bool use_mock_url_session_url_loader_for_testing_{false};
+#endif
 
   base::WeakPtrFactory<NetworkService> weak_factory_{this};
 };

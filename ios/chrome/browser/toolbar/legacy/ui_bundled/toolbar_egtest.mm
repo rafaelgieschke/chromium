@@ -69,10 +69,10 @@ void WaitForEmpyOmnibox() {
 }  // namespace
 
 // Toolbar integration tests for Chrome.
-@interface ToolbarTestCase : ChromeTestCase
+@interface LegacyToolbarTestCase : ChromeTestCase
 @end
 
-@implementation ToolbarTestCase
+@implementation LegacyToolbarTestCase
 
 - (void)setUp {
   [super setUp];
@@ -188,8 +188,7 @@ void WaitForEmpyOmnibox() {
 
   [ChromeEarlGrey loadURL:URL];
 
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
-      assertWithMatcher:chrome_test_util::OmniboxText(URL.GetContent())];
+  [ChromeEarlGrey waitForWebStateVisibleURL:URL];
   [ChromeEarlGreyUI focusOmniboxAndReplaceText:@"foo"];
 
   id<GREYMatcher> typingShield = grey_accessibilityID(@"Typing Shield");
@@ -325,7 +324,14 @@ void WaitForEmpyOmnibox() {
 }
 
 // Types JavaScript into Omnibox and verify that an alert is displayed.
-- (void)testTypeJavaScriptIntoOmnibox {
+// TODO(crbug.com/483956342): Re-enable test on asan bot.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_testTypeJavaScriptIntoOmnibox \
+  DISABLED_testTypeJavaScriptIntoOmnibox
+#else
+#define MAYBE_testTypeJavaScriptIntoOmnibox testTypeJavaScriptIntoOmnibox
+#endif
+- (void)MAYBE_testTypeJavaScriptIntoOmnibox {
   [ChromeEarlGrey openNewTab];
   [ChromeEarlGrey loadURL:self.testServer->GetURL("/echo")];
 

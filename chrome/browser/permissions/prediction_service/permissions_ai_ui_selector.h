@@ -25,7 +25,7 @@
 #if BUILDFLAG(BUILD_WITH_TFLITE_LIB)
 #include "chrome/browser/permissions/prediction_service/language_detection_observer.h"
 #include "components/content_extraction/content/browser/inner_text.h"
-#include "components/passage_embeddings/passage_embeddings_types.h"
+#include "components/passage_embeddings/core/passage_embeddings_types.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #endif
 
@@ -190,15 +190,6 @@ class PermissionsAiUiSelector : public permissions::PermissionUiSelector {
 #if BUILDFLAG(BUILD_WITH_TFLITE_LIB)
   // Function that handles model execution for all AIvX models.
   void ExecuteOnDeviceAivXModel(ModelExecutionData model_data);
-  // As the first part of the AIv3 model execution chain, this function triggers
-  // AIv3 input collection and model execution, with its output being input of
-  // the follow-up CPSSv3 server side model execution. If the AIv3 model is not
-  // available or is executed with an error, only the server side model will get
-  // called.
-  void InquireOnDeviceAiv3AndServerModelIfAvailable(
-      content::RenderWidgetHostView* host_view,
-      permissions::PredictionRequestFeatures features,
-      PredictionRequestMetadata request_metadata);
 
   // As the first part of the AIv4 model execution chain, this function triggers
   // AIv4 input collection and model execution, with its output being input of

@@ -37,9 +37,9 @@
 #import "ios/chrome/app/application_delegate/metrics_mediator.h"
 #import "ios/chrome/app/deferred_initialization_runner.h"
 #import "ios/chrome/app/deferred_initialization_task_names.h"
+#import "ios/chrome/app/profile/app_icon_launched_profile_agent.h"
 #import "ios/chrome/app/profile/application_storage_metrics.h"
 #import "ios/chrome/app/profile/certificate_policy_profile_agent.h"
-#import "ios/chrome/app/profile/docking_promo_profile_agent.h"
 #import "ios/chrome/app/profile/features.h"
 #import "ios/chrome/app/profile/first_run_profile_agent.h"
 #import "ios/chrome/app/profile/identity_confirmation_profile_agent.h"
@@ -65,6 +65,7 @@
 #import "ios/chrome/browser/feature_engagement/model/tracker_factory.h"
 #import "ios/chrome/browser/first_run/public/features.h"
 #import "ios/chrome/browser/mailto_handler/model/mailto_handler_service_factory.h"
+#import "ios/chrome/browser/ntp/model/home_background_customization_promo_profile_agent.h"
 #import "ios/chrome/browser/profile_metrics/model/profile_activity_profile_agent.h"
 #import "ios/chrome/browser/reading_list/model/reading_list_download_service.h"
 #import "ios/chrome/browser/reading_list/model/reading_list_download_service_factory.h"
@@ -483,7 +484,9 @@ void RecordDiscardedSceneConnectedAfterBeingPurged(
 
   // Save the cookies unless there is already a save in progress. This avoid
   // posting multiple tasks if the user switch rapidly between multiple apps.
-  if (!_savingCookies) {
+  if (!base::FeatureList::IsEnabled(
+          kDisableCookieStoreIOSFlushOnBackgrounding) &&
+      !_savingCookies) {
     _savingCookies = YES;
 
     // Save the cookie while ensuring the application will be given time for
@@ -629,7 +632,7 @@ void RecordDiscardedSceneConnectedAfterBeingPurged(
     }
   }
 
-  if (!tests_hook::LoadMinimalAppUI()) {
+  if (!tests_hook::ShouldLoadMinimalAppUI()) {
     [self attachProfileAgents];
   }
 }
@@ -645,15 +648,8 @@ void RecordDiscardedSceneConnectedAfterBeingPurged(
   [_state addAgent:[[SearchEngineChoiceProfileAgent alloc] init]];
   [_state addAgent:[[SessionMetricsProfileAgent alloc] init]];
 
-  if (IsDockingPromoEnabled()) {
-    switch (DockingPromoExperimentTypeEnabled()) {
-      case DockingPromoDisplayTriggerArm::kDuringFRE:
-        break;
-      case DockingPromoDisplayTriggerArm::kAfterFRE:
-      case DockingPromoDisplayTriggerArm::kAppLaunch:
-        [_state addAgent:[[DockingPromoProfileAgent alloc] init]];
-        break;
-    }
+  if (IsDockingPromoV2Enabled()) {
+    [_state addAgent:[[AppIconLaunchedProfileAgent alloc] init]];
   }
 
   if (IsWelcomeBackEnabled()) {
@@ -663,6 +659,8 @@ void RecordDiscardedSceneConnectedAfterBeingPurged(
   if (IsSyncedSetUpEnabled()) {
     [_state addAgent:[[SyncedSetUpProfileAgent alloc] init]];
   }
+
+  [_state addAgent:[[HomeBackgroundCustomizationPromoProfileAgent alloc] init]];
 }
 
 - (void)maybeContinueForegroundInitialization {

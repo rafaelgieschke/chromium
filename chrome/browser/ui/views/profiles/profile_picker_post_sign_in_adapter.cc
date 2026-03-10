@@ -186,8 +186,12 @@ void ProfilePickerPostSignInAdapter::ShowHistorySyncOptinScreen(
 
 void ProfilePickerPostSignInAdapter::ShowAccountManagementScreen(
     signin::SigninChoiceCallback on_account_management_screen_closed) {
+  ManagedUserProfileNoticeUI::ScreenType screen_type =
+      signin_access_point_ == signin_metrics::AccessPoint::kForYouFre
+          ? ManagedUserProfileNoticeUI::ScreenType::kFirstRun
+          : ManagedUserProfileNoticeUI::ScreenType::kProfilePicker;
   SwitchToManagedUserProfileNotice(
-      ManagedUserProfileNoticeUI::ScreenType::kProfilePicker,
+      screen_type,
       base::BindOnce(&OnManagementUserChoice,
                      std::move(on_account_management_screen_closed)));
 }
@@ -269,7 +273,7 @@ void ProfilePickerPostSignInAdapter::SwitchToProfileSwitch(
 }
 
 void ProfilePickerPostSignInAdapter::ResetHostAndShowErrorDialog(
-    const ForceSigninUIError& error) {
+    const std::variant<ForceSigninUIError, SigninUIError>& error) {
   CHECK(IsInitialized());
   if (!step_switch_callback_->is_null()) {
     std::move(step_switch_callback_.value()).Run(false);
@@ -277,7 +281,7 @@ void ProfilePickerPostSignInAdapter::ResetHostAndShowErrorDialog(
 
   Cancel();
   host_->Reset(StepSwitchFinishedCallback(
-      base::BindOnce(&ProfilePickerWebContentsHost::ShowForceSigninErrorDialog,
+      base::BindOnce(&ProfilePickerWebContentsHost::ShowSigninErrorDialog,
                      base::Unretained(host_), error)));
 }
 

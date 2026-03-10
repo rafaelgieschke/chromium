@@ -4,7 +4,7 @@
 
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
-#include "chrome/browser/web_applications/commands/manifest_silent_update_command.h"
+#include "chrome/browser/web_applications/scheduler/manifest_silent_update_result.h"
 #include "chrome/browser/web_applications/test/fake_web_app_origin_association_manager.h"
 #include "chrome/browser/web_applications/test/fake_web_app_provider.h"
 #include "chrome/browser/web_applications/test/fake_web_contents_manager.h"
@@ -30,12 +30,7 @@ namespace {
 
 class WebAppScopeExtensionsTest : public WebAppTest {
  public:
-  WebAppScopeExtensionsTest() {
-    feature_list_.InitWithFeatures(
-        /*enabled_features=*/{features::kWebAppPredictableAppUpdating,
-                              features::kWebAppUsePrimaryIcon},
-        /*disabled_features=*/{});
-  }
+  WebAppScopeExtensionsTest() = default;
   ~WebAppScopeExtensionsTest() override = default;
 
   void SetUp() override {
@@ -90,7 +85,8 @@ class WebAppScopeExtensionsTest : public WebAppTest {
   WebAppRegistrar& registrar() { return fake_provider().registrar_unsafe(); }
 
  private:
-  base::test::ScopedFeatureList feature_list_;
+  base::test::ScopedFeatureList feature_list_{
+      features::kWebAppPredictableAppUpdating};
 };
 
 TEST_F(WebAppScopeExtensionsTest, TestScopeNotifiedOnReinstall) {

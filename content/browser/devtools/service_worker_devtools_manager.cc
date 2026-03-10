@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <optional>
 
-#include "base/containers/contains.h"
 #include "base/no_destructor.h"
 #include "base/observer_list.h"
 #include "content/browser/devtools/devtools_instrumentation.h"
@@ -57,6 +56,9 @@ void ServiceWorkerDevToolsManager::AddAllAgentHosts(
     ServiceWorkerDevToolsAgentHost::List* result) {
   for (auto& it : live_hosts_)
     result->push_back(it.second.get());
+  for (auto& it : new_installing_hosts_) {
+    result->push_back(it.get());
+  }
 }
 
 void ServiceWorkerDevToolsManager::AddAllAgentHostsForBrowserContext(
@@ -91,7 +93,8 @@ void ServiceWorkerDevToolsManager::WorkerMainScriptFetchingStarting(
 
   scoped_refptr<ServiceWorkerDevToolsAgentHost> host =
       base::MakeRefCounted<ServiceWorkerDevToolsAgentHost>(
-          -1, -1, std::move(context_wrapper), version_id, url, scope,
+          ChildProcessId(), -1, std::move(context_wrapper), version_id, url,
+          scope,
           /*is_installed_version=*/false,
           /*client_security_state=*/nullptr,
           /*coep_reporter=*/mojo::NullRemote(),
@@ -155,13 +158,15 @@ void ServiceWorkerDevToolsManager::WorkerStarting(
     bool* pause_on_start) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   const WorkerId worker_id(worker_process_id, worker_route_id);
-  DCHECK(!base::Contains(live_hosts_, worker_id));
+  DCHECK(!live_hosts_.contains(worker_id));
 
   scoped_refptr<ServiceWorkerDevToolsAgentHost> agent_host =
       TakeStoppedHost(context_wrapper.get(), version_id);
   if (agent_host) {
     live_hosts_[worker_id] = agent_host;
-    agent_host->WorkerStarted(worker_process_id, worker_route_id);
+    // TODO(crbug.com/379869738) Remove FromUnsafeValue.
+    agent_host->WorkerStarted(
+        ChildProcessId::FromUnsafeValue(worker_process_id), worker_route_id);
     *pause_on_start =
         agent_host->IsAttached() && agent_host->should_pause_on_start();
     *devtools_worker_token = agent_host->devtools_worker_token();
@@ -171,7 +176,9 @@ void ServiceWorkerDevToolsManager::WorkerStarting(
   agent_host = TakeNewInstallingHost(context_wrapper.get(), version_id);
   if (agent_host) {
     live_hosts_[worker_id] = agent_host;
-    agent_host->WorkerStarted(worker_process_id, worker_route_id);
+    // TODO(crbug.com/379869738) Remove FromUnsafeValue.
+    agent_host->WorkerStarted(
+        ChildProcessId::FromUnsafeValue(worker_process_id), worker_route_id);
     *pause_on_start = agent_host->should_pause_on_start();
     *devtools_worker_token = agent_host->devtools_worker_token();
 
@@ -186,8 +193,8 @@ void ServiceWorkerDevToolsManager::WorkerStarting(
 
   *devtools_worker_token = base::UnguessableToken::Create();
   auto host = base::MakeRefCounted<ServiceWorkerDevToolsAgentHost>(
-      worker_process_id, worker_route_id, std::move(context_wrapper),
-      version_id, url, scope, is_installed_version,
+      ChildProcessId::FromUnsafeValue(worker_process_id), worker_route_id,
+      std::move(context_wrapper), version_id, url, scope, is_installed_version,
       std::move(client_security_state), std::move(coep_reporter),
       std::move(dip_reporter), *devtools_worker_token);
   live_hosts_[worker_id] = host;

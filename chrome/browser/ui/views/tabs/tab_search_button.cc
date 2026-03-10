@@ -6,12 +6,10 @@
 
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
-#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/tabs/new_tab_button.h"
 #include "chrome/browser/ui/views/tabs/tab_search_button.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_control_button.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_controller.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -25,16 +23,13 @@
 namespace {
 constexpr int kCRTabSearchCornerRadius = 10;
 constexpr int kCRTabSearchFlatCornerRadius = 4;
-constexpr int kComboButtonFlatCornerRadius = 0;
 }  // namespace
 
 TabSearchButton::TabSearchButton(
-    TabStripController* tab_strip_controller,
     BrowserWindowInterface* browser_window_interface,
     Edge fixed_flat_edge,
-    Edge animated_flat_edge,
-    TabStrip* tab_strip)
-    : TabStripControlButton(tab_strip_controller,
+    Edge animated_flat_edge)
+    : TabStripControlButton(browser_window_interface,
                             PressedCallback(),
                             vector_icons::kExpandMoreIcon,
                             fixed_flat_edge,
@@ -45,7 +40,6 @@ TabSearchButton::TabSearchButton(
   GetViewAccessibility().SetName(
       l10n_util::GetStringUTF16(IDS_ACCNAME_TAB_SEARCH));
 
-  CHECK(!features::HasTabSearchToolbarButton());
   SetForegroundFrameActiveColorId(kColorNewTabButtonForegroundFrameActive);
   SetForegroundFrameInactiveColorId(kColorNewTabButtonForegroundFrameInactive);
   SetBackgroundFrameActiveColorId(kColorNewTabButtonCRBackgroundFrameActive);
@@ -71,8 +65,7 @@ int TabSearchButton::GetCornerRadius() const {
 }
 
 int TabSearchButton::GetFlatCornerRadius() const {
-  return features::HasTabSearchToolbarButton() ? kComboButtonFlatCornerRadius
-                                               : kCRTabSearchFlatCornerRadius;
+  return kCRTabSearchFlatCornerRadius;
 }
 
 BEGIN_METADATA(TabSearchButton)

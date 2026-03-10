@@ -6,14 +6,17 @@
 
 #include <map>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include "base/check.h"
 #include "base/check_op.h"
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
+#include "base/functional/callback_helpers.h"
 #include "base/location.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
@@ -23,22 +26,22 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/types/pass_key.h"
 #include "build/build_config.h"
-#include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/intent_picker_tab_helper.h"
 #include "chrome/browser/ui/user_education/browser_user_education_interface.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
+#include "chrome/browser/ui/views/web_apps/web_app_blocked_migration_infobar_delegate.h"
 #include "chrome/browser/ui/web_applications/web_app_dialog_utils.h"
 #include "chrome/browser/ui/web_applications/web_app_dialogs.h"
 #include "chrome/browser/ui/web_applications/web_app_launch_utils.h"
@@ -55,7 +58,9 @@
 #include "chrome/browser/web_applications/web_app_tab_helper.h"
 #include "chrome/browser/web_applications/web_app_ui_manager.h"
 #include "chrome/browser/web_applications/web_app_uninstall_dialog_user_options.h"
+#include "chrome/browser/web_applications/web_app_utils.h"
 #include "components/feature_engagement/public/feature_constants.h"
+#include "components/services/app_service/public/cpp/app_launch_params.h"
 #include "components/user_education/common/feature_promo/feature_promo_controller.h"
 #include "components/user_education/common/feature_promo/feature_promo_result.h"
 #include "components/user_education/common/user_education_data.h"
@@ -146,10 +151,7 @@ void UninstallWebAppWithDialogFromStartupSwitch(
     SynchronizeOsOptions synchronize_options;
     synchronize_options.force_unregister_os_integration = true;
     provider->scheduler().SynchronizeOsIntegration(
-        app_id,
-        base::BindOnce(
-            [](std::unique_ptr<ScopedKeepAlive> scoped_keep_alive) {},
-            std::move(scoped_keep_alive)),
+        app_id, base::DoNothingWithBoundArgs(std::move(scoped_keep_alive)),
         synchronize_options);
   }
 }
@@ -175,7 +177,18 @@ void WebAppUiManager::TriggerInstallNotSupportedDialog(
     content::WebContents* web_contents,
     Profile* profile,
     base::OnceClosure callback) {
-  ShowInstallNotSupportedDialog(web_contents, profile, std::move(callback));
+  NotSupportedReason reason;
+  if (profile->IsGuestSession()) {
+    reason = NotSupportedReason::kGuestMode;
+  } else if (profile->IsOffTheRecord()) {
+    reason = NotSupportedReason::kOffTheRecord;
+  } else if (!web_app::IsWebAppInstallByUserPolicyEnabled(profile)) {
+    reason = NotSupportedReason::kPolicyDisabled;
+  } else {
+    NOTREACHED();
+  }
+  ShowInstallNotSupportedDialog(web_contents, profile, reason,
+                                std::move(callback));
 }
 
 WebAppUiManagerImpl::WebAppUiManagerImpl(Profile* profile)
@@ -202,11 +215,12 @@ void WebAppUiManagerImpl::Start() {
       FROM_HERE, base::BindOnce(&WebAppUiManagerImpl::OnExtensionSystemReady,
                                 weak_ptr_factory_.GetWeakPtr()));
 
-  BrowserList::AddObserver(this);
+  browser_collection_observation_.Observe(
+      GlobalBrowserCollection::GetInstance());
 }
 
 void WebAppUiManagerImpl::Shutdown() {
-  BrowserList::RemoveObserver(this);
+  browser_collection_observation_.Reset();
   started_ = false;
 }
 
@@ -365,6 +379,19 @@ void WebAppUiManagerImpl::ShowWebAppIdentityUpdateDialog(
   ::web_app::ShowWebAppIdentityUpdateDialog(
       app_id, title_change, icon_change, old_title, new_title, old_icon,
       new_icon, web_contents, std::move(callback));
+}
+
+void WebAppUiManagerImpl::ShowSubAppsInstallDialog(
+    content::WebContents* initiating_web_contents,
+    const std::vector<std::unique_ptr<WebAppInstallInfo>>& sub_apps,
+    const webapps::AppId& parent_app_id,
+    base::OnceCallback<void(bool)> callback) {
+  std::string parent_app_name = WebAppProvider::GetForWebApps(profile_)
+                                    ->registrar_unsafe()
+                                    .GetAppShortName(parent_app_id);
+  web_app::ShowSubAppsInstallDialog(initiating_web_contents, sub_apps,
+                                    parent_app_name, parent_app_id,
+                                    std::move(callback));
 }
 
 void WebAppUiManagerImpl::ShowWebAppSettings(const webapps::AppId& app_id) {
@@ -583,6 +610,16 @@ void WebAppUiManagerImpl::MaybeCreateEnableSupportedLinksInfobar(
 #endif  // !BUILDFLAG(IS_CHROMEOS)
 }
 
+void WebAppUiManagerImpl::MaybeCreateWebAppBlockedMigrationInfoBar(
+    content::WebContents* web_contents) {
+  WebAppBlockedMigrationInfoBarDelegate::Create(web_contents);
+}
+
+void WebAppUiManagerImpl::MaybeRemoveWebAppBlockedMigrationInfoBar(
+    content::WebContents* web_contents) {
+  WebAppBlockedMigrationInfoBarDelegate::Remove(web_contents);
+}
+
 void WebAppUiManagerImpl::MaybeShowIPHPromoForAppsLaunchedViaLinkCapturing(
     Browser* browser,
     Profile* profile,
@@ -616,7 +653,7 @@ void WebAppUiManagerImpl::MaybeShowIPHPromoForAppsLaunchedViaLinkCapturing(
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 }
 
-void WebAppUiManagerImpl::OnBrowserAdded(Browser* browser) {
+void WebAppUiManagerImpl::OnBrowserCreated(BrowserWindowInterface* browser) {
   DCHECK(started_);
   if (!IsBrowserForInstalledApp(browser)) {
     return;
@@ -625,7 +662,8 @@ void WebAppUiManagerImpl::OnBrowserAdded(Browser* browser) {
   ++num_windows_for_apps_map_[GetAppIdForBrowser(browser)];
 
 #if BUILDFLAG(IS_CHROMEOS)
-  browser->tab_strip_model()->AddObserver(this);
+  // TODO(crbug.com/452120900): TabStripModel auto-unregistered by dtor
+  browser->GetTabStripModel()->AddObserver(this);
   browser_close_cancelled_subscriptions_.push_back(
       browser->RegisterBrowserCloseCancelled(
           base::BindRepeating(&WebAppUiManagerImpl::OnBrowserCloseCancelled,
@@ -633,7 +671,7 @@ void WebAppUiManagerImpl::OnBrowserAdded(Browser* browser) {
 #endif  // BUILDFLAG(IS_CHROMEOS)
 }
 
-void WebAppUiManagerImpl::OnBrowserRemoved(Browser* browser) {
+void WebAppUiManagerImpl::OnBrowserClosed(BrowserWindowInterface* browser) {
   DCHECK(started_);
   if (!IsBrowserForInstalledApp(browser)) {
     return;
@@ -644,10 +682,6 @@ void WebAppUiManagerImpl::OnBrowserRemoved(Browser* browser) {
   size_t& num_windows_for_app = num_windows_for_apps_map_[app_id];
   DCHECK_GT(num_windows_for_app, 0u);
   --num_windows_for_app;
-
-#if BUILDFLAG(IS_CHROMEOS)
-  browser->tab_strip_model()->RemoveObserver(this);
-#endif  // BUILDFLAG(IS_CHROMEOS)
 
   if (num_windows_for_app > 0) {
     return;

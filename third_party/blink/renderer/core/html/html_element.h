@@ -108,11 +108,6 @@ enum class PopoverHideResult {
   kForcedOpenByInspector,
 };
 
-enum class PopoverTriggerSupport {
-  kNone,
-  kSupported,
-};
-
 class CORE_EXPORT HTMLElement : public Element {
   DEFINE_WRAPPERTYPEINFO();
 
@@ -129,7 +124,7 @@ class CORE_EXPORT HTMLElement : public Element {
   String title() const final;
 
   void setInnerText(const String&);
-  V8UnionStringLegacyNullToEmptyStringOrTrustedScript* innerTextForBinding();
+  String innerTextForBinding();
   virtual void setInnerTextForBinding(
       const V8UnionStringLegacyNullToEmptyStringOrTrustedScript*
           string_or_trusted_script,
@@ -204,7 +199,7 @@ class CORE_EXPORT HTMLElement : public Element {
   virtual bool IsHTMLFrameSetElement() const { return false; }
   // TODO(crbug.com/443013457): Remove these 2 methods when the
   // permission/usermedia trials are over.
-  virtual bool IsHTMLPermissionElement() const { return false; }
+  virtual bool IsHTMLCapabilityElementBase() const { return false; }
   virtual bool IsHTMLUserMediaElement() const { return false; }
   virtual bool IsHTMLUnknownElement() const { return false; }
   virtual bool IsPluginElement() const { return false; }
@@ -218,6 +213,9 @@ class CORE_EXPORT HTMLElement : public Element {
   // https://html.spec.whatwg.org/C/#interactive-content
   virtual bool IsInteractiveContent() const;
   void DefaultEventHandler(Event&) override;
+
+  // Returns the axes on which this element has native arrow key behavior.
+  FocusgroupFlags NativeArrowKeyAxes() const override;
 
   // Used to handle return/space key events and simulate clicks. Returns true
   // if the event is handled.
@@ -251,9 +249,6 @@ class CORE_EXPORT HTMLElement : public Element {
   ElementInternals* attachInternals(ExceptionState& exception_state);
   virtual FormAssociated* ToFormAssociatedOrNull() { return nullptr; }
   bool IsFormAssociatedCustomElement() const;
-
-  // Returns true if the elementInternals.type is set to "button".
-  bool IsCustomButton() const;
 
   void UpdateDescendantDirectionality(TextDirection direction);
   void UpdateDirectionalityAfterInputTypeChange(const AtomicString& old_value,
@@ -345,8 +340,6 @@ class CORE_EXPORT HTMLElement : public Element {
       HeapVector<Member<HTMLElement>>* popovers_held_open_by_inspector =
           nullptr);
 
-  virtual PopoverTriggerSupport SupportsPopoverTriggering() const;
-
   void SetImplicitAnchor(Element* element);
   Element* implicitAnchor() const;
 
@@ -368,8 +361,7 @@ class CORE_EXPORT HTMLElement : public Element {
   // See: crbug.com/1490919, https://open-ui.org/components/invokers.explainer/
   bool IsValidBuiltinCommand(HTMLElement& invoker,
                              CommandEventType command) override;
-  bool IsValidBuiltinPopoverCommand(HTMLElement& invoker,
-                                    CommandEventType command);
+  bool IsValidBuiltinPopoverCommand(CommandEventType command);
   bool HandleCommandInternal(HTMLElement& invoker,
                              CommandEventType command) override;
   // This is true if this element *can* be a command invoker: it is an element
@@ -391,6 +383,9 @@ class CORE_EXPORT HTMLElement : public Element {
   // "true". Spec: https://github.com/whatwg/html/pull/10018.
   AtomicString writingSuggestions() const;
   void setWritingSuggestions(const AtomicString& value);
+
+  // See comment on this method in element.h
+  bool IsRenderedInTopLayer() const override;
 
  protected:
   FocusableState SupportsFocus(UpdateBehavior update_behavior) const override;

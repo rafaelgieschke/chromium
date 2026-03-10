@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/containers/flat_set.h"
 #include "base/files/file_util.h"
 #include "base/i18n/time_formatting.h"
@@ -35,6 +34,7 @@
 #include "chrome/browser/safe_browsing/extension_telemetry/cookies_get_signal_processor.h"
 #include "chrome/browser/safe_browsing/extension_telemetry/declarative_net_request_action_signal_processor.h"
 #include "chrome/browser/safe_browsing/extension_telemetry/declarative_net_request_signal_processor.h"
+#include "chrome/browser/safe_browsing/extension_telemetry/dom_access_signal_processor.h"
 #include "chrome/browser/safe_browsing/extension_telemetry/extension_js_callstacks.h"
 #include "chrome/browser/safe_browsing/extension_telemetry/extension_signal.h"
 #include "chrome/browser/safe_browsing/extension_telemetry/extension_telemetry_config_manager.h"
@@ -44,6 +44,7 @@
 #include "chrome/browser/safe_browsing/extension_telemetry/extension_telemetry_uploader.h"
 #include "chrome/browser/safe_browsing/extension_telemetry/potential_password_theft_signal_processor.h"
 #include "chrome/browser/safe_browsing/extension_telemetry/remote_host_contacted_signal_processor.h"
+#include "chrome/browser/safe_browsing/extension_telemetry/script_injection_signal_processor.h"
 #include "chrome/browser/safe_browsing/extension_telemetry/search_hijacking_detector.h"
 #include "chrome/browser/safe_browsing/extension_telemetry/tabs_api_signal_processor.h"
 #include "chrome/browser/safe_browsing/extension_telemetry/tabs_execute_script_signal_processor.h"
@@ -436,14 +437,6 @@ GetExtensionTelemetryEventRouter(Profile* profile) {
 }
 #endif  // BUILDFLAG(ENTERPRISE_CLOUD_CONTENT_ANALYSIS)
 
-// Returns true if the signal type should be collected for enterprise telemetry.
-bool CollectForEnterprise(ExtensionSignalType type) {
-  return type == ExtensionSignalType::kCookiesGet ||
-         type == ExtensionSignalType::kCookiesGetAll ||
-         type == ExtensionSignalType::kRemoteHostContacted ||
-         type == ExtensionSignalType::kTabsApi;
-}
-
 }  // namespace
 
 // Adds extension installation mode and managed status to extension telemetry
@@ -693,12 +686,13 @@ void ExtensionTelemetryService::AddSignal(
     std::unique_ptr<ExtensionSignal> signal) {
   ExtensionSignalType signal_type = signal->GetType();
 
-  if (esb_enabled_) {
+  if (esb_enabled_ && signal_subscribers_.contains(signal_type)) {
     RecordSignalType(signal_type);
     AddSignalHelper(*signal, extension_store_, signal_subscribers_);
   }
 
-  if (enterprise_enabled_ && CollectForEnterprise(signal_type)) {
+  if (enterprise_enabled_ &&
+      enterprise_signal_subscribers_.contains(signal_type)) {
     RecordSignalTypeForEnterprise(signal_type);
     AddSignalHelper(*signal, enterprise_extension_store_,
                     enterprise_signal_subscribers_);
@@ -717,7 +711,7 @@ void ExtensionTelemetryService::AddSignalHelper(
     ExtensionStore& store,
     SignalSubscribers& subscribers) {
   ExtensionSignalType signal_type = signal.GetType();
-  DCHECK(base::Contains(subscribers, signal_type));
+  DCHECK(subscribers.contains(signal_type));
 
   if (!store.contains(signal.extension_id())) {
     // This is the first signal triggered by this extension since the last
@@ -1350,19 +1344,19 @@ std::optional<ExtensionTelemetryService::OffstoreExtensionFileData>
 ExtensionTelemetryService::RetrieveOffstoreFileDataForReport(
     const extensions::ExtensionId& extension_id) {
   const auto& pref_dict = GetExtensionTelemetryFileData(*pref_service_);
-  const base::Value::Dict* extension_dict = pref_dict.FindDict(extension_id);
+  const base::DictValue* extension_dict = pref_dict.FindDict(extension_id);
   if (!extension_dict) {
     return std::nullopt;
   }
 
-  const base::Value::Dict* file_data_dict =
+  const base::DictValue* file_data_dict =
       extension_dict->FindDict(kFileDataDictPref);
   if (!file_data_dict || file_data_dict->empty()) {
     return std::nullopt;
   }
 
   OffstoreExtensionFileData offstore_extension_file_data;
-  base::Value::Dict dict = file_data_dict->Clone();
+  base::DictValue dict = file_data_dict->Clone();
   std::optional<base::Value> manifest_value = dict.Extract(kManifestFile);
   if (manifest_value.has_value()) {
     offstore_extension_file_data.manifest =
@@ -1552,6 +1546,12 @@ void ExtensionTelemetryService::
   enterprise_signal_processors_.emplace(
       ExtensionSignalType::kTabsApi,
       std::make_unique<TabsApiSignalProcessor>());
+  enterprise_signal_processors_.emplace(
+      ExtensionSignalType::kDOMAccess,
+      std::make_unique<DOMAccessSignalProcessor>());
+  enterprise_signal_processors_.emplace(
+      ExtensionSignalType::kScriptInjection,
+      std::make_unique<ScriptInjectionSignalProcessor>());
 
   // Create subscriber lists for each telemetry signal type.
   // Map the signal processors to the signals that they consume.
@@ -1571,6 +1571,13 @@ void ExtensionTelemetryService::
   std::vector<raw_ptr<ExtensionSignalProcessor, VectorExperimental>>
       enterprise_subscribers_for_tabs_api = {
           enterprise_signal_processors_[ExtensionSignalType::kTabsApi].get()};
+  std::vector<raw_ptr<ExtensionSignalProcessor, VectorExperimental>>
+      enterprise_subscribers_for_dom_access = {
+          enterprise_signal_processors_[ExtensionSignalType::kDOMAccess].get()};
+  std::vector<raw_ptr<ExtensionSignalProcessor, VectorExperimental>>
+      enterprise_subscribers_for_script_injection = {
+          enterprise_signal_processors_[ExtensionSignalType::kScriptInjection]
+              .get()};
 
   enterprise_signal_subscribers_.emplace(
       ExtensionSignalType::kCookiesGet,
@@ -1584,6 +1591,12 @@ void ExtensionTelemetryService::
   enterprise_signal_subscribers_.emplace(
       ExtensionSignalType::kTabsApi,
       std::move(enterprise_subscribers_for_tabs_api));
+  enterprise_signal_subscribers_.emplace(
+      ExtensionSignalType::kDOMAccess,
+      std::move(enterprise_subscribers_for_dom_access));
+  enterprise_signal_subscribers_.emplace(
+      ExtensionSignalType::kScriptInjection,
+      std::move(enterprise_subscribers_for_script_injection));
 }
 
 ExtensionTelemetryService::OffstoreExtensionFileDataContext::
@@ -1638,7 +1651,7 @@ void ExtensionTelemetryService::StartOffstoreFileDataCollection() {
   // Gather context to process offstore extensions.
   const auto& pref_dict = GetExtensionTelemetryFileData(*pref_service_);
   for (const auto& [extension_id, root_dir] : offstore_extension_dirs_) {
-    const base::Value::Dict* extension_dict = pref_dict.FindDict(extension_id);
+    const base::DictValue* extension_dict = pref_dict.FindDict(extension_id);
     if (!extension_dict) {
       offstore_extension_file_data_contexts_.emplace(extension_id, root_dir);
       continue;
@@ -1696,7 +1709,7 @@ void ExtensionTelemetryService::GetOffstoreExtensionDirs() {
 void ExtensionTelemetryService::RemoveStaleExtensionsFileDataFromPref() {
   ScopedDictPrefUpdate pref_update(pref_service_,
                                    prefs::kExtensionTelemetryFileData);
-  base::Value::Dict& pref_dict = pref_update.Get();
+  base::DictValue& pref_dict = pref_update.Get();
 
   std::vector<extensions::ExtensionId> stale_extensions;
   for (auto&& offstore : pref_dict) {
@@ -1746,9 +1759,9 @@ void ExtensionTelemetryService::CollectOffstoreFileData() {
 
 void ExtensionTelemetryService::OnOffstoreFileDataCollected(
     base::flat_set<OffstoreExtensionFileDataContext>::iterator context,
-    base::Value::Dict file_data) {
+    base::DictValue file_data) {
   // Save to Prefs
-  base::Value::Dict extension_dict;
+  base::DictValue extension_dict;
   extension_dict.Set(kFileDataProcessTimestampPref,
                      base::TimeToValue(base::Time::Now()));
   extension_dict.Set(kFileDataDictPref, std::move(file_data));

@@ -122,7 +122,10 @@ void PlusAddressSuggestionGenerator::FetchSuggestionData(
                                   std::move(plus_address_data));
           },
           *source_to_suggest, is_manually_triggered_,
-          trigger_field.is_autofilled(),
+          // TODO(crbug.com/393114125): Change to use
+          // `AutofillField::field_modifiers_` after launching
+          // `kAutofillFixIsAutofilled`.
+          trigger_field.is_autofilled_according_to_renderer(),
           autofill::RemoveDiacriticsAndConvertToLowerCase(
               trigger_field.value()))
           .Then(std::move(callback));
@@ -190,7 +193,7 @@ PlusAddressSuggestionGenerator::GetSourceToSuggest(
       !plus_address_delegate_->IsPlusAddressFillingEnabled(
           client.GetLastCommittedPrimaryMainFrameOrigin()) ||
       SuppressSuggestionsForAutocompleteUnrecognizedField(
-          *trigger_autofill_field)) {
+          *trigger_autofill_field, GetAcUnrecognizedBehavior(client))) {
     return std::nullopt;
   }
 

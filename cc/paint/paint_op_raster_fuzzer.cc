@@ -2,17 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/351564777): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include <stddef.h>
 #include <stdint.h>
 
 #include <cstdint>
 
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/process/memory.h"
 #include "base/test/test_discardable_memory_allocator.h"
@@ -21,17 +17,15 @@
 #include "cc/paint/paint_op_reader.h"
 #include "cc/paint/paint_op_writer.h"
 #include "cc/test/transfer_cache_test_helper.h"
-#include "components/viz/test/test_context_provider.h"
-#include "components/viz/test/test_gles2_interface.h"
 #include "gpu/command_buffer/common/buffer.h"
 #include "gpu/command_buffer/service/service_font_manager.h"
-#include "gpu/skia_bindings/gl_bindings_skia_cmd_buffer.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/gpu/GpuTypes.h"
 #include "third_party/skia/include/gpu/ganesh/GrDirectContext.h"
 #include "third_party/skia/include/gpu/ganesh/SkSurfaceGanesh.h"
 #include "third_party/skia/include/gpu/ganesh/gl/GrGLDirectContext.h"
 #include "third_party/skia/include/gpu/ganesh/gl/GrGLInterface.h"
+#include "third_party/skia/include/gpu/ganesh/mock/GrMockTypes.h"
 
 struct Environment {
   Environment() {
@@ -122,7 +116,7 @@ void Raster(GrDirectContext* gr_context,
     deserialized_op->DestroyThis();
 
     size -= bytes_read;
-    data += bytes_read;
+    UNSAFE_TODO(data += bytes_read);
   }
 }
 
@@ -145,7 +139,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     bytes_for_fonts = size / 2;
   }
   const uint8_t* raster_data = base::bits::AlignDown(
-      data + bytes_for_fonts, cc::PaintOpWriter::kMaxAlignment);
+      UNSAFE_TODO(data + bytes_for_fonts), cc::PaintOpWriter::kMaxAlignment);
   if (raster_data < data) {
     return 0;
   }
@@ -163,24 +157,20 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                               &locked_handles);
   }
 
-  auto context_provider_no_support = viz::TestContextProvider::CreateGLES();
-  context_provider_no_support->BindToCurrentSequence();
-  auto gr_context_no_support =
-      GrDirectContexts::MakeGL(skia_bindings::CreateGLES2InterfaceBindings(
-          context_provider_no_support->ContextGL(),
-          context_provider_no_support->ContextSupport()));
+  GrMockOptions options_no_support;
+  options_no_support.fShaderDerivativeSupport = false;
+  auto gr_context_no_support = GrDirectContext::MakeMock(&options_no_support);
+
   CHECK(!!gr_context_no_support);
   CHECK(!gr_context_no_support->supportsDistanceFieldText());
   Raster(gr_context_no_support.get(), font_manager->strike_client(),
          &paint_cache, raster_data, raster_size);
 
-  auto context_provider_with_support = viz::TestContextProvider::CreateGLES(
-      std::string("GL_OES_standard_derivatives"));
-  context_provider_with_support->BindToCurrentSequence();
+  GrMockOptions options_with_support;
+  options_with_support.fShaderDerivativeSupport = true;
   auto gr_context_with_support =
-      GrDirectContexts::MakeGL(skia_bindings::CreateGLES2InterfaceBindings(
-          context_provider_with_support->ContextGL(),
-          context_provider_with_support->ContextSupport()));
+      GrDirectContext::MakeMock(&options_with_support);
+
   CHECK(!!gr_context_with_support);
   CHECK(gr_context_with_support->supportsDistanceFieldText());
   Raster(gr_context_with_support.get(), font_manager->strike_client(),

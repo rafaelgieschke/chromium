@@ -2,10 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <array>
-
-
 #include <algorithm>
+#include <array>
 #include <vector>
 
 #include "base/command_line.h"
@@ -21,7 +19,6 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/search/ntp_test_utils.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/webui_url_constants.h"
@@ -78,7 +75,7 @@ class RestoreOnStartupPolicyTest : public UrlBlockingPolicyTest,
 
   void ListOfURLs() {
     // Verifies that policy can set the startup pages to a list of URLs.
-    base::Value::List urls;
+    base::ListValue urls;
     for (const auto* url : kRestoredURLs) {
       urls.Append(url);
       expected_urls_.push_back(GURL(url));
@@ -120,7 +117,7 @@ class RestoreOnStartupPolicyTest : public UrlBlockingPolicyTest,
     // list of URLs". |expected_urls_| will be restored from the last session.
     // |expected_urls_in_new_window_| will be opened on a policy-designated new
     // window.
-    base::Value::List urls;
+    base::ListValue urls;
     for (const auto* url : kRestoredURLs) {
       urls.Append(url);
       expected_urls_.emplace_back(url);
@@ -143,7 +140,7 @@ class RestoreOnStartupPolicyTest : public UrlBlockingPolicyTest,
     policies.Set(key::kRestoreOnStartup, POLICY_LEVEL_MANDATORY,
                  POLICY_SCOPE_USER, POLICY_SOURCE_CLOUD,
                  base::Value(SessionStartupPref::kPrefValueLast), nullptr);
-    base::Value::List urls;
+    base::ListValue urls;
     for (const auto* url_string : kRestoredURLs)
       urls.Append(url_string);
     policies.Set(key::kURLBlocklist, POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,

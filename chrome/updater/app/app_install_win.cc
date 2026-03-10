@@ -70,6 +70,7 @@
 #include "chrome/updater/win/ui/progress_wnd.h"
 #include "chrome/updater/win/ui/resources/resources.grh"
 #include "chrome/updater/win/ui/resources/updater_installer_strings.h"
+#include "chrome/updater/win/ui/webview_progress_wnd.h"
 #include "chrome/updater/win/win_constants.h"
 #include "components/update_client/update_client_errors.h"
 #include "url/gurl.h"
@@ -634,7 +635,7 @@ void AppInstallControllerImpl::DoInstallAppOffline(
     return;
   }
 
-  base::Value::Dict install_settings_dict;
+  base::DictValue install_settings_dict;
   install_settings_dict.Set(kInstallerVersion, installer_version);
 
   const base::CommandLine cmd_line(*base::CommandLine::ForCurrentProcess());
@@ -642,6 +643,8 @@ void AppInstallControllerImpl::DoInstallAppOffline(
                             cmd_line.HasSwitch(kEnterpriseSwitch));
   install_settings_dict.Set(kSessionIdSwitch,
                             cmd_line.GetSwitchValueUTF8(kSessionIdSwitch));
+  install_settings_dict.Set(kInstallSourceSwitch,
+                            cmd_line.GetSwitchValueUTF8(kInstallSourceSwitch));
 
   std::string install_settings;
   if (!JSONStringValueSerializer(&install_settings)
@@ -796,6 +799,8 @@ void AppInstallControllerImpl::StateChange(
                 update_state.total_bytes),
             pos >= 0 ? pos : 0);
       } else {
+        install_progress_observer_ipc_->OnDownloading(app_id_, app_name_,
+                                                      base::Seconds(0), pos);
         install_progress_observer_ipc_->OnWaitingToInstall(app_id_, app_name_);
       }
       break;
@@ -890,19 +895,28 @@ void AppInstallControllerImpl::InitializeUI() {
   if (is_silent_install_) {
     observer_ = std::make_unique<InstallProgressSilentObserver>(this);
   } else {
-    auto progress_wnd =
-        std::make_unique<ui::ProgressWnd>(ui_message_loop_.get(), nullptr);
+#define VISIT_PROGRESS_WND(progress_wnd)                                     \
+  std::optional<tagging::TagArgs> tag_args = GetTagArgs().tag_args;          \
+  if (tag_args) {                                                            \
+    progress_wnd->set_bundle_name(base::UTF8ToUTF16(tag_args->bundle_name)); \
+  }                                                                          \
+  progress_wnd->SetEventSink(this);                                          \
+  progress_wnd->Initialize();                                                \
+  progress_wnd->Show();                                                      \
+                                                                             \
+  observer_hwnd_ = progress_wnd->m_hWnd;                                     \
+  observer_.reset(progress_wnd.release());
 
-    std::optional<tagging::TagArgs> tag_args = GetTagArgs().tag_args;
-    if (tag_args) {
-      progress_wnd->set_bundle_name(base::UTF8ToUTF16(tag_args->bundle_name));
+    if (base::CommandLine::ForCurrentProcess()->HasSwitch(kWebViewUISwitch)) {
+      auto wnd = std::make_unique<ui::WebviewProgressWnd>();
+      VISIT_PROGRESS_WND(wnd);
+      return;
     }
-    progress_wnd->SetEventSink(this);
-    progress_wnd->Initialize();
-    progress_wnd->Show();
-
-    observer_hwnd_ = progress_wnd->m_hWnd;
-    observer_.reset(progress_wnd.release());
+    auto wnd =
+        std::make_unique<ui::ProgressWnd>(ui_message_loop_.get(), nullptr);
+    VISIT_PROGRESS_WND(wnd);
+    return;
+#undef VISIT_PROGRESS_WND
   }
 }
 

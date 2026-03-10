@@ -343,8 +343,8 @@ std::optional<int> ParseMonthFromString(std::u16string_view text,
 }
 
 std::optional<int> ParseYearFromString(std::u16string_view text) {
-  std::u16string trimmed;
-  base::TrimWhitespace(text, base::TRIM_ALL, &trimmed);
+  const std::u16string_view trimmed =
+      base::TrimWhitespace(text, base::TRIM_ALL);
 
   int year = 0;
   if (!trimmed.empty() && !base::StringToInt(trimmed, &year))
@@ -380,7 +380,7 @@ std::u16string FindPossiblePhoneCountryCode(std::u16string_view text) {
   if (text.find(u"00") != std::u16string::npos ||
       text.find('+') != std::u16string::npos) {
     std::vector<std::u16string> captures;
-    if (MatchesRegex<kAugmentedPhoneCountryCodeRe>(text, &captures)) {
+    if (MatchesRegex<kAugmentedPhoneCountryCodeExtractionRe>(text, &captures)) {
       return captures[1];
     }
   }

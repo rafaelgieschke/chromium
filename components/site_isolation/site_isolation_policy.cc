@@ -4,7 +4,6 @@
 
 #include "components/site_isolation/site_isolation_policy.h"
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/json/values_util.h"
 #include "base/metrics/field_trial_params.h"
@@ -38,6 +37,13 @@ struct IsolationDisableDecisions {
 
 bool ShouldDisableSiteIsolationDueToMemorySlow(
     content::SiteIsolationMode site_isolation_mode) {
+#if BUILDFLAG(IS_ANDROID)
+  if (!base::FeatureList::IsEnabled(
+          features::kSiteIsolationEnableMemoryThresholdAndroid)) {
+    // If kSiteIsolationEnableMemoryThresholdAndroid is disabled, site isolation
+    // should be enabled regardless of memory constraints.
+    return false;
+  }
   // The memory threshold behavior differs for desktop and Android:
   // - Android uses a 1900MB default threshold for partial site isolation modes
   //   and a 3200MB default threshold for strict site isolation. See docs in
@@ -47,7 +53,6 @@ bool ShouldDisableSiteIsolationDueToMemorySlow(
   //   partial and strict site isolation thresholds can be overridden via
   //   params defined in a kSiteIsolationMemoryThresholds field trial.
   // - Desktop does not enforce a default memory threshold.
-#if BUILDFLAG(IS_ANDROID)
   int default_memory_threshold_mb;
   if (site_isolation_mode == content::SiteIsolationMode::kStrictSiteIsolation) {
     default_memory_threshold_mb = 3200;
@@ -186,9 +191,11 @@ bool SiteIsolationPolicy::IsIsolationForOAuthSitesEnabled() {
 }
 
 // static
-bool SiteIsolationPolicy::IsOriginIsolationForJsOptExceptionsEnabled() {
+bool SiteIsolationPolicy::IsOriginIsolationForJsOptExceptionsEnabled(
+    content::BrowserContext* browser_context) {
   if (content::SiteIsolationPolicy::IsStrictOriginIsolationEnabled() ||
-      content::SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault()) {
+      content::SiteIsolationPolicy::AreOriginKeyedProcessesEnabledByDefault(
+          browser_context)) {
     // Origin isolation for JavaScript optimizer exceptions isn't needed if
     // origin isolation is enabled for everything because an origin gets passed
     // into AreV8OptimizationsDisabledForSite() and the return value will match
@@ -270,10 +277,10 @@ void SiteIsolationPolicy::PersistUserTriggeredIsolatedOrigin(
   ScopedListPrefUpdate update(
       user_prefs::UserPrefs::Get(context),
       site_isolation::prefs::kUserTriggeredIsolatedOrigins);
-  base::Value::List& list = update.Get();
-  base::Value value(origin.Serialize());
-  if (!base::Contains(list, value)) {
-    list.Append(std::move(value));
+  base::ListValue& list = update.Get();
+  std::string value(origin.Serialize());
+  if (!list.contains(value)) {
+    list.Append(value);
   }
 }
 
@@ -287,7 +294,7 @@ void SiteIsolationPolicy::PersistWebTriggeredIsolatedOrigin(
   ScopedDictPrefUpdate update(
       user_prefs::UserPrefs::Get(context),
       site_isolation::prefs::kWebTriggeredIsolatedOrigins);
-  base::Value::Dict& dict = update.Get();
+  base::DictValue& dict = update.Get();
 
   // Add the origin.  If it already exists, this will just update the
   // timestamp.
@@ -367,7 +374,7 @@ void SiteIsolationPolicy::ApplyPersistedIsolatedOrigins(
     if (!expired_entries.empty()) {
       ScopedDictPrefUpdate update(pref_service,
                                   prefs::kWebTriggeredIsolatedOrigins);
-      base::Value::Dict& updated_dict = update.Get();
+      base::DictValue& updated_dict = update.Get();
       for (const auto& entry : expired_entries) {
         updated_dict.Remove(entry);
       }

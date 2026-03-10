@@ -60,9 +60,15 @@ void TabStripEventRecorder::OnChildrenAdded(
     bool insert_from_detached) {
   for (const auto& handle : handles) {
     if (const auto* tab_handle_ptr = std::get_if<tabs::TabHandle>(&handle)) {
+      if (!tab_handle_ptr->Get()) {
+        continue;
+      }
       Handle(ToEvent(*tab_handle_ptr, position, tab_strip_model_adapter_));
     } else if (const auto* collection_handle_ptr =
                    std::get_if<tabs::TabCollectionHandle>(&handle)) {
+      if (!collection_handle_ptr->Get()) {
+        continue;
+      }
       Handle(ToEvent(*collection_handle_ptr, position, tab_strip_model_adapter_,
                      insert_from_detached));
     }
@@ -81,7 +87,8 @@ void TabStripEventRecorder::OnChildMoved(
   const tabs::TabCollection::Position& from_position = node_data.position;
   const tabs::TabCollection::NodeHandle node_handle = node_data.handle;
 
-  Handle(ToEvent(to_position, from_position, node_handle));
+  Handle(ToEvent(to_position, from_position, node_handle,
+                 tab_strip_model_adapter_));
 }
 
 void TabStripEventRecorder::OnTabStripModelChanged(
@@ -103,11 +110,6 @@ void TabStripEventRecorder::OnTabChangedAt(tabs::TabInterface* tab,
                                            int index,
                                            TabChangeType change_type) {
   Handle(ToEvent(tab_strip_model_adapter_, index, change_type));
-}
-
-void TabStripEventRecorder::OnTabBlockedStateChanged(tabs::TabInterface* tab,
-                                                     int index) {
-  OnTabChangedAt(tab, index, TabChangeType::kAll);
 }
 
 void TabStripEventRecorder::OnTabGroupChanged(const TabGroupChange& change) {

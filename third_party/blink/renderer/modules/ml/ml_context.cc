@@ -158,8 +158,8 @@ OperandDataTypeToSharedImageFormat(webnn::OperandDataType data_type) {
 // TODO(crbug.com/427252761): Support other data types in CoreML backend.
 #if BUILDFLAG(IS_MAC)
   if (data_type != webnn::OperandDataType::kFloat16) {
-    return base::unexpected(String::Format(
-        "Invalid operand data type: %s", ToBlinkDataType(data_type).AsCStr()));
+    return base::unexpected(UNSAFE_TODO(String::Format(
+        "Invalid operand data type: %s", ToBlinkDataType(data_type).AsCStr())));
   }
   // The only format supported by CoreML `MLMultiArray::initWithPixelBuffer`.
   return viz::SinglePlaneFormat::kR_F16;
@@ -184,8 +184,8 @@ OperandDataTypeToSharedImageFormat(webnn::OperandDataType data_type) {
     // Default case is for new format types added to MLTensor.
     default:
       return base::unexpected(
-          String::Format("Invalid operand data type: %s",
-                         ToBlinkDataType(data_type).AsCStr()));
+          UNSAFE_TODO(String::Format("Invalid operand data type: %s",
+                                     ToBlinkDataType(data_type).AsCStr())));
   }
 #endif  // BUILDFLAG(IS_MAC)
 }
@@ -447,7 +447,7 @@ const MLOpSupportLimits* MLContext::opSupportLimits(ScriptState* script_state) {
   dequantize_linear->setScale(SupportedTensorLimitsToTensorLimits(
       data_type_limits.dequantize_linear_scale));
   dequantize_linear->setZeroPoint(SupportedTensorLimitsToTensorLimits(
-      data_type_limits.dequantize_linear_zero_point));
+      data_type_limits.dequantize_linear_input));
   dequantize_linear->setOutput(SupportedTensorLimitsToTensorLimits(
       data_type_limits.dequantize_linear_scale));
   op_support_limits->setDequantizeLinear(dequantize_linear);

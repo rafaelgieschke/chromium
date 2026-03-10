@@ -43,7 +43,7 @@
 #include "remoting/host/register_support_host_request.h"
 #include "remoting/protocol/errors.h"
 #include "remoting/protocol/transport_context.h"
-#include "remoting/signaling/fake_signal_strategy.h"
+#include "remoting/signaling/fake_ftl_signal_strategy.h"
 #include "services/network/test/test_shared_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -270,6 +270,8 @@ class It2MeHostTest : public testing::Test, public It2MeHost::Observer {
 
   static base::Value MakeList(std::initializer_list<std::string_view> values);
 
+  const ChromotingHost* GetHost() const { return it2me_host_->host_.get(); }
+
   ChromotingHost* GetHost() { return it2me_host_->host_.get(); }
 
   const SessionPolicies& get_local_session_policies() const {
@@ -305,7 +307,7 @@ class It2MeHostTest : public testing::Test, public It2MeHost::Observer {
   raw_ptr<FakeIt2MeDialogFactory, AcrossTasksDanglingUntriaged>
       dialog_factory_ = nullptr;
 
-  std::optional<base::Value::Dict> policies_;
+  std::optional<base::DictValue> policies_;
 
   scoped_refptr<It2MeHost> it2me_host_;
 
@@ -416,8 +418,8 @@ void It2MeHostTest::StartHost() {
       webrtc::SocketAddress(kTestStunServer, 100));
   ice_config.expiration_time = base::Time::Now() + base::Hours(2);
 
-  auto fake_signal_strategy =
-      std::make_unique<FakeSignalStrategy>(SignalingAddress("fake_local_jid"));
+  auto fake_signal_strategy = std::make_unique<FakeFtlSignalStrategy>(
+      SignalingAddress("fake_local_jid"));
 
   it2me_host_ = new It2MeHost();
   if (enterprise_params_.has_value()) {
@@ -435,7 +437,7 @@ void It2MeHostTest::StartHost() {
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
   auto create_connection_context = base::BindOnce(
-      [](std::unique_ptr<SignalStrategy> signal_strategy,
+      [](std::unique_ptr<FtlSignalStrategy> signal_strategy,
          base::WeakPtr<OAuthTokenGetter> token_getter, bool is_corp_user,
          ChromotingHostContext* host_context) {
         auto context = std::make_unique<It2MeHost::DeferredConnectContext>();
@@ -542,7 +544,7 @@ void It2MeHostTest::SimulateEffectiveSessionPoliciesReceived() {
 
 base::Value It2MeHostTest::MakeList(
     std::initializer_list<std::string_view> values) {
-  base::Value::List result;
+  base::ListValue result;
   for (const auto& value : values) {
     result.Append(value);
   }
@@ -1123,6 +1125,25 @@ TEST_F(It2MeHostTest, EnableFileTransferDefaultsToFalse) {
   StartHost(/*enterprise_params=*/std::nullopt);
 
   EXPECT_FALSE(*get_local_session_policies().allow_file_transfer);
+}
+
+TEST_F(It2MeHostTest, AudioPlaybackIsLocalOnlyForNonEnterpriseSessions) {
+  StartHost(/*enterprise_params=*/std::nullopt);
+
+  EXPECT_EQ(
+      GetHost()->desktop_environment_options_for_tests().audio_playback_mode(),
+      AudioPlaybackMode::kLocalOnly);
+}
+
+TEST_F(It2MeHostTest, ConnectRespectsAudioPlaybackParameter) {
+  ChromeOsEnterpriseParams params(
+      GetDefaultEnterpriseParamsForEnterpriseAdmin());
+  params.audio_playback = ChromeOsEnterpriseAudioPlayback::kRemoteOnly;
+  StartHost(std::move(params));
+
+  EXPECT_EQ(
+      GetHost()->desktop_environment_options_for_tests().audio_playback_mode(),
+      AudioPlaybackMode::kRemoteOnly);
 }
 
 TEST_F(It2MeHostTest,

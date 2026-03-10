@@ -4,17 +4,18 @@
 
 #include "chrome/browser/permissions/chrome_permissions_client.h"
 
+#include <algorithm>
 #include <optional>
 #include <vector>
 
 #include "base/check_deref.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/callback_helpers.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "chrome/browser/actor/actor_keyed_service.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
 #include "chrome/browser/ash/shimless_rma/chrome_shimless_rma_delegate.h"
 #include "chrome/browser/bluetooth/bluetooth_chooser_context_factory.h"
@@ -66,6 +67,7 @@
 #include "components/permissions/permission_util.h"
 #include "components/permissions/permissions_client.h"
 #include "components/permissions/request_type.h"
+#include "components/permissions/resolvers/permission_prompt_options.h"
 #include "components/prefs/pref_service.h"
 #include "components/site_engagement/content/site_engagement_service.h"
 #include "components/subresource_filter/content/browser/subresource_filter_content_settings_manager.h"
@@ -76,15 +78,12 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/url_constants.h"
 #include "extensions/buildflags/buildflags.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/origin.h"
-
-#if !BUILDFLAG(IS_ANDROID)
-#include "chrome/browser/actor/actor_keyed_service.h"
-#endif
 
 #if BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/android/resource_mapper.h"
@@ -315,9 +314,10 @@ void ChromePermissionsClient::AreSitesImportant(
     if (registerable_domain.empty()) {
       registerable_domain = host;  // IP address or internal hostname.
     }
-    entry.second = base::Contains(important_domains, registerable_domain,
-                                  &site_engagement::ImportantSitesUtil::
-                                      ImportantDomainInfo::registerable_domain);
+    entry.second =
+        std::ranges::contains(important_domains, registerable_domain,
+                              &site_engagement::ImportantSitesUtil::
+                                  ImportantDomainInfo::registerable_domain);
   }
 }
 
@@ -361,7 +361,7 @@ void ChromePermissionsClient::GetUkmSourceId(
 permissions::IconId ChromePermissionsClient::GetOverrideIconId(
     permissions::RequestType request_type) {
 #if BUILDFLAG(IS_CHROMEOS)
-  // TODO(xhwang): fix this icon, see crbug.com/446263.
+  // TODO(xhwang): fix this icon, see crbug.com/40399970.
   if (request_type == permissions::RequestType::kProtectedMediaIdentifier) {
     return vector_icons::kProductIcon;
   }
@@ -482,6 +482,7 @@ ChromePermissionsClient::CreatePermissionUiSelectors(
 void ChromePermissionsClient::OnPromptResolved(
     const PermissionRequest* request,
     permissions::PermissionAction action,
+    const PromptOptions& prompt_options,
     PermissionPromptDisposition prompt_disposition,
     PermissionPromptDispositionReason prompt_disposition_reason,
     std::optional<QuietUiReason> quiet_ui_reason,
@@ -525,17 +526,32 @@ void ChromePermissionsClient::OnPromptResolved(
 #endif
   }
 
+  // We're interested only in the granted prompts as in case of a permission
+  // grant, Chrome needs to inform the page about a permission status change.
+  if (quiet_ui_reason &&
+      (action == permissions::PermissionAction::GRANTED ||
+       action == permissions::PermissionAction::GRANTED_ONCE) &&
+      (request->request_type() == permissions::RequestType::kNotifications ||
+       request->request_type() == permissions::RequestType::kGeolocation)) {
+    content::PermissionController* permission_controller =
+        web_contents->GetBrowserContext()->GetPermissionController();
+    if (permission_controller) {
+      permissions::PermissionUmaUtil::
+          RecordOnPermissionStatusChangedEventSubscribed(
+              request->request_type(),
+              request->IsSourceSubscribedToPermissionChangeEvent(
+                  permission_controller));
+    }
+  }
+
 #if !BUILDFLAG(IS_ANDROID)
   // Infobar exists only on Desktop platforms.
-  if (base::FeatureList::IsEnabled(
-          permissions::features::kPermissionPromiseLifetimeModulation)) {
-    bool should_show_infobar = ShouldShowInfobarOnPromptResolved(
-        web_contents, request, quiet_ui_reason, action);
-    permissions::PermissionUmaUtil::RecordPageReloadInfoBarShown(
-        should_show_infobar);
-    if (should_show_infobar) {
-      ShowInfobar(web_contents);
-    }
+  bool should_show_infobar = ShouldShowInfobarOnPromptResolved(
+      web_contents, request, quiet_ui_reason, action);
+  permissions::PermissionUmaUtil::RecordPageReloadInfoBarShown(
+      should_show_infobar);
+  if (should_show_infobar) {
+    ShowInfobar(web_contents);
   }
 #endif
 
@@ -552,7 +568,7 @@ void ChromePermissionsClient::OnPromptResolved(
       std::make_optional(prompt_display_duration), /*is_post_prompt=*/true,
       web_contents->GetPrimaryMainFrame()->GetLastCommittedOrigin().GetURL(),
       pepc_prompt_position, initial_permission_status, base::DoNothing(),
-      request->prompt_options());
+      prompt_options);
 }
 
 std::optional<bool>
@@ -633,38 +649,60 @@ bool ChromePermissionsClient::CanBypassEmbeddingOriginCheck(
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   // Extensions are excluded from origin checks as currently they can request
   // permission from iframes when embedded in non-secure contexts
-  // (https://crbug.com/530507).
+  // (https://crbug.com/40435309).
   if (requesting_origin.SchemeIs(extensions::kExtensionScheme)) {
     return true;
   }
 #endif
 
-  // The New Tab Page is excluded from origin checks as its effective
-  // requesting origin may be the Default Search Engine origin.
-  return embedding_origin ==
-             GURL(chrome::kChromeUINewTabURL).DeprecatedGetOriginAsURL() ||
-         embedding_origin ==
-             GURL(chrome::kChromeUINewTabPageURL).DeprecatedGetOriginAsURL();
+  // New Tab Page:
+  // Bypass embedding origin check as the `requesting_origin` will later be
+  // transformed to the DSE origin in `GetCanonicalOriginOverride()`.
+  if (embedding_origin.host() == chrome::kChromeUINewTabHost ||
+      embedding_origin.host() == chrome::kChromeUINewTabPageHost) {
+    return true;
+  }
+
+  // Omnibox Popup and Contextual Tasks:
+  // Bypass embedding origin check as the `requesting_origin` will later be
+  // transformed to the DSE origin in `GetCanonicalOriginOverride()`.
+  if (embedding_origin.host() == chrome::kChromeUIOmniboxPopupHost ||
+      embedding_origin.host() == chrome::kChromeUIContextualTasksHost) {
+    return true;
+  }
+
+  return false;
 }
 
-std::optional<GURL> ChromePermissionsClient::OverrideCanonicalOrigin(
+std::optional<GURL> ChromePermissionsClient::GetCanonicalOriginOverride(
     const GURL& requesting_origin,
     const GURL& embedding_origin) {
-  if (embedding_origin.DeprecatedGetOriginAsURL() ==
-      GURL(chrome::kChromeUINewTabURL).DeprecatedGetOriginAsURL()) {
-    if (requesting_origin.DeprecatedGetOriginAsURL() ==
-        GURL(chrome::kChromeUINewTabPageURL).DeprecatedGetOriginAsURL()) {
+  // New Tab Page:
+  // Transform chrome:// origins to the DSE origin so that permissions are
+  // stored under and shared with the DSE.
+  if (embedding_origin.host() == chrome::kChromeUINewTabHost) {
+    if (requesting_origin.host() == chrome::kChromeUINewTabPageHost) {
       return GURL(UIThreadSearchTermsData().GoogleBaseURLValue())
           .DeprecatedGetOriginAsURL();
     }
     return requesting_origin;
   }
 
+  // Omnibox and Contextual Tasks:
+  // Transform chrome:// origins to the DSE origin so that permissions are
+  // stored under and shared with the DSE.
+  if (requesting_origin == embedding_origin &&
+      (requesting_origin.host() == chrome::kChromeUIOmniboxPopupHost ||
+       requesting_origin.host() == chrome::kChromeUIContextualTasksHost)) {
+    return GURL(UIThreadSearchTermsData().GoogleBaseURLValue())
+        .DeprecatedGetOriginAsURL();
+  }
+
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   // Note that currently chrome extensions are allowed to use permissions even
   // when in embedded in non-secure contexts. This is unfortunate and we
   // should remove this at some point, but for now always use the requesting
-  // origin for embedded extensions. https://crbug.com/530507.
+  // origin for embedded extensions. https://crbug.com/40435309.
   if (requesting_origin.SchemeIs(extensions::kExtensionScheme)) {
     return requesting_origin;
   }
@@ -673,13 +711,33 @@ std::optional<GURL> ChromePermissionsClient::OverrideCanonicalOrigin(
   return std::nullopt;
 }
 
-bool ChromePermissionsClient::DoURLsMatchNewTabPage(
+std::optional<GURL> ChromePermissionsClient::GetEmbeddingOriginOverride(
     const GURL& requesting_origin,
-    const GURL& embedding_origin) {
-  return embedding_origin ==
-             GURL(chrome::kChromeUINewTabURL).DeprecatedGetOriginAsURL() &&
-         requesting_origin ==
-             GURL(chrome::kChromeUINewTabPageURL).DeprecatedGetOriginAsURL();
+    content::WebContents* web_contents) {
+  GURL embedding_origin =
+      web_contents->GetLastCommittedURL().DeprecatedGetOriginAsURL();
+
+  // New Tab Page:
+  // Use the WebContents URL (chrome://newtab) as the embedding origin when
+  // the requesting origin is the NTP (chrome://new-tab-page).
+  // Note that the embedding origin is later transformed to the DSE origin via
+  // `GetCanonicalOriginOverride()`.
+  if (requesting_origin.host() == chrome::kChromeUINewTabPageHost &&
+      embedding_origin.host() == chrome::kChromeUINewTabHost) {
+    return embedding_origin;
+  }
+
+  // Omnibox Popup and Contextual Tasks:
+  // Use the WebContents URL as the embedding origin.
+  // Note that the embedding origin is later transformed to the DSE origin via
+  // `GetCanonicalOriginOverride()`.
+  if (requesting_origin == embedding_origin &&
+      (requesting_origin.host() == chrome::kChromeUIOmniboxPopupHost ||
+       requesting_origin.host() == chrome::kChromeUIContextualTasksHost)) {
+    return embedding_origin;
+  }
+
+  return std::nullopt;
 }
 
 #if BUILDFLAG(IS_ANDROID)
@@ -847,7 +905,6 @@ bool ChromePermissionsClient::CanPromptSystemPermission(
 
 bool ChromePermissionsClient::IsActorOperatingOnWebContents(
     content::WebContents* web_contents) const {
-#if !BUILDFLAG(IS_ANDROID)
   auto* actor_service =
       actor::ActorKeyedService::Get(web_contents->GetBrowserContext());
   if (!actor_service) {
@@ -857,7 +914,4 @@ bool ChromePermissionsClient::IsActorOperatingOnWebContents(
   const auto* tab_interface =
       tabs::TabInterface::MaybeGetFromContents(web_contents);
   return tab_interface && actor_service->IsActiveOnTab(*tab_interface);
-#else
-  return false;
-#endif
 }

@@ -44,41 +44,25 @@
 #include "components/autofill/core/browser/suggestions/suggestion_type.h"
 #include "components/autofill/core/browser/suggestions/suggestion_util.h"
 #include "components/autofill/core/common/autofill_features.h"
+#include "components/autofill/core/common/autofill_prefs.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/autofill/core/common/unique_ids.h"
 #include "components/feature_engagement/public/feature_constants.h"
+#include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace autofill {
 namespace {
 
-std::u16string GetEntitySuggestionMainText(
-    const EntityInstance& entity,
-    const AutofillFieldWithAttributeType& trigger_field,
-    const AttributeInstance& trigger_attribute,
-    const std::string& app_locale) {
-  const bool should_obfuscate_main_text =
-      ShouldFieldBeObfuscated(entity, trigger_field, app_locale);
-
-  std::u16string main_text = trigger_attribute.GetInfo(
-      trigger_field.field->Type().GetAutofillAiType(
-          trigger_attribute.type().entity_type()),
-      app_locale, trigger_field.field->format_string());
-  if (should_obfuscate_main_text) {
-    main_text = GetObfuscatedValue(main_text);
-  }
-  return main_text;
-}
-
 // Holds an assignment of AutofillFields to AttributeTypes.
 //
 // Note that an AutofillField may have multiple AttributeTypes of distinct
 // EntityTypes assigned. That is, it may happen that both of the following are
 // true:
-//   base::Contains(assignment.Find(EntityType(kVehicle)),
+//   std::ranges::contains(assignment.Find(EntityType(kVehicle)),
 //                  {field, AttributeType(kVehicleOwner));
-//   base::Contains(assignment.Find(EntityType(kDriversLicense)),
+//   std::ranges::contains(assignment.Find(EntityType(kDriversLicense)),
 //                  {field, AttributeType(kDriversLicenseName));
 class AttributeTypeAssignment {
  public:
@@ -132,11 +116,30 @@ DenseSet<AttributeType> FindAttributesForField(
   return attributes;
 }
 
-// Returns a suggestion to manage AutofillAi data.
-Suggestion CreateManageSuggestion() {
+// Returns a suggestion to manage all AutofillAi data.
+Suggestion CreateManageAutofillAiSuggestion() {
   Suggestion suggestion(
       l10n_util::GetStringUTF16(IDS_AUTOFILL_AI_MANAGE_SUGGESTION_MAIN_TEXT),
       SuggestionType::kManageAutofillAi);
+  suggestion.icon = Suggestion::Icon::kSettings;
+  return suggestion;
+}
+
+// Returns a suggestion to manage AutofillAi identity dosc data.
+Suggestion CreateManageIdentityDocsSuggestion() {
+  Suggestion suggestion(
+      l10n_util::GetStringUTF16(
+          IDS_AUTOFILL_AI_MANAGE_IDENTITY_DOCS_SUGGESTION_MAIN_TEXT),
+      SuggestionType::kManageAutofillAiIdentityDocs);
+  suggestion.icon = Suggestion::Icon::kSettings;
+  return suggestion;
+}
+
+// Returns a suggestion to manage AutofillAi travel data.
+Suggestion CreateManageTravelSuggestion() {
+  Suggestion suggestion(l10n_util::GetStringUTF16(
+                            IDS_AUTOFILL_AI_MANAGE_TRAVEL_SUGGESTION_MAIN_TEXT),
+                        SuggestionType::kManageAutofillAiTravel);
   suggestion.icon = Suggestion::Icon::kSettings;
   return suggestion;
 }
@@ -152,15 +155,39 @@ Suggestion CreateUndoSuggestion() {
 }
 
 std::vector<Suggestion> GetFooterSuggestions(
-    const FormFieldData& trigger_field) {
+    const FormFieldData& trigger_field,
+    bool suggestions_contain_travel_entity,
+    bool suggestions_contain_identity_docs_entity) {
   std::vector<Suggestion> suggestions;
   suggestions.reserve(3);
 
   suggestions.emplace_back(SuggestionType::kSeparator);
-  if (trigger_field.is_autofilled()) {
+  // TODO(crbug.com/393114125): Change to use `AutofillField::field_modifiers_`
+  // after launching `kAutofillFixIsAutofilled`.
+  if (trigger_field.is_autofilled_according_to_renderer()) {
     suggestions.emplace_back(CreateUndoSuggestion());
   }
-  suggestions.emplace_back(CreateManageSuggestion());
+  if (base::FeatureList::IsEnabled(
+          autofill::features::
+              kSuggestionManageButtonSplitForEnhancedAutofill) &&
+      base::FeatureList::IsEnabled(
+          autofill::features::kYourSavedInfoSettingsPage)) {
+    CHECK(suggestions_contain_travel_entity ||
+          suggestions_contain_identity_docs_entity);
+
+    if (suggestions_contain_travel_entity &&
+        suggestions_contain_identity_docs_entity) {
+      suggestions.emplace_back(CreateManageAutofillAiSuggestion());
+    } else if (suggestions_contain_travel_entity) {
+      suggestions.emplace_back(CreateManageTravelSuggestion());
+    } else if (suggestions_contain_identity_docs_entity) {
+      suggestions.emplace_back(CreateManageIdentityDocsSuggestion());
+    } else {
+      NOTREACHED();
+    }
+  } else {
+    suggestions.emplace_back(CreateManageAutofillAiSuggestion());
+  }
   return suggestions;
 }
 
@@ -183,7 +210,7 @@ std::vector<std::u16string> GetLabelsForSuggestions(
     base::span<const EntityInstance> entities_to_suggest,
     base::span<const EntityInstance*> other_entities_that_can_fill_section,
     DenseSet<AttributeType> trigger_field_attributes,
-    const std::string& app_locale) {
+    std::string_view app_locale) {
   std::vector<const EntityInstance*> entities =
       base::ToVector(entities_to_suggest,
                      [](const EntityInstance& entity) { return &entity; });
@@ -192,7 +219,8 @@ std::vector<std::u16string> GetLabelsForSuggestions(
 
   std::vector<EntityLabel> labels =
       GetLabelsForEntities(entities, trigger_field_attributes,
-                           /*only_disambiguating_types=*/true, app_locale);
+                           /*only_disambiguating_types=*/true,
+                           /*obfuscate_sensitive_types=*/false, app_locale);
 
   // Drop the labels for the `other_entities_that_can_fill_section`.
   if (labels.size() > entities_to_suggest.size()) {
@@ -211,16 +239,55 @@ std::vector<std::u16string> GetLabelsForSuggestions(
   });
 }
 
+// Returns a map of the minimum length of each masked attribute across all
+// entities.
+absl::flat_hash_map<AttributeType, size_t> GetAttributeMaskLengths(
+    base::span<const EntityInstance* const> entities) {
+  absl::flat_hash_map<AttributeType, size_t> lengths;
+  for (const EntityInstance* const entity : entities) {
+    for (const AttributeInstance& attribute : entity->attributes()) {
+      if (!attribute.masked()) {
+        continue;
+      }
+      const std::u16string value = attribute.GetCompleteRawInfo();
+      if (value.empty()) {
+        continue;
+      }
+      auto [it, inserted] = lengths.insert({attribute.type(), value.size()});
+      if (!inserted) {
+        it->second = std::min(it->second, value.size());
+      }
+    }
+  }
+  return lengths;
+}
+
 // Returns entities whose set of fields and values to be filled are not subsets
-// of another. This function favors server entities, for example if
-// two entities (one being local and one being server) are going to fill the
-// same fields with the same values, this function will keep the server one.
-// Note that `s` is expected to be sorted by descending priority and favor
-// higher-priority suggestions.
+// of another. This function favors server entities, for example if two entities
+// (one being local and one being server) are going to fill the same fields with
+// the same values, this function will keep the server one. Note that `entities`
+// is expected to be sorted by descending priority and favor higher-priority
+// suggestions.
 std::vector<const EntityInstance*> DedupedEntitiesForSuggestions(
     const std::vector<const EntityInstance*>& entities,
     const AttributeTypeAssignment& type_assignment,
     const std::string& app_locale) {
+  // If any of the attributes are masked, only compare the suffixes or the
+  // minimum length of the attributes.
+  const absl::flat_hash_map<AttributeType, size_t> mask_lengths =
+      GetAttributeMaskLengths(entities);
+  // Returns the suffix of `value` whose length is `mask_length` if
+  // `attribute_type` is masked, otherwise returns `value` unchanged.
+  auto maybe_take_suffix = [&mask_lengths](AttributeType attribute_type,
+                                           std::u16string value) {
+    if (const auto it = mask_lengths.find(attribute_type);
+        it != mask_lengths.end()) {
+      const size_t mask_length = std::min(it->second, value.size());
+      return value.substr(value.size() - mask_length);
+    }
+    return value;
+  };
+
   std::vector<std::vector<std::pair<FieldGlobalId, std::u16string>>>
       fields_to_values(entities.size());
   for (auto [entity, field_to_values] : base::zip(entities, fields_to_values)) {
@@ -238,8 +305,9 @@ std::vector<const EntityInstance*> DedupedEntitiesForSuggestions(
         continue;
       }
 
-      field_to_values.emplace_back(field->global_id(),
-                                   std::move(attribute_value));
+      field_to_values.emplace_back(
+          field->global_id(),
+          maybe_take_suffix(attribute_type, std::move(attribute_value)));
     }
   }
 
@@ -248,6 +316,7 @@ std::vector<const EntityInstance*> DedupedEntitiesForSuggestions(
       case EntityInstance::RecordType::kServerWallet:
         return true;
       case EntityInstance::RecordType::kLocal:
+      case EntityInstance::RecordType::kAccessibilityAnnotator:
         return false;
     }
     NOTREACHED();
@@ -298,6 +367,8 @@ Suggestion::Icon GetSuggestionIcon(EntityType trigger_entity_type) {
       return Suggestion::Icon::kFlight;
     case EntityTypeName::kNationalIdCard:
       return Suggestion::Icon::kIdCard;
+    case EntityTypeName::kOrder:
+      return Suggestion::Icon::kNoIcon;
     case EntityTypeName::kPassport:
       return Suggestion::Icon::kIdCard;
     case EntityTypeName::kKnownTravelerNumber:
@@ -306,6 +377,38 @@ Suggestion::Icon GetSuggestionIcon(EntityType trigger_entity_type) {
       return Suggestion::Icon::kPersonCheck;
     case EntityTypeName::kVehicle:
       return Suggestion::Icon::kVehicle;
+  }
+  NOTREACHED();
+}
+
+bool IsTravelType(EntityType trigger_entity_type) {
+  switch (trigger_entity_type.name()) {
+    case EntityTypeName::kFlightReservation:
+    case EntityTypeName::kKnownTravelerNumber:
+    case EntityTypeName::kRedressNumber:
+    case EntityTypeName::kVehicle:
+      return true;
+    case EntityTypeName::kDriversLicense:
+    case EntityTypeName::kNationalIdCard:
+    case EntityTypeName::kOrder:
+    case EntityTypeName::kPassport:
+      return false;
+  }
+  NOTREACHED();
+}
+
+bool IsIdentityDocsType(EntityType trigger_entity_type) {
+  switch (trigger_entity_type.name()) {
+    case EntityTypeName::kDriversLicense:
+    case EntityTypeName::kNationalIdCard:
+    case EntityTypeName::kPassport:
+      return true;
+    case EntityTypeName::kFlightReservation:
+    case EntityTypeName::kKnownTravelerNumber:
+    case EntityTypeName::kOrder:
+    case EntityTypeName::kRedressNumber:
+    case EntityTypeName::kVehicle:
+      return false;
   }
   NOTREACHED();
 }
@@ -371,15 +474,20 @@ Suggestion GetSuggestionForEntity(
     base::span<const AutofillFieldWithAttributeType> fields,
     const AutofillFieldWithAttributeType& trigger_field,
     std::u16string label,
-    const std::string& app_locale) {
+    std::string_view app_locale) {
   // The dereference is guaranteed by EntityShouldProduceSuggestion().
   const AttributeInstance& trigger_attribute =
       *entity.attribute(trigger_field.type);
+  std::u16string main_text = trigger_attribute.GetInfo(
+      trigger_field.field->Type().GetAutofillAiType(
+          trigger_attribute.type().entity_type()),
+      app_locale, trigger_field.field->format_string());
+  if (trigger_attribute.type().is_obfuscated()) {
+    main_text = GetObfuscatedValue(main_text, /*visible_suffix_length=*/4);
+  }
 
   Suggestion suggestion =
-      Suggestion(GetEntitySuggestionMainText(entity, trigger_field,
-                                             trigger_attribute, app_locale),
-                 SuggestionType::kFillAutofillAi);
+      Suggestion(main_text, SuggestionType::kFillAutofillAi);
   suggestion.labels = {{Suggestion::Text(std::move(label))}};
   suggestion.payload = Suggestion::AutofillAiPayload(entity.guid());
   suggestion.icon = GetSuggestionIcon(entity.type());
@@ -393,8 +501,8 @@ Suggestion GetSuggestionForEntity(
 // The desired ordering criteria are the following:
 // - Entities of the same type should appear together.
 // - Entities of type A should appear before entities of type B if the most
-//   "frecent" entity of type A is more frecent than the most frecent entity of
-//   type B.
+//   "frecent" entity of type A is more frecent than the most frecent entity
+//   of type B.
 //
 // In other terms, entities are grouped so that the most “frecent” suggestion
 // will be shown first, then all suggestions of the same type, then the next
@@ -452,7 +560,7 @@ std::vector<Suggestion> CreateAutofillAiFillingSuggestions(
     base::span<const EntityInstance> entities_to_suggest,
     base::span<const EntityInstance> all_entities,
     const AttributeTypeAssignment& assignment,
-    const std::string& app_locale) {
+    std::string_view app_locale) {
   CHECK(!entities_to_suggest.empty());
   const AutofillField& trigger_field =
       CHECK_DEREF(form.GetFieldById(trigger_field_data.global_id()));
@@ -461,14 +569,15 @@ std::vector<Suggestion> CreateAutofillAiFillingSuggestions(
       entities_to_suggest, {}, &EntityInstance::guid);
 
   // Labels need to be consistent across the whole fill group. That is, as the
-  // user clicks around fields they need to see the same set of attributes as a
-  // combination of main text and labels. Therefore, entities that do not
+  // user clicks around fields they need to see the same set of attributes as
+  // a combination of main text and labels. Therefore, entities that do not
   // generate suggestions on a certain triggering field still affect label
   // generation and should be taken into account.
   std::vector<const EntityInstance*> other_entities_that_can_fill_section;
   for (const EntityInstance& entity : all_entities) {
     if (!entities_to_suggest_ids.contains(entity.guid()) &&
-        CanFillSomeField(entity, assignment.Find(entity.type()), app_locale)) {
+        CanFillSomeField(entity, assignment.Find(entity.type()),
+                         std::string(app_locale))) {
       other_entities_that_can_fill_section.push_back(&entity);
     }
   }
@@ -481,6 +590,8 @@ std::vector<Suggestion> CreateAutofillAiFillingSuggestions(
   std::vector<Suggestion> suggestions;
   suggestions.reserve(entities_to_suggest.size());
   CHECK_EQ(entities_to_suggest.size(), labels.size());
+  bool contains_travel_entity = false;
+  bool contains_identity_docs_entity = false;
   for (auto [entity, label] : base::zip(entities_to_suggest, labels)) {
     base::span<const AutofillFieldWithAttributeType> fields_with_types =
         assignment.Find(entity.type());
@@ -490,9 +601,13 @@ std::vector<Suggestion> CreateAutofillAiFillingSuggestions(
     suggestions.push_back(GetSuggestionForEntity(entity, fields_with_types,
                                                  *trigger_field_with_type,
                                                  std::move(label), app_locale));
+    contains_travel_entity |= IsTravelType(entity.type());
+    contains_identity_docs_entity |= IsIdentityDocsType(entity.type());
   }
 
-  base::Extend(suggestions, GetFooterSuggestions(trigger_field_data));
+  base::Extend(suggestions,
+               GetFooterSuggestions(trigger_field_data, contains_travel_entity,
+                                    contains_identity_docs_entity));
   return suggestions;
 }
 
@@ -556,7 +671,7 @@ void AutofillAiSuggestionGenerator::FetchSuggestionData(
   if (!GetFieldsFillableByAutofillAi(*form_structure, client)
            .contains(trigger_field.global_id()) ||
       SuppressSuggestionsForAutocompleteUnrecognizedField(
-          *trigger_autofill_field)) {
+          *trigger_autofill_field, GetAcUnrecognizedBehavior(client))) {
     callback({SuggestionDataSource::kAutofillAi, {}});
     return;
   }

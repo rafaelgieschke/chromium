@@ -4,9 +4,10 @@
 
 #include "base/memory_coordinator/test_memory_consumer_registry.h"
 
+#include <algorithm>
+
 #include "base/check.h"
 #include "base/check_op.h"
-#include "base/containers/contains.h"
 #include "base/memory_coordinator/memory_consumer.h"
 #include "base/task/single_thread_task_runner.h"
 
@@ -24,15 +25,16 @@ TestMemoryConsumerRegistry::~TestMemoryConsumerRegistry() {
 }
 
 void TestMemoryConsumerRegistry::OnMemoryConsumerAdded(
-    std::string_view consumer_id,
-    MemoryConsumerTraits traits,
+    uint32_t consumer_id,
+    std::string_view consumer_name,
+    std::optional<MemoryConsumerTraits> traits,
     RegisteredMemoryConsumer consumer) {
-  CHECK(!Contains(memory_consumers_, consumer));
+  CHECK(!std::ranges::contains(memory_consumers_, consumer));
   memory_consumers_.push_back(consumer);
 }
 
 void TestMemoryConsumerRegistry::OnMemoryConsumerRemoved(
-    std::string_view consumer_id,
+    uint32_t consumer_id,
     RegisteredMemoryConsumer consumer) {
   size_t removed = std::erase(memory_consumers_, consumer);
   CHECK_EQ(removed, 1u);

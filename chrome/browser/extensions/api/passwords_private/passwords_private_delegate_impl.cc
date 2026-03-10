@@ -29,8 +29,10 @@
 #include "chrome/browser/extensions/api/passwords_private/passwords_private_event_router_factory.h"
 #include "chrome/browser/extensions/profile_util.h"
 #include "chrome/browser/password_manager/account_password_store_factory.h"
+#include "chrome/browser/password_manager/chrome_password_change_service.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/password_manager/factories/password_sender_service_factory.h"
+#include "chrome/browser/password_manager/password_change_service_factory.h"
 #include "chrome/browser/password_manager/profile_password_store_factory.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/profiles/profile.h"
@@ -700,7 +702,7 @@ void PasswordsPrivateDelegateImpl::MovePasswordsToAccount(
   auto* client = ChromePasswordManagerClient::FromWebContents(web_contents);
   DCHECK(client);
 
-  if (!client->GetPasswordFeatureManager()->IsAccountStorageEnabled()) {
+  if (!client->GetPasswordFeatureManager()->IsAccountStorageActive()) {
     return;
   }
 
@@ -714,10 +716,7 @@ void PasswordsPrivateDelegateImpl::MovePasswordsToAccount(
     credentials_to_move.push_back(*entry);
   }
 
-  saved_passwords_presenter_.MoveCredentialsToAccount(
-      credentials_to_move,
-      password_manager::metrics_util::MoveToAccountStoreTrigger::
-          kExplicitlyTriggeredInSettings);
+  saved_passwords_presenter_.MoveCredentialsToAccount(credentials_to_move);
 }
 
 void PasswordsPrivateDelegateImpl::FetchFamilyMembers(
@@ -831,8 +830,8 @@ PasswordsPrivateDelegateImpl::GetExportProgressStatus() {
   return ConvertStatus(password_manager_porter_->GetExportProgressStatus());
 }
 
-bool PasswordsPrivateDelegateImpl::IsAccountStorageEnabled() {
-  return password_manager::features_util::IsAccountStorageEnabled(
+bool PasswordsPrivateDelegateImpl::IsAccountStorageActive() {
+  return password_manager::features_util::IsAccountStorageActive(
       SyncServiceFactory::GetForProfile(profile_));
 }
 
@@ -841,8 +840,10 @@ void PasswordsPrivateDelegateImpl::SetAccountStorageEnabled(
     content::WebContents* web_contents) {
   auto* client = ChromePasswordManagerClient::FromWebContents(web_contents);
   DCHECK(client);
+  // TODO(crbug.com/470332074): Verify whether this should check for "enabled"
+  // instead of "active".
   if (enabled ==
-      client->GetPasswordFeatureManager()->IsAccountStorageEnabled()) {
+      client->GetPasswordFeatureManager()->IsAccountStorageActive()) {
     return;
   }
   SyncServiceFactory::GetForProfile(profile_)
@@ -886,6 +887,26 @@ void PasswordsPrivateDelegateImpl::StartPasswordCheck(
     return;
   }
   sentiment_service->RanPasswordCheck();
+}
+
+void PasswordsPrivateDelegateImpl::StartPasswordChange(
+    int credential_id,
+    content::WebContents* web_contents) {
+  CHECK(web_contents);
+  const CredentialUIEntry* credential =
+      credential_id_generator_.TryGetKey(credential_id);
+  if (!credential) {
+    // TODO(crbug.com/485620841): Show error, instead of returning.
+    // There should always be a credential, unless something went wrong.
+    return;
+  }
+
+  auto* password_change_service =
+      PasswordChangeServiceFactory::GetForProfile(profile_);
+  if (password_change_service) {
+    password_change_service->StartPasswordChangeFromCheckup(*credential,
+                                                            web_contents);
+  }
 }
 
 api::passwords_private::PasswordCheckStatus
@@ -1210,7 +1231,7 @@ void PasswordsPrivateDelegateImpl::OnStateChanged(
   PasswordsPrivateEventRouter* router =
       PasswordsPrivateEventRouterFactory::GetForProfile(profile_);
   if (router) {
-    router->OnAccountStorageEnabledStateChanged(IsAccountStorageEnabled());
+    router->OnAccountStorageActiveStateChanged(IsAccountStorageActive());
     router->OnShouldShowAccountStorageSettingToggleChanged(
         ShouldShowAccountStorageSettingToggle());
   }

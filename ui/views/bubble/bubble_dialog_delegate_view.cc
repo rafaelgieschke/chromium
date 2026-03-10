@@ -13,7 +13,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
@@ -216,6 +215,8 @@ class BubbleDialogDelegate::AnchorViewObserver : public ViewObserver {
   AnchorViewObserver(BubbleDialogDelegate* parent, View* anchor_view)
       : parent_(parent), anchor_view_(anchor_view) {
     anchor_view_->AddObserver(this);
+    scoped_notify_ = std::make_unique<
+        views::View::ScopedNotifyObserversOnVisibleBoundsChanged>(*anchor_view);
     AddToAnchorVector();
   }
 
@@ -234,13 +235,11 @@ class BubbleDialogDelegate::AnchorViewObserver : public ViewObserver {
     // The anchor is being deleted, make sure the parent bubble no longer
     // observes it.
     DCHECK_EQ(anchor_view_, observed_view);
+    scoped_notify_ = nullptr;
     parent_->SetAnchorView(nullptr);
   }
 
-  void OnViewBoundsChanged(View* observed_view) override {
-    // This code really wants to know the anchor bounds in screen coordinates
-    // have changed. There isn't a good way to detect this outside of the view.
-    // Observing View bounds changing catches some cases but not all of them.
+  void OnViewVisibleBoundsChanged(View* observed_view) override {
     DCHECK_EQ(anchor_view_, observed_view);
     parent_->OnAnchorBoundsChanged();
   }
@@ -251,7 +250,7 @@ class BubbleDialogDelegate::AnchorViewObserver : public ViewObserver {
  private:
   void AddToAnchorVector() {
     auto& vector = GetAnchorVector(anchor_view_);
-    DCHECK(!base::Contains(vector, parent_));
+    DCHECK(!std::ranges::contains(vector, parent_));
     vector.push_back(parent_);
   }
 
@@ -273,6 +272,8 @@ class BubbleDialogDelegate::AnchorViewObserver : public ViewObserver {
     }
   }
 
+  std::unique_ptr<views::View::ScopedNotifyObserversOnVisibleBoundsChanged>
+      scoped_notify_;
   const raw_ptr<BubbleDialogDelegate> parent_;
   const raw_ptr<View> anchor_view_;
 };
@@ -504,7 +505,7 @@ BubbleDialogDelegate::~BubbleDialogDelegate() {
 Widget* BubbleDialogDelegate::CreateBubble(
     BubbleDialogDelegate* bubble_delegate,
     Widget::InitParams::Ownership ownership) {
-  // On Mac, MODAL_TYPE_WINDOW is implemented using sheets, which can't be
+  // On Mac, ModalType::kWindow is implemented using sheets, which can't be
   // anchored at a specific point - they are always placed near the top center
   // of the window. To avoid unpleasant surprises, disallow setting an anchor
   // view or rectangle on these types of bubbles.
@@ -707,13 +708,54 @@ BubbleDialogDelegate::PreventCloseOnDeactivate() {
 }
 
 void BubbleDialogDelegate::SetHighlightedButton(Button* highlighted_button) {
+  // Destroy old highlights after creating the new one, so if it didn't
+  // change, this has no effect.
+  auto old_button_highlight = std::move(button_anchor_highlight_);
+  auto old_element_highlight = std::move(element_anchor_highlight_);
+
   bool visible = GetWidget() && GetWidget()->IsVisible();
-  // If the Widget is visible, ensure the old highlight (if any) is removed
-  // when the highlighted view changes.
-  if (visible && highlighted_button != highlighted_button_tracker_.view()) {
-    UpdateHighlightedButton(false);
-  }
+
   highlighted_button_tracker_.SetView(highlighted_button);
+  highlighted_element_tracker_ = nullptr;
+  highlighted_element_shown_subscription_ = std::nullopt;
+
+  if (visible) {
+    UpdateHighlightedButton(true);
+  }
+}
+
+void BubbleDialogDelegate::SetHighlightedElement(ui::ElementIdentifier id) {
+  auto* element_tracker = ui::ElementTracker::GetElementTracker();
+
+  auto* parent_widget =
+      anchor_widget() ? anchor_widget()
+                      : views::Widget::GetWidgetForNativeView(parent_window());
+  auto context = views::ElementTrackerViews::GetContextForWidget(parent_widget);
+
+  // `highlighted_button_tracker_` will deal with the hiding part.
+  // Unretained is safe because `highlighted_element_shown_` owns the
+  // callback subscription.
+  highlighted_element_shown_subscription_ =
+      element_tracker->AddElementShownCallback(
+          id, context,
+          base::BindRepeating(
+              &BubbleDialogDelegate::SetResolvedHighlightedElement,
+              base::Unretained(this)));
+  SetResolvedHighlightedElement(element_tracker->GetUniqueElement(id, context));
+}
+
+void BubbleDialogDelegate::SetResolvedHighlightedElement(
+    ui::TrackedElement* highlighted_element) {
+  // Destroy old highlights after creating the new one, so if it didn't
+  // change, this has no effect.
+  auto old_button_highlight = std::move(button_anchor_highlight_);
+  auto old_element_highlight = std::move(element_anchor_highlight_);
+
+  bool visible = GetWidget() && GetWidget()->IsVisible();
+
+  highlighted_button_tracker_.SetView(nullptr);
+  highlighted_element_tracker_ = highlighted_element;
+
   if (visible) {
     UpdateHighlightedButton(true);
   }
@@ -918,7 +960,7 @@ BubbleDialogDelegate::BubbleUmaLogger::GetBubbleName() const {
 
 template <typename Value>
 void BubbleDialogDelegate::BubbleUmaLogger::LogMetric(
-    void (*uma_func)(std::string_view, Value),
+    void (*uma_func)(const std::string&, Value),
     std::string_view histogram_name,
     Value value) const {
   if (!base::FeatureList::IsEnabled(::features::kBubbleMetricsApi)) {
@@ -933,8 +975,8 @@ void BubbleDialogDelegate::BubbleUmaLogger::LogMetric(
   }
 
   if (allowed_class_names_for_testing_.has_value()) {
-    if (!base::Contains(allowed_class_names_for_testing_.value(),
-                        bubble_name.value())) {
+    if (!std::ranges::contains(allowed_class_names_for_testing_.value(),
+                               bubble_name.value())) {
       return;
     }
   } else if (!views_metrics::IsValidBubbleName(bubble_name.value())) {
@@ -947,7 +989,7 @@ void BubbleDialogDelegate::BubbleUmaLogger::LogMetric(
 
 // Instantiate template function to be able to use in views_unittests.
 template VIEWS_EXPORT void BubbleDialogDelegate::BubbleUmaLogger::LogMetric<
-    base::TimeDelta>(void (*uma_func)(std::string_view, base::TimeDelta),
+    base::TimeDelta>(void (*uma_func)(const std::string&, base::TimeDelta),
                      std::string_view histogram_name,
                      base::TimeDelta value) const;
 
@@ -1274,11 +1316,24 @@ void BubbleDialogDelegate::SetAnchoredDialogKey() {
 void BubbleDialogDelegate::UpdateHighlightedButton(bool highlighted) {
   Button* button = Button::AsButton(highlighted_button_tracker_.view());
   button = button ? button : Button::AsButton(GetAnchorView());
-  if (button && highlight_button_when_shown_) {
+
+  ui::TrackedElement* element = highlighted_element_tracker_.get();
+  element = element ? element : anchor_tracked_element_.get();
+
+  if (highlight_button_when_shown_) {
     if (highlighted) {
-      button_anchor_highlight_ = button->AddAnchorHighlight();
+      if (button) {
+        button_anchor_highlight_ = button->AddAnchorHighlight();
+        element_anchor_highlight_.reset();
+      } else if (element) {
+        element_anchor_highlight_ =
+            ui::ElementHighlighter::GetElementHighlighter()->AddHighlight(
+                element);
+        button_anchor_highlight_.reset();
+      }
     } else {
       button_anchor_highlight_.reset();
+      element_anchor_highlight_.reset();
     }
   }
 }

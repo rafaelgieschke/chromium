@@ -1139,6 +1139,14 @@ bool Widget::IsVisibleOnAllWorkspaces() const {
   return native_widget_ ? native_widget_->IsVisibleOnAllWorkspaces() : false;
 }
 
+#if BUILDFLAG(IS_MAC)
+void Widget::MoveToActiveFullscreenSpace() {
+  if (native_widget_) {
+    native_widget_->MoveToActiveFullscreenSpace();
+  }
+}
+#endif  // BUILDFLAG(IS_MAC)
+
 void Widget::Maximize() {
   if (native_widget_) {
     native_widget_->Maximize();
@@ -1343,7 +1351,7 @@ void Widget::RunShellDrag(View* view,
 
   // TODO(crbug.com/375959961): On X11, the native widget's mouse button state
   // is not updated when the mouse button is released to end a drag.
-#if !BUILDFLAG(IS_OZONE_X11)
+#if !BUILDFLAG(SUPPORTS_OZONE_X11)
   is_mouse_button_pressed_ = native_widget_->IsMouseButtonDown();
 #endif
 

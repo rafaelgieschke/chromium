@@ -24,6 +24,7 @@
 #include <inttypes.h>
 
 #include "base/debug/dump_without_crashing.h"
+#include "base/feature_list.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/common/features.h"
@@ -124,16 +125,16 @@ bool LayoutView::HitTest(const HitTestLocation& location,
   if (HasSVGTextDescendants()) {
     // This is necessary because SVG <text> might have obsolete geometry after
     // scale-only changes.  See crbug.com/1296089#c16
-    auto it = svg_text_descendants_->find(this);
-    if (it != svg_text_descendants_->end()) {
-      for (LayoutBox* box : *it->value) {
-        auto* svg_text = To<LayoutSVGText>(box);
+    auto it = svg_text_descendants_.find(this);
+    if (it != svg_text_descendants_.end()) {
+      for (LayoutSVGText* svg_text : *it->value) {
         if (svg_text->NeedsTextMetricsUpdate()) {
           svg_text->SetNeedsLayout(layout_invalidation_reason::kStyleChange);
         }
       }
     }
   }
+
   // We have to recursively update layout/style here because otherwise, when the
   // hit test recurses into a child document, it could trigger a layout on the
   // parent document, which can destroy PaintLayer that are higher up in the
@@ -380,13 +381,6 @@ LogicalSize LayoutView::InitialContainingBlockSize() const {
                      LayoutUnit(ViewLogicalHeightForBoxSizing()));
 }
 
-TrackedDescendantsMap& LayoutView::SvgTextDescendantsMap() {
-  NOT_DESTROYED();
-  if (!svg_text_descendants_)
-    svg_text_descendants_ = MakeGarbageCollected<TrackedDescendantsMap>();
-  return *svg_text_descendants_;
-}
-
 void LayoutView::RegisterVariableLengthTransformResult(
     const LayoutText& text,
     const VariableLengthTransformResult& result) {
@@ -436,13 +430,61 @@ bool LayoutView::MapToVisualRectInAncestorSpaceInternal(
   if (ancestor == this)
     return true;
 
+  const bool apply_viewport_clip =
+      !(visual_rect_flags & VisualRectFlags::kSkipAncestorAndViewportClips);
+
   Element* owner = GetDocument().LocalOwner();
   if (!owner) {
     PhysicalRect rect = PhysicalRect::EnclosingRect(
         transform_state.LastPlanarQuad().BoundingBox());
+    const bool apply_overflow_clip =
+        apply_viewport_clip &&
+        !(visual_rect_flags & kDontApplyMainFrameOverflowClip);
+    const bool apply_viewport_transform =
+        visual_rect_flags & kVisualRectApplyRemoteViewportTransform;
+
+    // When mapping into the viewport space (ancestor == nullptr) for the
+    // outermost main frame, apply the local visual viewport transform (page
+    // scale + visual viewport location). The GeometryMapper viewport fast path
+    // includes this transform; keep the slow path consistent.
+    if (apply_viewport_transform &&
+        GetFrameView()->GetFrame().IsOutermostMainFrame() &&
+        base::FeatureList::IsEnabled(
+            blink::features::
+                kVisualRectMappingApplyLocalVisualViewportTransform)) {
+      // Convert from root-frame coordinates into visual-viewport coordinates.
+      // This applies the visual viewport's location and page scale (pinch-zoom)
+      // so viewport mapping remains consistent between the slow path and the
+      // GeometryMapper fast path.
+      VisualViewport& visual_viewport =
+          GetFrameView()->GetFrame().GetPage()->GetVisualViewport();
+      gfx::RectF rect_f(rect);
+      rect_f = visual_viewport.RootFrameToViewport(rect_f);
+      rect = PhysicalRect::EnclosingRect(rect_f);
+
+      // RootFrameToViewport can yield negative coordinates when the visual
+      // viewport is offset (e.g. browser controls animation or pinch-zoom).
+      // Apply the same local-root viewport clipping semantics as the
+      // GeometryMapper viewport fast path. This does not duplicate clipping
+      // performed by MapToVisualRectInRemoteRootFrame(): in the outermost main
+      // frame that method is a no-op, and the slow path does not otherwise
+      // apply LayoutView::ViewRect() clipping for ancestor == nullptr.
+      if (apply_overflow_clip) {
+        PhysicalRect view_rectangle = ViewRect();
+        if (visual_rect_flags & kEdgeInclusive) {
+          if (!rect.InclusiveIntersect(view_rectangle)) {
+            transform_state.SetQuad(gfx::QuadF(gfx::RectF(rect)));
+            return false;
+          }
+        } else {
+          rect.Intersect(view_rectangle);
+        }
+      }
+    }
+
     bool retval = GetFrameView()->MapToVisualRectInRemoteRootFrame(
-        rect, !(visual_rect_flags & kDontApplyMainFrameOverflowClip),
-        visual_rect_flags & kVisualRectApplyRemoteViewportTransform);
+        rect, apply_overflow_clip, apply_viewport_transform,
+        apply_viewport_clip);
     transform_state.SetQuad(gfx::QuadF(gfx::RectF(rect)));
     return retval;
   }
@@ -451,15 +493,16 @@ bool LayoutView::MapToVisualRectInAncestorSpaceInternal(
     PhysicalRect rect = PhysicalRect::EnclosingRect(
         transform_state.LastPlanarQuad().BoundingBox());
     PhysicalRect view_rectangle = ViewRect();
-    if (visual_rect_flags & kEdgeInclusive) {
-      if (!rect.InclusiveIntersect(view_rectangle)) {
-        transform_state.SetQuad(gfx::QuadF(gfx::RectF(rect)));
-        return false;
+    if (apply_viewport_clip) {
+      if (visual_rect_flags & kEdgeInclusive) {
+        if (!rect.InclusiveIntersect(view_rectangle)) {
+          transform_state.SetQuad(gfx::QuadF(gfx::RectF(rect)));
+          return false;
+        }
+      } else {
+        rect.Intersect(view_rectangle);
       }
-    } else {
-      rect.Intersect(view_rectangle);
     }
-
     // Frames are painted at rounded-int position. Since we cannot efficiently
     // compute the subpixel offset of painting at this point in a a bottom-up
     // walk, round to the enclosing int rect, which will enclose the actual
@@ -756,7 +799,7 @@ AtomicString LayoutView::NamedPageAtIndex(wtf_size_t page_index) const {
     return AtomicString();
   }
   const auto& page_fragment = To<PhysicalBoxFragment>(*children[page_index]);
-  return page_fragment.PageName();
+  return page_fragment.PropagatedPageName();
 }
 
 PhysicalRect LayoutView::DocumentRect() const {

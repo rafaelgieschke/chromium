@@ -6,6 +6,7 @@
 #define SERVICES_WEBNN_ORT_CONTEXT_IMPL_ORT_H_
 
 #include "base/memory/scoped_refptr.h"
+#include "base/task/cancelable_task_tracker.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
 #include "services/webnn/ort/device_allocator.h"
 #include "services/webnn/ort/environment.h"
@@ -43,6 +44,7 @@ class ContextImplOrt final : public WebNNContextImpl {
   ContextImplOrt(mojo::PendingReceiver<mojom::WebNNContext> receiver,
                  base::WeakPtr<WebNNContextProviderImpl> context_provider,
                  const EpWorkarounds& ep_workarounds,
+                 bool dequantize_linear_input_support_int32,
                  mojom::CreateContextOptionsPtr options,
                  scoped_refptr<SessionOptions> session_options,
                  mojo::ScopedDataPipeConsumerHandle write_tensor_consumer,
@@ -61,12 +63,18 @@ class ContextImplOrt final : public WebNNContextImpl {
   // WebNNContextImpl:
   base::WeakPtr<WebNNContextImpl> AsWeakPtr() override;
 
-  static ContextProperties GetContextProperties(bool resample2d_limit_to_nchw);
+  static ContextProperties GetContextProperties(
+      bool resample2d_limit_to_nchw,
+      bool dequantize_linear_input_support_int32);
 
   scoped_refptr<Environment> env() const { return env_; }
 
   scoped_refptr<SessionOptions> session_options() const {
     return session_options_;
+  }
+
+  base::CancelableTaskTracker& cancelable_task_tracker() {
+    return cancelable_task_tracker_;
   }
 
   void HandleContextLostOrCrash(const std::string& error_message,
@@ -81,7 +89,8 @@ class ContextImplOrt final : public WebNNContextImpl {
       WebNNGraphImpl::ComputeResourceInfo compute_resource_info,
       base::flat_map<OperandId, std::unique_ptr<WebNNConstantOperand>>
           constant_operands,
-      base::flat_map<OperandId, WebNNTensorImpl*> constant_tensor_operands,
+      base::flat_map<OperandId, scoped_refptr<WebNNTensorImpl>>
+          constant_tensor_operands,
       CreateGraphImplCallback callback) override;
 
   base::expected<scoped_refptr<WebNNTensorImpl>, mojom::ErrorPtr>
@@ -103,6 +112,9 @@ class ContextImplOrt final : public WebNNContextImpl {
   // The device allocator used for device tensor creation. May be nullptr if
   // device tensor is not supported.
   scoped_refptr<DeviceAllocator> device_allocator_;
+
+  // Cancels pending graph compilation tasks when destructing.
+  base::CancelableTaskTracker cancelable_task_tracker_;
 
   base::WeakPtrFactory<ContextImplOrt> weak_factory_{this};
 };

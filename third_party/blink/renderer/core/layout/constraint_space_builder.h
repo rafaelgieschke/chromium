@@ -287,6 +287,18 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     }
   }
 
+  void SetPaperEdgeAdjacentSides(LogicalBoxSides sides) {
+    auto* rare_data = EnsureRareData();
+    rare_data->is_adjacent_to_paper_edge_inline_start = sides.inline_start;
+    rare_data->is_adjacent_to_paper_edge_inline_end = sides.inline_end;
+    rare_data->is_adjacent_to_paper_edge_block_start = sides.block_start;
+    rare_data->is_adjacent_to_paper_edge_block_end = sides.block_end;
+  }
+
+  void SetSafePrintableInset(LayoutUnit inset) {
+    EnsureRareData()->safe_printable_inset = inset;
+  }
+
   void SetRequiresContentBeforeBreaking(bool b) {
     if (!b && !space_.rare_data_) {
       return;
@@ -537,25 +549,9 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     }
   }
 
-  void SetLineClampEndMarginStrut(MarginStrut end_margin_strut) {
-#if DCHECK_IS_ON()
-    DCHECK(!is_line_clamp_end_margin_strut_set_);
-    is_line_clamp_end_margin_strut_set_ = true;
-#endif
-    DCHECK(!is_new_fc_);
-    if (!end_margin_strut.IsEmpty()) {
-      EnsureRareData()->SetLineClampEndMarginStrut(end_margin_strut);
-    }
-  }
-
-  void SetLineClampEndPadding(LayoutUnit end_padding) {
-#if DCHECK_IS_ON()
-    DCHECK(!is_line_clamp_end_padding_set_);
-    is_line_clamp_end_padding_set_ = true;
-#endif
-    DCHECK(!is_new_fc_);
-    if (end_padding) {
-      EnsureRareData()->SetLineClampEndPadding(end_padding);
+  void SetLineClampAncestorChain(const LineClampAncestorChain* data) {
+    if (data) {
+      EnsureRareData()->SetLineClampAncestorChain(data);
     }
   }
 
@@ -589,6 +585,10 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     EnsureRareData()->should_force_text_box_trim_end = true;
   }
 
+  void SetShouldForceMarginTrimEnd() {
+    EnsureRareData()->should_force_margin_trim_end = true;
+  }
+
   void SetDecorationPercentageResolutionType(
       DecorationPercentageResolutionType type) {
     EnsureRareData()->decoration_percentage_resolution_type =
@@ -609,12 +609,12 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
     EnsureRareData()->SetTargetStretchBlockSizes(target_stretch_block_sizes);
   }
 
-  void SetGridLayoutSubtree(GridLayoutSubtree&& grid_layout_subtree) {
+  void SetGridLayoutSubtree(const GridLayoutSubtree* grid_layout_subtree) {
 #if DCHECK_IS_ON()
     DCHECK(!is_grid_layout_subtree_set_);
     is_grid_layout_subtree_set_ = true;
 #endif
-    EnsureRareData()->SetGridLayoutSubtree(std::move(grid_layout_subtree));
+    EnsureRareData()->SetGridLayoutSubtree(grid_layout_subtree);
   }
 
   // Creates a new constraint space.
@@ -676,8 +676,6 @@ class CORE_EXPORT ConstraintSpaceBuilder final {
   bool is_table_cell_with_collapsed_borders_set_ = false;
   bool is_custom_layout_data_set_ = false;
   bool is_line_clamp_data_set_ = false;
-  bool is_line_clamp_end_padding_set_ = false;
-  bool is_line_clamp_end_margin_strut_set_ = false;
   bool is_table_row_data_set_ = false;
   bool is_table_section_data_set_ = false;
   bool is_grid_layout_subtree_set_ = false;

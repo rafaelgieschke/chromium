@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/debug/crash_logging.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/functional/bind.h"
@@ -146,6 +145,7 @@ void DelegatedFrameHost::WasHidden(HiddenCause cause) {
 void DelegatedFrameHost::CopyFromCompositingSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& output_size,
+    base::TimeDelta timeout,
     base::OnceCallback<void(const content::CopyFromSurfaceResult&)> callback) {
   const viz::SurfaceId surface_id(frame_sink_id_, local_surface_id_);
 
@@ -159,7 +159,7 @@ void DelegatedFrameHost::CopyFromCompositingSurface(
   CopyFromCompositingSurfaceInternal(
       src_subrect, output_size, surface_id,
       viz::CopyOutputRequest::ResultFormat::RGBA,
-      viz::CopyOutputRequest::ResultDestination::kSystemMemory,
+      viz::CopyOutputRequest::ResultDestination::kSystemMemory, timeout,
       base::BindOnce(
           [](base::OnceCallback<void(const content::CopyFromSurfaceResult&)>
                  callback,
@@ -169,7 +169,8 @@ void DelegatedFrameHost::CopyFromCompositingSurface(
               std::move(keep_alive).RunAndReset();
             }
             std::move(callback).Run(
-                result->ScopedAccessSkBitmap().GetOutScopedBitmapAndMetadata());
+                ToCopyFromSurfaceResult(result->ScopedAccessSkBitmap()
+                                            .GetOutScopedBitmapAndMetadata()));
           },
           std::move(callback), std::move(keep_surface_alive)));
 }
@@ -183,7 +184,7 @@ void DelegatedFrameHost::CopyFromCompositingSurfaceAsTexture(
       src_subrect, output_size, surface_id,
       viz::CopyOutputRequest::ResultFormat::RGBA,
       viz::CopyOutputRequest::ResultDestination::kSharedImage,
-      std::move(callback));
+      base::TimeDelta(), std::move(callback));
 }
 
 void DelegatedFrameHost::CopyFromCompositingSurfaceInternal(
@@ -192,6 +193,7 @@ void DelegatedFrameHost::CopyFromCompositingSurfaceInternal(
     const viz::SurfaceId& surface_id,
     viz::CopyOutputRequest::ResultFormat format,
     viz::CopyOutputRequest::ResultDestination destination,
+    base::TimeDelta timeout,
     viz::CopyOutputRequest::CopyOutputRequestCallback callback) {
   auto request = std::make_unique<viz::CopyOutputRequest>(format, destination,
                                                           std::move(callback));
@@ -233,7 +235,9 @@ void DelegatedFrameHost::CopyFromCompositingSurfaceInternal(
         gfx::Vector2d(output_size.width(), output_size.height()));
   }
   CHECK(host_frame_sink_manager_);
-  host_frame_sink_manager_->RequestCopyOfOutput(surface_id, std::move(request));
+  host_frame_sink_manager_->RequestCopyOfOutput(
+      surface_id, std::move(request), /*capture_exact_surface_id=*/false,
+      timeout);
 }
 
 void DelegatedFrameHost::SetFrameEvictionStateAndNotifyObservers(
@@ -337,13 +341,17 @@ void DelegatedFrameHost::EmbedSurface(
 
   if (!primary_surface_id ||
       primary_surface_id->local_surface_id() != local_surface_id_) {
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC)
     // On Windows and Linux, we would like to produce new content as soon as
     // possible or the OS will create an additional black gutter. Until we can
     // block resize on surface synchronization on these platforms, we will not
     // block UI on the top-level renderer. The exception to this is if we're
     // using an infinite deadline, in which case we should respect the
     // specified deadline and block UI since that's what was requested.
+    //
+    // On macOS, we want to generate new content as quickly as possible;
+    // otherwise, the waiting time for the render process will make users feel
+    // sluggish when resizing windows.
     if (deadline_policy.policy_type() !=
             cc::DeadlinePolicy::kUseInfiniteDeadline &&
         !current_frame_size_in_dip_.IsEmpty() &&

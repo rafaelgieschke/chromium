@@ -6,7 +6,7 @@
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/web_ui_mocha_browser_test.h"
 #include "components/history_clusters/core/features.h"
-#include "components/history_embeddings/history_embeddings_features.h"
+#include "components/history_embeddings/core/history_embeddings_features.h"
 #include "content/public/test/browser_test.h"
 
 typedef WebUIMochaBrowserTest CrComponentsTest;
@@ -92,7 +92,19 @@ IN_PROC_BROWSER_TEST_F(CrComponentsSearchboxTest, RealboxMatchTest) {
 
 IN_PROC_BROWSER_TEST_F(CrComponentsSearchboxTest, RealboxTest) {
   set_test_loader_host(chrome::kChromeUINewTabPageHost);
-  RunTest("cr_components/searchbox/searchbox_test.js", "mocha.run()");
+  RunTest("cr_components/searchbox/searchbox_test.js",
+          "runMochaSuite('SearchboxTest');");
+}
+
+IN_PROC_BROWSER_TEST_F(CrComponentsSearchboxTest, SearchboxInputTest) {
+  set_test_loader_host(chrome::kChromeUINewTabPageHost);
+  RunTest("cr_components/searchbox/searchbox_input_test.js", "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(CrComponentsSearchboxTest, RealboxPlaceholderTest) {
+  set_test_loader_host(chrome::kChromeUINewTabPageHost);
+  RunTest("cr_components/searchbox/placeholder_text_cycler_test.js",
+          "runMochaSuite('PlaceholderTextCyclerTest');");
 }
 
 IN_PROC_BROWSER_TEST_F(CrComponentsSearchboxTest, RealboxLensTest) {
@@ -266,8 +278,18 @@ class CrComponentsComposeboxTest : public WebUIMochaBrowserTest {
   }
 };
 
-IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, ContextMenuEntrypoint) {
-  RunTest("cr_components/composebox/context_menu_entrypoint_test.js",
+IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, ContextualEntrypointButton) {
+  RunTest("cr_components/composebox/contextual_entrypoint_button_test.js",
+          "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, ContextualEntrypointAndMenu) {
+  RunTest("cr_components/composebox/contextual_entrypoint_and_menu_test.js",
+          "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, ContextualActionMenu) {
+  RunTest("cr_components/composebox/contextual_action_menu_test.js",
           "mocha.run()");
 }
 
@@ -292,4 +314,15 @@ IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, ComposeboxDragAndDrop) {
 
 IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, ComposeboxFileCarousel) {
   RunTest("cr_components/composebox/file_carousel_test.js", "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest,
+                       ComposeboxAudioWaveAnimation) {
+  RunTest("cr_components/composebox/composebox_audio_animation_test.js",
+          "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(CrComponentsComposeboxTest, ComposeboxInputPlaceholder) {
+  RunTest("cr_components/composebox/composebox_input_placeholder_test.js",
+          "mocha.run()");
 }

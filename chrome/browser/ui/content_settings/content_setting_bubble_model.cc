@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-
 #include "chrome/browser/ui/content_settings/content_setting_bubble_model.h"
 
 #include <stddef.h>
@@ -59,6 +58,7 @@
 #include "components/permissions/constants.h"
 #include "components/permissions/features.h"
 #include "components/permissions/permission_decision_auto_blocker.h"
+#include "components/permissions/permission_request.h"
 #include "components/permissions/permission_request_manager.h"
 #include "components/permissions/permission_uma_util.h"
 #include "components/permissions/permission_util.h"
@@ -68,6 +68,7 @@
 #include "components/subresource_filter/core/browser/subresource_filter_constants.h"
 #include "components/subresource_filter/core/browser/subresource_filter_features.h"
 #include "components/url_formatter/elide_url.h"
+#include "components/url_formatter/url_formatter.h"
 #include "components/vector_icons/vector_icons.h"
 #include "content/public/browser/page.h"
 #include "content/public/browser/permission_controller.h"
@@ -171,10 +172,12 @@ ContentSettingBubbleModel::ListItem CreateUrlListItem(int32_t id,
                                                       const GURL& url) {
   // Empty URLs should get a placeholder.
   // TODO(csharrison): See if we can DCHECK that the URL will be valid here.
-  std::u16string title = url.spec().empty()
-                             ? l10n_util::GetStringUTF16(IDS_TAB_LOADING_TITLE)
-                             : base::UTF8ToUTF16(url.spec());
-
+  std::u16string title =
+      url.spec().empty()
+          ? l10n_util::GetStringUTF16(IDS_TAB_LOADING_TITLE)
+          : url_formatter::FormatUrl(
+                url, url_formatter::kFormatUrlOmitUsernamePassword,
+                base::UnescapeRule::NONE, nullptr, nullptr, nullptr);
   // Format the title to include the unicode single dot bullet code-point
   // \u2022 and two spaces.
   title = l10n_util::GetStringFUTF16(IDS_LIST_BULLET, title);
@@ -1795,6 +1798,8 @@ ContentSettingQuietRequestBubbleModel::ContentSettingQuietRequestBubbleModel(
       break;
     case QuietUiReason::kServicePredictedVeryUnlikelyGrant:
     case QuietUiReason::kOnDevicePredictedVeryUnlikelyGrant:
+    // TODO(crbug.com/412962300) use custom string
+    case QuietUiReason::kTriggeredDueToLackOfGesture:
       int bubble_message_string_id = 0;
       int bubble_done_button_string_id = 0;
       switch (request_type) {
@@ -1887,22 +1892,30 @@ void ContentSettingQuietRequestBubbleModel::OnDoneButtonClicked() {
   CHECK_GT(manager->Requests().size(), 0u);
   DCHECK_EQ(manager->Requests().size(), 1u);
   auto quiet_ui_reason = manager->ReasonForUsingQuietUi();
-  const permissions::RequestType request_type =
-      manager->Requests()[0]->request_type();
+  const permissions::PermissionRequest& request = *manager->Requests()[0];
   DCHECK(quiet_ui_reason);
-  DCHECK(request_type == permissions::RequestType::kNotifications ||
-         request_type == permissions::RequestType::kGeolocation);
+  DCHECK(request.request_type() == permissions::RequestType::kNotifications ||
+         request.request_type() == permissions::RequestType::kGeolocation);
+
+  // GEOLOCATION_WITH_OPTIONS is currently not supported on desktop.
+  //
+  // TODO(crbug.com/430494523): Plumb through the selected PromptOptions once it
+  // is.
+  CHECK_NE(request.GetContentSettingsType(),
+           ContentSettingsType::GEOLOCATION_WITH_OPTIONS);
+
   switch (*quiet_ui_reason) {
     case QuietUiReason::kEnabledInPrefs:
+    case QuietUiReason::kTriggeredDueToLackOfGesture:
     case QuietUiReason::kTriggeredByCrowdDeny:
     case QuietUiReason::kServicePredictedVeryUnlikelyGrant:
     case QuietUiReason::kOnDevicePredictedVeryUnlikelyGrant:
-      manager->Accept();
+      manager->Accept(/*prompt_options=*/std::monostate());
       break;
     case QuietUiReason::kTriggeredDueToAbusiveRequests:
     case QuietUiReason::kTriggeredDueToAbusiveContent:
     case QuietUiReason::kTriggeredDueToDisruptiveBehavior:
-      manager->Deny();
+      manager->Deny(/*prompt_options=*/std::monostate());
       base::RecordAction(base::UserMetricsAction(
           "Notifications.Quiet.ContinueBlockingClicked"));
       break;
@@ -1919,6 +1932,7 @@ void ContentSettingQuietRequestBubbleModel::OnCancelButtonClicked() {
   }
   switch (*quiet_ui_reason) {
     case QuietUiReason::kEnabledInPrefs:
+    case QuietUiReason::kTriggeredDueToLackOfGesture:
     case QuietUiReason::kTriggeredByCrowdDeny:
     case QuietUiReason::kServicePredictedVeryUnlikelyGrant:
     case QuietUiReason::kOnDevicePredictedVeryUnlikelyGrant:
@@ -1927,7 +1941,9 @@ void ContentSettingQuietRequestBubbleModel::OnCancelButtonClicked() {
     case QuietUiReason::kTriggeredDueToAbusiveRequests:
     case QuietUiReason::kTriggeredDueToAbusiveContent:
     case QuietUiReason::kTriggeredDueToDisruptiveBehavior:
-      manager->Accept();
+      CHECK_EQ(manager->Requests()[0]->request_type(),
+               permissions::RequestType::kNotifications);
+      manager->Accept(/*prompt_options=*/std::monostate());
       base::RecordAction(
           base::UserMetricsAction("Notifications.Quiet.ShowForSiteClicked"));
       break;

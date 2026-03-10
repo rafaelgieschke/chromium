@@ -144,6 +144,12 @@ WidgetEventPair GetParentWidgetAndEvent(views::View* this_view,
   // Convert location to top level widget coordinate.
   event->set_location(event_location);
 
+#if BUILDFLAG(IS_MAC)
+  // Update root_location to match the converted location, so that downstream
+  // code comparing root_location across events sees consistent coordinates.
+  event->set_root_location(event_location);
+#endif
+
   return {top_level, std::move(event)};
 }
 
@@ -291,9 +297,10 @@ void RoundedOmniboxResultsFrame::OnBeforeWidgetInit(
 
 // static
 int RoundedOmniboxResultsFrame::GetNonResultSectionHeight(bool include_cutout) {
-  return include_cutout ? GetLayoutConstant(LOCATION_BAR_HEIGHT) +
-                              GetLocationBarAlignmentInsets().height()
-                        : 0;
+  return include_cutout
+             ? GetLayoutConstant(LayoutConstant::kLocationBarHeight) +
+                   GetLocationBarAlignmentInsets().height()
+             : 0;
 }
 
 // static

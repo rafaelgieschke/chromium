@@ -81,6 +81,7 @@ ci/Dawn Win10 x86 Release (NVIDIA)
 ci/Dawn Win11 arm64 Builder
 ci/Dawn Win11 arm64 DEPS Builder
 ci/Dawn Win11 arm64 DEPS Release (Qualcomm Snapdragon X Elite)
+ci/Dawn Win11 arm64 Release (Qualcomm Snapdragon X Elite)
 ci/Deterministic Android
 ci/Deterministic Android (dbg)
 ci/Deterministic Fuchsia (dbg)
@@ -253,6 +254,7 @@ ci/Win11 FYI arm64 Release (Qualcomm Adreno 690)
 ci/Win11 FYI arm64 Release (Qualcomm Snapdragon X Elite)
 ci/Win11 FYI x64 Experimental Release (AMD 780M)
 ci/Win11 FYI x64 Experimental Release (AMD 890M)
+ci/Win11 FYI x64 Experimental Release (AMD RX 5500XT)
 ci/Win11 FYI x64 Experimental Release (NVIDIA RTX 4070 Super)
 ci/Win11 FYI x64 Release (AMD RX 7600)
 ci/Win11 FYI x64 Release (NVIDIA RTX 4070 Super)
@@ -280,6 +282,7 @@ ci/android-angle-chromium-arm64-builder
 ci/android-angle-chromium-arm64-pixel2
 ci/android-archive-rel
 ci/android-arm64-archive-rel
+ci/android-bfcache-rel
 ci/android-binary-size-generator
 ci/android-cast-arm-dbg
 ci/android-cast-arm-rel
@@ -327,8 +330,6 @@ ci/chromeos-amd64-generic-rel-tast
 ci/chromeos-arm-generic-dbg
 ci/chromeos-arm-generic-rel
 ci/chromeos-arm64-generic-rel
-ci/chromeos-jacuzzi-rel
-ci/chromeos-octopus-rel
 ci/chromeos-x64-libfuzzer-asan-rel-tests
 ci/fuchsia-angle-builder
 ci/fuchsia-arm64-cast-receiver-rel
@@ -446,6 +447,7 @@ try/android-angle-chromium-try
 try/android-arm-compile-dbg
 try/android-arm64-compile-dbg
 try/android-arm64-rel
+try/android-bfcache-rel
 try/android-binary-size
 try/android-cast-arm-dbg
 try/android-cast-arm-rel
@@ -501,10 +503,8 @@ try/chromeos-amd64-generic-rel-gtest-and-tast
 try/chromeos-arm-generic-dbg
 try/chromeos-arm-generic-rel
 try/chromeos-arm64-generic-rel
-try/chromeos-jacuzzi-rel
 try/chromeos-js-coverage-rel
 try/chromeos-libfuzzer-asan-rel
-try/chromeos-octopus-rel
 try/chromeos-x64-libfuzzer-asan-rel-tests
 try/compile-size
 try/fuchsia-angle-try
@@ -571,6 +571,7 @@ try/gpu-fyi-try-win10-nvidia-exp-64
 try/gpu-fyi-try-win10-nvidia-rel-32
 try/gpu-fyi-try-win10-nvidia-rel-64
 try/gpu-fyi-try-win11-amd-rel-64
+try/gpu-fyi-try-win11-amd-rx-5500xt-exp
 try/gpu-fyi-try-win11-nvidia-4070-exp-64
 try/gpu-fyi-try-win11-nvidia-4070-rel-64
 try/gpu-fyi-try-win11-qualcomm-rel-64
@@ -624,6 +625,7 @@ try/linux-gcc-rel
 try/linux-headless-shell-rel
 try/linux-js-coverage-rel
 try/linux-libfuzzer-asan-rel
+try/linux-metadata-validator
 try/linux-msan-chained-origins-rel
 try/linux-msan-no-origins-rel
 try/linux-oi-rel
@@ -631,7 +633,6 @@ try/linux-perfetto-rel
 try/linux-presubmit
 try/linux-rel
 try/linux-rel-cft
-try/linux-rel-test-selection
 try/linux-swangle-chromium-try-x64
 try/linux-swangle-chromium-try-x64-exp
 try/linux-swangle-try-tot-swiftshader-x64
@@ -647,6 +648,7 @@ try/linux-utr-tester
 try/linux-v4l2-codec-rel
 try/linux-wayland-mutter-rel
 try/linux-wayland-weston-rel
+try/linux-webium-product-rel
 try/linux-win-cross-rel
 try/linux-x64-centipede-asan-rel-tests
 try/linux-x64-libfuzzer-asan-dbg-tests
@@ -675,6 +677,7 @@ try/mac-clobber-rel
 try/mac-enterprise-companion-try-builder-dbg
 try/mac-enterprise-companion-try-builder-rel
 try/mac-fieldtrial-tester
+try/mac-gpu-rel
 try/mac-libfuzzer-asan-rel
 try/mac-official
 try/mac-rel
@@ -729,6 +732,7 @@ try/win-swangle-try-x86
 try/win-updater-try-builder-dbg
 try/win-updater-try-builder-rel
 try/win-utr-tester
+try/win-webium-product-rel
 try/win-x64-libfuzzer-asan-rel-tests
 try/win10-dbg
 try/win11-rel

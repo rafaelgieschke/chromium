@@ -64,6 +64,7 @@
 #include "third_party/blink/renderer/platform/graphics/accelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/extensions_3d_util.h"
+#include "third_party/blink/renderer/platform/graphics/gpu/graphics_context_3d_utils.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
@@ -88,12 +89,7 @@ namespace {
 // feature would prevent flickering in some cases where desynchronized canvas
 // are periodically refreshed on Windows.
 BASE_FEATURE(kUseNonEmptySyncTokenForLowLatencyCanvas,
-#if BUILDFLAG(IS_WIN)
-             base::FEATURE_ENABLED_BY_DEFAULT
-#else
-             base::FEATURE_DISABLED_BY_DEFAULT
-#endif
-);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 const float kResourceAdjustedRatio = 0.5;
 
@@ -1977,19 +1973,18 @@ scoped_refptr<DrawingBuffer::ColorBuffer> DrawingBuffer::CreateColorBuffer(
                                ? kTopLeft_GrSurfaceOrigin
                                : kBottomLeft_GrSurfaceOrigin;
 
+  const gpu::Capabilities& caps = ContextProvider()->GetCapabilities();
 #if BUILDFLAG(IS_MAC)
   // For Mac, explicitly specify BGRA/X instead of RGBA/X so that IOSurface
   // format matches shared image format. This is necessary for Graphite where
   // IOSurfaces are always used to allow sharing between ANGLE and Dawn.
   if (color_buffer_format_ == viz::SinglePlaneFormat::kRGBA_8888 &&
-      ContextProvider()->GetCapabilities().gpu_memory_buffer_formats.Has(
-          viz::SinglePlaneSharedImageFormatToBufferFormat(
-              viz::SinglePlaneFormat::kBGRA_8888))) {
+      GraphicsContext3DUtils::IsScanoutSupportedForCanvasWithFormat(
+          viz::SinglePlaneFormat::kBGRA_8888, caps)) {
     color_buffer_format_ = viz::SinglePlaneFormat::kBGRA_8888;
   } else if (color_buffer_format_ == viz::SinglePlaneFormat::kRGBX_8888 &&
-             ContextProvider()->GetCapabilities().gpu_memory_buffer_formats.Has(
-                 viz::SinglePlaneSharedImageFormatToBufferFormat(
-                     viz::SinglePlaneFormat::kBGRX_8888))) {
+             GraphicsContext3DUtils::IsScanoutSupportedForCanvasWithFormat(
+                 viz::SinglePlaneFormat::kBGRX_8888, caps)) {
     color_buffer_format_ = viz::SinglePlaneFormat::kBGRX_8888;
   }
 #endif  // BUILDFLAG(IS_MAC)
@@ -2001,7 +1996,16 @@ scoped_refptr<DrawingBuffer::ColorBuffer> DrawingBuffer::CreateColorBuffer(
   } else {
     // First see if creating a SharedImage that can be used as an overlay is
     // feasible.
-    if (ShouldUseChromiumImage()) {
+    bool should_use_chromium_image = false;
+    if (SharedGpuContext::IsGpuCompositingEnabled() &&
+        chromium_image_usage_ == kAllowChromiumImage) {
+      should_use_chromium_image =
+          SharedGpuContext::WebGLImageChromiumEnabled() ||
+          (low_latency_enabled() &&
+           base::FeatureList::IsEnabled(
+               features::kLowLatencyWebGLImageChromium));
+    }
+    if (should_use_chromium_image) {
 #if !BUILDFLAG(IS_ANDROID)
       // Android's SharedImage backing for ChromiumImage does not support BGRX.
 
@@ -2019,16 +2023,14 @@ scoped_refptr<DrawingBuffer::ColorBuffer> DrawingBuffer::CreateColorBuffer(
       // Intel GPUs (i8xx) don't support RGBX overlays.
       if (color_buffer_format_ == viz::SinglePlaneFormat::kRGBX_8888 &&
           allow_bgrx &&
-          ContextProvider()->GetCapabilities().gpu_memory_buffer_formats.Has(
-              viz::SinglePlaneSharedImageFormatToBufferFormat(
-                  viz::SinglePlaneFormat::kBGRX_8888))) {
+          GraphicsContext3DUtils::IsScanoutSupportedForCanvasWithFormat(
+              viz::SinglePlaneFormat::kBGRX_8888, caps)) {
         color_buffer_format_ = viz::SinglePlaneFormat::kBGRX_8888;
       }
 #endif  // !BUILDFLAG(IS_ANDROID)
 
-      if (ContextProvider()->GetCapabilities().gpu_memory_buffer_formats.Has(
-              viz::SinglePlaneSharedImageFormatToBufferFormat(
-                  color_buffer_format_))) {
+      if (GraphicsContext3DUtils::IsScanoutSupportedForCanvasWithFormat(
+              color_buffer_format_, caps)) {
         usage = usage | gpu::SHARED_IMAGE_USAGE_SCANOUT;
         if (low_latency_enabled()) {
           usage = usage | gpu::SHARED_IMAGE_USAGE_CONCURRENT_READ_WRITE;
@@ -2174,17 +2176,6 @@ DrawingBuffer::ScopedStateRestorer::~ScopedStateRestorer() {
   if (pixel_pack_buffer_binding_dirty_)
     client->DrawingBufferClientRestorePixelPackBufferBinding();
   client->DrawingBufferClientRestorePixelLocalStorage();
-}
-
-bool DrawingBuffer::ShouldUseChromiumImage() {
-  if (chromium_image_usage_ != kAllowChromiumImage) {
-    return false;
-  }
-  if (RuntimeEnabledFeatures::WebGLImageChromiumEnabled()) {
-    return true;
-  }
-  return low_latency_enabled() &&
-         base::FeatureList::IsEnabled(features::kLowLatencyWebGLImageChromium);
 }
 
 }  // namespace blink

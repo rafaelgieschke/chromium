@@ -104,6 +104,7 @@ class CC_ANIMATION_EXPORT KeyframeEffect : public gfx::KeyframeEffect {
   void AddKeyframeModel(
       std::unique_ptr<gfx::KeyframeModel> keyframe_model) override;
   void PauseKeyframeModel(int keyframe_model_id, base::TimeDelta time_offset);
+  void PauseKeyframeModels(base::TimeDelta time_offset);
   void AbortKeyframeModel(int keyframe_model_id);
   void AbortKeyframeModelsWithProperty(TargetProperty::Type target_property,
                                        bool needs_completion);
@@ -114,7 +115,8 @@ class CC_ANIMATION_EXPORT KeyframeEffect : public gfx::KeyframeEffect {
 
   // Dispatches animation event to a keyframe model specified as part of the
   // event. Returns true if the event is dispatched, false otherwise.
-  bool DispatchAnimationEventToKeyframeModel(const AnimationEvent& event);
+  bool DispatchAnimationEventToKeyframeModel(
+      const AnimationPlaybackEvent& event);
 
   // Returns true if there are any KeyframeModels that have neither finished
   // nor aborted.
@@ -189,7 +191,7 @@ class CC_ANIMATION_EXPORT KeyframeEffect : public gfx::KeyframeEffect {
   std::optional<gfx::PointF> ScrollOffsetForAnimation() const;
   void GenerateEvent(AnimationEvents* events,
                      const KeyframeModel& keyframe_model,
-                     AnimationEvent::Type type,
+                     AnimationPlaybackEvent::Type type,
                      base::TimeTicks monotonic_time);
   void GenerateTakeoverEventForScrollAnimation(
       AnimationEvents* events,

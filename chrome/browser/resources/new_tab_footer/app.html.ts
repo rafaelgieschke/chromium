@@ -13,7 +13,7 @@ export function getHtml(this: NewTabFooterAppElement) {
 Container for housing the items in the center of the footer that are
 separated from each other by a divider.
 -->
-<div id="container" @contextmenu="${this.onContextMenu_}">
+<div id="container" @contextmenu="${this.onContextmenu_}">
   <div id="spacer"></div>
   <div id="infoContainer">
   ${this.managementNotice_ ?
@@ -24,7 +24,7 @@ separated from each other by a divider.
              'custom_logo' : ''}">
           ${this.managementNotice_.customBitmapDataUrl ? html`
             <img id="managementNoticeLogo" alt=""
-                src="${this.managementNotice_.customBitmapDataUrl.url}">`: html`
+                src="${this.managementNotice_.customBitmapDataUrl}">`: html`
             <cr-icon icon="cr:domain" alt="" id="managementNoticeLogo" >
             </cr-icon>`}
         </div>
@@ -44,7 +44,7 @@ separated from each other by a divider.
         </button>
       </div>` : ''}
     ${this.showBackgroundAttribution_ ? html`
-      ${this.backgroundAttributionLink_ && this.backgroundAttributionLink_.url ?  html`
+      ${this.backgroundAttributionLink_ ?  html`
         <div id="backgroundAttributionContainer" class="notice-item"
             title="${this.backgroundAttributionText_}">
           <button @click="${this.onBackgroundAttributionClick_}" role="link"

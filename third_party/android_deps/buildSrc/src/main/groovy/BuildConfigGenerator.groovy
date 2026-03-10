@@ -585,7 +585,7 @@ No modifications.
             String gnTarget;
             if (aliasedLib) {
                 gnTarget = aliasedLib
-            } else if (depTargetName.startsWith('google_play_services_') || depTargetName.startsWith('google_firebase_')) {
+            } else if (isPlayServicesTarget(depTargetName)) {
                 gnTarget = '$google_play_services_package:' + depTargetName
             } else if (dep.buildGnPath != pathToBuildGradle) {
                 if (dep.isAndroidx) {
@@ -871,8 +871,8 @@ No modifications.
                 sb.append('  # Rules are unnecessary.\n')
                 sb.append('  ignore_proguard_configs = true\n')
                 sb.append('\n')
-                sb.append('  # Chrome does not use the APIs that require the native library.\n')
-                sb.append('  ignore_native_libraries = true\n')
+                sb.append('  # ChromeXR does use the APIs that require the native library.\n')
+                sb.append('  extract_native_libraries = true\n')
                 break
             case 'net_sf_kxml_kxml2':
                 sb.append('  # Target needs to exclude *xmlpull* files as already included in Android SDK.\n')

@@ -8,10 +8,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <algorithm>
 #include <memory>
 #include <set>
 
-#include "base/containers/contains.h"
 #include "base/containers/span.h"
 #include "base/containers/stack.h"
 #include "base/files/file_enumerator.h"
@@ -49,9 +49,8 @@ void PickleFromFileInfo(const SandboxDirectoryDatabase::FileInfo& info,
   pickle->WriteInt64(time.ToInternalValue());
 }
 
-bool FileInfoFromPickle(const base::Pickle& pickle,
+bool FileInfoFromPickle(base::PickleIterator iter,
                         SandboxDirectoryDatabase::FileInfo* info) {
-  base::PickleIterator iter(pickle);
   std::string data_path;
   std::string name;
   int64_t internal_time;
@@ -220,7 +219,7 @@ bool DatabaseCheckHelper::ScanDatabase() {
       // value: "<pickled FileInfo>"
       FileInfo file_info;
       if (!FileInfoFromPickle(
-              base::Pickle::WithUnownedBuffer(base::as_byte_span(itr->value())),
+              base::PickleIterator::WithData(base::as_byte_span(itr->value())),
               &file_info)) {
         return false;
       }
@@ -296,7 +295,7 @@ bool DatabaseCheckHelper::ScanDirectory() {
       if (!path_.AppendRelativePath(absolute_file_path, &relative_file_path))
         return false;
 
-      if (base::Contains(kExcludes, relative_file_path))
+      if (std::ranges::contains(kExcludes, relative_file_path))
         continue;
 
       if (find_info.IsDirectory()) {
@@ -479,7 +478,7 @@ bool SandboxDirectoryDatabase::GetFileInfo(FileId file_id, FileInfo* info) {
       db_->Get(leveldb::ReadOptions(), file_key, &file_data_string);
   if (status.ok()) {
     bool success = FileInfoFromPickle(
-        base::Pickle::WithUnownedBuffer(base::as_byte_span(file_data_string)),
+        base::PickleIterator::WithData(base::as_byte_span(file_data_string)),
         info);
     if (!success)
       return false;

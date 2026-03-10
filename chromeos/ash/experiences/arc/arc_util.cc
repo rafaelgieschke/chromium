@@ -243,9 +243,6 @@ bool IsArcVmRtVcpuEnabled(uint32_t cpus) {
           ash::switches::kEnableArcVmRtVcpu)) {
     return true;
   }
-  if (cpus == 2 && base::FeatureList::IsEnabled(kRtVcpuDualCore)) {
-    return true;
-  }
   if (cpus > 2 && base::FeatureList::IsEnabled(kRtVcpuQuadCore)) {
     return true;
   }
@@ -620,8 +617,6 @@ int GetDaysUntilArcVmDataMigrationDeadline(PrefService* prefs) {
       ArcVmDataMigrationStatus::kStarted) {
     // If ARCVM /data migration is in progress. Treat it in the same way as
     // cases where the deadline is passed.
-    // TODO(b/258278176): Do not call this function when the migration is in
-    // progress, or return a different value (0) to provide a dedicated UI.
     return 1;
   }
   const base::Time notification_first_shown_time =

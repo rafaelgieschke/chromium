@@ -50,7 +50,7 @@
 #include "chrome/browser/ash/policy/handlers/bluetooth_policy_handler.h"
 #include "chrome/browser/ash/policy/handlers/device_dlc_predownload_list_policy_handler.h"
 #include "chrome/browser/ash/policy/handlers/device_dock_mac_address_source_handler.h"
-#include "chrome/browser/ash/policy/handlers/device_name_policy_handler_impl.h"
+#include "chrome/browser/ash/policy/handlers/device_name_policy_handler.h"
 #include "chrome/browser/ash/policy/handlers/device_wifi_allowed_handler.h"
 #include "chrome/browser/ash/policy/handlers/minimum_version_policy_handler.h"
 #include "chrome/browser/ash/policy/handlers/minimum_version_policy_handler_delegate_impl.h"
@@ -73,7 +73,6 @@
 #include "chrome/browser/policy/device_management_service_configuration.h"
 #include "chrome/browser/policy/networking/device_network_configuration_updater_ash.h"
 #include "chrome/browser/policy/policy_util.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/ash/components/cryptohome/system_salt_getter.h"
 #include "chromeos/ash/components/dbus/dbus_thread_manager.h"
@@ -285,14 +284,18 @@ void BrowserPolicyConnectorAsh::Init(
   bluetooth_policy_handler_ =
       std::make_unique<BluetoothPolicyHandler>(ash::CrosSettings::Get());
 
-  device_name_policy_handler_ = std::make_unique<DeviceNamePolicyHandlerImpl>(
-      this, ash::CrosSettings::Get());
+  device_name_policy_handler_ =
+      std::make_unique<DeviceNamePolicyHandler>(this, ash::CrosSettings::Get());
 
   minimum_version_policy_handler_delegate_ =
       std::make_unique<MinimumVersionPolicyHandlerDelegateImpl>();
 
+  // TODO(crbug.com/404133022): Avoid using g_browser_process.
+  BuildState* build_state = g_browser_process->GetBuildState();
+
   minimum_version_policy_handler_ =
       std::make_unique<MinimumVersionPolicyHandler>(
+          local_state, build_state, this,
           minimum_version_policy_handler_delegate_.get(),
           ash::CrosSettings::Get());
 
@@ -396,6 +399,9 @@ void BrowserPolicyConnectorAsh::Shutdown() {
     device_cloud_policy_manager_->RemoveDeviceCloudPolicyManagerObserver(this);
   }
 
+  if (device_cloud_policy_invalidator_) {
+    device_cloud_policy_invalidator_->Shutdown();
+  }
   device_cloud_policy_invalidator_.reset();
 
   device_remote_commands_invalidator_.reset();

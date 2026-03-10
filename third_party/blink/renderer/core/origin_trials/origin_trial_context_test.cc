@@ -78,9 +78,10 @@ class MockTokenValidator : public TrialTokenValidator {
                      const OriginInfo& origin_info,
                      base::span<const OriginInfo> scripts,
                      base::Time time)
-        : token(token_param), origin(origin_info), current_time(time) {
-      third_party_origin_info.AppendRange(scripts.begin(), scripts.end());
-    }
+        : token(token_param),
+          origin(origin_info),
+          third_party_origin_info(scripts),
+          current_time(time) {}
   };
 
   MockTokenValidator() = default;
@@ -428,7 +429,7 @@ TEST_F(OriginTrialContextTest, PermissionsPolicy) {
   PolicyParserMessageBuffer logger;
   network::ParsedPermissionsPolicy result;
   result = PermissionsPolicyParser::ParsePermissionsPolicyForTest(
-      "frobulate=*", security_origin, nullptr, logger, feature_map, window);
+      "frobulate=*", *security_origin, nullptr, logger, feature_map, window);
   EXPECT_TRUE(logger.GetMessages().empty());
   ASSERT_EQ(1u, result.size());
   EXPECT_EQ(network::mojom::PermissionsPolicyFeature::kFrobulate,

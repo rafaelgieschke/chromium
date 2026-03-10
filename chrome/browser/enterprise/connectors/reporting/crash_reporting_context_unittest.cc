@@ -7,6 +7,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/test/protobuf_matchers.h"
 #include "base/test/scoped_feature_list.h"
+#include "build/branding_buildflags.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/enterprise/connectors/reporting/realtime_reporting_client.h"
 #include "chrome/browser/enterprise/connectors/reporting/realtime_reporting_client_factory.h"
@@ -142,7 +143,7 @@ TEST_P(CrashReportingContextTest, UploadToReportingServer) {
           RealtimeReportingClientFactory::GetForProfile(profile));
 
   ::chrome::cros::reporting::proto::Event expected_event_proto;
-  base::Value::Dict expected_event;
+  base::DictValue expected_event;
 
   if (use_proto_format()) {
     auto* browser_crash_event =

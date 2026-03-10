@@ -6,6 +6,7 @@
 #define SERVICES_WEBNN_WEBNN_TENSOR_IMPL_H_
 
 #include "base/component_export.h"
+#include "base/memory/raw_ref.h"
 #include "gpu/command_buffer/common/sync_token.h"
 #include "gpu/command_buffer/service/shared_image/shared_image_representation.h"
 #include "mojo/public/cpp/base/big_buffer.h"
@@ -20,7 +21,15 @@ namespace webnn {
 
 class WebNNContextImpl;
 
-// GPU process implementation of the MLTensor interface exposed to script.
+// GPU process implementation of the `MLTensor` interface. While this class is
+// reference-counted a `WebNNTensorImpl` is guaranteed not to outlive the
+// `WebNNContextImpl` that created it because references are only held by the
+// context itself or by tasks scheduled to its `gpu::Scheduler` sequence which
+// is shut down when the context is destroyed.
+//
+// This invariant is checked by the `raw_ref<WebNNContextImpl>` member, which
+// will trigger dangling pointer warnings in debug builds and safe crashes in
+// release builds.
 class COMPONENT_EXPORT(WEBNN_SERVICE) WebNNTensorImpl
     : public WebNNObjectImpl<mojom::WebNNTensor,
                              blink::WebNNTensorToken,
@@ -30,11 +39,11 @@ class COMPONENT_EXPORT(WEBNN_SERVICE) WebNNTensorImpl
       std::unique_ptr<gpu::WebNNTensorRepresentation, OnTaskRunnerDeleter>;
 
   WebNNTensorImpl(mojo::PendingAssociatedReceiver<mojom::WebNNTensor> receiver,
-                  base::WeakPtr<WebNNContextImpl> context,
+                  WebNNContextImpl& context,
                   mojom::TensorInfoPtr tensor_info);
 
   WebNNTensorImpl(mojo::PendingAssociatedReceiver<mojom::WebNNTensor> receiver,
-                  base::WeakPtr<WebNNContextImpl> context,
+                  WebNNContextImpl& context,
                   mojom::TensorInfoPtr tensor_info,
                   RepresentationPtr representation);
 
@@ -47,10 +56,6 @@ class COMPONENT_EXPORT(WEBNN_SERVICE) WebNNTensorImpl
 
   size_t PackedByteLength() const { return descriptor_.PackedByteLength(); }
   size_t NumberOfElements() const { return descriptor_.NumberOfElements(); }
-
-  base::WeakPtr<const WebNNTensorImpl> GetWeakPtr() const {
-    return weak_factory_.GetWeakPtr();
-  }
 
   bool IsValidWithDescriptor(const OperandDescriptor& descriptor) const;
 
@@ -66,11 +71,14 @@ class COMPONENT_EXPORT(WEBNN_SERVICE) WebNNTensorImpl
     return representation_ && !representation_access_;
   }
 
+  // Returns true if the tensor is an interop tensor.
+  bool has_shared_image() const { return representation_ != nullptr; }
+
   // This method will be called by `ImportTensor()` or
   // `WebNNContext::CreateTensorFromMailbox()` for WebNN to begin access of the
-  // platform-specific tensor as a shared image on the main thread, and then
-  // call `ImportTensorImpl()` with that access. Returns true on success.
-  bool ImportTensorOnMainThread();
+  // platform-specific tensor as a shared image and then call
+  // `ImportTensorImpl()` with that access. Returns true on success.
+  bool ImportTensorInternal();
 
   // Helper that runs a closure synchronously on a different sequence.
   // The caller blocks but the target sequence never blocks.
@@ -100,16 +108,17 @@ class COMPONENT_EXPORT(WEBNN_SERVICE) WebNNTensorImpl
   virtual void ExportTensorImpl(ScopedAccessPtr access,
                                 ExportTensorCallback callback) = 0;
 
-  // Called by `ImportTensorOnMainThread()` after WebNN begins access of the
+  // Called by `ImportTensorInternal()` after WebNN begins access of the
   // platform-specific tensor as a shared image.
   // Backend subclasses implement this to perform any necessary
   // device synchronization and store the access. Returns true on success.
   // On success, the subclass should assign `representation_access_` to
   // `access`. Must not post tasks itself; all main thread synchronization is
-  // handled by `ImportTensorOnMainThread()`.
+  // handled by `ImportTensorInternal()`.
   virtual bool ImportTensorImpl(ScopedAccessPtr access) = 0;
 
-  base::WeakPtr<WebNNContextImpl> context_;
+  // The `WebNNContextImpl` which owns and will outlive this object.
+  const base::raw_ref<WebNNContextImpl> context_;
 
   // The shared image representation used to access the contents from shared
   // image. Only valid when usage has WebGPUInterop.
@@ -134,8 +143,6 @@ class COMPONENT_EXPORT(WEBNN_SERVICE) WebNNTensorImpl
 
   const OperandDescriptor descriptor_;
   const MLTensorUsage usage_;
-
-  base::WeakPtrFactory<WebNNTensorImpl> weak_factory_{this};
 };
 
 }  // namespace webnn

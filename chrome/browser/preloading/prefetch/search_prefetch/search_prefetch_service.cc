@@ -7,7 +7,6 @@
 #include <iterator>
 #include <memory>
 
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/json/values_util.h"
@@ -115,7 +114,10 @@ void RecordFinalStatus(SearchPrefetchStatus status, bool navigation_prefetch) {
   }
 }
 
-bool ShouldPrefetch(const AutocompleteMatch& match) {
+bool ShouldPrefetchSuggestion(const AutocompleteMatch& match) {
+  if (ShouldSuppressPrefetchForUnsupportedMode(match)) {
+    return false;
+  }
   // Prerender's threshold should definitely be higher than prefetch's. So a
   // prerender hints can be treated as a prefetch hint.
   return BaseSearchProvider::ShouldPrefetch(match) ||
@@ -615,6 +617,14 @@ SearchPrefetchService::TakePrefetchResponseFromMemoryCache(
   scoped_refptr<StreamingSearchPrefetchURLLoader> loader =
       iter->second->TakeSearchPrefetchURLLoader();
 
+  // Record if the response has been received when the navigation accesses
+  // the prefetch URL loader. The result determines if the navigation itself or
+  // the prefetch is in the critical path.
+  base::UmaHistogramBoolean(
+      "Omnibox.SearchPrefetch.TakePrefetchResponseFromMemoryCache."
+      "ResourceResponseReceived",
+      loader->HasResourceResponse());
+
   iter->second->MarkPrefetchAsServed();
 
   if (navigation_url != iter->second->prefetch_url()) {
@@ -711,7 +721,7 @@ void SearchPrefetchService::OnResultChanged(content::WebContents* web_contents,
 
   for (const auto& match : result) {
     // Return early if neither prefetch nor prerender are enabled for the match.
-    if (!ShouldPrefetch(match)) {
+    if (!ShouldPrefetchSuggestion(match)) {
       continue;
     }
 
@@ -786,13 +796,20 @@ bool SearchPrefetchService::OnNavigationLikely(
     return false;
   }
 
-  if (!web_contents)
+  if (!web_contents) {
     return false;
-  if (!AllowTopNavigationPrefetch() && index == 0)
+  }
+  if (!AllowTopNavigationPrefetch() && index == 0) {
     return false;
+  }
   // Only prefetch search types.
-  if (!AutocompleteMatch::IsSearchType(match.type))
+  if (!AutocompleteMatch::IsSearchType(match.type)) {
     return false;
+  }
+
+  if (ShouldSuppressPrefetchForUnsupportedMode(match)) {
+    return false;
+  }
   // Check to make sure this is search related and that we can read the search
   // arguments. For Search history this may be null.
 
@@ -975,7 +992,7 @@ void SearchPrefetchService::AddCacheEntry(const GURL& navigation_url,
 
 bool SearchPrefetchService::LoadFromPrefs() {
   prefetch_cache_.clear();
-  const base::Value::Dict& dictionary =
+  const base::DictValue& dictionary =
       profile_->GetPrefs()->GetDict(prefetch::prefs::kCachePrefPath);
 
   auto* template_url_service =
@@ -990,7 +1007,7 @@ bool SearchPrefetchService::LoadFromPrefs() {
     if (!navigation_url.is_valid())
       continue;
 
-    const base::Value::List& prefetch_url_and_time = element.second.GetList();
+    const base::ListValue& prefetch_url_and_time = element.second.GetList();
 
     if (prefetch_url_and_time.size() != 2 ||
         !prefetch_url_and_time[0].is_string() ||
@@ -1049,11 +1066,11 @@ bool SearchPrefetchService::LoadFromPrefs() {
 }
 
 void SearchPrefetchService::SaveToPrefs() const {
-  base::Value::Dict dictionary;
+  base::DictValue dictionary;
   for (const auto& element : prefetch_cache_) {
     std::string navigation_url = element.first.spec();
     std::string prefetch_url = element.second.first.spec();
-    base::Value::List value;
+    base::ListValue value;
     value.Append(prefetch_url);
     value.Append(base::TimeToValue(element.second.second));
     dictionary.Set(std::move(navigation_url), std::move(value));
@@ -1130,7 +1147,6 @@ SearchPrefetchService::RetrieveSearchTermsInMemoryCache(
     const network::ResourceRequest& tentative_resource_request,
     SearchPrefetchServingReasonRecorder& recorder) {
   const GURL& navigation_url = tentative_resource_request.url;
-
   auto* template_url_service =
       TemplateURLServiceFactory::GetForProfile(profile_);
   if (!template_url_service ||
@@ -1146,6 +1162,15 @@ SearchPrefetchService::RetrieveSearchTermsInMemoryCache(
     recorder.reason_ = SearchPrefetchServingReason::kNotDefaultSearchWithTerms;
     return prefetches_.end();
   }
+
+  if (ShouldSuppressPrefetchForUnsupportedMode(
+          tentative_resource_request.url)) {
+    // Never intercept requests to unsupported search mode.
+    // TODO(lingqi): Add a new serving reason for this case.
+    recorder.reason_ = SearchPrefetchServingReason::kNotServedOtherReason;
+    return prefetches_.end();
+  }
+
   // TODO(https://crbug.com/417978876): figure out the reason why search_terms
   // can be empty when `HasCanonicalPreloadingOmniboxSearchURL` returns true.
   if (search_terms.empty()) {
@@ -1267,7 +1292,7 @@ void SearchPrefetchService::FireAllExpiryTimerForTesting() {
 void SearchPrefetchService::SetLoaderDestructionCallbackForTesting(
     const GURL& canonical_search_url,
     base::OnceClosure streaming_url_loader_destruction_callback) {
-  CHECK(base::Contains(prefetches_, canonical_search_url));
+  CHECK(prefetches_.contains(canonical_search_url));
   return prefetches_[canonical_search_url]
       ->SetLoaderDestructionCallbackForTesting(  // IN-TEST
           std::move(streaming_url_loader_destruction_callback));

@@ -22,6 +22,7 @@
 #include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/mac/mac_util.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/notreached.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
@@ -100,6 +101,20 @@ namespace {
 // update it immediately.
 BASE_FEATURE(kDelayUpdateWindowsAfterTextInputStateChanged,
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+// LINT.IfChange(GetCachedFirstRectResult)
+enum class GetCachedFirstRectResult {
+  kFound = 0,
+  kNoTextInputManager = 1,
+  kNoTextSelection = 2,
+  kNotBoundedBySelection = 3,
+  kNoCompositionBounds = 4,
+  kInvalidCompositionRange = 5,
+  kMaxValue = kInvalidCompositionRange,
+};
+// LINT.ThenChange(//tools/metrics/histograms/metadata/input/enums.xml:GetCachedFirstRectResult)
 
 }  // namespace
 
@@ -332,6 +347,20 @@ void RenderWidgetHostViewMac::MigrateNSViewBridge(
   // supposed to be hidden already.
   if (!is_visible_) {
     remote_ns_view_->SetVisible(false);
+  }
+
+  // Re-send the current text input state to the new NSView bridge. This is
+  // necessary because the text input state may have been set before the
+  // migration (e.g., when a PWA launches with an auto-focused text field).
+  // Without this, the new NSView's inputContext will return nil because
+  // _textInputType remains TEXT_INPUT_TYPE_NONE, causing emoji picker and
+  // other IME features to fail. See https://crbug.com/478659019.
+  if (text_input_manager_) {
+    const ui::mojom::TextInputState* state =
+        text_input_manager_->GetTextInputState();
+    if (state) {
+      remote_ns_view_->SetTextInputState(state->type, state->flags);
+    }
   }
 
   // End local display::Screen observation via `in_process_ns_view_bridge_`;
@@ -1054,6 +1083,7 @@ uint32_t RenderWidgetHostViewMac::GetCaptureSequenceNumber() const {
 void RenderWidgetHostViewMac::CopyFromSurface(
     const gfx::Rect& src_subrect,
     const gfx::Size& dst_size,
+    base::TimeDelta timeout,
     base::OnceCallback<void(const content::CopyFromSurfaceResult&)> callback) {
   base::WeakPtr<RenderWidgetHostImpl> popup_host;
   base::WeakPtr<DelegatedFrameHost> popup_frame_host;
@@ -1068,7 +1098,7 @@ void RenderWidgetHostViewMac::CopyFromSurface(
   RenderWidgetHostViewBase::CopyMainAndPopupFromSurface(
       host()->GetWeakPtr(),
       browser_compositor_->GetDelegatedFrameHost()->GetWeakPtr(), popup_host,
-      popup_frame_host, src_subrect, dst_size, GetDeviceScaleFactor(),
+      popup_frame_host, src_subrect, dst_size, GetDeviceScaleFactor(), timeout,
       std::move(callback));
 }
 
@@ -1229,8 +1259,15 @@ bool RenderWidgetHostViewMac::GetCachedFirstRectForCharacterRange(
     const gfx::Range& requested_range,
     gfx::Rect* rect,
     gfx::Range* actual_range) {
-  if (!GetTextInputManager())
-    return false;
+  auto log_result = [](GetCachedFirstRectResult result) -> bool {
+    base::UmaHistogramEnumeration("TextInputClient.GetCachedFirstRectResult",
+                                  result);
+    return result == GetCachedFirstRectResult::kFound;
+  };
+
+  if (!GetTextInputManager()) {
+    return log_result(GetCachedFirstRectResult::kNoTextInputManager);
+  }
 
   DCHECK(rect);
   // This exists to make IMEs more responsive, see http://crbug.com/115920
@@ -1239,8 +1276,9 @@ bool RenderWidgetHostViewMac::GetCachedFirstRectForCharacterRange(
                "requested range", requested_range.ToString());
 
   const TextInputManager::TextSelection* selection = GetTextSelection();
-  if (!selection)
-    return false;
+  if (!selection) {
+    return log_result(GetCachedFirstRectResult::kNoTextSelection);
+  }
 
   // If requested range is right after caret, we can just return it.
   if (selection->range().is_empty() &&
@@ -1258,7 +1296,7 @@ bool RenderWidgetHostViewMac::GetCachedFirstRectForCharacterRange(
           "ime",
           "RenderWidgetHostViewMac::GetCachedFirstRectForCharacterRange",
           "GetTextSelectionBounds", rect->ToString());
-      return true;
+      return log_result(GetCachedFirstRectResult::kFound);
     }
 
     // If no selection bounds, fall back to use selection region.
@@ -1268,14 +1306,15 @@ bool RenderWidgetHostViewMac::GetCachedFirstRectForCharacterRange(
     TRACE_EVENT1(
         "ime", "RenderWidgetHostViewMac::GetCachedFirstRectForCharacterRange",
         "caret_rect", rect->ToString());
-    return true;
+    return log_result(GetCachedFirstRectResult::kFound);
   }
 
   const TextInputManager::CompositionRangeInfo* composition_info =
       GetCompositionRangeInfo();
   if (!composition_info || composition_info->range.is_empty()) {
-    if (!requested_range.IsBoundedBy(selection->range()))
-      return false;
+    if (!requested_range.IsBoundedBy(selection->range())) {
+      return log_result(GetCachedFirstRectResult::kNotBoundedBySelection);
+    }
     DCHECK(GetFocusedWidget());
     if (actual_range)
       *actual_range = selection->range();
@@ -1285,18 +1324,20 @@ bool RenderWidgetHostViewMac::GetCachedFirstRectForCharacterRange(
     TRACE_EVENT1(
         "ime", "RenderWidgetHostViewMac::GetCachedFirstRectForCharacterRange",
         "first_selection_rect", rect->ToString());
-    return true;
+    return log_result(GetCachedFirstRectResult::kFound);
   }
 
   // If firstRectForCharacterRange in WebFrame is failed in renderer,
   // ImeCompositionRangeChanged will be sent with empty vector.
-  if (!composition_info || composition_info->character_bounds.empty())
-    return false;
+  if (!composition_info || composition_info->character_bounds.empty()) {
+    return log_result(GetCachedFirstRectResult::kNoCompositionBounds);
+  }
 
   const gfx::Range request_range_in_composition =
       ConvertCharacterRangeToCompositionRange(requested_range);
-  if (request_range_in_composition == gfx::Range::InvalidRange())
-    return false;
+  if (request_range_in_composition == gfx::Range::InvalidRange()) {
+    return log_result(GetCachedFirstRectResult::kInvalidCompositionRange);
+  }
 
   DCHECK_EQ(composition_info->character_bounds.size(),
             composition_info->range.length());
@@ -1314,7 +1355,7 @@ bool RenderWidgetHostViewMac::GetCachedFirstRectForCharacterRange(
         gfx::Range(composition_info->range.start() + ui_actual_range.start(),
                    composition_info->range.start() + ui_actual_range.end());
   }
-  return true;
+  return log_result(GetCachedFirstRectResult::kFound);
 }
 
 void RenderWidgetHostViewMac::FocusedNodeChanged(
@@ -1715,9 +1756,9 @@ id RenderWidgetHostViewMac::GetAccessibilityElement() {
 
 id RenderWidgetHostViewMac::GetRootBrowserAccessibilityElement() {
   if (auto* manager = host()->GetRootBrowserAccessibilityManager()) {
-    return manager->GetBrowserAccessibilityRoot()
-        ->GetNativeViewAccessible()
-        .Get();
+    if (auto* root = manager->GetBrowserAccessibilityRoot()) {
+      return root->GetNativeViewAccessible().Get();
+    }
   }
   return nil;
 }
@@ -1759,12 +1800,34 @@ void RenderWidgetHostViewMac::OnFirstResponderChanged(bool is_first_responder) {
   is_first_responder_ = is_first_responder;
   accessibility_focus_overrider_.SetViewIsFirstResponder(is_first_responder_);
 
+  // Propagate focus changes to RenderWidgetHost only under the following
+  // conditions:
+  //
+  // - Headless mode:
+  //   IsHeadless() implies there is no NSWindow, so force focus change
+  //   propagation.
+  //
+  // - Gaining focus:
+  //   - When Focus() is being explicitly requested (is_getting_focus is true),
+  //   or
+  //   - When the window is key.
+  //   This avoids a race where claiming focus while the window is non-key could
+  //   be treated as invalid, resulting in a subsequent resignFirstResponder
+  //   overwriting the valid focus set by OnWindowIsKeyChanged.
+  //
+  // - Losing focus:
+  //   - Only when the host is currently focused.
+  //   This prevents duplicate LostFocus notifications.
   if (is_first_responder_) {
-    host()->GotFocus();
-    SetTextInputActive(true);
+    if (IsHeadless() || is_getting_focus_ || is_window_key_) {
+      host()->GotFocus();
+      SetTextInputActive(true);
+    }
   } else {
-    SetTextInputActive(false);
-    host()->LostFocus();
+    if (IsHeadless() || host()->is_focused()) {
+      SetTextInputActive(false);
+      host()->LostFocus();
+    }
   }
 }
 

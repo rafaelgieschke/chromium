@@ -95,27 +95,24 @@ bool IsSystemAecDeactivated(int aec_group_id) {
 // allow using DSP-based AEC effect.
 bool IsDspBasedAecDeactivated(int aec_group_id) {
   return base::GetFieldTrialParamByFeatureAsBool(
-             media::kCrOSDspBasedAecDeactivatedGroups,
-             base::NumberToString(aec_group_id), false) ||
-         !base::FeatureList::IsEnabled(media::kCrOSDspBasedAecAllowed);
+      media::kCrOSDspBasedAecDeactivatedGroups,
+      base::NumberToString(aec_group_id), false);
 }
 
 // Checks if the board with `aec_group_id` is flagged by the field trial to not
 // allow using DSP-based NS effect.
 bool IsDspBasedNsDeactivated(int aec_group_id) {
   return base::GetFieldTrialParamByFeatureAsBool(
-             media::kCrOSDspBasedNsDeactivatedGroups,
-             base::NumberToString(aec_group_id), false) ||
-         !base::FeatureList::IsEnabled(media::kCrOSDspBasedNsAllowed);
+      media::kCrOSDspBasedNsDeactivatedGroups,
+      base::NumberToString(aec_group_id), false);
 }
 
 // Checks if the board with `aec_group_id` is flagged by the field trial to not
 // allow using DSP-based AGC effect.
 bool IsDspBasedAgcDeactivated(int aec_group_id) {
   return base::GetFieldTrialParamByFeatureAsBool(
-             media::kCrOSDspBasedAgcDeactivatedGroups,
-             base::NumberToString(aec_group_id), false) ||
-         !base::FeatureList::IsEnabled(media::kCrOSDspBasedAgcAllowed);
+      media::kCrOSDspBasedAgcDeactivatedGroups,
+      base::NumberToString(aec_group_id), false);
 }
 
 // Specifies which DSP-based effects are allowed based on media constraints and

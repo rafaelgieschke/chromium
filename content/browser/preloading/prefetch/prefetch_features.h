@@ -63,13 +63,6 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrefetchStateContaminationMitigation);
 CONTENT_EXPORT extern const base::FeatureParam<bool>
     kPrefetchStateContaminationSwapsBrowsingContextGroup;
 
-// Fix for prefetching a URL controlled by a ServiceWorker without fetch
-// handler. Currently this stops prefetching for such cases
-// (https://crbug.com/379076354).
-// Even when `kPrefetchServiceWorker` is enabled, this is still effective for
-// SW-ineligible prefetches.
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrefetchServiceWorkerNoFetchHandlerFix);
-
 // Enabling this will apply net::RequestPriority::MEDIUM for prefetch
 // requests triggered by embedders. See crbug.com/353628437 to track this issue.
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrefetchNetworkPriorityForEmbedders);
@@ -82,17 +75,6 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(
 // Allow prefetching ServiceWorker-controlled URLs.
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrefetchServiceWorker);
 bool IsPrefetchServiceWorkerEnabled(content::BrowserContext* browser_context);
-
-// Replace current prefetch queue with a new queue and scheduler, which allows
-// prioritization, concurrent prefetches, bursting.
-//
-// For more details, see
-// https://docs.google.com/document/d/1W0Nk3Nq6NaUXkBppOUC5zyNmhVqMjYShm1bydGYd9qc
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrefetchScheduler);
-
-// Call `PrefetchScheduler::Progress()` synchronously as much as possible.
-CONTENT_EXPORT extern const base::FeatureParam<bool>
-    kPrefetchSchedulerProgressSyncBestEffort;
 
 // Controls params for tests of `PrefetchScheduler`.
 CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrefetchSchedulerTesting);
@@ -109,20 +91,13 @@ CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrefetchMultipleActiveSetSizeLimitForBase);
 CONTENT_EXPORT extern const base::FeatureParam<size_t>
     kPrefetchMultipleActiveSetSizeLimitForBaseValue;
 
-// Kill switch, which enables reporting serving metrics of preloads.
-// (crbug.com/360094997)
-//
-// TODO(crbug.com/360094997): Remove it after confirming stability.
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kPreloadServingMetrics);
+// Kill switch for fixing header modifications upon redirects.
+// TODO(crbug.com/467177773): Remove it after confirming stability.
+CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrefetchFixHeaderUpdatesOnRedirect);
 
-// Kill switch for the modified failure/disconnect notifications around
-// `PrefetchContainer`.
-// TODO(crbug.com/400761083): Remove it after confirming stability.
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrefetchGracefulNotification);
-
-// Kill switch for making the cancelling of `PrefetchStreamingURLLoader` async.
-// TODO(crbug.com/400761083): Remove it after confirming stability.
-CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrefetchAsyncCancelOnCookiesChange);
+// Allow starting prefetch request from off the main thread. Please see
+// crbug.com/452389538 for more details.
+CONTENT_EXPORT BASE_DECLARE_FEATURE(kPrefetchOffTheMainThread);
 
 }  // namespace features
 

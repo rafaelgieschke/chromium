@@ -19,7 +19,6 @@
 #include "ui/base/data_transfer_policy/data_transfer_policy_controller.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
 #include "ui/base/dragdrop/drop_target_event.h"
-#include "ui/base/dragdrop/mojom/drag_drop_types.mojom-shared.h"
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
 #include "ui/compositor/layer.h"
 #include "ui/ozone/public/ozone_platform.h"
@@ -112,7 +111,7 @@ void PerformDrop(aura::client::DragDropDelegate::DropCallback drop_cb,
     std::move(drop_cb).Run(std::move(data_to_drop), output_drag_op,
                            /*drag_image_layer_owner=*/nullptr);
   }
-  base::IgnoreResult(drag_cancel.Release());
+  std::ignore = drag_cancel.Release();
 }
 
 }  // namespace

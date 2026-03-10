@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 
+#include "ash/constants/webui_url_constants.h"
 #include "ash/public/cpp/child_accounts/parent_access_controller.h"
 #include "ash/public/cpp/login_screen.h"
 #include "base/build_time.h"
@@ -20,7 +21,6 @@
 #include "chrome/browser/ash/system/timezone_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/ash/set_time/set_time_dialog.h"
-#include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/set_time_dialog_resources.h"
 #include "chrome/grit/set_time_dialog_resources_map.h"
@@ -83,7 +83,7 @@ class SetTimeMessageHandler : public content::WebUIMessageHandler,
   }
 
  private:
-  void OnPageReady(const base::Value::List& args) { AllowJavascript(); }
+  void OnPageReady(const base::ListValue& args) { AllowJavascript(); }
 
   // SystemClockClient::Observer:
   void SystemClockUpdated() override {
@@ -103,7 +103,7 @@ class SetTimeMessageHandler : public content::WebUIMessageHandler,
   // Handler for Javascript call to set the system clock when the user sets a
   // new time. Expects the time as the number of seconds since the Unix
   // epoch, treated as a double.
-  void OnSetTime(const base::Value::List& args) {
+  void OnSetTime(const base::ListValue& args) {
     double seconds = args[0].GetDouble();
     SystemClockClient::Get()->SetTime(static_cast<int64_t>(seconds));
   }
@@ -111,7 +111,7 @@ class SetTimeMessageHandler : public content::WebUIMessageHandler,
   // Handler for Javascript call to change the system time zone when the user
   // selects a new time zone. Expects the time zone ID as a string, as it
   // appears in the time zone option values.
-  void OnSetTimezone(const base::Value::List& args) {
+  void OnSetTimezone(const base::ListValue& args) {
     if (args.empty() || !args[0].is_string()) {
       NOTREACHED();
     }
@@ -122,7 +122,7 @@ class SetTimeMessageHandler : public content::WebUIMessageHandler,
     system::SetTimezoneFromUI(profile, timezone_id);
   }
 
-  void DoneClicked(const base::Value::List& args) {
+  void DoneClicked(const base::ListValue& args) {
     if (!parent_access::ParentAccessService::IsApprovalRequired(
             SupervisedAction::kUpdateClock)) {
       OnParentAccessValidation(true);
@@ -165,7 +165,7 @@ SetTimeUI::SetTimeUI(content::WebUI* web_ui) : MojoWebDialogUI(web_ui) {
 
   // Set up the chrome://set-time source.
   content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
-      Profile::FromWebUI(web_ui), chrome::kChromeUISetTimeHost);
+      Profile::FromWebUI(web_ui), ash::kChromeUISetTimeHost);
   webui::SetJSModuleDefaults(source);
   webui::EnableTrustedTypesCSP(source);
   static constexpr webui::LocalizedString kStrings[] = {
@@ -178,7 +178,7 @@ SetTimeUI::SetTimeUI(content::WebUI* web_ui) : MojoWebDialogUI(web_ui) {
   };
   source->AddLocalizedStrings(kStrings);
 
-  base::Value::Dict values;
+  base::DictValue values;
   // List of list of strings: [[ID, name], [ID, name], ...]
   values.Set("timezoneList", system::GetTimezoneList());
 

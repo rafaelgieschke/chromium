@@ -200,6 +200,7 @@ MutableCSSPropertyValueSet::SetResult CSSParser::ParseValue(
   const CSSValue* value =
       CSSParserFastPaths::MaybeParseValue(resolved_property, string, context);
   if (value) {
+    context->Count(unresolved_property);
     return declaration->SetLonghandProperty(CSSPropertyValue(
         CSSPropertyName(resolved_property), *value, important));
   }
@@ -219,6 +220,7 @@ MutableCSSPropertyValueSet::SetResult CSSParser::ParseValue(
     value =
         CSSPropertyParser::ParseSingleValue(resolved_property, stream, context);
     if (value != nullptr) {
+      context->Count(unresolved_property);
       return declaration->SetLonghandProperty(CSSPropertyValue(
           CSSPropertyName(resolved_property), *value, important));
     }
@@ -460,6 +462,7 @@ const CSSValue* CSSParser::ParseFontFaceDescriptor(
 CSSPrimitiveValue* CSSParser::ParseLengthPercentage(
     const String& string,
     const CSSParserContext* context,
+    CSSParserLocalContext& local_context,
     CSSPrimitiveValue::ValueRange value_range) {
   if (string.empty() || !context) {
     return nullptr;
@@ -468,8 +471,8 @@ CSSPrimitiveValue* CSSParser::ParseLengthPercentage(
   // Trim whitespace from the string. It's only necessary to consume leading
   // whitespaces, since ConsumeLengthOrPercent always consumes trailing ones.
   stream.ConsumeWhitespace();
-  CSSPrimitiveValue* parsed_value =
-      css_parsing_utils::ConsumeLengthOrPercent(stream, *context, value_range);
+  CSSPrimitiveValue* parsed_value = css_parsing_utils::ConsumeLengthOrPercent(
+      stream, *context, local_context, value_range);
   return stream.AtEnd() ? parsed_value : nullptr;
 }
 

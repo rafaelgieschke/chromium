@@ -4,7 +4,6 @@
 
 #include "chrome/browser/web_applications/sampling_metrics_provider.h"
 
-#include "base/containers/contains.h"
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
@@ -13,6 +12,7 @@
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
 #include "chrome/browser/web_applications/daily_metrics_helper.h"
 #include "chrome/browser/web_applications/mojom/user_display_mode.mojom.h"
+#include "chrome/browser/web_applications/web_app_filter.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/browser/web_applications/web_app_registrar.h"
 #include "chrome/browser/web_applications/web_app_tab_helper.h"
@@ -50,9 +50,8 @@ void EmitUkmMetricsForTab(tabs::TabInterface* tab) {
   DailyInteraction interaction;
 
   interaction.start_url = registrar.GetAppStartUrl(*app_id);
-  interaction.installed = registrar.IsInstallState(
-      *app_id, {proto::INSTALLED_WITHOUT_OS_INTEGRATION,
-                proto::INSTALLED_WITH_OS_INTEGRATION});
+  interaction.installed =
+      registrar.AppMatches(*app_id, WebAppFilter::InstalledInChrome());
   auto install_source =
       provider->registrar_unsafe().GetLatestAppInstallSource(*app_id);
   if (install_source) {
@@ -70,7 +69,8 @@ void EmitUkmMetricsForTab(tabs::TabInterface* tab) {
 #else
   interaction.captures_links = registrar.CapturesLinksInScope(*app_id);
 #endif
-  interaction.promotable = !registrar.IsDiyApp(*app_id);
+  interaction.promotable =
+      registrar.AppMatches(*app_id, WebAppFilter::IsCraftedApp());
 
   if (tab->IsActivated() && browser->IsActive()) {
     interaction.foreground_duration = base::Seconds(kTimerIntervalInSeconds);
@@ -101,7 +101,7 @@ void MaybeEmitUkmMetricsForTab(tabs::TabInterface* tab, IdSet& emitted_ids) {
   }
 
   // We only emit UKM metrics a single time for a given AppId.
-  if (base::Contains(emitted_ids, *app_id)) {
+  if (emitted_ids.contains(*app_id)) {
     return;
   }
 
@@ -142,7 +142,7 @@ void MaybeEmitUkmMetricsForPromotable(
     const webapps::WebAppBannerData& banner_data,
     IdSet& emitted_ids) {
   const GURL& url = banner_data.manifest().start_url;
-  if (base::Contains(emitted_ids, url.spec())) {
+  if (emitted_ids.contains(url.spec())) {
     return;
   }
 
@@ -232,7 +232,8 @@ void SamplingMetricsProvider::EmitMetrics() {
 
           std::optional<mojom::UserDisplayMode> user_display_mode =
               registrar.GetAppUserDisplayMode(*app_id);
-          bool installed_by_user = registrar.WasInstalledByUser(*app_id);
+          bool installed_by_user =
+              registrar.AppMatches(*app_id, WebAppFilter::InstalledByUser());
           if (user_display_mode == mojom::UserDisplayMode::kBrowser) {
             ++tabbed_pwas_user_display_mode_browser_count;
             if (installed_by_user) {

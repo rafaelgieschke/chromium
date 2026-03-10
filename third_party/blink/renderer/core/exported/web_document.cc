@@ -32,9 +32,11 @@
 
 #include "base/containers/to_vector.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/unguessable_token.h"
 #include "net/storage_access_api/status.h"
 #include "services/network/public/mojom/referrer_policy.mojom-blink.h"
 #include "third_party/blink/public/common/loader/referrer_utils.h"
+#include "third_party/blink/public/mojom/content_extraction/script_tools.mojom-blink.h"
 #include "third_party/blink/public/platform/web_distillability.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/web/web_dom_event.h"
@@ -71,9 +73,11 @@
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/script_tools/model_context_supplement.h"
+#include "third_party/blink/renderer/core/script_tools/script_tool_types.h"
 #include "third_party/blink/renderer/core/speculation_rules/document_speculation_rules.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "ui/accessibility/ax_mode.h"
@@ -83,6 +87,28 @@ namespace {
 static const blink::WebStyleSheetKey GenerateStyleSheetKey() {
   static unsigned counter = 0;
   return blink::String::Number(++counter);
+}
+
+blink::WebScriptToolErrorCode ToWebScriptToolErrorCode(
+    blink::ScriptToolErrorCode code) {
+  switch (code) {
+    case blink::ScriptToolErrorCode::kInvalidToolName:
+      return blink::WebScriptToolErrorCode::kInvalidToolName;
+    case blink::ScriptToolErrorCode::kInvalidInputArguments:
+      return blink::WebScriptToolErrorCode::kInvalidInputArguments;
+    case blink::ScriptToolErrorCode::kMissingRequiredSubmitButton:
+      return blink::WebScriptToolErrorCode::kMissingRequiredSubmitButton;
+    case blink::ScriptToolErrorCode::kToolInvocationFailed:
+      return blink::WebScriptToolErrorCode::kToolInvocationFailed;
+    case blink::ScriptToolErrorCode::kToolCancelled:
+      return blink::WebScriptToolErrorCode::kToolCancelled;
+  }
+}
+
+blink::WebScriptToolError ToWebScriptToolError(
+    const blink::ScriptToolError& error) {
+  return blink::WebScriptToolError(ToWebScriptToolErrorCode(error.code),
+                                   blink::WebString(error.message));
 }
 
 }  // namespace
@@ -385,7 +411,9 @@ void WebDocument::InitiatePreview(const WebURL& url) {
   }
 
   KURL kurl(url);
-  DocumentSpeculationRules::From(*document).InitiatePreview(kurl);
+  if (kurl.ProtocolIsInHttpFamily()) {
+    DocumentSpeculationRules::From(*document).InitiatePreview(kurl);
+  }
 }
 
 void WebDocument::SnapshotAccessibilityTree(
@@ -406,15 +434,92 @@ size_t WebDocument::ActiveResourceRequestCount() const {
   return ConstUnwrap<Document>()->Fetcher()->ActiveRequestCount();
 }
 
-void WebDocument::ExecuteScriptTool(
+std::optional<uint32_t> WebDocument::ExecuteScriptTool(
     const WebString& name,
     const WebString& input_arguments,
-    ScriptToolExecutedCallback tool_executed_cb) {
+    WebScriptToolResultCallback tool_result_cb) {
   if (auto* model_context = ModelContextSupplement::modelContext(
           *Unwrap<Document>()->domWindow()->navigator())) {
-    model_context->ExecuteTool(name, input_arguments,
-                               std::move(tool_executed_cb));
+    auto web_tool_declaration = std::make_unique<WebScriptToolDeclaration>();
+    if (auto script_tool_declaration =
+            model_context->GetScriptToolDeclaration(name)) {
+      web_tool_declaration->description =
+          WebString(script_tool_declaration->description);
+      web_tool_declaration->input_schema =
+          WebString(script_tool_declaration->input_schema);
+      web_tool_declaration->read_only = script_tool_declaration->read_only;
+    }
+    // TODO(481899636): PLUMB SIGNAL TO THE BROWSER SIDE!
+    return model_context->ExecuteTool(
+        name, input_arguments,
+        /* signal= */ nullptr,
+        blink::BindOnce(
+            [](WebScriptToolResultCallback tool_result_cb,
+               std::unique_ptr<WebScriptToolDeclaration> web_tool_declaration,
+               base::expected<String, ScriptToolError> result) {
+              if (result.has_value()) {
+                std::move(tool_result_cb)
+                    .Run(std::move(web_tool_declaration),
+                         base::expected<WebString, WebScriptToolError>(
+                             WebString(*result)));
+              } else {
+                std::move(tool_result_cb)
+                    .Run(
+                        std::move(web_tool_declaration),
+                        base::unexpected(ToWebScriptToolError(result.error())));
+              }
+            },
+            std::move(tool_result_cb), std::move(web_tool_declaration)));
   }
+  return std::nullopt;
+}
+
+void WebDocument::CancelScriptTool(uint32_t execution_id) {
+  if (auto* model_context = ModelContextSupplement::modelContext(
+          *Unwrap<Document>()->domWindow()->navigator())) {
+    model_context->CancelTool(execution_id);
+  }
+}
+
+void WebDocument::GetCrossDocumentScriptToolResult(
+    CrossDocumentScriptToolResultCallback result_callback) {
+  if (auto* model_context = ModelContextSupplement::modelContext(
+          *Unwrap<Document>()->domWindow()->navigator())) {
+    model_context->GetCrossDocumentScriptToolResult(blink::BindOnce(
+        [](CrossDocumentScriptToolResultCallback original_callback,
+           String result) {
+          std::move(original_callback).Run(WebString(result));
+        },
+        std::move(result_callback)));
+  }
+}
+
+bool WebDocument::IsAutofillEventEnabled() const {
+  const Document* document = ConstUnwrap<Document>();
+  CHECK(document);
+  return RuntimeEnabledFeatures::AutofillEventEnabled(
+      document->GetExecutionContext());
+}
+
+void WebDocument::DispatchAutofillEvent(
+    std::vector<std::pair<WebFormControlElement, WebString>> field_data,
+    const base::UnguessableToken& fill_id,
+    bool supports_refill) {
+  Document* document = Unwrap<Document>();
+  CHECK(document);
+
+  HeapVector<std::pair<Member<Element>, String>> converted_field_data;
+  for (auto& pair : field_data) {
+    if (pair.first.IsNull()) {
+      continue;
+    }
+    HTMLFormControlElement* control_element = pair.first;
+    converted_field_data.push_back(
+        std::make_pair(control_element, String(std::move(pair.second))));
+  }
+
+  document->DispatchAutofillEvent(std::move(converted_field_data), fill_id,
+                                  supports_refill);
 }
 
 }  // namespace blink

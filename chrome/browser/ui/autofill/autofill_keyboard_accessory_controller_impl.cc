@@ -93,6 +93,7 @@ Suggestion::Text FormatLabelsByFillingProduct(
     case FillingProduct::kDataList:
     case FillingProduct::kOneTimePassword:
     case FillingProduct::kPasskey:
+    case FillingProduct::kAtMemory:
     case FillingProduct::kNone:
       return Suggestion::Text(label);
   }
@@ -515,6 +516,7 @@ void AutofillKeyboardAccessoryControllerImpl::OnDeletionDialogClosed(
     case FillingProduct::kIdentityCredential:
     case FillingProduct::kDataList:
     case FillingProduct::kOneTimePassword:
+    case FillingProduct::kAtMemory:
       break;
   }
 
@@ -553,7 +555,8 @@ void AutofillKeyboardAccessoryControllerImpl::Show(
     UiSessionId ui_session_id,
     std::vector<Suggestion> suggestions,
     AutofillSuggestionTriggerSource trigger_source,
-    AutoselectFirstSuggestion autoselect_first_suggestion) {
+    AutoselectFirstSuggestion autoselect_first_suggestion,
+    AutofillSuggestionsIgnoreFocusLoss ignore_focus_loss) {
   ui_session_id_ = ui_session_id;
   suggestions_filling_product_ =
       !suggestions.empty() && IsStandaloneSuggestionType(suggestions[0].type)

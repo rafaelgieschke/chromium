@@ -15,7 +15,6 @@
 #include "base/scoped_multi_source_observation.h"
 #include "base/scoped_observation.h"
 #include "base/values.h"
-#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/policy/value_provider/policy_value_provider.h"
 #include "chrome/browser/profiles/profile_observer.h"
@@ -57,13 +56,13 @@ class PolicyValueAndStatusAggregator : public PolicyValueProvider::Observer,
 
   // Returns the dictionary containing the policy metadata available for the
   // platform.
-  base::Value::Dict GetAggregatedPolicyStatus();
+  base::DictValue GetAggregatedPolicyStatus();
 
   // Returns the dictionary containing policy names.
-  base::Value::Dict GetAggregatedPolicyNames();
+  base::DictValue GetAggregatedPolicyNames();
 
   // Returns the available policy values.
-  base::Value::Dict GetAggregatedPolicyValues();
+  base::DictValue GetAggregatedPolicyValues();
 
   // Refreshes the policy values by calling Refresh() on all
   // PolicyValueProviders and notifies the observers about policy value and

@@ -31,10 +31,6 @@ bool FocusgroupController::HandleArrowKeyboardEvent(KeyboardEvent* event,
   ExecutionContext* context = frame->DomWindow()->GetExecutionContext();
   DCHECK(RuntimeEnabledFeatures::FocusgroupEnabled(context));
 
-  FocusgroupDirection direction = utils::FocusgroupDirectionForEvent(event);
-  if (direction == FocusgroupDirection::kNone)
-    return false;
-
   if (!frame->GetDocument())
     return false;
 
@@ -43,6 +39,27 @@ bool FocusgroupController::HandleArrowKeyboardEvent(KeyboardEvent* event,
     // The FocusgroupController shouldn't handle this arrow key event when the
     // focus already moved to a different element than where it came from. The
     // webpage likely had a key-handler that moved the focus.
+    return false;
+  }
+
+  // Resolve the logical direction from the focused element's writing mode.
+  // This means arrow keys follow the element's local writing direction: in an
+  // RTL context ArrowLeft is forward-inline, in vertical-rl ArrowDown is
+  // forward-inline, etc.
+  FocusgroupDirection direction =
+      utils::FocusgroupDirectionForEvent(event, *focused);
+  if (direction == FocusgroupDirection::kNone) {
+    return false;
+  }
+
+  // If the currently focused element is (or is within) an arrow key handler
+  // for its focusgroup owner on the navigation axis, do not run focusgroup
+  // arrow navigation. The interactive control's native arrow-key behavior
+  // should take precedence. Note: Unlike some controls (e.g., text inputs),
+  // scroll containers don't consume arrow key events; they scroll but allow
+  // the event to propagate. This check is necessary to prevent focusgroup
+  // navigation from interfering with native scrolling.
+  if (utils::IsInArrowKeyHandler(*focused, direction)) {
     return false;
   }
 
@@ -150,7 +167,8 @@ bool FocusgroupController::AdvanceInGrid(Element* initial_element,
     // 3. Only set the focus on grid focusgroup items. If we're on a cell that
     // isn't a grid focusgroup item, keep going to the next/previous element
     // until we find a valid item or we exhausted all the options.
-    if (utils::IsGridFocusgroupItem(current)) {
+    if (utils::IsGridFocusgroupItem(current) &&
+        current->IsKeyboardFocusableSlow()) {
       Focus(current, direction);
       return true;
     }

@@ -119,7 +119,7 @@ TEST(CookieManagerTraitsTest, Roundtrips_CookieAccessResult) {
             copied.is_allowed_to_access_secure_cookies);
 }
 
-TEST(CookieManagerTraitsTest, Rountrips_CookieWithAccessResult) {
+TEST(CookieManagerTraitsTest, Roundtrips_CookieWithAccessResult) {
   auto original_cookie = net::CanonicalCookie::CreateUnsafeCookieForTesting(
       "A", "B", "x.y", "/path", base::Time(), base::Time(), base::Time(),
       base::Time(),
@@ -382,7 +382,6 @@ TEST(CookieManagerTraitsTest, Roundtrips_CookiePartitionKey) {
            net::CookiePartitionKey::FromURLForTesting(url, kCrossSite),
            net::CookiePartitionKey::FromURLForTesting(url, kSameSite, nonce),
            net::CookiePartitionKey::FromURLForTesting(url, kCrossSite, nonce),
-           net::CookiePartitionKey::FromScript(),
        }) {
     // `copied` is about to be overwritten so it doesn't matter what it is,
     // but CookiePartitionKey doesn't provide a default ctor, so we have to

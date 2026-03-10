@@ -23,6 +23,7 @@
 #include "ash/shell.h"
 #include "ash/test/active_window_waiter.h"
 #include "ash/webui/settings/public/constants/routes.mojom.h"
+#include "ash/webui/settings/public/constants/routes_util.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/memory/raw_ptr.h"
@@ -40,7 +41,6 @@
 #include "base/test/test_future.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
-#include "chrome/browser/apps/app_service/app_launch_params.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
 #include "chrome/browser/apps/app_service/chrome_app_deprecation/chrome_app_deprecation.h"
@@ -81,14 +81,12 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
 #include "chrome/browser/web_applications/test/web_app_install_test_utils.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_profile.h"
@@ -100,6 +98,7 @@
 #include "components/app_constants/constants.h"
 #include "components/browser_sync/browser_sync_switches.h"
 #include "components/prefs/pref_service.h"
+#include "components/services/app_service/public/cpp/app_launch_params.h"
 #include "components/services/app_service/public/cpp/package_id.h"
 #include "components/session_manager/core/session_manager.h"
 #include "components/user_manager/test_helper.h"
@@ -285,7 +284,7 @@ IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest, ShowAppInfo) {
       settings_app->tab_strip_model()->GetActiveWebContents()));
 
   EXPECT_EQ(
-      chrome::GetOSSettingsUrl(
+      chromeos::settings::GetOSSettingsUrl(
           base::StrCat({chromeos::settings::mojom::kAppDetailsSubpagePath,
                         "?id=", app->id()})),
       settings_app->tab_strip_model()->GetActiveWebContents()->GetVisibleURL());
@@ -337,7 +336,7 @@ class SelfDestroyAppItem : public ChromeAppListItem {
 };
 
 // Verifies that activating an app item which destroys itself during activation
-// will not cause crash (see https://crbug.com/990282).
+// will not cause crash (see https://crbug.com/41474255).
 IN_PROC_BROWSER_TEST_F(AppListClientImplBrowserTest, ActivateSelfDestroyApp) {
   AppListClientImpl* client = AppListClientImpl::GetInstance();
   client->UpdateProfile();

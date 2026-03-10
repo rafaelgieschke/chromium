@@ -9,7 +9,6 @@
 <translation id="101823271612280837">ਰਿਕਾਰਡਿੰਗ ਬੰਦ ਹੋ ਗਈ। ਟੈਬਲੈੱਟ ਮੋਡ ਵਿੱਚ ਗੇਮ ਡੈਸ਼ਬੋਰਡ ਦੀ ਵਰਤੋਂ ਨਹੀਂ ਕੀਤੀ ਜਾ ਸਕਦੀ।</translation>
 <translation id="1024364763893396229">ਆਪਣਾ <ph name="NAME" /> ਰੱਖਿਅਤ ਕਰੋ</translation>
 <translation id="1032891413405719768">ਸਟਾਈਲਸ ਦੀ ਬੈਟਰੀ ਘੱਟ ਹੈ</translation>
-<translation id="1036073649888683237">ਸੂਚਨਾਵਾਂ ਦਾ ਪ੍ਰਬੰਧਨ ਕਰਨ ਲਈ, ਸੈਟਿੰਗਾਂ 'ਤੇ ਜਾਓ</translation>
 <translation id="1036348656032585052">ਬੰਦ ਕਰੋ</translation>
 <translation id="1037492556044956303"><ph name="DEVICE_NAME" /> ਨੂੰ ਸ਼ਾਮਲ ਕੀਤਾ ਗਿਆ</translation>
 <translation id="1038106730571050514">ਸੁਝਾਅ ਦਿਖਾਓ</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">ਹਾਲੀਆ ਫ਼ੋਟੋ <ph name="TOTAL_COUNT" /> ਵਿੱਚੋਂ <ph name="INDEX" />।</translation>
 <translation id="2201687081523799384">Google Tasks ਨੂੰ ਸਮੇਟੋ</translation>
 <translation id="2208323208084708176">ਯੂਨੀਫਾਈਡ ਡੈਸਕਟਾਪ ਮੋਡ</translation>
-<translation id="2210311543574621570">Ctrl + V ਦਬਾ ਕੇ ਰੱਖਣ 'ਤੇ ਤੁਹਾਨੂੰ ਕਲਿੱਪਬੋਰਡ ਦਿਖਾਈ ਦੇਵੇਗਾ। ਤੁਸੀਂ chrome://flags 'ਤੇ ਜਾ ਕੇ #clipboard-history-longpress ਫਲੈਗ ਨੂੰ ਬੰਦ ਕਰ ਕੇ ਇਸ ਸ਼ਾਰਟਕੱਟ ਨੂੰ ਬੰਦ ਕਰ ਸਕਦੇ ਹੋ।</translation>
 <translation id="2215920961700443347">ਇੰਟਰਨੈੱਟ ਨਹੀਂ ਹੈ। ਇੰਟਰਨੈੱਟ ਨਾਲ ਕਨੈਕਟ ਕਰ ਕੇ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।</translation>
 <translation id="2222841058024245321">ਡੈਸਕ 7</translation>
 <translation id="2223384056430485343">ਸਪਲਿਟ ਸਕ੍ਰੀਨ ਵਿੱਚ</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">ਐਪ ਇੰਸਟੌਲ ਕਰੋ</translation>
 <translation id="2482878487686419369">ਸੂਚਨਾਵਾਂ</translation>
 <translation id="2484513351006226581">ਕੀ-ਬੋਰਡ ਖਾਕਾ ਬਦਲਣ ਲਈ <ph name="KEYBOARD_SHORTCUT" /> ਦਬਾਓ।</translation>
+<translation id="2485422356828889247">ਅਣਸਥਾਪਤ ਕਰੋ</translation>
 <translation id="2486214324139475545"><ph name="DESK_NAME" /> ਦੀ ਪੂਰਵ-ਝਲਕ। ਕਿਰਿਆਸ਼ੀਲ ਡੈਸਕ।</translation>
 <translation id="2486405091093637109">"<ph name="DISPLAY_NAME" />" ਨੂੰ <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz) ਰੈਜ਼ੋਲਿਊਸ਼ਨ 'ਤੇ ਬਦਲ ਦਿੱਤਾ ਗਿਆ। ਤਸਦੀਕ ਕਰਨ ਤੋਂ ਬਿਨਾਂ, ਪਿਛਲੀਆਂ ਸੈਟਿੰਗਾਂ ਨੂੰ <ph name="TIMEOUT_SECONDS" /> ਵਿੱਚ ਮੁੜ-ਬਹਾਲ ਕੀਤਾ ਜਾਵੇਗਾ।</translation>
 <translation id="2487915095798731898">ਸ਼ਾਮਲ ਹੋਵੋ</translation>
@@ -2196,7 +2195,6 @@
 <translation id="8241650983304689286">ਨਵੇਂ ਸਪਲਿਟ ਦ੍ਰਿਸ਼ ਵਿੱਚ ਟੈਬ ਸ਼ਾਮਲ ਕਰੋ</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, ਸਿਗਨਲ ਦੀ ਤੀਬਰਤਾ <ph name="SIGNAL_STRENGTH" />, ਫ਼ੋਨ ਦੀ ਬੈਟਰੀ <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">ਸਾਰੀ Google Drive ਸਮੱਗਰੀ ਦਿਖਾਓ</translation>
-<translation id="8257510091797044096">ਆਪਣੇ ਡੀਵਾਈਸ ਦਾ ਸੈੱਟਅੱਪ ਕਰੋ</translation>
 <translation id="8261506727792406068">ਮਿਟਾਓ</translation>
 <translation id="8262312463845990408">ਪਲੇਬੈਕ ਨੂੰ ਟੌਗਲ ਕਰੋ</translation>
 <translation id="8268302343625273732">Google Classroom ਵਿੱਚ ਸਾਰੀਆਂ ਅਸਾਈਨਮੈਂਟਾਂ ਦੇਖੋ</translation>

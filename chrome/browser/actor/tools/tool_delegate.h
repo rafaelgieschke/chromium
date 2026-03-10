@@ -10,9 +10,11 @@
 
 #include "base/containers/flat_map.h"
 #include "base/functional/callback_forward.h"
+#include "base/memory/weak_ptr.h"
 #include "chrome/browser/actor/site_policy.h"
 #include "chrome/common/actor_webui.mojom.h"
-#include "components/autofill/core/browser/integrators/glic/actor_form_filling_types.h"
+#include "chrome/common/buildflags.h"
+#include "components/autofill/core/browser/integrators/actor/actor_form_filling_types.h"
 #include "components/password_manager/core/browser/actor_login/actor_login_types.h"
 #include "url/gurl.h"
 
@@ -37,6 +39,7 @@ class Image;
 namespace actor {
 
 class AggregatedJournal;
+class AutofillSelectionDialogEventHandler;
 
 // Provides tools with functionality implemented by the code invoking the tool.
 class ToolDelegate {
@@ -49,7 +52,6 @@ class ToolDelegate {
   // Returns the journal so that tools may log information related to their
   // execution.
   virtual AggregatedJournal& GetJournal() = 0;
-
   // Returns the login service associated with the task.
   virtual actor_login::ActorLoginService& GetActorLoginService() = 0;
 
@@ -117,6 +119,7 @@ class ToolDelegate {
       webui::mojom::SelectAutofillSuggestionsDialogResponsePtr)>;
   virtual void RequestToShowAutofillSuggestions(
       std::vector<autofill::ActorFormFillingRequest> requests,
+      base::WeakPtr<AutofillSelectionDialogEventHandler> event_handler,
       AutofillSuggestionSelectedCallback callback) = 0;
 
   // During tool execution, the tool becomes blocked on the user's attention.

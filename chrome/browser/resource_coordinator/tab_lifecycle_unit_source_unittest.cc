@@ -38,7 +38,7 @@
 #include "components/performance_manager/test_support/graph_impl.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
-#include "components/tabs/public/split_tab_visual_data.h"
+#include "components/split_tabs/split_tab_visual_data.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/mock_web_contents_observer.h"
@@ -674,7 +674,7 @@ TEST_F(TabLifecycleUnitSourceTest, UpdateMemorySavingsOnMultipleDiscards) {
           tab_strip_model_->GetWebContentsAt(1));
   EXPECT_NE(pre_discard_resource_usage, nullptr);
   EXPECT_EQ(pre_discard_resource_usage->memory_footprint_estimate(),
-            base::KiB(100));
+            base::KiBU(100));
 
   // Navigate the tab so that it is no longer discarded.
   EXPECT_CALL(tab_observer_, MockOnLifecycleUnitStateChanged(
@@ -699,7 +699,7 @@ TEST_F(TabLifecycleUnitSourceTest, UpdateMemorySavingsOnMultipleDiscards) {
       tab_strip_model_->GetWebContentsAt(1));
   EXPECT_NE(pre_discard_resource_usage, nullptr);
   EXPECT_EQ(pre_discard_resource_usage->memory_footprint_estimate(),
-            base::KiB(500));
+            base::KiBU(500));
   ::testing::Mock::VerifyAndClear(&tab_observer_);
 
   // Expect notifications when tabs are closed.
@@ -715,7 +715,7 @@ TEST_F(TabLifecycleUnitSourceTest, DetachWebContents_External) {
   DetachWebContentsTest(LifecycleUnitDiscardReason::EXTERNAL);
 }
 
-// Regression test for https://crbug.com/818454. Previously, TabLifecycleUnits
+// Regression test for https://crbug.com/40090674. Previously, TabLifecycleUnits
 // were destroyed from TabStripModelObserver::TabClosingAt(). If a tab was
 // detached (TabStripModel::DetachWebContentsAt) and its WebContents destroyed,
 // the TabLifecycleUnit was never destroyed. This was solved by giving ownership

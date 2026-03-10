@@ -280,7 +280,7 @@ export class HistoryEmbeddingsElement extends HistoryEmbeddingsElementBase {
     if (!this.answerSource_) {
       return undefined;
     }
-    const sourceUrl = new URL(this.answerSource_.url.url);
+    const sourceUrl = new URL(this.answerSource_.url);
     const textDirectives = this.answerSource_.answerData?.answerTextDirectives;
     if (textDirectives && textDirectives.length > 0) {
       // Only the first directive is used for now until there's a way to show
@@ -294,7 +294,7 @@ export class HistoryEmbeddingsElement extends HistoryEmbeddingsElementBase {
 
   protected getFavicon_(item: SearchResultItem|undefined): string {
     return getFaviconForPageURL(
-        item?.url.url || '', /*isSyncedUrlForHistoryUi=*/ true);
+        item?.url || '', /*isSyncedUrlForHistoryUi=*/ true);
   }
 
   protected getHeadingText_(): string {
@@ -366,12 +366,16 @@ export class HistoryEmbeddingsElement extends HistoryEmbeddingsElementBase {
     }
   }
 
-  protected onAnswerLinkContextMenu_(e: MouseEvent) {
+  protected onAnswerLinkContextmenu_(e: MouseEvent) {
     this.fire('answer-context-menu', {
       item: this.answerSource_,
       x: e.clientX,
       y: e.clientY,
     });
+  }
+
+  protected onAnswerLinkAuxclick_(e: MouseEvent) {
+    this.onAnswerLinkClick_(e);
   }
 
   protected onAnswerLinkClick_(e: MouseEvent) {
@@ -417,7 +421,7 @@ export class HistoryEmbeddingsElement extends HistoryEmbeddingsElementBase {
     this.$.sharedMenu.get().close();
   }
 
-  protected onResultContextMenu_(e: MouseEvent) {
+  protected onResultContextmenu_(e: MouseEvent) {
     assert(this.searchResult_);
     const index = Number((e.currentTarget as HTMLElement).dataset['index']);
     this.fire('result-context-menu', {
@@ -425,6 +429,10 @@ export class HistoryEmbeddingsElement extends HistoryEmbeddingsElementBase {
       x: e.clientX,
       y: e.clientY,
     });
+  }
+
+  protected onResultAuxclick_(e: MouseEvent) {
+    this.onResultClick_(e);
   }
 
   protected onResultClick_(e: MouseEvent) {

@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "base/containers/contains.h"
 #include "base/functional/callback_helpers.h"
 #include "base/test/bind.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
@@ -73,7 +72,7 @@ class ServiceWorkerContextCoreTest : public testing::Test,
     blink::ServiceWorkerStatusCode status;
     int64_t registration_id;
     context()->RegisterServiceWorker(
-        script, key, options, blink::mojom::FetchClientSettingsObject::New(),
+        script, key, options, CreateFetchClientSettingsObject(),
         base::BindLambdaForTesting(
             [&](blink::ServiceWorkerStatusCode result_status,
                 const std::string& /* status_message */,
@@ -201,7 +200,7 @@ TEST_F(ServiceWorkerContextCoreTest, FailureInfo) {
   context()->UpdateVersionFailureCount(kVersionId,
                                        blink::ServiceWorkerStatusCode::kOk);
   EXPECT_EQ(0, context()->GetVersionFailureCount(kVersionId));
-  EXPECT_FALSE(base::Contains(context()->failure_counts_, kVersionId));
+  EXPECT_FALSE(context()->failure_counts_.contains(kVersionId));
 }
 
 TEST_F(ServiceWorkerContextCoreTest, DeleteForStorageKey) {
@@ -240,7 +239,7 @@ TEST_F(ServiceWorkerContextCoreTest, DeleteForStorageKeyAbortsQueuedJobs) {
   base::RunLoop register_job_loop;
   blink::ServiceWorkerStatusCode register_job_status;
   context()->RegisterServiceWorker(
-      script, key, options, blink::mojom::FetchClientSettingsObject::New(),
+      script, key, options, CreateFetchClientSettingsObject(),
       base::BindLambdaForTesting(
           [&](blink::ServiceWorkerStatusCode result_status,
               const std::string& /* status_message */,
@@ -290,7 +289,7 @@ TEST_F(ServiceWorkerContextCoreTest,
   base::RunLoop register_job_loop;
   blink::ServiceWorkerStatusCode register_job_status;
   context()->RegisterServiceWorker(
-      script, key, options, blink::mojom::FetchClientSettingsObject::New(),
+      script, key, options, CreateFetchClientSettingsObject(),
       base::BindLambdaForTesting(
           [&](blink::ServiceWorkerStatusCode result_status,
               const std::string& /* status_message */,

@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/tab_sharing/tab_sharing_status_message_view.h"
 
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/render_frame_host.h"
@@ -13,10 +14,12 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/views/accessibility/view_accessibility.h"
+#include "ui/views/controls/link.h"
 #include "ui/views/controls/separator.h"
 #include "ui/views/layout/flex_layout.h"
 #include "ui/views/metadata/view_factory.h"
 #include "ui/views/view_class_properties.h"
+#include "ui/views/view_utils.h"
 
 namespace {
 using EndpointInfo = ::TabSharingStatusMessageView::EndpointInfo;
@@ -25,7 +28,8 @@ using MessageInfo = ::TabSharingStatusMessageView::MessageInfo;
 using TabRole = ::TabSharingInfoBarDelegate::TabRole;
 
 constexpr auto kButtonInsets = gfx::Insets::VH(2, 8);
-constexpr auto kRefreshSeparatorInsets = gfx::Insets::TLBR(0, 12, 0, 12);
+constexpr auto kRefreshButtonInsets = gfx::Insets::VH(4, 8);
+constexpr auto kRefreshSeparatorInsets = gfx::Insets::TLBR(12, 12, 12, 0);
 constexpr auto kSeparatorInsets = gfx::Insets::TLBR(0, 16, 0, 0);
 std::vector<std::u16string> EndpointInfosToStrings(
     const std::vector<EndpointInfo>& endpoint_infos) {
@@ -261,6 +265,22 @@ gfx::Size TabSharingStatusMessageView::GetMinimumSize() const {
   return gfx::Size();
 }
 
+void TabSharingStatusMessageView::OnThemeChanged() {
+  views::View::OnThemeChanged();
+  const auto* cp = GetColorProvider();
+  const SkColor text_color = cp->GetColor(kColorInfoBarForeground);
+  const SkColor background_color = cp->GetColor(kColorInfoBarBackground);
+
+  for (views::View* child : children()) {
+    auto* label = views::AsViewClass<views::Label>(child);
+    if (label && !views::IsViewClass<views::Link>(child)) {
+      label->SetEnabledColor(text_color);
+      label->SetBackgroundColor(background_color);
+      label->SetAutoColorReadabilityEnabled(false);
+    }
+  }
+}
+
 void TabSharingStatusMessageView::SetupMessage(MessageInfo info) {
   // Format the message text and retrieve the offsets to where the replacements
   // should go.
@@ -344,11 +364,13 @@ void TabSharingStatusMessageView::AddButton(
   button->SetStyle(ui::ButtonStyle::kTonal);
 
   if (base::FeatureList::IsEnabled(features::kInfobarRefresh)) {
-    button->SetCustomPadding(gfx::Insets::VH(4, 12));
+    button->SetCustomPadding(kRefreshButtonInsets);
     button->SetProperty(views::kCrossAxisAlignmentKey,
                         views::LayoutAlignment::kCenter);
+    button->SetBgColorIdOverride(ui::kColorSysBaseContainerElevated);
   } else {
     button->SetCustomPadding(kButtonInsets);
+    button->SetBgColorIdOverride(ui::kColorSysNeutralContainer);
   }
   button->SetTextColor(views::Button::ButtonState::STATE_NORMAL,
                        ui::kColorLinkForeground);
@@ -356,7 +378,6 @@ void TabSharingStatusMessageView::AddButton(
                        ui::kColorLinkForeground);
   button->SetTextColor(views::Button::ButtonState::STATE_PRESSED,
                        ui::kColorLinkForeground);
-  button->SetBgColorIdOverride(ui::kColorSysNeutralContainer);
   button->SetLabelStyle(views::style::STYLE_BODY_5_MEDIUM);
   button->SetProperty(
       views::kFlexBehaviorKey,

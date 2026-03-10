@@ -30,6 +30,7 @@
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_util.h"
 #include "extensions/browser/image_loader.h"
+#include "extensions/browser/ui_util.h"
 #include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_features.h"
@@ -150,7 +151,7 @@ std::u16string ExtensionInstallPrompt::Prompt::GetDialogTitle() const {
         return l10n_util::GetStringFUTF16(
             IDS_EXTENSION_EXTERNAL_INITIAL_INSTALL_PROMPT_TITLE_EXTENSION,
             initial_extensions_provider_name_,
-            extensions::util::GetFixupExtensionNameForUIDisplay(
+            extensions::ui_util::GetFixupExtensionNameForUIDisplay(
                 extension_->name()));
       } else {
         id = IDS_EXTENSION_EXTERNAL_INSTALL_PROMPT_TITLE_EXTENSION;
@@ -168,14 +169,17 @@ std::u16string ExtensionInstallPrompt::Prompt::GetDialogTitle() const {
     case EXTENSION_PENDING_REQUEST_PROMPT:
       id = IDS_EXTENSION_PENDING_REQUEST_PROMPT_TITLE;
       break;
+    case EXTENSION_PARENT_APPROVAL_PROMPT:
+      id = IDS_EXTENSION_PARENT_APPROVAL_PROMPT_TITLE;
+      break;
     case UNSET_PROMPT_TYPE:
     case NUM_PROMPT_TYPES:
       NOTREACHED();
   }
 
   return l10n_util::GetStringFUTF16(
-      id,
-      extensions::util::GetFixupExtensionNameForUIDisplay(extension_->name()));
+      id, extensions::ui_util::GetFixupExtensionNameForUIDisplay(
+              extension_->name()));
 }
 
 int ExtensionInstallPrompt::Prompt::GetDialogButtons() const {
@@ -234,6 +238,9 @@ std::u16string ExtensionInstallPrompt::Prompt::GetAcceptButtonLabel() const {
     case EXTENSION_PENDING_REQUEST_PROMPT:
       // Pending request prompt doesn't have accept button.
       break;
+    case EXTENSION_PARENT_APPROVAL_PROMPT:
+      id = IDS_PARENT_PERMISSION_PROMPT_APPROVE_BUTTON;
+      break;
     case UNSET_PROMPT_TYPE:
     case NUM_PROMPT_TYPES:
       NOTREACHED();
@@ -261,6 +268,9 @@ std::u16string ExtensionInstallPrompt::Prompt::GetAbortButtonLabel() const {
     case EXTENSION_PENDING_REQUEST_PROMPT:
       id = IDS_CLOSE;
       break;
+    case EXTENSION_PARENT_APPROVAL_PROMPT:
+      id = IDS_PARENT_PERMISSION_PROMPT_CANCEL_BUTTON;
+      break;
     case UNSET_PROMPT_TYPE:
     case NUM_PROMPT_TYPES:
       NOTREACHED();
@@ -287,6 +297,9 @@ std::u16string ExtensionInstallPrompt::Prompt::GetPermissionsHeading() const {
       break;
     case REPAIR_PROMPT:
       id = IDS_EXTENSION_PROMPT_CAN_ACCESS;
+      break;
+    case EXTENSION_PARENT_APPROVAL_PROMPT:
+      id = IDS_EXTENSION_PROMPT_REQUESTS_PERMISSIONS;
       break;
     case UNSET_PROMPT_TYPE:
     case NUM_PROMPT_TYPES:
@@ -429,13 +442,13 @@ ExtensionInstallPrompt::GetReEnablePromptTypeForExtension(
 // static
 scoped_refptr<Extension>
 ExtensionInstallPrompt::GetLocalizedExtensionForDisplay(
-    const base::Value::Dict& manifest,
+    const base::DictValue& manifest,
     int flags,
     const std::string& id,
     const std::string& localized_name,
     const std::string& localized_description,
     std::u16string* error) {
-  std::optional<base::Value::Dict> localized_manifest;
+  std::optional<base::DictValue> localized_manifest;
   if (!localized_name.empty() || !localized_description.empty()) {
     localized_manifest = manifest.Clone();
     if (!localized_name.empty()) {
@@ -533,6 +546,31 @@ void ExtensionInstallPrompt::OnInstallSuccess(
 void ExtensionInstallPrompt::OnInstallFailure(
     const extensions::CrxInstallError& error) {
   install_ui_->OnInstallFailure(error);
+}
+
+void ExtensionInstallPrompt::SetUseAppInstalledBubble(bool use_bubble) {
+  install_ui_->SetUseAppInstalledBubble(use_bubble);
+}
+
+void ExtensionInstallPrompt::SetSkipPostInstallUI(bool skip_ui) {
+  install_ui_->SetSkipPostInstallUI(skip_ui);
+}
+
+void ExtensionInstallPrompt::ConfirmInstall(
+    DoneCallback install_callback,
+    const extensions::Extension* extension) {
+  ShowDialog(std::move(install_callback), extension, nullptr,
+             GetDefaultShowDialogCallback());
+}
+
+void ExtensionInstallPrompt::ConfirmReEnable(
+    DoneCallback install_callback,
+    const extensions::Extension* extension,
+    content::BrowserContext* browser_context) {
+  PromptType type =
+      GetReEnablePromptTypeForExtension(browser_context, extension);
+  ShowDialog(std::move(install_callback), extension, nullptr,
+             std::make_unique<Prompt>(type), GetDefaultShowDialogCallback());
 }
 
 std::unique_ptr<ExtensionInstallPrompt::Prompt>

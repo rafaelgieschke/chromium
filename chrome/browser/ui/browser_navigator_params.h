@@ -37,7 +37,6 @@
 #include "components/tab_groups/tab_group_id.h"
 #endif
 
-class Browser;
 class BrowserWindowInterface;
 class Profile;
 
@@ -76,13 +75,11 @@ struct NavigateParams {
       std::unique_ptr<content::WebContents> contents_to_insert);
 #endif
 
-#if !BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_DESKTOP_ANDROID)
   NavigateParams(BrowserWindowInterface* a_browser,
                  const GURL& a_url,
                  ui::PageTransition a_transition);
   NavigateParams(BrowserWindowInterface* a_browser,
                  std::unique_ptr<content::WebContents> contents_to_insert);
-#endif
 
   NavigateParams(Profile* profile,
                  const GURL& a_url,
@@ -263,7 +260,6 @@ struct NavigateParams {
   };
   PathBehavior path_behavior = RESPECT;
 
-#if !BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_DESKTOP_ANDROID)
   // [in]  Specifies a BrowserWindowInterface object where the navigation
   //       could occur or the tab could be added. Navigate() is not obliged to
   //       use this BrowserWindowInterface if it is not compatible with the
@@ -279,7 +275,6 @@ struct NavigateParams {
   //       (Browser objects are deleted when the user closes a visible browser
   //       window).
   raw_ptr<BrowserWindowInterface, AcrossTasksDanglingUntriaged> browser;
-#endif
 
 #if !BUILDFLAG(IS_ANDROID)
   // The group the caller would like the tab to be added to.
@@ -372,6 +367,15 @@ struct NavigateParams {
   // navigation capturing does. Setting this field to `true` will disable all of
   // the behaviors listed in that document.
   bool pwa_navigation_capturing_force_off = false;
+
+  // A text fragment selector (that uses the syntax defined in
+  // https://wicg.github.io/scroll-to-text-fragment/#syntax) to scroll the
+  // matched text into the viewport without applying the standard highlight
+  // styling. This is used for cross-device scroll restoration and is expected
+  // to be set only for trusted navigations .
+  // The string should contain only the selector value (the part after
+  // "text=" in a URL directive), not the "text=" prefix itself.
+  std::optional<std::string> internal_scroll_to_text_fragment;
 
  private:
   NavigateParams();

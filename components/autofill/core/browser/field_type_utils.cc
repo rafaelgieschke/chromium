@@ -36,8 +36,8 @@ size_t AddressLineIndex(FieldType type) {
       base::MakeFixedFlatMap<FieldType, size_t>({{ADDRESS_HOME_LINE1, 0},
                                                  {ADDRESS_HOME_LINE2, 1},
                                                  {ADDRESS_HOME_LINE3, 2}});
-  if (kAddressLineIndex.contains(type)) {
-    return kAddressLineIndex.at(type);
+  if (auto it = kAddressLineIndex.find(type); it != kAddressLineIndex.end()) {
+    return it->second;
   }
   NOTREACHED();
 }
@@ -182,6 +182,13 @@ bool IsDateFieldType(FieldType field_type) {
     case FLIGHT_RESERVATION_CONFIRMATION_CODE:
     case FLIGHT_RESERVATION_ARRIVAL_AIRPORT:
     case FLIGHT_RESERVATION_DEPARTURE_AIRPORT:
+    case ADDRESS_HOME_ZIP_AND_CITY:
+    case ORDER_ID:
+    case ORDER_MERCHANT_NAME:
+    case ORDER_MERCHANT_DOMAIN:
+    case ORDER_PRODUCT_NAMES:
+    case ORDER_ACCOUNT:
+    case ORDER_GRAND_TOTAL:
       return false;
     case CREDIT_CARD_EXP_DATE_2_DIGIT_YEAR:
     case CREDIT_CARD_EXP_DATE_4_DIGIT_YEAR:
@@ -193,6 +200,7 @@ bool IsDateFieldType(FieldType field_type) {
     case NATIONAL_ID_CARD_ISSUE_DATE:
     case KNOWN_TRAVELER_NUMBER_EXPIRATION_DATE:
     case FLIGHT_RESERVATION_DEPARTURE_DATE:
+    case ORDER_DATE:
       return true;
   }
   NOTREACHED();
@@ -328,6 +336,14 @@ bool IsAffixFormatStringEnabledForType(FieldType type) {
     case FLIGHT_RESERVATION_ARRIVAL_AIRPORT:
     case FLIGHT_RESERVATION_DEPARTURE_AIRPORT:
     case FLIGHT_RESERVATION_DEPARTURE_DATE:
+    case ADDRESS_HOME_ZIP_AND_CITY:
+    case ORDER_ID:
+    case ORDER_DATE:
+    case ORDER_MERCHANT_NAME:
+    case ORDER_MERCHANT_DOMAIN:
+    case ORDER_PRODUCT_NAMES:
+    case ORDER_ACCOUNT:
+    case ORDER_GRAND_TOTAL:
       return false;
     case PASSPORT_NUMBER:
     case VEHICLE_VIN:

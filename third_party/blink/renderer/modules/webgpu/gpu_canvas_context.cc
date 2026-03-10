@@ -119,9 +119,19 @@ SkAlphaType GPUCanvasContext::GetAlphaType() const {
 viz::SharedImageFormat GPUCanvasContext::GetSharedImageFormat() const {
   if (!swap_buffers_) {
     return GetN32FormatForCanvas();
-    ;
   }
   return swap_buffers_->Format();
+}
+
+base::ByteSize GPUCanvasContext::AllocatedBufferSize() const {
+  base::ByteSize result;
+  if (resource_provider_) {
+    result += resource_provider_->EstimatedSizeInBytes();
+  }
+  if (swap_buffers_) {
+    result += swap_buffers_->EstimatedSizeInBytes();
+  }
+  return result;
 }
 
 gfx::ColorSpace GPUCanvasContext::GetColorSpace() const {
@@ -151,6 +161,8 @@ void GPUCanvasContext::Reshape(int width, int height) {
   // Steps for canvas context resizing:
   // 1. Replace the drawing buffer of context.
   ReplaceDrawingBuffer(/* destroy_swap_buffers */ false);
+
+  Host()->UpdateMemoryUsage();
 
   // 2. Let configuration be context.[[configuration]]
   // 3. If configuration is not null:
@@ -197,7 +209,7 @@ scoped_refptr<StaticBitmapImage> GPUCanvasContext::GetImage() {
   return SnapshotInternal(front_buffer_texture->GetTexture());
 }
 
-CanvasResourceProviderSharedImage*
+CanvasNon2DResourceProviderSharedImage*
 GPUCanvasContext::GetOrCreateCanvasResourceProvider() {
   auto* provider = resource_provider_.get();
   if (!provider && !did_fail_to_create_resource_provider_) {
@@ -205,10 +217,11 @@ GPUCanvasContext::GetOrCreateCanvasResourceProvider() {
       if (SharedGpuContext::IsGpuCompositingEnabled()) {
         // This code path could be used for compositing so add the necessary
         // shared image usage flags.
-        resource_provider_ = CanvasResourceProvider::CreateWebGPUImageProvider(
-            Host()->Size(), GetSharedImageFormat(), GetAlphaType(),
-            GetColorSpace(), swap_buffers_->GetSharedImageUsagesForDisplay(),
-            Host());
+        resource_provider_ =
+            CanvasNon2DResourceProviderSharedImage::CreateForWebGPU(
+                Host()->Size(), GetSharedImageFormat(), GetAlphaType(),
+                GetColorSpace(),
+                swap_buffers_->GetSharedImageUsagesForDisplay(), Host());
       }
       Host()->UpdateMemoryUsage();
       provider = resource_provider_.get();
@@ -225,11 +238,11 @@ GPUCanvasContext::GetOrCreateCanvasResourceProvider() {
   return provider;
 }
 
-CanvasResourceProviderSharedImage*
-GPUCanvasContext::PaintRenderingResultsToCanvas(
+scoped_refptr<StaticBitmapImage>
+GPUCanvasContext::PaintRenderingResultsToSnapshot(
     SourceDrawingBuffer source_buffer) {
   if (!swap_buffers_) {
-    return resource_provider_.get();
+    return resource_provider_ ? resource_provider_->Snapshot() : nullptr;
   }
 
   if (resource_provider_.get() &&
@@ -247,9 +260,9 @@ GPUCanvasContext::PaintRenderingResultsToCanvas(
     SkColor4f color = alpha_mode_ == V8GPUCanvasAlphaMode::Enum::kOpaque
                           ? SkColors::kBlack
                           : SkColors::kTransparent;
-    resource_provider->Canvas().clear(color);
-    resource_provider->FlushCanvas(FlushReason::kClear);
-    return resource_provider;
+    return resource_provider->DoExternalDrawAndSnapshot(
+        [color](cc::PaintCanvas& canvas) { canvas.clear(color); },
+        ImageOrientationEnum::kDefault);
   }
 
   wgpu::Texture texture;
@@ -266,29 +279,21 @@ GPUCanvasContext::PaintRenderingResultsToCanvas(
     // Create a WebGPU texture backed by the front buffer's SharedImage.
     front_buffer_texture = GetFrontBufferMailboxTexture();
     if (!front_buffer_texture) {
-      return resource_provider;
+      return resource_provider->Snapshot();
     }
 
     texture = front_buffer_texture->GetTexture();
 #endif
   } else {
     if (!texture_) {
-      return resource_provider;
+      return resource_provider->Snapshot();
     }
     texture = texture_->GetHandle();
   }
 
   CopyTextureToResourceProvider(texture, resource_provider);
-  return resource_provider;
-}
 
-scoped_refptr<StaticBitmapImage>
-GPUCanvasContext::PaintRenderingResultsToSnapshot(
-    SourceDrawingBuffer source_buffer) {
-  CanvasResourceProviderSharedImage* provider =
-      PaintRenderingResultsToCanvas(source_buffer);
-
-  return provider ? provider->Snapshot() : nullptr;
+  return resource_provider->Snapshot();
 }
 
 bool GPUCanvasContext::CopyRenderingResultsToVideoFrame(
@@ -411,15 +416,15 @@ void GPUCanvasContext::configure(const GPUCanvasConfiguration* descriptor,
   }
 
   if (!IsContextFormatSupported(descriptor->format().AsEnum())) {
-    exception_state.ThrowTypeError(
+    exception_state.ThrowTypeError(UNSAFE_TODO(
         String::Format("Unsupported canvas context format '%s'.",
-                       V8GPUTextureFormat(descriptor->format()).AsCStr()));
+                       V8GPUTextureFormat(descriptor->format()).AsCStr())));
     return;
   }
 
   const wgpu::TextureUsage usage =
       AsDawnFlags<wgpu::TextureUsage>(descriptor->usage());
-  if (RuntimeEnabledFeatures::WebGPUExperimentalFeaturesEnabled() &&
+  if (RuntimeEnabledFeatures::WebGPUTransientAttachmentEnabled() &&
       usage & wgpu::TextureUsage::TransientAttachment) {
     exception_state.ThrowTypeError(
         String::Format("Unsupported TransientAttachment texture usage"));
@@ -714,6 +719,7 @@ GPUTexture* GPUCanvasContext::getCurrentTexture(
   SkAlphaType alpha_type = GetAlphaType();
   scoped_refptr<WebGPUMailboxTexture> mailbox_texture =
       swap_buffers_->GetNewTexture(swap_texture_descriptor_, alpha_type);
+  Host()->UpdateMemoryUsage();
   if (!mailbox_texture) {
     // Try to give a helpful message for the most common cause for mailbox
     // texture creation failure.
@@ -773,7 +779,11 @@ GPUCanvasContext::GetFrontBufferMailboxTexture() {
   wgpu::DawnTextureInternalUsageDescriptor front_buffer_usage_desc = {{
       .internalUsage = front_buffer_usage,
   }};
+
+  // Note: By spec all WebGPU textures must have some usage (i.e. can't have
+  // only internal usages), so specify the internal usages in `usage` as well.
   wgpu::TextureDescriptor desc = {
+      .usage = front_buffer_usage,
       .size = {base::checked_cast<uint32_t>(front_buffer_si->size().width()),
                base::checked_cast<uint32_t>(front_buffer_si->size().height())},
       .format = swap_buffers_->TextureFormat(),
@@ -889,7 +899,7 @@ void GPUCanvasContext::CopyToSwapTexture() {
 
 bool GPUCanvasContext::CopyTextureToResourceProvider(
     const wgpu::Texture& texture,
-    CanvasResourceProviderSharedImage* resource_provider) const {
+    CanvasNon2DResourceProviderSharedImage* resource_provider) const {
 #if BUILDFLAG(USE_DAWN)
   DCHECK(resource_provider);
 
@@ -909,9 +919,7 @@ bool GPUCanvasContext::CopyTextureToResourceProvider(
   }
 
   gpu::SyncToken sync_token;
-  auto dst_client_si =
-      resource_provider->GetBackingClientSharedImageForExternalWrite(
-          gpu::SharedImageUsageSet(), sync_token);
+  auto dst_client_si = resource_provider->BeginExternalWrite(sync_token);
   if (!dst_client_si) {
     return false;
   }
@@ -1022,9 +1030,10 @@ scoped_refptr<StaticBitmapImage> GPUCanvasContext::SnapshotInternal(
   // These paths are usually related to either printing or either video and
   // usually related to OffscreenCanvas; in cases where the image created from
   // this Snapshot will be sent eventually to the Display Compositor.
-  auto resource_provider = CanvasResourceProvider::CreateWebGPUImageProvider(
-      size, GetSharedImageFormat(), GetAlphaType(), GetColorSpace(),
-      swap_buffers_->GetSharedImageUsagesForDisplay());
+  auto resource_provider =
+      CanvasNon2DResourceProviderSharedImage::CreateForWebGPU(
+          size, GetSharedImageFormat(), GetAlphaType(), GetColorSpace(),
+          swap_buffers_->GetSharedImageUsagesForDisplay());
   if (!resource_provider)
     return nullptr;
 

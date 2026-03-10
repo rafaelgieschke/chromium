@@ -4,6 +4,7 @@
 
 package org.chromium.chrome.browser.compositor.layouts;
 
+import static org.chromium.build.NullUtil.assertNonNull;
 import static org.chromium.build.NullUtil.assumeNonNull;
 
 import android.content.Context;
@@ -15,13 +16,14 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 
+import androidx.annotation.Px;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.Callback;
 import org.chromium.base.ObserverList;
 import org.chromium.base.TraceEvent;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.base.supplier.NonNullObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplier;
 import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.build.annotations.EnsuresNonNullIf;
@@ -177,7 +179,7 @@ public class LayoutManagerImpl
     /** The animation handler responsible for updating all the browser compositor's animations. */
     private final CompositorAnimationHandler mAnimationHandler;
 
-    private final ObservableSupplier<TabContentManager> mTabContentManagerSupplier;
+    private final MonotonicObservableSupplier<TabContentManager> mTabContentManagerSupplier;
     private final SettableNonNullObservableSupplier<Long> mFrameRequestSupplier =
             ObservableSuppliers.createNonNull(0L);
     private final Runnable mRequestFrameRunnable = this::requestUpdate;
@@ -201,8 +203,8 @@ public class LayoutManagerImpl
     private @Nullable ShowingEventSequencer mShowingEventSequencer;
 
     /**
-     * Protected class to handle {@link TabModelObserver} related tasks. Extending classes will
-     * need to override any related calls to add new functionality
+     * Protected class to handle {@link TabModelObserver} related tasks. Extending classes will need
+     * to override any related calls to add new functionality
      */
     protected class LayoutManagerTabModelObserver implements TabModelObserver {
         @Override
@@ -237,33 +239,23 @@ public class LayoutManagerImpl
                 boolean markedForSelection) {
             int tabId = tab.getId();
             if (launchType == TabLaunchType.FROM_RESTORE) return;
-                boolean incognito = tab.isIncognito();
-                boolean willBeSelected =
-                        (launchType != TabLaunchType.FROM_LONGPRESS_BACKGROUND
-                                        && launchType
-                                                != TabLaunchType.FROM_LONGPRESS_BACKGROUND_IN_GROUP
-                                        && launchType != TabLaunchType.FROM_RECENT_TABS
-                                        && launchType != TabLaunchType.FROM_RESTORE_TABS_UI
-                                        && launchType != TabLaunchType.FROM_SYNC_BACKGROUND
-                                        && launchType
-                                                != TabLaunchType
-                                                        .FROM_COLLABORATION_BACKGROUND_IN_GROUP)
-                                || (!getTabModelSelector().isIncognitoSelected() && incognito);
-                float lastTapX = LocalizationUtils.isLayoutRtl() ? mHost.getWidth() * mPxToDp : 0.f;
-                float lastTapY = 0.f;
-                if (launchType != TabLaunchType.FROM_CHROME_UI) {
-                    lastTapX = mPxToDp * mLastTapX;
-                    lastTapY = mPxToDp * mLastTapY;
-                }
+            boolean incognito = tab.isIncognito();
+            boolean willBeSelected = willAddedTabBeSelected(launchType, incognito);
+            float lastTapX = LocalizationUtils.isLayoutRtl() ? mHost.getWidth() * mPxToDp : 0.f;
+            float lastTapY = 0.f;
+            if (launchType != TabLaunchType.FROM_CHROME_UI) {
+                lastTapX = mPxToDp * mLastTapX;
+                lastTapY = mPxToDp * mLastTapY;
+            }
 
-                tabCreated(
-                        tabId,
-                        getTabModelSelector().getCurrentTabId(),
-                        launchType,
-                        incognito,
-                        willBeSelected,
-                        lastTapX,
-                        lastTapY);
+            tabCreated(
+                    tabId,
+                    getTabModelSelector().getCurrentTabId(),
+                    launchType,
+                    incognito,
+                    willBeSelected,
+                    lastTapX,
+                    lastTapY);
         }
 
         @Override
@@ -295,6 +287,26 @@ public class LayoutManagerImpl
         @Override
         public void tabRemoved(Tab tab) {
             tabClosed(tab.getId(), tab.isIncognito(), true);
+        }
+
+        private boolean willAddedTabBeSelected(@TabLaunchType int launchType, boolean incognito) {
+            boolean isBackgroundLaunch;
+            switch (launchType) {
+                case TabLaunchType.FROM_LONGPRESS_BACKGROUND:
+                case TabLaunchType.FROM_LONGPRESS_BACKGROUND_IN_GROUP:
+                case TabLaunchType.FROM_RECENT_TABS:
+                case TabLaunchType.FROM_RESTORE_TABS_UI:
+                case TabLaunchType.FROM_SYNC_BACKGROUND:
+                case TabLaunchType.FROM_BROWSER_ACTIONS:
+                case TabLaunchType.FROM_COLLABORATION_BACKGROUND_IN_GROUP:
+                    isBackgroundLaunch = true;
+                    break;
+                default:
+                    isBackgroundLaunch = false;
+            }
+
+            return !isBackgroundLaunch
+                    || (!getTabModelSelector().isIncognitoSelected() && incognito);
         }
     }
 
@@ -337,7 +349,7 @@ public class LayoutManagerImpl
     public LayoutManagerImpl(
             LayoutManagerHost host,
             ViewGroup contentContainer,
-            ObservableSupplier<TabContentManager> tabContentManagerSupplier,
+            MonotonicObservableSupplier<TabContentManager> tabContentManagerSupplier,
             Supplier<TopUiThemeColorProvider> topUiThemeColorProvider) {
         mHost = host;
         mPxToDp = 1.f / mHost.getContext().getResources().getDisplayMetrics().density;
@@ -643,7 +655,7 @@ public class LayoutManagerImpl
             @Nullable ControlContainer controlContainer,
             DynamicResourceLoader dynamicResourceLoader,
             TopUiThemeColorProvider topUiColorProvider,
-            ObservableSupplier<Integer> bottomControlsOffsetSupplier) {
+            NonNullObservableSupplier<Integer> bottomControlsOffsetSupplier) {
         LayoutRenderHost renderHost = mHost.getLayoutRenderHost();
 
         mBrowserControlsStateProvider = mHost.getBrowserControlsManager();
@@ -658,7 +670,7 @@ public class LayoutManagerImpl
                         mFrameRequestSupplier,
                         mRequestFrameRunnable,
                         selector,
-                        mTabContentManagerSupplier.get(),
+                        assertNonNull(mTabContentManagerSupplier.get()),
                         mBrowserControlsStateProvider,
                         mTopUiThemeColorProvider,
                         getLayoutNeedOffsetTagSupplier());
@@ -880,9 +892,14 @@ public class LayoutManagerImpl
         }
     }
 
+    /** Sets the {@link LayoutTab#CONTENT_OFFSET_X} for the static layout. */
+    public void setContentOffsetX(@Px int contentOffsetX) {
+        mStaticLayout.setContentOffsetX(contentOffsetX);
+    }
+
     /**
      * @return The default {@link Layout} to show when {@link Layout}s get hidden and the next
-     *         {@link Layout} to show isn't known.
+     *     {@link Layout} to show isn't known.
      */
     protected Layout getDefaultLayout() {
         return mStaticLayout;
@@ -1372,7 +1389,8 @@ public class LayoutManagerImpl
                 mCachedWindowViewport.height() * mPxToDp,
                 mCachedVisibleViewport.top,
                 getOrientation());
-        overlay.getHandleBackPressChangedSupplier().addObserver((v) -> onBackPressStateChanged());
+        overlay.getHandleBackPressChangedSupplier()
+                .addSyncObserverAndPostIfNonNull((v) -> onBackPressStateChanged());
     }
 
     void setSceneOverlayOrderForTesting(Map<Class, Integer> order) {

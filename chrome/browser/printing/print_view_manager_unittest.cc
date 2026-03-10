@@ -96,7 +96,7 @@ class TestPrinterQueryWin : public PrinterQuery {
   // Updates the current settings with `new_settings` dictionary values. Also
   // fills in the settings with values from `offsets_` and `printer_type_` that
   // would normally be filled in by the `PrintingContext`.
-  void SetSettings(base::Value::Dict new_settings,
+  void SetSettings(base::DictValue new_settings,
                    base::OnceClosure callback) override;
 
   // Sets `printer_language_type_` to `type`. Should be called before
@@ -136,7 +136,7 @@ TestPrinterQueryWin::TestPrinterQueryWin(
 
 TestPrinterQueryWin::~TestPrinterQueryWin() = default;
 
-void TestPrinterQueryWin::SetSettings(base::Value::Dict new_settings,
+void TestPrinterQueryWin::SetSettings(base::DictValue new_settings,
                                       base::OnceClosure callback) {
   DCHECK(offsets_);
   DCHECK(printer_language_type_);
@@ -415,7 +415,7 @@ TEST_F(PrintViewManagerTest, PrintForSystemDialog) {
 
 #if BUILDFLAG(IS_WIN)
 // Verifies that `StartPdfToPostScriptConversion` is called with the correct
-// printable area offsets. See crbug.com/821485.
+// printable area offsets. See crbug.com/41376276.
 TEST_F(PrintViewManagerTest, PostScriptHasCorrectOffsets) {
   scoped_refptr<TestPrintQueriesQueueWin> queue =
       base::MakeRefCounted<TestPrintQueriesQueueWin>();
@@ -439,7 +439,7 @@ TEST_F(PrintViewManagerTest, PostScriptHasCorrectOffsets) {
   print_view_manager->PrintPreviewNow(web_contents->GetPrimaryMainFrame(),
                                       false);
 
-  base::Value::Dict print_ticket =
+  base::DictValue print_ticket =
       test::GetPrintTicket(mojom::PrinterType::kLocal);
   const char kTestData[] = "abc";
   auto print_data = base::MakeRefCounted<base::RefCountedStaticMemory>(

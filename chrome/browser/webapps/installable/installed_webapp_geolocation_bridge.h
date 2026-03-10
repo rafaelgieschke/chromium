@@ -9,6 +9,7 @@
 
 #include "base/android/scoped_java_ref.h"
 #include "base/memory/raw_ptr.h"
+#include "chrome/android/chrome_jni_headers/InstalledWebappGeolocationBridge_shared_jni.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "services/device/public/mojom/geolocation.mojom.h"
 #include "services/device/public/mojom/geoposition.mojom.h"
@@ -43,18 +44,18 @@ class InstalledWebappGeolocationBridge : public device::mojom::Geolocation {
 
   // Called by JNI on its thread looper.
   void OnNewLocationAvailable(JNIEnv* env,
-                              jdouble latitude,
-                              jdouble longitude,
-                              jdouble time_stamp,
-                              jboolean has_altitude,
-                              jdouble altitude,
-                              jboolean has_accuracy,
-                              jdouble accuracy,
-                              jboolean has_heading,
-                              jdouble heading,
-                              jboolean has_speed,
-                              jdouble speed);
-  void OnNewErrorAvailable(JNIEnv* env, std::string& message);
+                              double latitude,
+                              double longitude,
+                              double time_stamp,
+                              bool has_altitude,
+                              double altitude,
+                              bool has_accuracy,
+                              double accuracy,
+                              bool has_heading,
+                              double heading,
+                              bool has_speed,
+                              double speed);
+  void OnNewErrorAvailable(JNIEnv* env, const std::string& message);
 
   const GURL& url() { return url_; }
 
@@ -86,7 +87,8 @@ class InstalledWebappGeolocationBridge : public device::mojom::Geolocation {
   // accuracy.
   bool high_accuracy_;
 
-  base::android::ScopedJavaGlobalRef<jobject> java_ref_;
+  base::android::ScopedJavaGlobalRef<JInstalledWebappGeolocationBridge>
+      java_ref_;
 
   // The binding between this object and the other end of the pipe.
   mojo::Receiver<device::mojom::Geolocation> receiver_;

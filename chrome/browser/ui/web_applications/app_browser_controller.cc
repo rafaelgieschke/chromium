@@ -4,9 +4,9 @@
 
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
 
+#include <algorithm>
 #include <string_view>
 
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/memory/values_equivalent.h"
@@ -133,6 +133,14 @@ bool AppBrowserController::IsIsolatedWebApp(
 bool AppBrowserController::IsForWebApp(const BrowserWindowInterface* browser,
                                        const webapps::AppId& app_id) {
   return IsWebApp(browser) && From(browser)->app_id() == app_id;
+}
+
+// static
+bool AppBrowserController::IsForIsolatedSubApp(
+    const BrowserWindowInterface* browser,
+    const std::optional<webapps::AppId>& maybe_parent_app_id) {
+  return IsWebApp(browser) && maybe_parent_app_id.has_value() &&
+         From(browser)->app_id() == maybe_parent_app_id.value();
 }
 
 // static
@@ -405,11 +413,12 @@ std::vector<actions::ActionId> AppBrowserController::GetTitleBarPageActions()
       kActionZoomNormal,
       kActionShowFileSystemAccess,
       kActionShowCookieControls,
+      kActionShowAddressesBubbleOrPage,
   };
 
 #if DCHECK_IS_ON()
   for (auto action_id : types_enabled) {
-    DCHECK(base::Contains(page_actions::kActionIds, action_id));
+    DCHECK(std::ranges::contains(page_actions::kActionIds, action_id));
   }
 #endif
 
@@ -432,6 +441,7 @@ AppBrowserController::GetTitleBarPageActionTypes() const {
   types_enabled.push_back(PageActionIconType::kFileSystemAccess);
   types_enabled.push_back(PageActionIconType::kCookieControls);
   types_enabled.push_back(PageActionIconType::kSaveCard);
+  types_enabled.push_back(PageActionIconType::kAutofillAddress);
 
   return types_enabled;
 }
@@ -492,7 +502,11 @@ bool AppBrowserController::HasPendingUpdateNotIgnoredByUser() const {
   return false;
 }
 
-void AppBrowserController::CreateMetadataAndTriggerAppUpdateDialog(
+bool AppBrowserController::HasPendingMigration() const {
+  return false;
+}
+
+void AppBrowserController::TriggerAppUpdateOrMigrationDialog(
     base::TimeTicks start_time) const {}
 
 bool AppBrowserController::IsPreventCloseEnabled() const {

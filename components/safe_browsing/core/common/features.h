@@ -50,8 +50,13 @@ extern const base::FeatureParam<double>
 extern const base::FeatureParam<int>
     kAutoRevokeSuspiciousNotificationMinNotificationCount;
 
-// Enables Bundled Security Settings UI on chrome://settings/security
+// Enables Bundled Security Settings UI on chrome://settings/security.
 BASE_DECLARE_FEATURE(kBundledSecuritySettings);
+
+// Enables new Secure DNS V2 UI in Bundled Security Settings UI on the
+// chrome://settings/security page. Requires that kBundledSecuritySettings is
+// also enabled.
+BASE_DECLARE_FEATURE(kBundledSecuritySettingsSecureDnsV2);
 
 // Expand CSPP beyond phishing and trigger when clipboard copy API is called on
 // the page.
@@ -61,6 +66,11 @@ extern const base::FeatureParam<int> kCsdClipboardCopyApiMaxLength;
 extern const base::FeatureParam<int> kCsdClipboardCopyApiMinLength;
 extern const base::FeatureParam<double> kCsdClipboardCopyApiSampleRate;
 extern const base::FeatureParam<bool> kCSDClipboardCopyApiProcessPayload;
+extern const base::FeatureParam<bool> kCSDClipboardCopyApiIncludeFullPayload;
+extern const base::FeatureParam<std::string> kCsdClipboardCopyApiLoaders;
+extern const base::FeatureParam<std::string> kCsdClipboardCopyApiRunners;
+extern const base::FeatureParam<std::string> kCsdClipboardCopyApiRemoteRunners;
+extern const base::FeatureParam<std::string> kCsdClipboardCopyApiDecoders;
 
 // Enables sending a CSD ping on the detection of a credit card form.
 BASE_DECLARE_FEATURE(kClientSideDetectionCreditCardForm);
@@ -82,6 +92,9 @@ extern const base::FeatureParam<bool> kCsdCreditCardFormEnableHeuristicFilter;
 // Specifies whether to filter credit card CSD pings based on the referring app.
 extern const base::FeatureParam<bool>
     kCsdCreditCardFormEnableReferringAppFilter;
+
+// Deprecate the DOM model and do not onboard to renderer.
+BASE_DECLARE_FEATURE(kClientSideDetectionDeprecateDOMModel);
 
 // Killswitch for Llama forced trigger info redirect chain check.
 BASE_DECLARE_FEATURE(kClientSideDetectionForcedLlamaRedirectChainKillswitch);
@@ -106,6 +119,16 @@ BASE_DECLARE_FEATURE(kClientSideDetectionKillswitch);
 // RTLookupResponse asks to scan the page.
 BASE_DECLARE_FEATURE(
     kClientSideDetectionLlamaForcedTriggerInfoForScamDetection);
+
+// The observers that trigger the image classification have been tweaked with a
+// more defined page loading state check.
+BASE_DECLARE_FEATURE(kClientSideDetectionNewObservers);
+extern const base::FeatureParam<double> kCsdClassificationDelay;
+
+#if BUILDFLAG(IS_ANDROID)
+// Instead of starting model download on startup, do it lazily during inference.
+BASE_DECLARE_FEATURE(kClientSideDetectionOnDeviceModelLazyDownloadAndroid);
+#endif
 
 // Killswitch for force request redirect chain check.
 BASE_DECLARE_FEATURE(kClientSideDetectionRedirectChainKillswitch);
@@ -144,9 +167,7 @@ BASE_DECLARE_FEATURE(kClientSideDetectionShowLlamaScamVerdictWarning);
 BASE_DECLARE_FEATURE(kClientSideDetectionShowScamVerdictWarningAndroid);
 #endif
 
-// Expand CSPP beyond phishing and trigger when vibration API is called on the
-// web page.
-BASE_DECLARE_FEATURE(kClientSideDetectionVibrationApi);
+BASE_DECLARE_FEATURE(kClientSideDetectionSkipErrorPage);
 
 // Set a RESIZE_BEST preference for image resizing algorithm in Client Side
 // Detection renderer processes for both image classification and image
@@ -199,6 +220,9 @@ BASE_DECLARE_FEATURE(kEnterpriseFileSystemAccessDeepScan);
 // Enables showing an updated Password Reuse UI for enterprise users.
 BASE_DECLARE_FEATURE(kEnterprisePasswordReuseUiRefresh);
 
+// Use a new URL for the enterprise real-time URL check.
+BASE_DECLARE_FEATURE(kEnterpriseRealTimeUrlCheckNewUrl);
+
 // Makes the Enhanced Protection a syncable setting.
 // Check the design doc (go/esb-as-a-synced-setting-dd) for further details.
 BASE_DECLARE_FEATURE(kEsbAsASyncedSetting);
@@ -227,6 +251,18 @@ extern const base::FeatureParam<int>
 
 // Enables reporting of external app redirects
 BASE_DECLARE_FEATURE(kExternalAppRedirectTelemetry);
+
+// When this flag is enabled, and when the configured secure_dns_mode is
+// AUTOMATIC, the DoH fallback setting
+// (dns_over_https.automatic_mode_fallback_to_doh) should be forced to be
+// interpreted as true.
+BASE_DECLARE_FEATURE(kForceSecureDnsDohFallback);
+
+// Enables querying server-side Gemini model for scam detection.
+BASE_DECLARE_FEATURE(kGeminiAntiscamProtectionForMetricsCollection);
+// The minimum scam score required to log page content to MQLS.
+extern const base::FeatureParam<double>
+    kGeminiAntiscamProtectionMinScamScoreLogPageContent;
 
 // Replace the high confidence allowlist check gating notification warnings with
 // a check of the global cache list specific to safe notification sites.
@@ -294,6 +330,14 @@ BASE_DECLARE_FEATURE_PARAM(bool, kMaliciousApkDownloadCheckTelemetryOnly);
 // Enables one-time migration of enhanced-safe-browsing users to the enhanced
 // bundle.
 BASE_DECLARE_FEATURE(kMigrateEnhancedSbUserToEnhancedBundle);
+
+// When enabled, performs a one-time migration that selects the JavaScript
+// optimizer content setting that automatically blocks the browser from using
+// JavaScript optimizers on unfamiliar sites. Only profiles that have Safe
+// Browsing enabled, have the JavaScript optimizer set to allowed for all sites,
+// and have the kBlockV8OptimizerOnUnfamiliarSitesSetting feature enabled will
+// be eligible for the migration.
+BASE_DECLARE_FEATURE(kMigrateToBlockV8OptimizerOnUnfamiliarSites);
 
 // TODO(crbug.com/449960661): Remove this flag once the MigrateAccountPrefs
 // feature is launched and the regression of users with ESB enhanced protection
@@ -392,6 +436,10 @@ extern const base::FeatureParam<int>
 extern const base::FeatureParam<bool>
     kShowWarningsForSuspiciousNotificationsShouldSwapButtons;
 
+// Controls whether to skip image classification scoring for non-page load
+// triggers.
+BASE_DECLARE_FEATURE(kSkipImageClassificationScoringForNonPageLoadTriggers);
+
 // Controls the daily quota for the suspicious site trigger.
 BASE_DECLARE_FEATURE(kSuspiciousSiteTriggerQuotaFeature);
 
@@ -413,7 +461,7 @@ BASE_DECLARE_FEATURE(kVisualFeaturesSizes);
 
 // keep-sorted end
 
-base::Value::List GetFeatureStatusList();
+base::ListValue GetFeatureStatusList();
 
 }  // namespace safe_browsing
 #endif  // COMPONENTS_SAFE_BROWSING_CORE_COMMON_FEATURES_H_

@@ -28,9 +28,10 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.FeatureOverrides;
 import org.chromium.base.UnownedUserDataHost;
 import org.chromium.base.UserDataHost;
-import org.chromium.base.supplier.ObservableSupplierImpl;
-import org.chromium.base.test.BaseRobolectricTestRule;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
@@ -74,8 +75,8 @@ public class ReaderModeToolbarButtonControllerTest {
 
     private final ActivityTabProvider mActivityTabProvider = new ActivityTabProvider();
 
-    private final ObservableSupplierImpl<ReaderModeIphController> mReaderModeIphControllerSupplier =
-            new ObservableSupplierImpl<>();
+    private final SettableMonotonicObservableSupplier<ReaderModeIphController>
+            mReaderModeIphControllerSupplier = ObservableSuppliers.createMonotonic();
 
     private UserDataHost mUserDataHost;
     private UnownedUserDataHost mUnownedUserDataHost;
@@ -193,7 +194,7 @@ public class ReaderModeToolbarButtonControllerTest {
         controller.getTabSupplierObserverForTesting().onUrlUpdated(mMockTab);
         assertTrue(controller.shouldShowButton(mMockTab));
 
-        BaseRobolectricTestRule.runAllBackgroundAndUi();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         CallbackHelper callbackHelper = new CallbackHelper();
         ButtonDataProvider.ButtonDataObserver observer =
@@ -217,7 +218,7 @@ public class ReaderModeToolbarButtonControllerTest {
 
         // Simulate the button being shown, and verify that the button is hidden after a delay.
         controller.onActionShown();
-        BaseRobolectricTestRule.runAllBackgroundAndUi();
+        RobolectricUtil.runAllBackgroundAndUi();
         assertEquals(1, callbackHelper.getCallCount());
         assertFalse(controller.shouldShowButton(mMockTab));
 

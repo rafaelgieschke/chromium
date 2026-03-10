@@ -35,35 +35,8 @@ export enum EnableControl {
   ENABLE_TOGGLE = 'ENABLE_TOGGLE',
 }
 
-// TODO(tjudkins): This should be extracted to a shared metrics module.
-export enum UserAction {
-  ALL_TOGGLED_ON = 'Extensions.Settings.HostList.AllHostsToggledOn',
-  ALL_TOGGLED_OFF = 'Extensions.Settings.HostList.AllHostsToggledOff',
-  SPECIFIC_TOGGLED_ON = 'Extensions.Settings.HostList.SpecificHostToggledOn',
-  SPECIFIC_TOGGLED_OFF = 'Extensions.Settings.HostList.SpecificHostToggledOff',
-  LEARN_MORE = 'Extensions.Settings.HostList.LearnMoreActivated',
-}
-
 // Duration of the toast shown.
 export const TOAST_DURATION_MS = 3000;
-
-// Values for logging Extension Safety Hub metrics.
-export const SAFETY_HUB_EXTENSION_KEPT_HISTOGRAM_NAME =
-    'SafeBrowsing.ExtensionSafetyHub.Trigger.Kept';
-export const SAFETY_HUB_EXTENSION_REMOVED_HISTOGRAM_NAME =
-    'SafeBrowsing.ExtensionSafetyHub.Trigger.Removed';
-export const SAFETY_HUB_EXTENSION_SHOWN_HISTOGRAM_NAME =
-    `SafeBrowsing.ExtensionSafetyHub.Trigger.Shown`;
-// This number should match however many entries are defined in the
-// `SafetyCheckWarningReason` defined in the `enums.xml` file.
-export const SAFETY_HUB_WARNING_REASON_MAX_SIZE = 7;
-
-// Histogram names for logging when an extension is uploaded to the user's
-// account.
-export const UPLOAD_EXTENSION_TO_ACCOUNT_ITEMS_LIST_PAGE_HISTOGRAM_NAME =
-    `Extensions.UploadExtensionToAccount.ItemsListPage`;
-export const UPLOAD_EXTENSION_TO_ACCOUNT_DETAILS_VIEW_PAGE_HISTOGRAM_NAME =
-    `Extensions.UploadExtensionToAccount.DetailsViewPage`;
 
 /**
  * Returns true if the extension is enabled, including terminated
@@ -298,21 +271,6 @@ export function getEnableControl(data: chrome.developerPrivate.ExtensionInfo):
   return EnableControl.ENABLE_TOGGLE;
 }
 
-/**
- * @return The tooltip to show for an extension's enable toggle.
- */
-export function getEnableToggleTooltipText(
-    data: chrome.developerPrivate.ExtensionInfo): string {
-  if (!isEnabled(data.state)) {
-    return loadTimeData.getString('enableToggleTooltipDisabled');
-  }
-
-  return loadTimeData.getString(
-      data.permissions.canAccessSiteData ?
-          'enableToggleTooltipEnabledWithSiteAccess' :
-          'enableToggleTooltipEnabled');
-}
-
 export function createDummyExtensionInfo():
     chrome.developerPrivate.ExtensionInfo {
   return {
@@ -348,7 +306,7 @@ export function createDummyExtensionInfo():
     mustRemainInstalled: false,
     name: '',
     offlineEnabled: false,
-    permissions: {simplePermissions: [], canAccessSiteData: false},
+    permissions: {simplePermissions: []},
     runtimeErrors: [],
     runtimeWarnings: [],
     state: chrome.developerPrivate.ExtensionState.ENABLED,

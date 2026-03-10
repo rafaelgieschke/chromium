@@ -16,6 +16,7 @@
 #include "third_party/blink/renderer/core/events/mouse_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/html/forms/html_field_set_element.h"
+#include "third_party/blink/renderer/core/html/forms/html_option_element.h"
 #include "third_party/blink/renderer/core/html/html_menu_bar_element.h"
 #include "third_party/blink/renderer/core/html/html_menu_list_element.h"
 #include "third_party/blink/renderer/core/html/menu_item_list.h"
@@ -42,6 +43,14 @@ bool HTMLMenuItemElement::MatchesDefaultPseudoClass() const {
 
 bool HTMLMenuItemElement::MatchesEnabledPseudoClass() const {
   return !IsDisabledFormControl();
+}
+
+bool HTMLMenuItemElement::IsSubmenuOpen() const {
+  if (HTMLMenuListElement* invoked_menulist = GetInvokedSubmenu()) {
+    return invoked_menulist->popoverOpen() &&
+           invoked_menulist->GetPopoverData()->invoker() == this;
+  }
+  return false;
 }
 
 void HTMLMenuItemElement::ParseAttribute(
@@ -80,7 +89,7 @@ bool HTMLMenuItemElement::IsCheckable() const {
   return HasOwnerMenuList() && nearest_ancestor_field_set_ &&
          nearest_ancestor_field_set_->FastGetAttribute(
              html_names::kCheckableAttr) &&
-         !InvokesSubmenu();
+         !GetInvokedSubmenu();
 }
 
 bool HTMLMenuItemElement::checked() const {
@@ -117,22 +126,28 @@ bool HTMLMenuItemElement::ShouldHaveFocusAppearance() const {
   return SelectorChecker::MatchesFocusVisiblePseudoClass(*this);
 }
 
-HTMLMenuListElement* HTMLMenuItemElement::InvokesSubmenu() const {
+HTMLMenuListElement* HTMLMenuItemElement::GetInvokedSubmenu() const {
   auto* invoked_element = DynamicTo<HTMLMenuListElement>(commandForElement());
   if (!invoked_element || !invoked_element->IsPopover()) {
     return nullptr;
   }
   CommandEventType type = GetCommandEventType(
       FastGetAttribute(html_names::kCommandAttr), GetExecutionContext());
-  if (type != CommandEventType::kToggleMenu &&
-      type != CommandEventType::kShowMenu &&
-      type != CommandEventType::kHideMenu) {
+  // Only the toggle-menu command creates a submenu relationship (which
+  // involves builtin behaviors that both show and hide the menu).
+  if (type != CommandEventType::kToggleMenu) {
     return nullptr;
   }
   return invoked_element;
 }
 
 bool HTMLMenuItemElement::CanBeCommandInvoker() const {
+  return !FastHasAttribute(html_names::kDisabledAttr);
+}
+
+bool HTMLMenuItemElement::IsValidInterestInvoker(Element& target) const {
+  DCHECK(RuntimeEnabledFeatures::HTMLInterestForAttributeEnabled());
+  // Menu items need to be enabled in order to support interest invokers.
   return !FastHasAttribute(html_names::kDisabledAttr);
 }
 
@@ -144,9 +159,9 @@ bool HTMLMenuItemElement::setChecked(bool checked) {
   if (!checkable) {
     // Not checkable - close the containing menulist unless this item invokes
     // a sub-menu.
-    return !InvokesSubmenu();
+    return !GetInvokedSubmenu();
   }
-  DCHECK(!InvokesSubmenu());
+  DCHECK(!GetInvokedSubmenu());
 
   is_default_checkedness_overridden_ = true;
 
@@ -159,7 +174,7 @@ bool HTMLMenuItemElement::setChecked(bool checked) {
   const AtomicString& checkable_keyword =
       nearest_ancestor_field_set_->FastGetAttribute(html_names::kCheckableAttr);
   if (is_checked_ &&
-      EqualIgnoringASCIICase(checkable_keyword, keywords::kSingle)) {
+      EqualIgnoringAsciiCase(checkable_keyword, keywords::kSingle)) {
     nearest_ancestor_field_set_->UpdateMenuItemCheckableExclusivity(this);
     // Exclusive checkbox - close the containing menulist after changing.
     return true;
@@ -179,10 +194,10 @@ void HTMLMenuItemElement::ActivateMenuItem() {
   // If this menu item isn't a submenu invoker, or it's a checkable menu item
   // that wants us to close after changing, then close the containing menu.
   if (close_containing_menulist) {
-    DCHECK(IsCheckable() || !InvokesSubmenu());
+    DCHECK(IsCheckable() || !GetInvokedSubmenu());
     CloseOutermostContainingMenuList();
   }
-  if (InvokesSubmenu()) {
+  if (GetInvokedSubmenu()) {
     DCHECK(!IsCheckable());
     HandleCommandForActivation();
   }
@@ -266,7 +281,7 @@ void HTMLMenuItemElement::HandleMenuKeyboardEvents(Event& event) {
       // If this invokes a menulist and is itself in a menulist, then
       // arrow right should open the invoked menulist and focus its first
       // menuitem.
-      if (auto* invoked_menulist = InvokesSubmenu()) {
+      if (auto* invoked_menulist = GetInvokedSubmenu()) {
         if (!invoked_menulist->popoverOpen()) {
           invoked_menulist->InvokePopover(*this);
         }
@@ -367,7 +382,7 @@ void HTMLMenuItemElement::HandleMenuKeyboardEvents(Event& event) {
     } else if (key == keywords::kArrowDown || key == keywords::kArrowUp) {
       // If this invokes a menulist and is in a menubar, then arrow down/up
       // should open the menulist and go to first/last menuitem in it.
-      if (auto* invoked_menulist = InvokesSubmenu()) {
+      if (auto* invoked_menulist = GetInvokedSubmenu()) {
         if (!invoked_menulist->popoverOpen()) {
           invoked_menulist->InvokePopover(*this);
         }
@@ -418,22 +433,21 @@ void HTMLMenuItemElement::HandleMenuPointerEvents(Event& event) {
       }
     }
     bool same_element = this == mouse_down_menuitem;
-    // TODO(masonf) This kEpsilon should be combined with the one in
-    // html_option_element.cc.
-    constexpr float kEpsilon = 5;  // 5 pixels in any direction
     bool mouse_moved = !mouse_down_info.location.IsWithinDistance(
-        mouse_event->AbsoluteLocation(), kEpsilon);
+        mouse_event->AbsoluteLocation(),
+        HTMLOptionElement::kPopupMenuDragEpsilon);
     // We "pick" a menu item here, iff:
     //  1. This was a mouse, not touchscreen, interaction,
     //  2. The mousedown was on a <menuitem> that triggers a sub-menu via
     //     `commandfor`, so we have a mousedown location stored,
     //  3. The mouseup is on a different menuitem than the mouseup, and
-    //  4. The mouseup on this <menuitem> is *not* within kEpsilon layout units
-    //  (post zoom, page-relative) of the location of the mousedown. I.e. the
-    //  mouse was dragged at least a little bit between mousedown and mouseup.
-    //  This ensures that if the new sub-menu is rendered over the top of the
-    //  triggering menuitem, and the user is just "clicking" to activate the
-    //  sub-menu, the menuitem under the cursor isn't selected.
+    //  4. The mouseup on this <menuitem> is *not* within kPopupMenuDragEpsilon
+    //     layout units (post zoom, page-relative) of the location of the
+    //     mousedown. I.e. the mouse was dragged at least a little bit between
+    //     mousedown and mouseup.  This ensures that if the new sub-menu is
+    //     rendered over the top of the triggering menuitem, and the user is
+    //     just "clicking" to activate the sub-menu, the menuitem under the
+    //     cursor isn't selected.
 
     bool activate_menu_item =
         mouse_down_menuitem && !same_element && mouse_moved;
@@ -448,7 +462,7 @@ void HTMLMenuItemElement::HandleMenuPointerEvents(Event& event) {
     DCHECK_EQ(event.type(), event_type_names::kMousedown);
     GetDocument().SetPopoverPickerPointerdown(
         {.target = this, .location = mouse_event->AbsoluteLocation()});
-    if (!InvokesSubmenu()) {
+    if (!GetInvokedSubmenu()) {
       return;
     }
     // Activate sub-menus on mouse *down*, so that the user can drag and
@@ -463,7 +477,7 @@ void HTMLMenuItemElement::HandleMenuPointerEvents(Event& event) {
 
 bool HTMLMenuItemElement::HandleCommandForActivation() {
   if (ignore_next_command_) {
-    DCHECK(InvokesSubmenu());
+    DCHECK(GetInvokedSubmenu());
     ignore_next_command_ = false;
     return false;
   }
@@ -471,7 +485,7 @@ bool HTMLMenuItemElement::HandleCommandForActivation() {
 }
 
 void HTMLMenuItemElement::DefaultEventHandler(Event& event) {
-  if (event.type() == event_type_names::kDOMActivate && !InvokesSubmenu()) {
+  if (event.type() == event_type_names::kDOMActivate && !GetInvokedSubmenu()) {
     // If this isn't a submenu invoker, activate it now. If it is a command
     // invoker of any kind, HTMLElement::DefaultEventHandler() will take care of
     // it, so we can't early-return here.

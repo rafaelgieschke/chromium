@@ -28,8 +28,7 @@ class GlicActorScrollToToolUiTest : public GlicActorUiTest {
           const int32_t node_id = SearchAnnotatedPageContent(label);
           content::RenderFrameHost* frame =
               tab_handle.Get()->GetContents()->GetPrimaryMainFrame();
-          Actions action = actor::MakeScrollTo(*frame, node_id);
-          action.set_task_id(task_id.value());
+          Actions action = actor::MakeScrollTo(*frame, node_id, task_id);
           return EncodeActionProto(action);
         });
     return ExecuteAction(std::move(scroll_provider),
@@ -61,8 +60,7 @@ class GlicActorScrollToToolUiTest : public GlicActorUiTest {
             node_id = content::GetDOMNodeId(*frame, query_selector).value();
           }
 
-          Actions action = actor::MakeScrollTo(*frame, node_id);
-          action.set_task_id(task_id_.value());
+          Actions action = actor::MakeScrollTo(*frame, node_id, task_id_);
           return EncodeActionProto(action);
         });
 
@@ -85,7 +83,14 @@ IN_PROC_BROWSER_TEST_F(GlicActorScrollToToolUiTest, FailsOnInvalidNodeID) {
                   WaitForJsResult(kNewActorTabId, "() => window.scrollY", 0));
 }
 
-IN_PROC_BROWSER_TEST_F(GlicActorScrollToToolUiTest, ScrollsToValidNodeID) {
+// TODO(crbug.com/460810821): Flaky on Mac and ChromeOS.
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC)
+#define MAYBE_ScrollsToValidNodeID DISABLED_ScrollsToValidNodeID
+#else
+#define MAYBE_ScrollsToValidNodeID ScrollsToValidNodeID
+#endif
+IN_PROC_BROWSER_TEST_F(GlicActorScrollToToolUiTest,
+                       MAYBE_ScrollsToValidNodeID) {
   DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kNewActorTabId);
   const GURL task_url = embedded_test_server()->GetURL("/actor/scroll_to.html");
 

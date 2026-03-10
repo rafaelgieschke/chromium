@@ -197,32 +197,45 @@ TEST(AudioParameters, Constructor_CopyChannelLayoutConfig) {
   EXPECT_TRUE(params2.IsValid());
 }
 
-TEST(AudioParameters, ShouldCheckDiscreteWithNoChannels) {
-  ASSERT_DEATH_IF_SUPPORTED(
-      {
-        ChannelLayoutConfig channel_layout_config(CHANNEL_LAYOUT_DISCRETE, 0);
-      },
-      "");
-}
+TEST(AudioOutputBufferParametersHelperTest, LoadAndWriteGlitchInfo) {
+  AudioOutputBufferParameters params = {};
+  AudioOutputBufferParametersHelper helper;
 
-TEST(AudioParameters, ChannelLayoutConfig_Guess) {
-  ChannelLayoutConfig channel_layout_config = ChannelLayoutConfig::Guess(2);
-  EXPECT_EQ(CHANNEL_LAYOUT_STEREO, channel_layout_config.channel_layout());
-  EXPECT_EQ(2, channel_layout_config.channels());
-}
+  // Check initial state.
+  AudioGlitchInfo glitch_info = helper.GetGlitchIncrementSinceLastCall(params);
+  EXPECT_EQ(base::TimeDelta(), glitch_info.duration);
+  EXPECT_EQ(0u, glitch_info.count);
 
-TEST(AudioParameters, ChannelLayoutConfig_GuessUnsupported) {
-  ChannelLayoutConfig channel_layout_config = ChannelLayoutConfig::Guess(100);
-  EXPECT_EQ(CHANNEL_LAYOUT_UNSUPPORTED, channel_layout_config.channel_layout());
-  EXPECT_EQ(0, channel_layout_config.channels());
-}
+  // Write a glitch.
+  AudioGlitchInfo glitch1{.duration = base::Milliseconds(100), .count = 1};
+  AudioOutputBufferParametersHelper::AddGlitchIncrementToBuffer(params,
+                                                                glitch1);
 
-TEST(AudioParameters, ChannelLayoutConfig_GuessDiscrete) {
-  constexpr int kNumChannels = 12;
-  ChannelLayoutConfig channel_layout_config =
-      ChannelLayoutConfig::Guess(kNumChannels);
-  EXPECT_EQ(CHANNEL_LAYOUT_DISCRETE, channel_layout_config.channel_layout());
-  EXPECT_EQ(kNumChannels, channel_layout_config.channels());
+  // Check that the glitch is read.
+  glitch_info = helper.GetGlitchIncrementSinceLastCall(params);
+  EXPECT_EQ(glitch1.duration, glitch_info.duration);
+  EXPECT_EQ(glitch1.count, glitch_info.count);
+
+  // Check that the internal state is updated, so we don't read it again.
+  glitch_info = helper.GetGlitchIncrementSinceLastCall(params);
+  EXPECT_EQ(base::TimeDelta(), glitch_info.duration);
+  EXPECT_EQ(0u, glitch_info.count);
+
+  // Write another glitch.
+  AudioGlitchInfo glitch2{.duration = base::Milliseconds(200), .count = 2};
+  AudioOutputBufferParametersHelper::AddGlitchIncrementToBuffer(params,
+                                                                glitch2);
+
+  // Check that we read the new glitch.
+  glitch_info = helper.GetGlitchIncrementSinceLastCall(params);
+  EXPECT_EQ(glitch2.duration, glitch_info.duration);
+  EXPECT_EQ(glitch2.count, glitch_info.count);
+
+  // Check that a new helper reads the cumulative glitch info.
+  AudioOutputBufferParametersHelper helper2;
+  glitch_info = helper2.GetGlitchIncrementSinceLastCall(params);
+  EXPECT_EQ(glitch1.duration + glitch2.duration, glitch_info.duration);
+  EXPECT_EQ(glitch1.count + glitch2.count, glitch_info.count);
 }
 
 }  // namespace media

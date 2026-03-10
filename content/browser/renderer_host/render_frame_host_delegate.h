@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/functional/callback_forward.h"
-#include "base/i18n/rtl.h"
 #include "base/memory/safe_ref.h"
 #include "build/build_config.h"
 #include "components/viz/common/surfaces/surface_id.h"
@@ -78,7 +77,6 @@ class Origin;
 namespace blink {
 namespace mojom {
 class DisplayCutoutHost;
-class FullscreenOptions;
 class WindowFeatures;
 }  // namespace mojom
 class PageState;
@@ -253,8 +251,7 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // The page's title was changed and should be updated. Only called for the
   // top-level frame.
   virtual void UpdateTitle(RenderFrameHostImpl* render_frame_host,
-                           const std::u16string& title,
-                           base::i18n::TextDirection title_direction) {}
+                           const std::u16string& title) {}
 
   // Update application title.
   virtual void UpdateApplicationTitle(RenderFrameHostImpl* render_frame_host,
@@ -368,6 +365,9 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
 
   // Request to restore window.
   virtual void Restore() {}
+
+  // Request to set resizable.
+  virtual void SetResizable(bool) {}
 #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 
 #if BUILDFLAG(IS_ANDROID)
@@ -596,6 +596,11 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   virtual void OnTextCopiedToClipboard(RenderFrameHostImpl* render_frame_host,
                                        const std::u16string& copied_text) {}
 
+  // Notifies the delegate that text selection has changed in the
+  // `render_frame_host`.
+  virtual void TextSelectionChanged(RenderFrameHostImpl* render_frame_host,
+                                    std::u16string_view selected_text) {}
+
   // Allows embedder to override the clipboard types if a policy has inspected
   // or modified the clipboard content. Called from
   // `ClipboardHostImpl::ReadAvailableTypes()` by the browser process when a
@@ -721,12 +726,6 @@ class CONTENT_EXPORT RenderFrameHostDelegate {
   // If a timer for an unresponsive renderer fires, whether it should be
   // ignored.
   virtual bool ShouldIgnoreUnresponsiveRenderer();
-
-  // Returns the base permissions policy that should be applied to the Isolated
-  // Web App running in the given RenderFrameHostImpl. If std::nullopt is
-  // returned the default non-isolated permissions policy will be applied.
-  virtual std::optional<network::ParsedPermissionsPolicy>
-  GetPermissionsPolicyForIsolatedWebApp(RenderFrameHostImpl* source);
 
   // Updates the draggable regions defined by the app-region CSS property.
   virtual void DraggableRegionsChanged(

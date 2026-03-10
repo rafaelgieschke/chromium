@@ -19,6 +19,10 @@ class OnDeviceModelBridgeNativeUnitTestHelper {
   OnDeviceModelBridgeNativeUnitTestHelper();
   ~OnDeviceModelBridgeNativeUnitTestHelper();
 
+  // Sets a default AiCoreFactory that uses upstream (dummy) implementations.
+  // Use this for tests that need to verify behavior when MLKit is not
+  // available.
+  void SetDefaultAiCoreFactory();
   void SetMockAiCoreFactory();
 
   // `index` is the index of the session backend in the list of session backends
@@ -46,6 +50,8 @@ class OnDeviceModelBridgeNativeUnitTestHelper {
       ModelDownloaderAndroid::DownloadFailureReason reason);
   void TriggerDownloaderOnAvailable(const std::string& name,
                                     const std::string& version);
+  void TriggerDownloaderOnStatusCheckResult(
+      ModelDownloaderAndroid::ModelStatus model_status);
 
  private:
   base::android::ScopedJavaGlobalRef<jobject> java_helper_;

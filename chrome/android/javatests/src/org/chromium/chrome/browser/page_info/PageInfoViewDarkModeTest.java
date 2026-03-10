@@ -4,13 +4,11 @@
 
 package org.chromium.chrome.browser.page_info;
 
-import static androidx.test.espresso.matcher.ViewMatchers.isDisplayed;
 import static androidx.test.espresso.matcher.ViewMatchers.withId;
 
-import static org.hamcrest.CoreMatchers.allOf;
 import static org.junit.Assert.assertNotNull;
 
-import static org.chromium.ui.test.util.ViewUtils.onViewWaiting;
+import static org.chromium.base.test.transit.ViewFinder.waitForView;
 
 import android.view.View;
 
@@ -57,7 +55,9 @@ import java.io.IOException;
     ChromeSwitches.DISABLE_STARTUP_PROMOS,
     ContentSwitches.HOST_RESOLVER_RULES + "=MAP * 127.0.0.1"
 })
-@DisableIf.Device(DeviceFormFactor.ONLY_TABLET) // crbug.com/338978357, crbug.com/384775466
+@DisableIf.Device(
+        DeviceFormFactor.TABLET_OR_DESKTOP) // https://crbug.com/338978357, crbug.com/384775466,
+// crbug.com/394675204
 public class PageInfoViewDarkModeTest {
     private static final String sSimpleHtml = "/chrome/test/data/android/simple.html";
 
@@ -70,7 +70,7 @@ public class PageInfoViewDarkModeTest {
     @Rule
     public RenderTestRule mRenderTestRule =
             RenderTestRule.Builder.withPublicCorpus()
-                    .setRevision(5)
+                    .setRevision(6)
                     .setBugComponent(RenderTestRule.Component.UI_BROWSER_BUBBLES_PAGE_INFO)
                     .build();
 
@@ -95,10 +95,7 @@ public class PageInfoViewDarkModeTest {
                                     null)
                             .show(tab, ChromePageInfoHighlight.noHighlight());
                 });
-        onViewWaiting(
-                allOf(withId(R.id.page_info_url_wrapper), isDisplayed()),
-                true // Put Focus on dialog to fix flakiness in api 29+ with espresso 3.2.
-                );
+        waitForView(withId(R.id.page_info_url_wrapper));
     }
 
     private View getPageInfoView() {

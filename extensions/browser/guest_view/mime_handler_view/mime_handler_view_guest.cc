@@ -105,7 +105,7 @@ MimeHandlerViewGuest::~MimeHandlerViewGuest() {
     // If we are awaiting attaching to outer WebContents
     if (GetEmbedderFrame() && GetEmbedderFrame()->GetParent()) {
       // TODO(ekaramad): This should only be needed if the embedder frame is in
-      // a plugin element (https://crbug.com/957373).
+      // a plugin element (https://crbug.com/40624996).
       mojo::AssociatedRemote<mojom::MimeHandlerViewContainerManager>
           container_manager;
       GetEmbedderFrame()
@@ -144,7 +144,7 @@ int MimeHandlerViewGuest::GetTaskPrefix() const {
 void MimeHandlerViewGuest::CreateInnerPage(
     std::unique_ptr<GuestViewBase> owned_this,
     scoped_refptr<content::SiteInstance> site_instance,
-    const base::Value::Dict& create_params,
+    const base::DictValue& create_params,
     GuestPageCreatedCallback callback) {
   const std::string* stream_id =
       create_params.FindString(mime_handler_view::kStreamId);
@@ -212,11 +212,11 @@ void MimeHandlerViewGuest::DidAttachToEmbedder() {
   if (!base::FeatureList::IsEnabled(features::kGuestViewMPArch)) {
     web_contents()->GetMutableRendererPrefs()->can_accept_load_drops = true;
     web_contents()->SyncRendererPrefs();
+    web_contents()->SetIgnoreZoomGestures(!is_full_page_plugin());
   }
 }
 
-void MimeHandlerViewGuest::DidInitialize(
-    const base::Value::Dict& create_params) {
+void MimeHandlerViewGuest::DidInitialize(const base::DictValue& create_params) {
   if (!base::FeatureList::IsEnabled(features::kGuestViewMPArch)) {
     ExtensionsAPIClient::Get()->AttachWebContentsHelpers(web_contents());
   }
@@ -304,19 +304,6 @@ bool MimeHandlerViewGuest::HandleContextMenu(
   return delegate_ && delegate_->HandleContextMenu(render_frame_host, params);
 }
 
-bool MimeHandlerViewGuest::PreHandleGestureEvent(
-    WebContents* source,
-    const blink::WebGestureEvent& event) {
-  CHECK(!base::FeatureList::IsEnabled(features::kGuestViewMPArch));
-
-  if (blink::WebInputEvent::IsPinchGestureEventType(event.GetType())) {
-    // If we're an embedded plugin we drop pinch-gestures to avoid zooming the
-    // guest.
-    return !is_full_page_plugin();
-  }
-  return false;
-}
-
 content::JavaScriptDialogManager*
 MimeHandlerViewGuest::GuestGetJavascriptDialogManager() {
   if (content::GuestPageHolder::Delegate* guest =
@@ -350,7 +337,7 @@ bool MimeHandlerViewGuest::PluginDoSave() {
   if (!attached() || !plugin_can_save_)
     return false;
 
-  base::Value::List args;
+  base::ListValue args;
   args.Append(stream_->stream_url().spec());
 
   auto event =
@@ -438,6 +425,8 @@ content::WebContents* MimeHandlerViewGuest::CreateCustomWebContents(
     const GURL& opener_url,
     const std::string& frame_name,
     const GURL& target_url,
+    WindowOpenDisposition disposition,
+    const blink::mojom::WindowFeatures& window_features,
     const content::StoragePartitionConfig& partition_config,
     content::SessionStorageNamespace* session_storage_namespace) {
   CHECK(!base::FeatureList::IsEnabled(features::kGuestViewMPArch));

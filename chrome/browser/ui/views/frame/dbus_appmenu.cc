@@ -14,7 +14,6 @@
 #include <vector>
 
 #include "base/check_op.h"
-#include "base/containers/contains.h"
 #include "base/containers/span.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
@@ -26,6 +25,7 @@
 #include "build/branding_buildflags.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/feedback/report_unsafe_site_dialog.h"
 #include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -34,10 +34,11 @@
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_live_tab_context.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/profiles/profile_picker.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -149,11 +150,6 @@ constexpr auto kProfilesMenu = std::to_array<DbusAppmenuCommand>(
      {kTagProfileEdit, IDS_PROFILES_MANAGE_BUTTON_LABEL},
      {kTagProfileCreate, IDS_PROFILES_ADD_PROFILE_LABEL}});
 
-constexpr auto kHelpMenu = std::to_array<DbusAppmenuCommand>({
-#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
-    {IDC_FEEDBACK, IDS_FEEDBACK},
-#endif
-    {IDC_HELP_PAGE_VIA_MENU, IDS_HELP_PAGE}});
 
 void FindMenuItemsForCommandAux(
     ui::MenuModel* menu,
@@ -176,6 +172,18 @@ std::vector<std::pair<ui::MenuModel*, size_t>> FindMenuItemsForCommand(
   std::vector<std::pair<ui::MenuModel*, size_t>> menu_items;
   FindMenuItemsForCommandAux(menu, command, &menu_items);
   return menu_items;
+}
+
+std::vector<DbusAppmenuCommand> BuildHelpMenu(Profile& profile) {
+  std::vector<DbusAppmenuCommand> help_menu;
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+  help_menu.push_back({IDC_FEEDBACK, IDS_FEEDBACK});
+  if (feedback::ReportUnsafeSiteDialog::IsEnabled(profile)) {
+    help_menu.push_back({IDC_REPORT_UNSAFE_SITE, IDS_REPORT_UNSAFE_SITE});
+  }
+#endif
+  help_menu.push_back({IDC_HELP_PAGE_VIA_MENU, IDS_HELP_PAGE});
+  return help_menu;
 }
 
 }  // namespace
@@ -237,8 +245,6 @@ DbusAppmenu::~DbusAppmenu() {
   if (tab_restore_service_) {
     tab_restore_service_->RemoveObserver(this);
   }
-
-  BrowserList::RemoveObserver(this);
 }
 
 void DbusAppmenu::Initialize(DbusMenu::InitializedCallback callback) {
@@ -254,7 +260,7 @@ void DbusAppmenu::Initialize(DbusMenu::InitializedCallback callback) {
   history_menu_ = BuildStaticMenu(IDS_HISTORY_MENU_LINUX, kHistoryMenu);
   BuildStaticMenu(IDS_TOOLS_MENU_LINUX, kToolsMenu);
   profiles_menu_ = BuildStaticMenu(IDS_PROFILES_MENU_NAME, kProfilesMenu);
-  BuildStaticMenu(IDS_HELP_MENU_LINUX, kHelpMenu);
+  BuildStaticMenu(IDS_HELP_MENU_LINUX, BuildHelpMenu(*browser_->profile()));
 
   pref_change_registrar_.Init(browser_->profile()->GetPrefs());
   pref_change_registrar_.Add(
@@ -276,7 +282,8 @@ void DbusAppmenu::Initialize(DbusMenu::InitializedCallback callback) {
   avatar_menu_ = std::make_unique<AvatarMenu>(
       &profile_manager->GetProfileAttributesStorage(), this, browser_.get());
   avatar_menu_->RebuildMenu();
-  BrowserList::AddObserver(this);
+  browser_collection_observation_.Observe(
+      GlobalBrowserCollection::GetInstance());
 
   RebuildProfilesMenu();
 
@@ -475,8 +482,8 @@ int DbusAppmenu::NextCommandId() {
     } else {
       last_command_id_++;
     }
-  } while (base::Contains(history_items_, last_command_id_) ||
-           base::Contains(profile_commands_, last_command_id_));
+  } while (history_items_.contains(last_command_id_) ||
+           profile_commands_.contains(last_command_id_));
   return last_command_id_;
 }
 
@@ -484,7 +491,7 @@ void DbusAppmenu::OnAvatarMenuChanged(AvatarMenu* avatar_menu) {
   RebuildProfilesMenu();
 }
 
-void DbusAppmenu::OnBrowserSetLastActive(Browser* browser) {
+void DbusAppmenu::OnBrowserActivated(BrowserWindowInterface* browser) {
   // Notify the avatar menu of the change and rebuild the menu. Note: The
   // ActiveBrowserChanged() call needs to happen first to update the state.
   avatar_menu_->ActiveBrowserChanged(browser);
@@ -598,7 +605,7 @@ void DbusAppmenu::ExecuteCommand(int command_id, int event_flags) {
   } else if (command_id == kTagProfileCreate) {
     ProfilePicker::Show(ProfilePicker::Params::FromEntryPoint(
         ProfilePicker::EntryPoint::kProfileMenuAddNewProfile));
-  } else if (base::Contains(history_items_, command_id)) {
+  } else if (history_items_.contains(command_id)) {
     HistoryItem* item = history_items_[command_id].get();
     // If this item can be restored using TabRestoreService, do so.
     // Otherwise, just load the URL.
@@ -616,7 +623,7 @@ void DbusAppmenu::ExecuteCommand(int command_id, int event_flags) {
                                  ui::PAGE_TRANSITION_AUTO_BOOKMARK, false),
           /*navigation_handle_callback=*/{});
     }
-  } else if (base::Contains(profile_commands_, command_id)) {
+  } else if (profile_commands_.contains(command_id)) {
     avatar_menu_->SwitchToProfile(profile_commands_[command_id], false);
   }
 }

@@ -43,8 +43,8 @@ targets.variant(
 )
 
 targets.variant(
-    name = "CROS_RELEASE_LKGM",
-    identifier = "RELEASE_LKGM",
+    name = "CROS_LKGM",
+    identifier = "LKGM",
     skylab = targets.skylab(
         use_lkgm = True,
     ),
@@ -192,7 +192,7 @@ targets.variant(
         dimensions = {
             "os": "iOS-18",
             "device": "iPhone16,1",
-            "cpu": "x86|arm64",
+            "cpu": "arm64",
         },
     ),
 )
@@ -248,20 +248,6 @@ targets.variant(
         "Apple TV 4K (3rd generation)",
         "--version",
         "26.0",
-    ],
-)
-
-targets.variant(
-    name = "SIM_IPAD_AIR_5TH_GEN_17_5",
-    identifier = "iPad Air (5th generation) 17.5",
-    mixins = [
-        "ios_runtime_cache_17_5",
-    ],
-    args = [
-        "--platform",
-        "iPad Air (5th generation)",
-        "--version",
-        "17.5",
     ],
 )
 
@@ -322,16 +308,16 @@ targets.variant(
 )
 
 targets.variant(
-    name = "SIM_IPAD_AIR_6TH_GEN_26_2",
-    identifier = "iPad Air (6th generation) 26.2",
+    name = "SIM_IPAD_AIR_6TH_GEN_26_4",
+    identifier = "iPad Air (6th generation) 26.4",
     mixins = [
-        "ios_runtime_cache_26_2",
+        "ios_runtime_cache_26_4",
     ],
     args = [
         "--platform",
         "iPad Air 11-inch (M2)",
         "--version",
-        "26.2",
+        "26.4",
     ],
 )
 
@@ -346,20 +332,6 @@ targets.variant(
         "iPad Air 11-inch (M2)",
         "--version",
         "18.5",
-    ],
-)
-
-targets.variant(
-    name = "SIM_IPAD_PRO_6TH_GEN_17_5",
-    identifier = "iPad Pro (12.9-inch) (6th generation) 17.5",
-    mixins = [
-        "ios_runtime_cache_17_5",
-    ],
-    args = [
-        "--platform",
-        "iPad Pro (12.9-inch) (6th generation)",
-        "--version",
-        "17.5",
     ],
 )
 
@@ -388,20 +360,6 @@ targets.variant(
         "iPad Pro 13-inch (M4)",
         "--version",
         "26.0",
-    ],
-)
-
-targets.variant(
-    name = "SIM_IPAD_10TH_GEN_17_5",
-    identifier = "iPad (10th generation) 17.5",
-    mixins = [
-        "ios_runtime_cache_17_5",
-    ],
-    args = [
-        "--platform",
-        "iPad (10th generation)",
-        "--version",
-        "17.5",
     ],
 )
 
@@ -444,20 +402,6 @@ targets.variant(
         "iPad (10th generation)",
         "--version",
         "26.0",
-    ],
-)
-
-targets.variant(
-    name = "SIM_IPHONE_14_17_5",
-    identifier = "iPhone 14 17.5",
-    mixins = [
-        "ios_runtime_cache_17_5",
-    ],
-    args = [
-        "--platform",
-        "iPhone 14",
-        "--version",
-        "17.5",
     ],
 )
 
@@ -518,16 +462,16 @@ targets.variant(
 )
 
 targets.variant(
-    name = "SIM_IPHONE_15_26_2",
-    identifier = "iPhone 15 26.2",
+    name = "SIM_IPHONE_15_26_4",
+    identifier = "iPhone 15 26.4",
     mixins = [
-        "ios_runtime_cache_26_2",
+        "ios_runtime_cache_26_4",
     ],
     args = [
         "--platform",
         "iPhone 15",
         "--version",
-        "26.2",
+        "26.4",
     ],
 )
 
@@ -560,30 +504,16 @@ targets.variant(
 )
 
 targets.variant(
-    name = "SIM_IPHONE_16_26_2",
-    identifier = "iPhone 16 26.2",
+    name = "SIM_IPHONE_16_26_4",
+    identifier = "iPhone 16 26.4",
     mixins = [
-        "ios_runtime_cache_26_2",
+        "ios_runtime_cache_26_4",
     ],
     args = [
         "--platform",
         "iPhone 16",
         "--version",
-        "26.2",
-    ],
-)
-
-targets.variant(
-    name = "SIM_IPHONE_14_PLUS_17_5",
-    identifier = "iPhone 14 Plus 17.5",
-    mixins = [
-        "ios_runtime_cache_17_5",
-    ],
-    args = [
-        "--platform",
-        "iPhone 14 Plus",
-        "--version",
-        "17.5",
+        "26.4",
     ],
 )
 
@@ -616,20 +546,6 @@ targets.variant(
 )
 
 targets.variant(
-    name = "SIM_IPHONE_14_PRO_MAX_17_5",
-    identifier = "iPhone 14 Pro Max 17.5",
-    mixins = [
-        "ios_runtime_cache_17_5",
-    ],
-    args = [
-        "--platform",
-        "iPhone 14 Pro Max",
-        "--version",
-        "17.5",
-    ],
-)
-
-targets.variant(
     name = "SIM_IPHONE_15_PRO_MAX_18_2",
     identifier = "iPhone 15 Pro Max 18.2",
     mixins = [
@@ -654,20 +570,6 @@ targets.variant(
         "iPhone 15 Pro Max",
         "--version",
         "18.5",
-    ],
-)
-
-targets.variant(
-    name = "SIM_IPHONE_SE_3RD_GEN_17_5",
-    identifier = "iPhone SE (3rd generation) 17.5",
-    mixins = [
-        "ios_runtime_cache_17_5",
-    ],
-    args = [
-        "--platform",
-        "iPhone SE (3rd generation)",
-        "--version",
-        "17.5",
     ],
 )
 
@@ -714,16 +616,16 @@ targets.variant(
 )
 
 targets.variant(
-    name = "SIM_IPHONE_SE_3RD_GEN_26_2",
-    identifier = "iPhone SE (3rd generation) 26.2",
+    name = "SIM_IPHONE_SE_3RD_GEN_26_4",
+    identifier = "iPhone SE (3rd generation) 26.4",
     mixins = [
-        "ios_runtime_cache_26_2",
+        "ios_runtime_cache_26_4",
     ],
     args = [
         "--platform",
         "iPhone SE (3rd generation)",
         "--version",
-        "26.2",
+        "26.4",
     ],
 )
 

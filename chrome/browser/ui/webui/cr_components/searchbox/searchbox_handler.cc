@@ -6,13 +6,14 @@
 
 #include "base/base64.h"
 #include "base/base64url.h"
-#include "base/containers/contains.h"
+#include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "build/branding_buildflags.h"
+#include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
 #include "chrome/browser/autocomplete/chrome_autocomplete_scheme_classifier.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
@@ -27,7 +28,6 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
-#include "chrome/browser/ui/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/new_tab_page/composebox/variations/composebox_fieldtrial.h"
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
@@ -35,6 +35,8 @@
 #include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/omnibox/browser/aim_eligibility_service.h"
+#include "components/omnibox/browser/aim_eligibility_service_features.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_result.h"
 #include "components/omnibox/browser/omnibox_client.h"
@@ -52,7 +54,10 @@
 #include "third_party/omnibox_proto/answer_data.pb.h"
 #include "third_party/omnibox_proto/answer_type.pb.h"
 #include "third_party/omnibox_proto/groups.pb.h"
+#include "third_party/omnibox_proto/input_type.pb.h"
 #include "third_party/omnibox_proto/rich_answer_template.pb.h"
+#include "third_party/omnibox_proto/rule_set.pb.h"
+#include "third_party/omnibox_proto/searchbox_config.pb.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/window_open_disposition_utils.h"
@@ -62,7 +67,9 @@
 #include "url/gurl.h"
 
 namespace searchbox_internal {
-const char* kSearchIconResourceName = "//resources/images/icon_search.svg";
+
+const char* kSearchSparkIconResourceName =
+    "//resources/cr_components/searchbox/icons/search_spark.svg";
 }  // namespace searchbox_internal
 
 namespace {
@@ -80,8 +87,6 @@ const char* kAnswerSunriseIconResourceName =
     "//resources/cr_components/searchbox/icons/sunrise.svg";
 const char* kAnswerTranslationIconResourceName =
     "//resources/cr_components/searchbox/icons/translation.svg";
-const char* kAnswerWhenIsIconResourceName =
-    "//resources/cr_components/searchbox/icons/when_is.svg";
 const char* kBookmarkIconResourceName = "//resources/images/icon_bookmark.svg";
 const char* kCalculatorIconResourceName =
     "//resources/cr_components/searchbox/icons/calculator.svg";
@@ -139,11 +144,12 @@ const char* kIncognitoIconResourceName =
     "//resources/cr_components/searchbox/icons/incognito.svg";
 const char* kJourneysIconResourceName =
     "//resources/cr_components/searchbox/icons/journeys.svg";
+const char* kNotesSparkIconResourceName =
+    "//resources/cr_components/searchbox/icons/notes_spark.svg";
 const char* kPageIconResourceName =
     "//resources/cr_components/searchbox/icons/page.svg";
 const char* kPedalsIconResourceName = "//theme/current-channel-logo";
-const char* kSearchSparkIconResourceName =
-    "//resources/cr_components/searchbox/icons/search_spark.svg";
+const char* kSearchIconResourceName = "//resources/images/icon_search.svg";
 const char* kSparkIconResourceName =
     "//resources/cr_components/searchbox/icons/spark.svg";
 const char* kStarActiveIconResourceName =
@@ -180,8 +186,6 @@ static void DefineChromeRefreshRealboxIcons() {
       "//resources/cr_components/searchbox/icons/sunrise_cr23.svg";
   kAnswerTranslationIconResourceName =
       "//resources/cr_components/searchbox/icons/translation_cr23.svg";
-  kAnswerWhenIsIconResourceName =
-      "//resources/cr_components/searchbox/icons/when_is_cr23.svg";
   kBookmarkIconResourceName =
       "//resources/cr_components/searchbox/icons/bookmark_cr23.svg";
   kCalculatorIconResourceName =
@@ -208,7 +212,7 @@ static void DefineChromeRefreshRealboxIcons() {
       "//resources/cr_components/searchbox/icons/page_cr23.svg";
   kPedalsIconResourceName =
       "//resources/cr_components/searchbox/icons/chrome_product_cr23.svg";
-  searchbox_internal::kSearchIconResourceName =
+  kSearchIconResourceName =
       "//resources/cr_components/searchbox/icons/search_cr23.svg";
   kTabIconResourceName =
       "//resources/cr_components/searchbox/icons/tab_cr23.svg";
@@ -263,7 +267,7 @@ bool MatchHasSideTypeAndRenderType(
     const omnibox::GroupConfigMap& suggestion_groups_map) {
   omnibox::GroupId group_id =
       match.suggestion_group_id.value_or(omnibox::GROUP_INVALID);
-  return base::Contains(suggestion_groups_map, group_id) &&
+  return suggestion_groups_map.contains(group_id) &&
          suggestion_groups_map.at(group_id).side_type() == side_type &&
          suggestion_groups_map.at(group_id).render_type() == render_type;
 }
@@ -291,6 +295,8 @@ std::string GetBase64UrlVariations(Profile* profile) {
 
   return variations_base64url;
 }
+
+BASE_FEATURE(kDropMismatchedSelections, base::FEATURE_ENABLED_BY_DEFAULT);
 
 }  // namespace
 
@@ -328,7 +334,7 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
       {"addContext", IDS_NTP_COMPOSE_ADD_CONTEXTS},
       {"addContextTitle", IDS_NTP_COMPOSE_ADD_CONTEXT_TITLE},
       {"addImage", IDS_NTP_COMPOSE_ADD_IMAGE},
-      {"addTab", IDS_NTP_COMPOSE_MOST_RECENT_TABS},
+      {"addTab", IDS_NTP_COMPOSEBOX_TAB_PICKER_ADD_TABS_TITLE},
       {"dismissButton", IDS_NTP_DISMISS},
       // TODO(b/467036804): Update the value of `lensSearchAriaLabel`.
       {"lensSearchAriaLabel", IDS_CONTENT_CONTEXT_LENS_OVERLAY},
@@ -361,6 +367,8 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
        IDS_NTP_COMPOSE_FILE_UPLOAD_VALIDATION_FAILED},
       {"composeboxFileUploadFailed", IDS_NTP_COMPOSE_FILE_UPLOAD_FAILED},
       {"composeboxFileUploadExpired", IDS_NTP_COMPOSE_FILE_UPLOAD_EXPIRED},
+      {"composeboxFileUploadNotAllowed",
+       IDS_NTP_COMPOSE_FILE_UPLOAD_NOT_ALLOWED},
       {"menu", IDS_MENU},
       {"uploadFile", IDS_NTP_COMPOSE_ADD_FILE},
       {"deepSearch", IDS_NTP_COMPOSE_DEEP_SEARCH},
@@ -380,6 +388,21 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
       {"voiceDetails", IDS_NEW_TAB_VOICE_DETAILS},
       {"voiceListening", IDS_NEW_TAB_VOICE_LISTENING},
       {"voicePermissionError", IDS_NEW_TAB_VOICE_PERMISSION_ERROR},
+      {"composeboxContextMenuMostRecentTabs",
+       IDS_CONTEXTUAL_TASKS_CONTEXT_MENU_MOST_RECENT_TABS},
+      {"composeboxContextMenuGeminiModels",
+       IDS_CONTEXTUAL_TASKS_CONTEXT_MENU_GEMINI_MODELS},
+      {"canvas", IDS_NTP_COMPOSE_CANVAS},
+      {"geminiModelAuto", IDS_NTP_COMPOSE_AUTO_MODEL},
+      {"geminiModelThinking", IDS_NTP_COMPOSE_THINKING_3_PRO},
+      {"composeboxHintTextAskAboutThese",
+       IDS_COMPOSE_HINT_TEXT_ASK_ABOUT_THESE},
+      {"composeboxHintTextAskAboutThisImage",
+       IDS_COMPOSE_HINT_TEXT_ASK_ABOUT_THIS_IMAGE},
+      {"composeboxHintTextAskAboutThisTab",
+       IDS_COMPOSE_HINT_TEXT_ASK_ABOUT_THIS_TAB},
+      {"composeboxHintTextAskAboutThisDoc",
+       IDS_COMPOSE_HINT_TEXT_ASK_ABOUT_THIS_DOC},
   };
   source->AddLocalizedStrings(kStrings);
   source->AddString("searchboxComposePlaceholder",
@@ -393,10 +416,6 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
                                  u"activitycontrols?settings=search&utm_source="
                                  u"aim&utm_campaign=aim_str"));
 
-  source->AddBoolean(
-      "searchboxMatchSearchboxTheme",
-      base::FeatureList::IsEnabled(ntp_features::kRealboxMatchSearchboxTheme));
-
   DefineChromeRefreshRealboxIcons();
   source->AddString(
       "searchboxDefaultIcon",
@@ -404,9 +423,9 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
           ? kGoogleGIconResourceName
 #else
-          ? searchbox_internal::kSearchIconResourceName
+          ? kSearchIconResourceName
 #endif
-          : searchbox_internal::kSearchIconResourceName);
+          : kSearchIconResourceName);
 
   source->AddBoolean("searchboxVoiceSearch", enable_voice_search);
   source->AddBoolean("searchboxLensSearch", enable_lens_search);
@@ -418,19 +437,61 @@ void SearchboxHandler::SetupWebUIDataSource(content::WebUIDataSource* source,
                      ntp_features::kNtpRealboxCr23SteadyStateShadow.Get());
 
   auto composebox_config = ntp_composebox::FeatureConfig::Get().config;
-  source->AddString("composeboxDragAndDropHint",
-                    l10n_util::GetPluralStringFUTF16(
-                        IDS_NTP_COMPOSE_DRAG_AND_DROP_HINT,
-                        composebox_config.composebox().max_num_files()));
-  source->AddString("maxFilesReachedError",
-                    l10n_util::GetPluralStringFUTF16(
-                        IDS_NTP_COMPOSE_MAX_FILES_REACHED_ERROR,
-                        composebox_config.composebox().max_num_files()));
+  int max_images = 0;
+  int max_pdfs = 0;
+  int max_files = 0;
+  AimEligibilityService* service =
+      AimEligibilityServiceFactory::GetForProfile(profile);
+  const omnibox::SearchboxConfig* config =
+      service ? service->GetSearchboxConfig() : nullptr;
+
+  if (config && config->has_rule_set()) {
+    max_files = config->rule_set().max_total_inputs();
+    for (const auto& rule : config->rule_set().input_type_rules()) {
+      if (rule.input_type() == omnibox::INPUT_TYPE_LENS_IMAGE) {
+        max_images = rule.max_instance();
+      } else if (rule.input_type() == omnibox::INPUT_TYPE_LENS_FILE) {
+        max_pdfs = rule.max_instance();
+      }
+    }
+  }
+
+  source->AddString(
+      "composeboxDragAndDropHint",
+      l10n_util::GetPluralStringFUTF16(
+          IDS_NTP_COMPOSE_DRAG_AND_DROP_HINT,
+          max_files > 0 ? max_files
+                        : composebox_config.composebox().max_num_files()));
+  source->AddString(
+      "maxFilesReachedError",
+      l10n_util::GetPluralStringFUTF16(
+          IDS_NTP_COMPOSE_MAX_FILES_REACHED_ERROR,
+          max_files > 0 ? max_files
+                        : composebox_config.composebox().max_num_files()));
+  source->AddString(
+      "maxImagesReachedError",
+      l10n_util::GetPluralStringFUTF16(
+          IDS_NTP_COMPOSE_MAX_IMAGES_REACHED_ERROR,
+          max_images > 0 ? max_images
+                         : composebox_config.composebox().max_num_files()));
+  source->AddString(
+      "maxPdfsReachedError",
+      l10n_util::GetPluralStringFUTF16(
+          IDS_NTP_COMPOSE_MAX_PDFS_REACHED_ERROR,
+          max_pdfs > 0 ? max_pdfs
+                       : composebox_config.composebox().max_num_files()));
   source->AddBoolean(
       "searchboxShowComposeAnimation",
       profile->GetPrefs()->GetInteger(
           prefs::kNtpComposeButtonShownCountPrefName) <
           composebox_config.entry_point().num_page_load_animations());
+  source->AddBoolean("contextualMenuUsePecApi",
+                     base::FeatureList::IsEnabled(omnibox::kAimUsePecApi));
+  source->AddBoolean("ShowContextMenuHeaders",
+                     ntp_composebox::kShowContextMenuHeaders.Get());
+  source->AddBoolean(
+      "thinkingModelIconUpdate",
+      base::FeatureList::IsEnabled(omnibox::kThinkingModelIconUpdate));
 }
 
 std::string SearchboxHandler::AutocompleteIconToResourceName(
@@ -490,12 +551,14 @@ std::string SearchboxHandler::AutocompleteIconToResourceName(
     return kJourneysIconResourceName;
   } else if (icon.name == omnibox::kJourneysIcon.name) {
     return kJourneysIconResourceName;
+  } else if (icon.name == omnibox::kNotesSparkIcon.name) {
+    return kNotesSparkIconResourceName;
   } else if (icon.name == omnibox::kPageChromeRefreshIcon.name) {
     return kPageIconResourceName;
   } else if (icon.name == omnibox::kProductChromeRefreshIcon.name) {
     return kPedalsIconResourceName;
   } else if (icon.name == omnibox::kSearchSparkIcon.name) {
-    return kSearchSparkIconResourceName;
+    return searchbox_internal::kSearchSparkIconResourceName;
   } else if (icon.name == omnibox::kSparkIcon.name) {
     return kSparkIconResourceName;
   } else if (icon.name == omnibox::kStarActiveChromeRefreshIcon.name) {
@@ -509,7 +572,7 @@ std::string SearchboxHandler::AutocompleteIconToResourceName(
   } else if (icon.name == vector_icons::kHistoryChromeRefreshIcon.name) {
     return kHistoryIconResourceName;
   } else if (icon.name == vector_icons::kSearchChromeRefreshIcon.name) {
-    return searchbox_internal::kSearchIconResourceName;
+    return kSearchIconResourceName;
   }
 
   // Don't add new icons here. Add them alphabetically by `if` predicate. E.g.
@@ -579,7 +642,7 @@ SearchboxHandler::CreateAutocompleteResult(
     const PrefService* prefs,
     const TemplateURLService* turl_service) const {
   return searchbox::mojom::AutocompleteResult::New(
-      input,
+      result.sequence_id(), input,
       CreateSuggestionGroupsMap(result, edit_model, prefs,
                                 result.suggestion_groups_map()),
       CreateAutocompleteMatches(result, edit_model, bookmark_model,
@@ -824,8 +887,8 @@ void SearchboxHandler::AddFileContextFromBrowser(
 
 void SearchboxHandler::OnContextualInputStatusChanged(
     base::UnguessableToken token,
-    composebox_query::mojom::FileUploadStatus status,
-    std::optional<composebox_query::mojom::FileUploadErrorType> error_type) {
+    contextual_search::ContextUploadStatus status,
+    std::optional<contextual_search::ContextUploadErrorType> error_type) {
   if (page_ && IsRemoteBound()) {
     page_->OnContextualInputStatusChanged(token, status, error_type);
   }
@@ -881,10 +944,11 @@ void SearchboxHandler::QueryAutocomplete(const std::u16string& input,
   // Set the lens overlay suggest inputs, if available.
   if (std::optional<lens::proto::LensOverlaySuggestInputs> suggest_inputs =
           controller_->client()->GetLensOverlaySuggestInputs()) {
-    // Don't set lens params if in "Create Image" mode. This prevents the
-    // contextual client from being used in this tool mode.
-    if (GetAimToolMode() !=
-        omnibox::ChromeAimToolsAndModels::TOOL_MODE_IMAGE_GEN_UPLOAD) {
+    // Don't set lens params if in "Create Image" with an image present or in
+    // "Canvas" mode. This prevents the contextual client from being used in
+    // this tool mode.
+    if (!GetInputState().image_gen_upload_active &&
+        GetInputState().active_tool != omnibox::ToolMode::TOOL_MODE_CANVAS) {
       autocomplete_input.set_lens_overlay_suggest_inputs(*suggest_inputs);
     }
   }
@@ -898,7 +962,7 @@ void SearchboxHandler::QueryAutocomplete(const std::u16string& input,
     }
   }
 
-  autocomplete_input.set_aim_tool_mode(GetAimToolMode());
+  autocomplete_input.set_input_state(GetInputState());
 
   edit_model()->SetAutocompleteInput(autocomplete_input);
   omnibox_controller()->StartAutocomplete(autocomplete_input);
@@ -928,6 +992,78 @@ void SearchboxHandler::OpenAutocompleteMatch(uint8_t line,
       shift_key);
   edit_model()->OpenSelection(OmniboxPopupSelection(line), timestamp,
                               disposition);
+}
+
+OmniboxPopupSelection ConvertSelection(
+    searchbox::mojom::OmniboxPopupSelectionPtr selection) {
+  OmniboxPopupSelection::LineState state =
+      OmniboxPopupSelection::LineState::LINE_STATE_MAX_VALUE;
+  switch (selection->state) {
+    case searchbox::mojom::SelectionLineState::kNormal: {
+      state = OmniboxPopupSelection::LineState::NORMAL;
+      break;
+    }
+    case searchbox::mojom::SelectionLineState::kKeywordMode: {
+      state = OmniboxPopupSelection::LineState::KEYWORD_MODE;
+      break;
+    }
+    case searchbox::mojom::SelectionLineState::kFocusedButtonAction: {
+      state = OmniboxPopupSelection::LineState::FOCUSED_BUTTON_ACTION;
+      break;
+    }
+    case searchbox::mojom::SelectionLineState::kFocusedButtonRemoveSuggestion: {
+      state =
+          OmniboxPopupSelection::LineState::FOCUSED_BUTTON_REMOVE_SUGGESTION;
+      break;
+    }
+    case searchbox::mojom::SelectionLineState::kFocusedButtonAim: {
+      state = OmniboxPopupSelection::LineState::FOCUSED_BUTTON_AIM;
+      break;
+    }
+    case searchbox::mojom::SelectionLineState::
+        kFocusedButtonContextEntrypoint: {
+      // Handled directly by webui omnibox popup.
+      NOTREACHED();
+    }
+  }
+  CHECK_NE(state, OmniboxPopupSelection::LineState::LINE_STATE_MAX_VALUE);
+  // Special case line for mojom equivalent of kNoMatch; it is represented
+  // as uint8_t so direct conversion would become a positive out of bounds
+  // index.
+  return OmniboxPopupSelection(selection->line == 255
+                                   ? OmniboxPopupSelection::kNoMatch
+                                   : selection->line,
+                               state, selection->action_index);
+}
+
+void SearchboxHandler::SetPopupSelection(
+    searchbox::mojom::OmniboxPopupSelectionPtr selection) {
+  edit_model()->SetPopupSelection(ConvertSelection(std::move(selection)), false,
+                                  false, false);
+}
+
+void SearchboxHandler::OpenPopupSelection(
+    uint32_t result_sequence_id,
+    searchbox::mojom::OmniboxPopupSelectionPtr selection,
+    WindowOpenDisposition disposition) {
+  const OmniboxPopupSelection native_selection =
+      ConvertSelection(std::move(selection));
+  const bool selection_matched =
+      native_selection == edit_model()->GetPopupSelection();
+  const bool sequence_id_matched =
+      result_sequence_id == autocomplete_controller()->result().sequence_id();
+
+  base::UmaHistogramBoolean("Omnibox.WebUI.SelectionMatched",
+                            selection_matched);
+  base::UmaHistogramBoolean("Omnibox.WebUI.AutocompleteResultSequenceIdMatched",
+                            sequence_id_matched);
+
+  if ((!selection_matched || !sequence_id_matched) &&
+      base::FeatureList::IsEnabled(kDropMismatchedSelections)) {
+    return;
+  }
+
+  edit_model()->OpenSelection(native_selection);
 }
 
 void SearchboxHandler::OnNavigationLikely(
@@ -970,12 +1106,8 @@ void SearchboxHandler::ActivateKeyword(
     const GURL& url,
     base::TimeTicks match_selection_timestamp,
     bool is_mouse_event) {
-  // Generic searchbox should not show keywords.
-  NOTREACHED();
-}
-
-void SearchboxHandler::ShowContextMenu(const gfx::Point& point) {
-  // Generic searchbox should not have a context menu.
+  // TODO(b/449785444): Allow embedders other than the Omnibox to activate
+  // keyword mode.
   NOTREACHED();
 }
 
@@ -1066,6 +1198,10 @@ void SearchboxHandler::GetRecentTabs(GetRecentTabsCallback callback) {
   std::move(callback).Run({});
 }
 
+void SearchboxHandler::GetInputState(GetInputStateCallback callback) {
+  std::move(callback).Run({});
+}
+
 void SearchboxHandler::OnResultChanged(AutocompleteController* controller,
                                        bool default_match_changed) {
   page_->AutocompleteResultChanged(CreateAutocompleteResult(
@@ -1123,8 +1259,8 @@ const AutocompleteMatch* SearchboxHandler::GetMatchWithUrl(
   return &match;
 }
 
-omnibox::ChromeAimToolsAndModels SearchboxHandler::GetAimToolMode() const {
-  return omnibox::ChromeAimToolsAndModels::TOOL_MODE_UNSPECIFIED;
+omnibox::InputState SearchboxHandler::GetInputState() const {
+  return omnibox::InputState();
 }
 
 OmniboxController* SearchboxHandler::omnibox_controller() const {

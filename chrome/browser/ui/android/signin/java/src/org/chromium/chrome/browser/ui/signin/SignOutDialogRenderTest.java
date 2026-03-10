@@ -5,6 +5,8 @@
 package org.chromium.chrome.browser.ui.signin;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 import android.view.View;
@@ -20,11 +22,13 @@ import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.mockito.quality.Strictness;
 
+import org.chromium.base.Callback;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.BaseActivityTestRule;
 import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.password_manager.PasswordManagerUtilBridge;
 import org.chromium.chrome.browser.password_manager.PasswordManagerUtilBridgeJni;
@@ -32,20 +36,31 @@ import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.signin.services.IdentityServicesProvider;
 import org.chromium.chrome.browser.signin.services.SigninManager;
+import org.chromium.chrome.browser.sync.SyncServiceFactory;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.ChromeRenderTestRule;
+import org.chromium.components.browser_ui.modaldialog.AppModalPresenter;
 import org.chromium.components.prefs.PrefService;
+import org.chromium.components.signin.SigninFeatures;
 import org.chromium.components.signin.identitymanager.ConsentLevel;
 import org.chromium.components.signin.identitymanager.IdentityManager;
 import org.chromium.components.signin.metrics.SignoutReason;
+import org.chromium.components.sync.SyncService;
+import org.chromium.components.sync.UserActionableError;
 import org.chromium.components.user_prefs.UserPrefs;
 import org.chromium.components.user_prefs.UserPrefsJni;
+import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.ui.test.util.BlankUiTestActivity;
+
+import java.util.Collections;
+import java.util.Set;
 
 /** Render tests for {@link SignOutDialogCoordinator} */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 @Batch(Batch.PER_CLASS)
+@DisableFeatures(SigninFeatures.SUPPORT_FORCED_SIGNIN_POLICY)
 public class SignOutDialogRenderTest {
     private static final String TEST_DOMAIN = "test.domain.example.com";
 
@@ -65,11 +80,11 @@ public class SignOutDialogRenderTest {
 
     @Mock private PasswordManagerUtilBridge.Natives mPasswordManagerUtilBridgeNativeMock;
 
-    @Mock private IdentityServicesProvider mIdentityServicesProvider;
-
     @Mock private SigninManager mSigninManagerMock;
 
     @Mock private IdentityManager mIdentityManagerMock;
+
+    @Mock private SyncService mSyncService;
 
     @Mock private Profile mProfile;
 
@@ -77,17 +92,61 @@ public class SignOutDialogRenderTest {
 
     @Mock private PrefService mPrefService;
 
+    @Mock private SnackbarManager mSnackbarManagerMock;
+
+    @Mock private SigninAndHistorySyncActivityLauncher mSigninAndHistorySyncActivityLauncher;
+
     private SignOutDialogCoordinator mSignOutDialogCoordinator;
 
     @Before
     public void setUp() {
         PasswordManagerUtilBridgeJni.setInstanceForTesting(mPasswordManagerUtilBridgeNativeMock);
         UserPrefsJni.setInstanceForTesting(mUserPrefsMock);
-        IdentityServicesProvider.setInstanceForTests(mIdentityServicesProvider);
-        when(mIdentityServicesProvider.getSigninManager(any())).thenReturn(mSigninManagerMock);
-        when(mIdentityServicesProvider.getIdentityManager(any())).thenReturn(mIdentityManagerMock);
-        when(mIdentityManagerMock.hasPrimaryAccount(ConsentLevel.SYNC)).thenReturn(true);
+        IdentityServicesProvider.setIdentityManagerForTesting(mIdentityManagerMock);
+        IdentityServicesProvider.setSigninManagerForTesting(mSigninManagerMock);
+        SyncServiceFactory.setInstanceForTesting(mSyncService);
+        lenient().when(mIdentityManagerMock.hasPrimaryAccount(ConsentLevel.SYNC)).thenReturn(true);
         mActivityTestRule.launchActivity(null);
+    }
+
+    @Test
+    @LargeTest
+    @Feature("RenderTest")
+    public void testSignOutDialogBookmarkLimitExceeded() throws Exception {
+        when(mIdentityManagerMock.hasPrimaryAccount(ConsentLevel.SIGNIN)).thenReturn(true);
+        when(mSyncService.getUserActionableError())
+                .thenReturn(UserActionableError.BOOKMARKS_LIMIT_EXCEEDED);
+        doAnswer(
+                        invocation -> {
+                            Callback<Set<Integer>> callback = invocation.getArgument(0);
+                            callback.onResult(Collections.emptySet());
+                            return null;
+                        })
+                .when(mSyncService)
+                .getTypesWithUnsyncedData(any());
+
+        ThreadUtils.runOnUiThreadBlocking(
+                () ->
+                        SignOutCoordinator.startSignOutFlow(
+                                mActivityTestRule.getActivity(),
+                                mProfile,
+                                null,
+                                mActivityTestRule.getActivity().getModalDialogManager(),
+                                mSnackbarManagerMock,
+                                mSigninAndHistorySyncActivityLauncher,
+                                SignoutReason.USER_CLICKED_SIGNOUT_SETTINGS,
+                                /* showConfirmDialog= */ false,
+                                /* onSignOut= */ () -> {},
+                                /*- suppressSnackbar= */ false));
+        View dialogView =
+                ThreadUtils.runOnUiThreadBlocking(
+                        () -> {
+                            ModalDialogManager manager =
+                                    mActivityTestRule.getActivity().getModalDialogManager();
+                            return ((AppModalPresenter) manager.getCurrentPresenterForTest())
+                                    .getDialogViewForTesting();
+                        });
+        mRenderTestRule.render(dialogView, "signout_dialog_bookmark_limit_exceeded");
     }
 
     @Test

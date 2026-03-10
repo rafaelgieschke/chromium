@@ -1,6 +1,7 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="mn">
+<translation id="1035560095760914532">Chrome-д хүссэн үедээ хандахын тулд доод хэсэгт байрлуулна уу</translation>
 <translation id="1076643793026027628">Chrome YouTube-н нууцлалтай холбоосыг Нууцлалтай горимд автоматаар нээнэ.</translation>
 <translation id="1081114897601629648">Дараах нууц үгнүүд шаардлагад нийцэхгүй байгаа тул Google Нууц үгний менежер лүү импортлоогүй.</translation>
 <translation id="1086486568852410168">Google Lens-р хайх</translation>
@@ -86,6 +87,10 @@
 <translation id="2767464022270041271">Хадгалсан ямар ч нууц үг алга. Google Password Manager таныг нууц үгнүүдээ хадгалсан үед тэдгээрийг шалгах боломжтой.</translation>
 <translation id="2788811701191021538">Chrome-д төлбөрийн хэрэгслүүдийн тохиргооны хуудсыг нээнэ.</translation>
 <translation id="2876628302275096482"><ph name="BEGIN_LINK" />Chrome таны өгөгдлийг хэрхэн хувийн байлгадаг<ph name="END_LINK" /> талаар нэмэлт мэдээлэл авах</translation>
+<translation id="288992067439702510">Та Google Chrome-н <ph name="LIMIT" /> хавчуургын хязгаарт хүрсэн тул таны зарим хавчуургыг Google Бүртгэлд тань хараахан хадгалаагүй байна.
+
+Та зарим хавчуургаа устгах хүртэл бүртгэлдээ шинэ хавчуурга хадгалах боломжгүй. Хэрэв та одоо гарвал хадгалаагүй хавчуургыг устгана.</translation>
+<translation id="2901621928549457170">iPad ашиглаж байхдаа Chrome-г шуурхай нээгээрэй</translation>
 <translation id="2922914028977213693">iPad дээрээ Chrome-г бүрэн ашиглахын тулд энд товшоорой.</translation>
 <translation id="292371311537977079">Chrome-н тохиргоо</translation>
 <translation id="2923827943290349720">Таныг Chrome-г хаах үед Нууцлалтай табуудыг түгжинэ</translation>
@@ -170,6 +175,8 @@
 <translation id="5119391094379141756">Chrome-г сонгоно уу</translation>
 <translation id="5123188916260706415">Chrome-д дуу хоолойгоор хайх</translation>
 <translation id="5162467219239570114">Chrome хуучирсан байна. <ph name="BEGIN_LINK" />Апп дэлгүүр<ph name="END_LINK" />-т шинэчлэлт байхгүй бол төхөөрөмж тань Chrome-н шинэ хувилбарыг цаашид дэмжихгүй байж болзошгүй.</translation>
+<translation id="5172049865623113551">iPhone ашиглаж байхдаа Chrome-г шуурхай нээгээрэй</translation>
+<translation id="5179095426828744632">Сууриас Chrome-д илүү хурдан хандаарай</translation>
 <translation id="5184329579814168207">Chrome-д нээх</translation>
 <translation id="5190139289262548459">Танай байгууллага, <ph name="DOMAIN" /> таны нэвтэрсэн бүртгэл болон Chrome-г хэрхэн ашиглахыг удирдана.</translation>
 <translation id="5209238444239954363">Chrome-н шинэчлэлтийг шалгаж чадсангүй. Дараа дахин оролдоно уу.</translation>
@@ -308,7 +315,6 @@
 <translation id="787226752901403048">Табын бүлэг хуваалцах, нэгдэхийн тулд Chrome-д нэвтэрч, санаан дээр хамтран ажиллаарай</translation>
 <translation id="7897703007638178753">Chrome-н саяхны табуудыг харах</translation>
 <translation id="7948283758957877064">Chrome-д шинэ зүйл юу байна вэ?</translation>
-<translation id="7996707498590516621">Chrome дахь Gemini-р зураг үүсгэх</translation>
 <translation id="8000174216052461231">Chrome-н зөвлөгөө: Chrome-н хамгийн хүчтэй хамгаалалтыг аваарай</translation>
 <translation id="8006014511203279255">Мессеж эсвэл бусад апп дахь холбооснуудыг товших бүрдээ Chrome-г ашиглана уу.</translation>
 <translation id="8014670471808569312">Chrome танд нууц үгээ хадгалахыг санал болгоно.</translation>
@@ -320,6 +326,7 @@
 <translation id="8136856065410661948">Үүнийг таны Apple Calendar-т Chrome болон Google Lens-с үйл явдал үүсгэхэд ашиглана.</translation>
 <translation id="8154120522323162874">Хөтчөө үргэлжлүүлэн тохируулснаар Chrome-г бүрэн ашиглаарай.</translation>
 <translation id="8160472928944011082">Chrome-г шинэчлэх боломжгүй байна</translation>
+<translation id="8213550501565480896">Chrome-г өгөгдмөлөөр тохируулах</translation>
 <translation id="8245080522851805544">Та Chrome-г хаахдаа төхөөрөмжийн баталгаажуулалтыг ашиглан үзсэн зүйлээ хувийн байлгаарай</translation>
 <translation id="8248887045858762645">Chrome-н зөвлөгөө</translation>
 <translation id="8265730590513812063">Chrome-н цэсийг нээнэ үү</translation>
@@ -351,6 +358,7 @@
 <translation id="8788269841521769222">Та энэ нууц үгийг санах шаардлагагүй. Үүнийг <ph name="EMAIL" />-д зориулж Google-н Нууц үгний менежерт хадгална</translation>
 <translation id="8796490717897731471"><ph name="EMAIL" />. Chrome-г удирддаг.</translation>
 <translation id="880967149107462122">Chrome-н Тохиргоо руу очно уу</translation>
+<translation id="8840947648682778034">iPhone, iPad-д зориулсан Chrome-н загвар</translation>
 <translation id="8842132678697187091">Та Google Lens-г энд нээх боломжтой.</translation>
 <translation id="8850736900032787670">Сонирхолдоо тулгуурласан хувийн болгосон контентыг хүлээн авахын тулд Chrome-д нэвтэрнэ үү.</translation>
 <translation id="8855781063981781621">Chrome-д Түгжих горимыг идэвхгүй болгохын тулд үүнийг iPad-даа унтраана уу.</translation>

@@ -8,6 +8,7 @@
 #include "base/test/gmock_move_support.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
 #include "base/types/expected.h"
 #include "chrome/browser/optimization_guide/mock_optimization_guide_keyed_service.h"
@@ -18,6 +19,7 @@
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/optimization_guide/core/model_execution/test/mock_remote_model_executor.h"
 #include "components/optimization_guide/core/optimization_guide_proto_util.h"
+#include "components/password_manager/core/browser/features/password_features.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/ukm/test_ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
@@ -34,6 +36,8 @@ using ::testing::WithArg;
 using PasswordChangeOutcome = ::optimization_guide::proto::
     PasswordChangeSubmissionData_PasswordChangeOutcome;
 using UkmEntry = ukm::builders::PasswordManager_PasswordChangeSubmissionOutcome;
+using SubmissionResult =
+    PasswordChangeSubmissionVerifier::SubmissionVerificationResult;
 
 std::unique_ptr<KeyedService> CreateOptimizationService(
     content::BrowserContext* context) {
@@ -100,22 +104,20 @@ TEST_F(PasswordChangeSubmissionVerifierTest, Succeeded) {
   base::HistogramTester histogram_tester;
   ukm::TestAutoSetUkmRecorder test_ukm_recorder;
 
-  auto verifier = std::make_unique<PasswordChangeSubmissionVerifier>(
-      web_contents(), logs_uploader());
-
-  base::test::TestFuture<bool> completion_future;
+  base::test::TestFuture<SubmissionResult> completion_future;
   EXPECT_CALL(*optimization_service(), ExecuteModel)
       .WillOnce(WithArg<3>(
           &PostResponse<
               PasswordChangeOutcome::
                   PasswordChangeSubmissionData_PasswordChangeOutcome_SUCCESSFUL_OUTCOME>));
-  verifier->CheckSubmissionOutcome(completion_future.GetCallback());
+  auto verifier = std::make_unique<PasswordChangeSubmissionVerifier>(
+      web_contents(), logs_uploader(), completion_future.GetCallback());
 
   EXPECT_TRUE(verifier->capturer());
   verifier->capturer()->ReplyWithContent(
       optimization_guide::AIPageContentResult());
 
-  EXPECT_TRUE(completion_future.Get());
+  EXPECT_EQ(completion_future.Get(), SubmissionResult::kSuccess);
   histogram_tester.ExpectTotalCount(
       PasswordChangeSubmissionVerifier::
           kPasswordChangeVerificationTimeHistogram,
@@ -135,22 +137,20 @@ TEST_F(PasswordChangeSubmissionVerifierTest, Failed) {
   base::HistogramTester histogram_tester;
   ukm::TestAutoSetUkmRecorder test_ukm_recorder;
 
-  auto verifier = std::make_unique<PasswordChangeSubmissionVerifier>(
-      web_contents(), logs_uploader());
-
-  base::test::TestFuture<bool> completion_future;
+  base::test::TestFuture<SubmissionResult> completion_future;
   EXPECT_CALL(*optimization_service(), ExecuteModel)
       .WillOnce(WithArg<3>(
           &PostResponse<
               PasswordChangeOutcome::
                   PasswordChangeSubmissionData_PasswordChangeOutcome_UNSUCCESSFUL_OUTCOME>));
-  verifier->CheckSubmissionOutcome(completion_future.GetCallback());
+  auto verifier = std::make_unique<PasswordChangeSubmissionVerifier>(
+      web_contents(), logs_uploader(), completion_future.GetCallback());
 
   EXPECT_TRUE(verifier->capturer());
   verifier->capturer()->ReplyWithContent(
       optimization_guide::AIPageContentResult());
 
-  EXPECT_FALSE(completion_future.Get());
+  EXPECT_EQ(completion_future.Get(), SubmissionResult::kFailure);
 
   histogram_tester.ExpectUniqueSample(
       PasswordChangeSubmissionVerifier::kSubmissionOutcomeHistogramName,
@@ -168,22 +168,20 @@ TEST_F(PasswordChangeSubmissionVerifierTest, UnknownOutcome) {
   base::HistogramTester histogram_tester;
   ukm::TestAutoSetUkmRecorder test_ukm_recorder;
 
-  auto verifier = std::make_unique<PasswordChangeSubmissionVerifier>(
-      web_contents(), logs_uploader());
-
-  base::test::TestFuture<bool> completion_future;
+  base::test::TestFuture<SubmissionResult> completion_future;
   EXPECT_CALL(*optimization_service(), ExecuteModel)
       .WillOnce(WithArg<3>(
           &PostResponse<
               PasswordChangeOutcome::
                   PasswordChangeSubmissionData_PasswordChangeOutcome_UNKNOWN_OUTCOME>));
-  verifier->CheckSubmissionOutcome(completion_future.GetCallback());
+  auto verifier = std::make_unique<PasswordChangeSubmissionVerifier>(
+      web_contents(), logs_uploader(), completion_future.GetCallback());
 
   EXPECT_TRUE(verifier->capturer());
   verifier->capturer()->ReplyWithContent(
       optimization_guide::AIPageContentResult());
 
-  EXPECT_TRUE(completion_future.Get());
+  EXPECT_EQ(completion_future.Get(), SubmissionResult::kSuccess);
   histogram_tester.ExpectTotalCount(
       PasswordChangeSubmissionVerifier::
           kPasswordChangeVerificationTimeHistogram,
@@ -200,6 +198,189 @@ TEST_F(PasswordChangeSubmissionVerifierTest, UnknownOutcome) {
 }
 
 TEST_F(PasswordChangeSubmissionVerifierTest,
+       Succeeded_UserInterventionEnabled) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      password_manager::features::kUserInterventionForPasswordChange);
+
+  base::HistogramTester histogram_tester;
+  ukm::TestAutoSetUkmRecorder test_ukm_recorder;
+
+  base::test::TestFuture<SubmissionResult> completion_future;
+  EXPECT_CALL(*optimization_service(), ExecuteModel)
+      .WillOnce(WithArg<3>(
+          &PostResponse<
+              PasswordChangeOutcome::
+                  PasswordChangeSubmissionData_PasswordChangeOutcome_SUCCESSFUL_OUTCOME>));
+  auto verifier = std::make_unique<PasswordChangeSubmissionVerifier>(
+      web_contents(), logs_uploader(), completion_future.GetCallback());
+
+  EXPECT_TRUE(verifier->capturer());
+  verifier->capturer()->ReplyWithContent(
+      optimization_guide::AIPageContentResult());
+
+  EXPECT_EQ(completion_future.Get(), SubmissionResult::kSuccess);
+  histogram_tester.ExpectTotalCount(
+      PasswordChangeSubmissionVerifier::
+          kPasswordChangeVerificationTimeHistogram,
+      1);
+  histogram_tester.ExpectUniqueSample(
+      PasswordChangeSubmissionVerifier::kSubmissionOutcomeHistogramName,
+      PasswordChangeSubmissionVerifier::SubmissionOutcome::kSuccess, 1);
+  ukm::TestUkmRecorder::ExpectEntryMetric(
+      GetUkmEntry(test_ukm_recorder),
+      ukm::builders::PasswordManager_PasswordChangeSubmissionOutcome::
+          kPasswordChangeSubmissionOutcomeName,
+      static_cast<int>(
+          PasswordChangeSubmissionVerifier::SubmissionOutcome::kSuccess));
+}
+
+TEST_F(PasswordChangeSubmissionVerifierTest, Failed_UserInterventionEnabled) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      password_manager::features::kUserInterventionForPasswordChange);
+
+  base::HistogramTester histogram_tester;
+  ukm::TestAutoSetUkmRecorder test_ukm_recorder;
+
+  base::test::TestFuture<SubmissionResult> completion_future;
+  EXPECT_CALL(*optimization_service(), ExecuteModel)
+      .WillOnce(WithArg<3>(
+          &PostResponse<
+              PasswordChangeOutcome::
+                  PasswordChangeSubmissionData_PasswordChangeOutcome_UNSUCCESSFUL_OUTCOME>));
+  auto verifier = std::make_unique<PasswordChangeSubmissionVerifier>(
+      web_contents(), logs_uploader(), completion_future.GetCallback());
+
+  EXPECT_TRUE(verifier->capturer());
+  verifier->capturer()->ReplyWithContent(
+      optimization_guide::AIPageContentResult());
+
+  EXPECT_EQ(completion_future.Get(), SubmissionResult::kFailure);
+
+  histogram_tester.ExpectUniqueSample(
+      PasswordChangeSubmissionVerifier::kSubmissionOutcomeHistogramName,
+      PasswordChangeSubmissionVerifier::SubmissionOutcome::kUncategorizedError,
+      1);
+  ukm::TestUkmRecorder::ExpectEntryMetric(
+      GetUkmEntry(test_ukm_recorder),
+      ukm::builders::PasswordManager_PasswordChangeSubmissionOutcome::
+          kPasswordChangeSubmissionOutcomeName,
+      static_cast<int>(PasswordChangeSubmissionVerifier::SubmissionOutcome::
+                           kUncategorizedError));
+}
+
+TEST_F(PasswordChangeSubmissionVerifierTest,
+       UnknownOutcome_UserInterventionEnabled) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      password_manager::features::kUserInterventionForPasswordChange);
+
+  base::HistogramTester histogram_tester;
+  ukm::TestAutoSetUkmRecorder test_ukm_recorder;
+
+  base::test::TestFuture<SubmissionResult> completion_future;
+  EXPECT_CALL(*optimization_service(), ExecuteModel)
+      .WillOnce(WithArg<3>(
+          &PostResponse<
+              PasswordChangeOutcome::
+                  PasswordChangeSubmissionData_PasswordChangeOutcome_UNKNOWN_OUTCOME>));
+  auto verifier = std::make_unique<PasswordChangeSubmissionVerifier>(
+      web_contents(), logs_uploader(), completion_future.GetCallback());
+
+  EXPECT_TRUE(verifier->capturer());
+  verifier->capturer()->ReplyWithContent(
+      optimization_guide::AIPageContentResult());
+
+  EXPECT_EQ(completion_future.Get(), SubmissionResult::kSuccess);
+  histogram_tester.ExpectTotalCount(
+      PasswordChangeSubmissionVerifier::
+          kPasswordChangeVerificationTimeHistogram,
+      1);
+  histogram_tester.ExpectUniqueSample(
+      PasswordChangeSubmissionVerifier::kSubmissionOutcomeHistogramName,
+      PasswordChangeSubmissionVerifier::SubmissionOutcome::kUnknown, 1);
+  ukm::TestUkmRecorder::ExpectEntryMetric(
+      GetUkmEntry(test_ukm_recorder),
+      ukm::builders::PasswordManager_PasswordChangeSubmissionOutcome::
+          kPasswordChangeSubmissionOutcomeName,
+      static_cast<int>(
+          PasswordChangeSubmissionVerifier::SubmissionOutcome::kUnknown));
+}
+
+TEST_F(PasswordChangeSubmissionVerifierTest,
+       InterventionNeeded_UserInterventionEnabled) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      password_manager::features::kUserInterventionForPasswordChange);
+
+  base::HistogramTester histogram_tester;
+  ukm::TestAutoSetUkmRecorder test_ukm_recorder;
+
+  base::test::TestFuture<SubmissionResult> completion_future;
+  EXPECT_CALL(*optimization_service(), ExecuteModel)
+      .WillOnce(WithArg<3>(
+          &PostResponse<
+              PasswordChangeOutcome::
+                  PasswordChangeSubmissionData_PasswordChangeOutcome_USER_INTERVENTION_NEEDED>));
+  auto verifier = std::make_unique<PasswordChangeSubmissionVerifier>(
+      web_contents(), logs_uploader(), completion_future.GetCallback());
+
+  EXPECT_TRUE(verifier->capturer());
+  verifier->capturer()->ReplyWithContent(
+      optimization_guide::AIPageContentResult());
+
+  EXPECT_EQ(completion_future.Get(), SubmissionResult::kUserInterventionNeeded);
+
+  histogram_tester.ExpectUniqueSample(
+      PasswordChangeSubmissionVerifier::kSubmissionOutcomeHistogramName,
+      PasswordChangeSubmissionVerifier::SubmissionOutcome::
+          kUserInterventionNeeded,
+      1);
+  ukm::TestUkmRecorder::ExpectEntryMetric(
+      GetUkmEntry(test_ukm_recorder),
+      ukm::builders::PasswordManager_PasswordChangeSubmissionOutcome::
+          kPasswordChangeSubmissionOutcomeName,
+      static_cast<int>(PasswordChangeSubmissionVerifier::SubmissionOutcome::
+                           kUserInterventionNeeded));
+}
+
+TEST_F(PasswordChangeSubmissionVerifierTest,
+       InterventionNeeded_FeatureDisabled) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(
+      password_manager::features::kUserInterventionForPasswordChange);
+
+  base::HistogramTester histogram_tester;
+  ukm::TestAutoSetUkmRecorder test_ukm_recorder;
+
+  base::test::TestFuture<SubmissionResult> completion_future;
+  EXPECT_CALL(*optimization_service(), ExecuteModel)
+      .WillOnce(WithArg<3>(
+          &PostResponse<
+              PasswordChangeOutcome::
+                  PasswordChangeSubmissionData_PasswordChangeOutcome_USER_INTERVENTION_NEEDED>));
+  auto verifier = std::make_unique<PasswordChangeSubmissionVerifier>(
+      web_contents(), logs_uploader(), completion_future.GetCallback());
+
+  EXPECT_TRUE(verifier->capturer());
+  verifier->capturer()->ReplyWithContent(
+      optimization_guide::AIPageContentResult());
+
+  EXPECT_EQ(completion_future.Get(), SubmissionResult::kFailure);
+  histogram_tester.ExpectUniqueSample(
+      PasswordChangeSubmissionVerifier::kSubmissionOutcomeHistogramName,
+      PasswordChangeSubmissionVerifier::SubmissionOutcome::kUncategorizedError,
+      1);
+  ukm::TestUkmRecorder::ExpectEntryMetric(
+      GetUkmEntry(test_ukm_recorder),
+      ukm::builders::PasswordManager_PasswordChangeSubmissionOutcome::
+          kPasswordChangeSubmissionOutcomeName,
+      static_cast<int>(PasswordChangeSubmissionVerifier::SubmissionOutcome::
+                           kUncategorizedError));
+}
+
+TEST_F(PasswordChangeSubmissionVerifierTest,
        FailsCapturingAnnotatedPageContent) {
   base::HistogramTester histogram_tester;
   ukm::TestAutoSetUkmRecorder test_ukm_recorder;
@@ -207,18 +388,16 @@ TEST_F(PasswordChangeSubmissionVerifierTest,
       base::OnceCallback<void(optimization_guide::OnAIPageContentDone)>>
       capture_annotated_page_content;
 
-  auto verifier = std::make_unique<PasswordChangeSubmissionVerifier>(
-      web_contents(), logs_uploader());
-
-  base::test::TestFuture<bool> completion_future;
+  base::test::TestFuture<SubmissionResult> completion_future;
   EXPECT_CALL(*optimization_service(), ExecuteModel).Times(0);
-  verifier->CheckSubmissionOutcome(completion_future.GetCallback());
+  auto verifier = std::make_unique<PasswordChangeSubmissionVerifier>(
+      web_contents(), logs_uploader(), completion_future.GetCallback());
 
   EXPECT_TRUE(verifier->capturer());
   verifier->capturer()->ReplyWithContent(
       base::unexpected("APC Capture Failed"));
 
-  EXPECT_FALSE(completion_future.Get());
+  EXPECT_EQ(completion_future.Get(), SubmissionResult::kFailure);
   histogram_tester.ExpectUniqueSample(
       "PasswordManager.PasswordChange.FailedCapturingPageContent",
       password_manager::metrics_util::PasswordChangeFlowStep::
@@ -228,7 +407,7 @@ TEST_F(PasswordChangeSubmissionVerifierTest,
 
 TEST_F(PasswordChangeSubmissionVerifierTest, DurationRecordedOnDestruction) {
   auto verifier = std::make_unique<PasswordChangeSubmissionVerifier>(
-      web_contents(), logs_uploader());
+      web_contents(), logs_uploader(), base::DoNothing());
 
   task_environment()->FastForwardBy(base::Milliseconds(4543));
 

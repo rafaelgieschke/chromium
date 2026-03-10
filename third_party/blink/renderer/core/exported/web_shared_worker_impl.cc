@@ -55,7 +55,6 @@
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/events/message_event.h"
-#include "third_party/blink/renderer/core/frame/csp/conversion_util.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/inspector/worker_devtools_params.h"
 #include "third_party/blink/renderer/core/script/script.h"
@@ -68,6 +67,7 @@
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
+#include "third_party/blink/renderer/platform/loader/fetch/policy_container_utils.h"
 #include "third_party/blink/renderer/platform/network/content_security_policy_parsers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
@@ -231,7 +231,8 @@ void WebSharedWorkerImpl::StartWorkerContext(
     CrossVariantMojoReceiver<mojom::blink::ReportingObserverInterfaceBase>
         coep_reporting_observer,
     CrossVariantMojoReceiver<mojom::blink::ReportingObserverInterfaceBase>
-        dip_reporting_observer) {
+        dip_reporting_observer,
+    bool is_cross_origin_isolated) {
   DCHECK(IsMainThread());
   DCHECK(web_worker_fetch_context);
   CHECK(constructor_origin.Get()->CanAccessSharedWorkers());
@@ -243,7 +244,8 @@ void WebSharedWorkerImpl::StartWorkerContext(
       MakeGarbageCollected<FetchClientSettingsObjectSnapshot>(
           /*global_object_url=*/script_request_url,
           /*base_url=*/script_request_url, constructor_origin,
-          outside_fetch_client_settings_object.referrer_policy,
+          FromWebPolicyContainerPolicies(
+              outside_fetch_client_settings_object.policy_container_policies),
           outside_fetch_client_settings_object.outgoing_referrer.GetString(),
           CalculateHttpsState(constructor_origin.Get()),
           AllowedByNosniff::MimeTypeCheck::kLaxForWorker,
@@ -267,9 +269,10 @@ void WebSharedWorkerImpl::StartWorkerContext(
   auto creation_params = std::make_unique<GlobalScopeCreationParams>(
       script_request_url, script_type, name, user_agent, ua_metadata,
       std::move(web_worker_fetch_context),
-      ConvertToMojoBlink(content_security_policies),
+      ToVector(content_security_policies, FromWebContentSecurityPolicy),
       Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
       outside_settings_object->GetReferrerPolicy(),
+      DocumentPolicy::DocumentPolicyBundle{},
       outside_settings_object->GetSecurityOrigin(),
       is_constructor_secure_context, outside_settings_object->GetHttpsState(),
       MakeGarbageCollected<WorkerClients>(),
@@ -283,8 +286,7 @@ void WebSharedWorkerImpl::StartWorkerContext(
       mojo::NullRemote() /* blob_url_store */, BeginFrameProviderParams(),
       nullptr /* parent_permissions_policy */, base::UnguessableToken(),
       ukm_source_id,
-      /*parent_context_token=*/std::nullopt,
-      /*parent_cross_origin_isolated_capability=*/false,
+      /*parent_context_token=*/std::nullopt, is_cross_origin_isolated,
       /*parent_is_isolated_context=*/false,
       /*interface_registry=*/nullptr,
       /*agent_group_scheduler_compositor_task_runner=*/nullptr,
@@ -380,7 +382,8 @@ std::unique_ptr<WebSharedWorker> WebSharedWorker::CreateAndStart(
     CrossVariantMojoReceiver<mojom::blink::ReportingObserverInterfaceBase>
         coep_reporting_observer,
     CrossVariantMojoReceiver<mojom::blink::ReportingObserverInterfaceBase>
-        dip_reporting_observer) {
+        dip_reporting_observer,
+    bool is_cross_origin_isolated) {
   auto worker =
       base::WrapUnique(new WebSharedWorkerImpl(token, std::move(host), client));
   worker->StartWorkerContext(
@@ -392,8 +395,25 @@ std::unique_ptr<WebSharedWorker> WebSharedWorker::CreateAndStart(
       pause_worker_context_on_start, std::move(worker_main_script_load_params),
       std::move(policy_container), std::move(web_worker_fetch_context),
       ukm_source_id, require_cross_site_request_for_cookies,
-      std::move(coep_reporting_observer), std::move(dip_reporting_observer));
+      std::move(coep_reporting_observer), std::move(dip_reporting_observer),
+      is_cross_origin_isolated);
   return worker;
+}
+
+void WebSharedWorkerImpl::Freeze() {
+  CHECK(IsMainThread());
+  if (asked_to_terminate_ || !worker_thread_) {
+    return;
+  }
+  worker_thread_->Freeze(true /* is_in_back_forward_cache */);
+}
+
+void WebSharedWorkerImpl::Resume() {
+  CHECK(IsMainThread());
+  if (asked_to_terminate_ || !worker_thread_) {
+    return;
+  }
+  worker_thread_->Resume();
 }
 
 }  // namespace blink

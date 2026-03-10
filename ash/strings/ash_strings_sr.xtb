@@ -9,7 +9,6 @@
 <translation id="101823271612280837">Снимање је заустављено. Не можете да користите контролну таблу игре у режиму таблета.</translation>
 <translation id="1024364763893396229">Сачувајте уређај <ph name="NAME" /></translation>
 <translation id="1032891413405719768">Батерија писаљке је скоро празна</translation>
-<translation id="1036073649888683237">Да бисте управљали обавештењима, идите у подешавања</translation>
 <translation id="1036348656032585052">Искључи</translation>
 <translation id="1037492556044956303"><ph name="DEVICE_NAME" />: додато</translation>
 <translation id="1038106730571050514">Прикажите предлоге</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388"><ph name="INDEX" />. недавна слика од <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Скупи Google задатке</translation>
 <translation id="2208323208084708176">Режим спојених радних површина</translation>
-<translation id="2210311543574621570">Привремену меморију ћете видети ако притиснете и задржите Ctrl + V. Ту пречицу можете да искључите ако онемогућите ознаку #clipboard-history-longpress у одељку chrome://flags.</translation>
 <translation id="2215920961700443347">Нема интернета. Повежите се на интернет и пробајте поново.</translation>
 <translation id="2222841058024245321">Радна површина 7</translation>
 <translation id="2223384056430485343">На подељеном екрану</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">Инсталирај апликацију</translation>
 <translation id="2482878487686419369">Обавештења</translation>
 <translation id="2484513351006226581">Притисните <ph name="KEYBOARD_SHORTCUT" /> да бисте променили распоред тастатуре.</translation>
+<translation id="2485422356828889247">Деинсталирај</translation>
 <translation id="2486214324139475545">Преглед радне површине <ph name="DESK_NAME" />. Активна радна површина.</translation>
 <translation id="2486405091093637109">Резолуција „<ph name="DISPLAY_NAME" />“ је промењена у <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz) резолуцију. Ако не потврдите, претходна подешавања ће бити враћена за <ph name="TIMEOUT_SECONDS" />.</translation>
 <translation id="2487915095798731898">Придружи ме</translation>
@@ -1738,7 +1737,7 @@
 <translation id="6704073473590541209">Изабрали сте маркер на десној ивици, користите тастере са стрелицама за померање</translation>
 <translation id="6706742084323792866">Тастатура за PIN</translation>
 <translation id="6709719156428404245">Превуците или притисните тастер за размак да бисте изабрали област за снимање видеа</translation>
-<translation id="6710213216561001401">Претходно</translation>
+<translation id="6710213216561001401">Назад</translation>
 <translation id="6723839937902243910">Енергија</translation>
 <translation id="672609503628871915">Прикажи шта је ново</translation>
 <translation id="6727969043791803658">Повезано, ниво батерије је <ph name="BATTERY_PERCENTAGE" />%</translation>
@@ -2197,7 +2196,6 @@
 <translation id="8241650983304689286">Додај картицу у нови подељени приказ</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, јачина сигнала <ph name="SIGNAL_STRENGTH" />, батерија телефона <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Прегледајте сав садржај Google диска</translation>
-<translation id="8257510091797044096">Подесите уређај</translation>
 <translation id="8261506727792406068">Избриши</translation>
 <translation id="8262312463845990408">Укључите/искључите репродукцију</translation>
 <translation id="8268302343625273732">Погледајте све задатке у Google учионици</translation>

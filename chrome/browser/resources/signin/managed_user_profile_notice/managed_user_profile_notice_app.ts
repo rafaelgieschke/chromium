@@ -106,6 +106,7 @@ export class ManagedUserProfileNoticeAppElement extends
       separateDataChoiceDetails_: {type: String},
       mergeDataChoiceTitle_: {type: String},
       mergeDataChoiceDetails_: {type: String},
+      usePrimaryAndTonalButtons_: {type: Boolean},
     };
   }
 
@@ -134,6 +135,8 @@ export class ManagedUserProfileNoticeAppElement extends
       loadTimeData.getString('processingSubtitle');
   protected accessor showUserDataHandling_: boolean = false;
   protected accessor selectedDataHandling_: BrowsingDataHandling|null = null;
+  private accessor usePrimaryAndTonalButtons_: boolean =
+      loadTimeData.getBoolean('usePrimaryAndTonalButtonsForPromos');
 
   protected accessor valuePropTitle_: string = '';
   protected accessor valuePropSubtitle_: string = '';
@@ -191,7 +194,7 @@ export class ManagedUserProfileNoticeAppElement extends
   }
 
   /** Called when the proceed button is clicked. */
-  protected onProceed_() {
+  protected onProceedClick_() {
     this.disableProceedButton_ = true;
     const linkData = this.selectedDataHandling_ === BrowsingDataHandling.MERGE;
     this.managedUserProfileNoticeBrowserProxy_.proceed(
@@ -199,7 +202,7 @@ export class ManagedUserProfileNoticeAppElement extends
   }
 
   /** Called when the cancel button is clicked. */
-  protected onCancel_() {
+  protected onCancelClick_() {
     if (this.allowValuePropStateBackFromDisclosure_()) {
       this.updateCurrentState_(State.VALUE_PROPOSITION);
       return;
@@ -303,9 +306,13 @@ export class ManagedUserProfileNoticeAppElement extends
     this.processingSubtitle_ = this.i18n('longProcessingSubtitle');
   }
 
-  protected onDataHandlingChanged_(
+  protected onSelectedDataHandlingChanged_(
       e: CustomEvent<{value: BrowsingDataHandling}>) {
     this.selectedDataHandling_ = e.detail.value;
+  }
+
+  protected getCancelButtonClass_(): string {
+    return this.usePrimaryAndTonalButtons_ ? 'tonal-button' : '';
   }
 }
 

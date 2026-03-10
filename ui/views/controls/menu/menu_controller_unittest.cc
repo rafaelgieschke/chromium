@@ -69,7 +69,6 @@
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
-#include "ui/base/dragdrop/mojom/drag_drop_types.mojom-shared.h"
 #include "ui/views/controls/menu/menu_pre_target_handler.h"
 #endif
 
@@ -77,7 +76,7 @@
 #include "ui/ozone/public/ozone_platform.h"
 #endif
 
-#if BUILDFLAG(IS_OZONE_X11)
+#if BUILDFLAG(SUPPORTS_OZONE_X11)
 #include "ui/events/test/events_test_utils_x11.h"
 #endif
 
@@ -433,6 +432,22 @@ class MenuControllerTest : public ViewsTestBase,
 
   void SetDropMenuItem(MenuItemView* target,
                        MenuDelegate::DropPosition position);
+
+  // Returns the current drop target from the MenuController.
+  MenuItemView* GetDropTarget() const {
+    return static_cast<MenuItemView*>(
+        menu_controller_->drop_target_tracker_.view());
+  }
+
+  // Returns the current drop item from a SubmenuView.
+  static MenuItemView* GetSubmenuDropItem(SubmenuView* submenu) {
+    return submenu->drop_item_;
+  }
+
+  // Wrapper to access private UpdateEmptyMenusAndMetrics.
+  static void UpdateEmptyMenusAndMetrics(MenuItemView* item) {
+    item->UpdateEmptyMenusAndMetrics();
+  }
 
   void SetComboboxType(MenuController::ComboboxType combobox_type);
 
@@ -1063,7 +1078,7 @@ TEST_F(MenuControllerTest, EventTargeter) {
 }
 #endif  // defined(USE_AURA)
 
-#if BUILDFLAG(IS_OZONE_X11)
+#if BUILDFLAG(SUPPORTS_OZONE_X11)
 // Tests that touch event ids are released correctly. See crbug.com/439051 for
 // details. When the ids aren't managed correctly, we get stuck down touches.
 TEST_F(MenuControllerTest, TouchIdsReleasedCorrectly) {
@@ -1092,7 +1107,7 @@ TEST_F(MenuControllerTest, TouchIdsReleasedCorrectly) {
 
   GetRootWindow(owner())->RemovePreTargetHandler(&test_event_handler);
 }
-#endif  // BUILDFLAG(IS_OZONE_X11)
+#endif  // BUILDFLAG(SUPPORTS_OZONE_X11)
 
 // Tests that initial selected menu items are correct when items are enabled or
 // disabled.
@@ -1770,7 +1785,7 @@ TEST_F(MenuControllerTest, AsynchronousDragCompleteWithoutClose) {
 
   // TODO(crbug.com/375959961): For X11, the menu is closed on drag completion
   // because the native widget's state is not properly updated.
-  EXPECT_EQ(BUILDFLAG(IS_OZONE_X11) ? 1 : 0,
+  EXPECT_EQ(BUILDFLAG(SUPPORTS_OZONE_X11) ? 1 : 0,
             menu_controller_delegate()->on_menu_closed_called());
 }
 
@@ -2511,7 +2526,7 @@ TEST_F(MenuControllerTest, WidgetStateChangeCancelsMenu) {
 
 // TODO(pkasting): The test below fails most of the time on Wayland; not clear
 // it's important to support this case.
-#if BUILDFLAG(ENABLE_DESKTOP_AURA) && !BUILDFLAG(IS_OZONE_WAYLAND)
+#if BUILDFLAG(ENABLE_DESKTOP_AURA) && !BUILDFLAG(SUPPORTS_OZONE_WAYLAND)
 class DesktopMenuControllerTest : public MenuControllerTest {
  public:
   // MenuControllerTest:
@@ -2529,7 +2544,7 @@ TEST_F(DesktopMenuControllerTest, RunWithoutWidgetDoesntCrash) {
   menu_controller()->Run(nullptr, nullptr, menu_item(), gfx::Rect(),
                          MenuAnchorPosition::kTopLeft);
 }
-#endif  // BUILDFLAG(ENABLE_DESKTOP_AURA) && !BUILDFLAG(IS_OZONE_WAYLAND)
+#endif  // BUILDFLAG(ENABLE_DESKTOP_AURA) && !BUILDFLAG(SUPPORTS_OZONE_WAYLAND)
 
 // Tests that if a MenuController is destroying during drag/drop, and another
 // MenuController becomes active, that the exiting of drag does not cause a
@@ -2577,7 +2592,7 @@ TEST_F(MenuControllerTest, RestoreCaptureAfterDrag) {
 
   // TODO(crbug.com/375959961): For X11, the menu is closed on drag completion
   // because the native widget's state is not properly updated.
-  EXPECT_NE(base_host->HasCapture(), BUILDFLAG(IS_OZONE_X11));
+  EXPECT_NE(base_host->HasCapture(), BUILDFLAG(SUPPORTS_OZONE_X11));
 }
 
 // Tests that capture is not restored to the submenu after a drag and drop where
@@ -3385,6 +3400,56 @@ TEST_F(MenuControllerTest, BrowserHotkeysCancelMenusAndAreRedispatched) {
   EXPECT_FALSE(press_f.handled());
   EXPECT_FALSE(press_f.stopped_propagation());
 }
+
+// This test verifies that releasing keys with modifiers does not close the
+// menu. This prevents the menu from flashing open and immediately closing when
+// users release keys after opening a menu with a keyboard shortcut containing
+// multiple modifiers.
+TEST_F(MenuControllerTest, KeyReleaseDoesNotCancelMenu) {
+  // Open the menu (simulating that it was opened by a keyboard shortcut).
+  menu_controller()->Run(owner(), nullptr, menu_item(), gfx::Rect(),
+                         MenuAnchorPosition::kTopLeft,
+                         ui::mojom::MenuSourceType::kKeyboard);
+  ASSERT_TRUE(showing());
+
+  // Simulate releasing a key while still holding modifiers (Cmd+Ctrl).
+  // This simulates the user releasing keys after opening the menu with a
+  // multi-modifier keyboard shortcut. This should NOT cancel the menu.
+  int options = ui::EF_COMMAND_DOWN | ui::EF_CONTROL_DOWN;
+  ui::KeyEvent release_key(ui::EventType::kKeyReleased, ui::VKEY_A, options);
+  menu_controller()->OnWillDispatchKeyEvent(&release_key);
+  EXPECT_TRUE(showing());
+
+  // Release Ctrl key while still holding Cmd.
+  // This should also NOT cancel the menu.
+  ui::KeyEvent release_ctrl(ui::EventType::kKeyReleased, ui::VKEY_CONTROL,
+                            ui::EF_COMMAND_DOWN);
+  menu_controller()->OnWillDispatchKeyEvent(&release_ctrl);
+  EXPECT_TRUE(showing());
+
+  // Release Cmd key.
+  // This should also NOT cancel the menu.
+  ui::KeyEvent release_cmd(ui::EventType::kKeyReleased, ui::VKEY_COMMAND, 0);
+  menu_controller()->OnWillDispatchKeyEvent(&release_cmd);
+  EXPECT_TRUE(showing());
+}
+
+// This test verifies that pressing a new accelerator while a menu is open
+// still closes the menu as expected.
+TEST_F(MenuControllerTest, KeyPressWithModifierCancelsMenu) {
+  // Open the menu.
+  menu_controller()->Run(owner(), nullptr, menu_item(), gfx::Rect(),
+                         MenuAnchorPosition::kTopLeft,
+                         ui::mojom::MenuSourceType::kKeyboard);
+  ASSERT_TRUE(showing());
+
+  // Press a key with a modifier - this SHOULD close the menu.
+  ui::KeyEvent press_key(ui::EventType::kKeyPressed, ui::VKEY_T,
+                         ui::EF_COMMAND_DOWN);
+  menu_controller()->OnWillDispatchKeyEvent(&press_key);
+  views::test::WaitForMenuClosureAnimation();
+  EXPECT_FALSE(showing());
+}
 #endif
 
 TEST_F(MenuControllerTest, SubmenuOpenByKey) {
@@ -3694,6 +3759,211 @@ TEST_F(MenuControllerTest, ContextMenuShownOnShiftF10Key) {
 #else
   EXPECT_EQ(0, menu_delegate()->show_context_menu_count());
 #endif
+}
+
+// Test that the active descendant on the SubmenuView is updated to the
+// selected menu item when selection changes.
+TEST_F(MenuControllerTest, ActiveDescendantUpdatedOnMenuItemSelection) {
+  menu_controller()->Run(owner(), nullptr, menu_item(), gfx::Rect(),
+                         MenuAnchorPosition::kTopLeft);
+
+  SubmenuView* const submenu = menu_item()->GetSubmenu();
+  const MenuItemView* const item1 = submenu->GetMenuItemAt(0);
+  const MenuItemView* const item2 = submenu->GetMenuItemAt(1);
+
+  // Arrow down to select the first item.
+  DispatchKey(ui::VKEY_DOWN);
+  EXPECT_EQ(item1, pending_state_item());
+
+  // Verify active descendant is set to item1 on the SubmenuView.
+  ui::AXNodeData submenu_data;
+  submenu->GetViewAccessibility().GetAccessibleNodeData(&submenu_data);
+  EXPECT_TRUE(submenu_data.HasIntAttribute(
+      ax::mojom::IntAttribute::kActivedescendantId));
+  EXPECT_EQ(submenu_data.GetIntAttribute(
+                ax::mojom::IntAttribute::kActivedescendantId),
+            item1->GetViewAccessibility().GetUniqueId());
+
+  // Arrow down to select the second item.
+  DispatchKey(ui::VKEY_DOWN);
+  EXPECT_EQ(item2, pending_state_item());
+
+  // Verify active descendant is now set to item2.
+  submenu_data = ui::AXNodeData();
+  submenu->GetViewAccessibility().GetAccessibleNodeData(&submenu_data);
+  EXPECT_TRUE(submenu_data.HasIntAttribute(
+      ax::mojom::IntAttribute::kActivedescendantId));
+  EXPECT_EQ(submenu_data.GetIntAttribute(
+                ax::mojom::IntAttribute::kActivedescendantId),
+            item2->GetViewAccessibility().GetUniqueId());
+}
+
+// Test that the active descendant on the SubmenuView is updated to the
+// hot-tracked button when a button inside a menu item is hot tracked.
+TEST_F(MenuControllerTest, ActiveDescendantUpdatedOnHotButtonSet) {
+  AddButtonMenuItems(/*single_child=*/false);
+  SubmenuView* const submenu = menu_item()->GetSubmenu();
+
+  // Select the menu item containing buttons (item at index 4, command 5).
+  const View* const buttons_view = submenu->children()[4];
+  ASSERT_NE(nullptr, buttons_view);
+  GET_CHILD_BUTTON(button1, buttons_view, 0);
+  GET_CHILD_BUTTON(button2, buttons_view, 1);
+
+  // Navigate to "Four", then increment into the button item.
+  SelectByChar('f');
+  EXPECT_EQ(4, pending_state_item()->GetCommand());
+  IncrementSelection();
+  EXPECT_EQ(5, pending_state_item()->GetCommand());
+  EXPECT_TRUE(button1->IsHotTracked());
+  EXPECT_EQ(button1, hot_button());
+
+  // Verify active descendant is set to button1 on the SubmenuView.
+  ui::AXNodeData submenu_data;
+  submenu->GetViewAccessibility().GetAccessibleNodeData(&submenu_data);
+  EXPECT_TRUE(submenu_data.HasIntAttribute(
+      ax::mojom::IntAttribute::kActivedescendantId));
+  EXPECT_EQ(submenu_data.GetIntAttribute(
+                ax::mojom::IntAttribute::kActivedescendantId),
+            button1->GetViewAccessibility().GetUniqueId());
+
+  // Move to the next button (button2).
+  IncrementSelection();
+  EXPECT_TRUE(button2->IsHotTracked());
+  EXPECT_EQ(button2, hot_button());
+
+  // Verify active descendant is now set to button2.
+  submenu_data = ui::AXNodeData();
+  submenu->GetViewAccessibility().GetAccessibleNodeData(&submenu_data);
+  EXPECT_TRUE(submenu_data.HasIntAttribute(
+      ax::mojom::IntAttribute::kActivedescendantId));
+  EXPECT_EQ(submenu_data.GetIntAttribute(
+                ax::mojom::IntAttribute::kActivedescendantId),
+            button2->GetViewAccessibility().GetUniqueId());
+}
+
+// Test that when the hot button is cleared, the active descendant is restored
+// to the selected menu item.
+TEST_F(MenuControllerTest, ActiveDescendantRestoredWhenHotButtonCleared) {
+  AddButtonMenuItems(/*single_child=*/false);
+  SubmenuView* const submenu = menu_item()->GetSubmenu();
+  const MenuItemView* const item_with_buttons = submenu->GetMenuItemAt(4);
+
+  const View* const buttons_view = submenu->children()[4];
+  ASSERT_NE(nullptr, buttons_view);
+  GET_CHILD_BUTTON(button1, buttons_view, 0);
+
+  // Navigate to "Four", then increment into the button item.
+  SelectByChar('f');
+  EXPECT_EQ(4, pending_state_item()->GetCommand());
+  IncrementSelection();
+  EXPECT_EQ(item_with_buttons, pending_state_item());
+  EXPECT_EQ(button1, hot_button());
+
+  // Verify active descendant is button1.
+  ui::AXNodeData submenu_data;
+  submenu->GetViewAccessibility().GetAccessibleNodeData(&submenu_data);
+  EXPECT_EQ(submenu_data.GetIntAttribute(
+                ax::mojom::IntAttribute::kActivedescendantId),
+            button1->GetViewAccessibility().GetUniqueId());
+
+  // Clear the hot button.
+  SetHotTrackedButton(nullptr);
+  EXPECT_EQ(nullptr, hot_button());
+
+  // Verify active descendant is now set back to the menu item.
+  submenu_data = ui::AXNodeData();
+  submenu->GetViewAccessibility().GetAccessibleNodeData(&submenu_data);
+  EXPECT_TRUE(submenu_data.HasIntAttribute(
+      ax::mojom::IntAttribute::kActivedescendantId));
+  EXPECT_EQ(submenu_data.GetIntAttribute(
+                ax::mojom::IntAttribute::kActivedescendantId),
+            item_with_buttons->GetViewAccessibility().GetUniqueId());
+}
+
+// Test that the kActiveDescendantChanged event is emitted when the selection
+// changes.
+TEST_F(MenuControllerTest, ActiveDescendantChangedEventOnSelection) {
+  const test::AXEventCounter ax_counter(views::AXUpdateNotifier::Get());
+  menu_controller()->Run(owner(), nullptr, menu_item(), gfx::Rect(),
+                         MenuAnchorPosition::kTopLeft);
+  EXPECT_EQ(ax_counter.GetCount(ax::mojom::Event::kActiveDescendantChanged), 0);
+
+  // Arrow down to select an item, verifying the event is emitted.
+  DispatchKey(ui::VKEY_DOWN);
+  EXPECT_EQ(ax_counter.GetCount(ax::mojom::Event::kActiveDescendantChanged), 1);
+
+  DispatchKey(ui::VKEY_DOWN);
+  EXPECT_EQ(ax_counter.GetCount(ax::mojom::Event::kActiveDescendantChanged), 2);
+}
+
+// Test that the kActiveDescendantChanged event is emitted when the hot button
+// changes.
+TEST_F(MenuControllerTest, ActiveDescendantChangedEventOnHotButton) {
+  const test::AXEventCounter ax_counter(views::AXUpdateNotifier::Get());
+  AddButtonMenuItems(/*single_child=*/false);
+  SubmenuView* const submenu = menu_item()->GetSubmenu();
+
+  const View* const buttons_view = submenu->children()[4];
+  ASSERT_NE(nullptr, buttons_view);
+  GET_CHILD_BUTTON(button1, buttons_view, 0);
+  GET_CHILD_BUTTON(button2, buttons_view, 1);
+
+  // Navigate to "Four", then increment into the button item.
+  SelectByChar('f');
+  EXPECT_EQ(4, pending_state_item()->GetCommand());
+  IncrementSelection();
+  EXPECT_EQ(button1, hot_button());
+
+  // Record the count after navigating to the button item.
+  const int initial_count =
+      ax_counter.GetCount(ax::mojom::Event::kActiveDescendantChanged);
+
+  // Move to the next button - should emit kActiveDescendantChanged.
+  IncrementSelection();
+  EXPECT_EQ(button2, hot_button());
+  EXPECT_GT(ax_counter.GetCount(ax::mojom::Event::kActiveDescendantChanged),
+            initial_count);
+
+  // Clear the hot button - should emit kActiveDescendantChanged when restoring
+  // to the menu item.
+  const int count_before_clear =
+      ax_counter.GetCount(ax::mojom::Event::kActiveDescendantChanged);
+  SetHotTrackedButton(nullptr);
+  EXPECT_GT(ax_counter.GetCount(ax::mojom::Event::kActiveDescendantChanged),
+            count_before_clear);
+}
+
+// Regression test for crbug.com/487373990. Verifies that drop target pointers
+// are cleared when the target MenuItemView is destroyed.
+TEST_F(MenuControllerTest, DropTargetClearedWhenEmptyMenuItemDestroyed) {
+  MenuItemView* const submenu_item = menu_item()->AppendSubMenu(10, u"Submenu");
+
+  // Populate the empty submenu with an EmptyMenuMenuItem placeholder.
+  UpdateEmptyMenusAndMetrics(submenu_item);
+  SubmenuView* const submenu = submenu_item->GetSubmenu();
+
+  // GetMenuItems() filters out EmptyMenuMenuItems, so find it directly.
+  MenuItemView* empty_item = nullptr;
+  for (View* child : submenu->children()) {
+    if (IsViewClass<EmptyMenuMenuItem>(child)) {
+      empty_item = AsViewClass<MenuItemView>(child);
+      break;
+    }
+  }
+  ASSERT_NE(empty_item, nullptr);
+
+  SetDropMenuItem(empty_item, MenuDelegate::DropPosition::kOn);
+  EXPECT_EQ(GetDropTarget(), empty_item);
+  EXPECT_EQ(GetSubmenuDropItem(submenu), empty_item);
+
+  // Adding a real item and re-running UpdateEmptyMenusAndMetrics destroys the
+  // EmptyMenuMenuItem. The drop target references must be cleared.
+  submenu_item->AppendMenuItem(11, u"Real Item");
+  UpdateEmptyMenusAndMetrics(submenu_item);
+
+  EXPECT_EQ(GetDropTarget(), nullptr);
+  EXPECT_EQ(GetSubmenuDropItem(submenu), nullptr);
 }
 
 }  // namespace views

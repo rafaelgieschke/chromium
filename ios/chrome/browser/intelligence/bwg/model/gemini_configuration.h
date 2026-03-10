@@ -14,11 +14,15 @@ class AuthenticationService;
 @class GeminiPageContext;
 @protocol SingleSignOnService;
 
+namespace gemini {
+enum class EntryPoint;
+}  // namespace gemini
+
 namespace ios::provider {
-enum class BWGLocationPermissionState;
+enum class GeminiLocationPermissionState;
 enum class BWGPageContextState;
-enum class BWGPageContextComputationState;
-enum class BWGPageContextAttachmentState;
+enum class GeminiPageContextComputationState;
+enum class GeminiPageContextAttachmentState;
 }  // namespace ios::provider
 
 namespace optimization_guide::proto {
@@ -43,17 +47,23 @@ class PageContext;
     std::unique_ptr<optimization_guide::proto::PageContext>
         uniquePageContext;
 
-// The state of the BWG location permission.
+// The state of the Gemini location permission.
 @property(nonatomic, assign)
-    ios::provider::BWGLocationPermissionState BWGLocationPermissionState;
+    ios::provider::GeminiLocationPermissionState geminiLocationPermissionState;
+
+// The state of the Gemini PageContext computation.
+@property(nonatomic, assign) ios::provider::GeminiPageContextComputationState
+    geminiPageContextComputationState;
 
 // The state of the BWG PageContext computation.
-@property(nonatomic, assign) ios::provider::BWGPageContextComputationState
+// TODO(crbug.com/467341090): Remove this property once all callers have
+// migrated.
+@property(nonatomic, assign) ios::provider::GeminiPageContextComputationState
     BWGPageContextComputationState;
 
-// The state of the BWG PageContext attachment.
-@property(nonatomic, assign)
-    ios::provider::BWGPageContextAttachmentState BWGPageContextAttachmentState;
+// The state of the Gemini PageContext attachment.
+@property(nonatomic, assign) ios::provider::GeminiPageContextAttachmentState
+    geminiPageContextAttachmentState;
 
 // The favicon of the attached page. Uses a default icon if it's unavailable.
 @property(nonatomic, strong) UIImage* favicon;
@@ -88,6 +98,29 @@ class PageContext;
 
 // Image to be attached to the Gemini instance.
 @property(nonatomic, strong) UIImage* imageAttachment;
+
+// Whether to show the Gemini image remix in-product help in the Floaty.
+@property(nonatomic, assign) BOOL imageRemixIPHShouldShow;
+
+// Whether to use the response ready interval to show the response ready
+// notification in the floaty.
+@property(nonatomic, assign) double responseReadyInterval;
+
+// Whether to use the dynamic size for the response view in the floaty.
+@property(nonatomic, assign) BOOL responseViewDynamicSizeEnabled;
+
+// Whether chat persistence is enabled.
+@property(nonatomic, assign) BOOL geminiChatPersistenceEnabled;
+
+// The initial bottom offset of the floaty.
+@property(nonatomic, assign) CGFloat initialBottomOffset;
+
+// The window scene in which the Gemini view window is initialized and
+// presented.
+@property(nonatomic, strong) UIWindowScene* hostWindowScene;
+
+// The entry point where the floaty was triggered from.
+@property(nonatomic, assign) gemini::EntryPoint entryPoint;
 
 @end
 

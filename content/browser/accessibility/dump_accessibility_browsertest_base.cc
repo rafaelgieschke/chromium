@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/scoped_observation.h"
@@ -59,7 +58,7 @@ namespace {
 bool SkipUrlMatch(const std::vector<std::string>& skip_urls,
                   const std::string& url) {
   for (const auto& skip_url : skip_urls) {
-    if (base::Contains(url, skip_url)) {
+    if (url.contains(skip_url)) {
       return true;
     }
   }
@@ -430,7 +429,7 @@ void DumpAccessibilityTestBase::WaitForExpectedText() {
     bool all_wait_for_strings_found = true;
     std::string tree_dump = DumpTreeAsString();
     for (const auto& str : scenario_.wait_for) {
-      if (!base::Contains(tree_dump, str)) {
+      if (!tree_dump.contains(str)) {
         VLOG(1) << "Still waiting on this text to be found: " << str;
         all_wait_for_strings_found = false;
         break;
@@ -557,7 +556,7 @@ void DumpAccessibilityTestBase::RunTestForPlatform(
     while (wait_for_string) {
       // Loop until specified string is found.
       std::string tree_dump = DumpUnfilteredAccessibilityTreeAsString();
-      if (base::Contains(tree_dump, str)) {
+      if (tree_dump.contains(str)) {
         wait_for_string = false;
         // Append an additional dump if the specified string was found.
         std::vector<std::string> additional_dump = Dump();
@@ -668,8 +667,8 @@ ui::BrowserAccessibility* DumpAccessibilityTestBase::FindNode(
   }
 
   CHECK(search_root);
-  ui::BrowserAccessibility* node = FindNodeInSubtree(*search_root, name);
-  return node;
+  return FindFirstAccessibilityNodeWithStringAttribute(
+      *search_root, ax::mojom::StringAttribute::kName, name);
 }
 
 ui::BrowserAccessibilityManager* DumpAccessibilityTestBase::GetManager() const {
@@ -759,48 +758,13 @@ DumpAccessibilityTestBase::CaptureEvents(InvokeAction invoke_action) {
   return std::make_pair(std::move(action_result), std::move(event_logs));
 }
 
-ui::BrowserAccessibility* DumpAccessibilityTestBase::FindNodeInSubtree(
-    ui::BrowserAccessibility& node,
-    const std::string& name) const {
-  if (node.GetStringAttribute(ax::mojom::StringAttribute::kName) == name) {
-    return &node;
-  }
-
-  for (unsigned int i = 0; i < node.PlatformChildCount(); ++i) {
-    ui::BrowserAccessibility* result =
-        FindNodeInSubtree(*node.PlatformGetChild(i), name);
-    if (result) {
-      return result;
-    }
-  }
-  return nullptr;
-}
-
 ui::BrowserAccessibility* DumpAccessibilityTestBase::FindNodeByStringAttribute(
     const ax::mojom::StringAttribute attr,
     const std::string& value) const {
   ui::BrowserAccessibility* root = GetManager()->GetBrowserAccessibilityRoot();
 
   CHECK(root);
-  return FindNodeByStringAttributeInSubtree(*root, attr, value);
-}
-
-ui::BrowserAccessibility*
-DumpAccessibilityTestBase::FindNodeByStringAttributeInSubtree(
-    ui::BrowserAccessibility& node,
-    const ax::mojom::StringAttribute attr,
-    const std::string& value) const {
-  if (node.GetStringAttribute(attr) == value) {
-    return &node;
-  }
-
-  for (unsigned int i = 0; i < node.PlatformChildCount(); ++i) {
-    if (ui::BrowserAccessibility* result = FindNodeByStringAttributeInSubtree(
-            *node.PlatformGetChild(i), attr, value)) {
-      return result;
-    }
-  }
-  return nullptr;
+  return FindFirstAccessibilityNodeWithStringAttribute(*root, attr, value);
 }
 
 bool DumpAccessibilityTestBase::IsTestingExternalTree() const {

@@ -15,6 +15,7 @@
 #include "base/types/zip.h"
 #include "components/autofill/core/browser/autofill_ai_form_rationalization.h"
 #include "components/autofill/core/browser/autofill_field.h"
+#include "components/autofill/core/browser/autofill_format_string.h"
 #include "components/autofill/core/browser/country_type.h"
 #include "components/autofill/core/browser/data_model/autofill_ai/entity_instance.h"
 #include "components/autofill/core/browser/data_model/autofill_ai/entity_type.h"
@@ -59,9 +60,8 @@ ValueAndFormatString GetValueAndFormatString(const AutofillField& field,
                                              AttributeType attribute_type) {
   if (attribute_type.data_type() != AttributeType::DataType::kDate ||
       !field.IsSelectElement()) {
-    std::u16string value = field.value_for_import();
-    base::TrimWhitespace(value, base::TRIM_ALL, &value);
-    return {.value = std::move(value),
+    return {.value = std::u16string(
+                base::TrimWhitespace(field.value_for_import(), base::TRIM_ALL)),
             .format_string = field.format_string() ? *field.format_string()
                                                    : AutofillFormatString()};
   }

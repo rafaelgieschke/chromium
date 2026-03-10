@@ -24,6 +24,7 @@
 #import "ios/chrome/browser/shared/model/prefs/pref_backed_boolean.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
+#import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/help_commands.h"
 #import "ios/chrome/browser/shared/public/commands/page_action_menu_entry_point_commands.h"
@@ -67,6 +68,8 @@
                        infobarModal:infobarModalPresenter];
 
   _presenter.delegate = self.bubblePresenterDelegate;
+  _presenter.geminiHandler =
+      HandlerForProtocol(self.browser->GetCommandDispatcher(), BWGCommands);
 
   [self.browser->GetCommandDispatcher()
       startDispatchingToTarget:self
@@ -200,6 +203,28 @@
     case InProductHelpType::kReaderModeOptions: {
       CHECK(IsReaderModeAvailable());
       [_presenter presentReaderModeOptionsBubble];
+      break;
+    }
+    case InProductHelpType::kGeminiImageRemix: {
+      CHECK(IsGeminiImageRemixToolEnabled());
+      CHECK(IsPageActionMenuEnabled());
+      id<BWGCommands> bwgHandler =
+          HandlerForProtocol(commandDispatcher, BWGCommands);
+      id<PageActionMenuEntryPointCommands> pageActionMenuEntryPointHandler =
+          HandlerForProtocol(commandDispatcher,
+                             PageActionMenuEntryPointCommands);
+      [_presenter presentGeminiImageRemixBubbleWithBWGHandler:bwgHandler
+                              pageActionMenuEntryPointHandler:
+                                  pageActionMenuEntryPointHandler];
+      break;
+    }
+    case InProductHelpType::kPinSiteToMostVisited: {
+      CHECK(IsContentSuggestionsCustomizable());
+      [_presenter presentPinSiteToMostVisitedTilesBubble];
+      break;
+    }
+    case InProductHelpType::kHomeBackgroundCustomization: {
+      [_presenter presentHomeBackgroundCustomizationTipBubble];
       break;
     }
   }

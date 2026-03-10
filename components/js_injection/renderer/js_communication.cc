@@ -5,7 +5,7 @@
 #include "components/js_injection/renderer/js_communication.h"
 
 #include "base/feature_list.h"
-#include "components/js_injection/common/interfaces.mojom-data-view.h"
+#include "components/js_injection/common/interfaces.mojom-shared.h"
 #include "components/js_injection/renderer/js_binding.h"
 #include "components/origin_matcher/origin_matcher.h"
 #include "content/public/common/isolated_world_ids.h"
@@ -35,7 +35,8 @@ class JsCommunication::JsObjectInfo
   explicit JsObjectInfo(mojom::JsObjectPtr js_object)
       : origin_matcher_(js_object->origin_matcher),
         js_to_java_messaging_(std::move(js_object->js_to_browser_messaging)),
-        factory_receiver_(this, std::move(js_object->browser_to_js_factory)) {}
+        factory_receiver_(this, std::move(js_object->browser_to_js_factory)),
+        world_id_(js_object->js_world) {}
 
   // mojom::BrowserToJsMessagingFactory:
   void SendBrowserToJsMessaging(
@@ -60,11 +61,14 @@ class JsCommunication::JsObjectInfo
     return js_to_java_messaging_.get();
   }
 
+  int32_t world_id() const { return world_id_; }
+
  private:
   origin_matcher::OriginMatcher origin_matcher_;
   mojo::AssociatedRemote<mojom::JsToBrowserMessaging> js_to_java_messaging_;
   mojo::AssociatedReceiver<mojom::BrowserToJsMessagingFactory>
       factory_receiver_;
+  int32_t world_id_;
   cppgc::WeakPersistent<JsBinding> js_binding_;
 };
 
@@ -92,8 +96,8 @@ void JsCommunication::SetJsObjects(
   JsObjectMap js_objects;
   for (auto& js_object : js_object_ptrs) {
     std::u16string name = js_object->js_object_name;
-    js_objects.insert(
-        {name, std::make_unique<JsObjectInfo>(std::move(js_object))});
+    js_objects.insert({{name, js_object->js_world},
+                       std::make_unique<JsObjectInfo>(std::move(js_object))});
   }
   js_objects_.swap(js_objects);
   client_remote_.reset();
@@ -135,8 +139,8 @@ void JsCommunication::DidClearWindowObject() {
   v8::Local<v8::Context> context;
   std::optional<v8::HandleScope> handle_scope;
   std::optional<v8::Context::Scope> context_scope;
+  blink::WebLocalFrame* web_frame = render_frame()->GetWebFrame();
   if (base::FeatureList::IsEnabled(kLazyBindJsInjection)) {
-    blink::WebLocalFrame* web_frame = render_frame()->GetWebFrame();
     isolate = web_frame->GetAgentGroupScheduler()->Isolate();
     handle_scope.emplace(isolate);
     context = web_frame->MainWorldScriptContext();
@@ -157,15 +161,26 @@ void JsCommunication::DidClearWindowObject() {
       js_object.second->SetBinding(nullptr);
       continue;
     }
-    cppgc::WeakPersistent<JsBinding> js_binding = JsBinding::Install(
-        render_frame(), js_object.first,
-        weak_ptr_factory_for_bindings_.GetWeakPtr(), isolate, context);
+    cppgc::WeakPersistent<JsBinding> js_binding;
+    if (js_object.second->world_id() == content::ISOLATED_WORLD_ID_GLOBAL) {
+      js_binding =
+          JsBinding::Install(render_frame(), js_object.first.first,
+                             weak_ptr_factory_for_bindings_.GetWeakPtr(),
+                             isolate, context, js_object.second->world_id());
+    } else {
+      js_binding = JsBinding::Install(
+          render_frame(), js_object.first.first,
+          weak_ptr_factory_for_bindings_.GetWeakPtr(), isolate,
+          web_frame->GetScriptContextFromWorldId(isolate,
+                                                 js_object.second->world_id()),
+          js_object.second->world_id());
+    }
     if (js_binding) {
       if (base::FeatureList::IsEnabled(kLazyBindJsInjection)) {
         js_object.second->SetBinding(js_binding);
       } else {
-        mojom::JsToBrowserMessaging* js_to_java_messaging =
-            GetJsToJavaMessage(js_object.first);
+        mojom::JsToBrowserMessaging* js_to_java_messaging = GetJsToJavaMessage(
+            js_object.first.first, js_object.second->world_id());
         if (js_to_java_messaging) {
           mojo::PendingAssociatedRemote<mojom::BrowserToJsMessaging> remote;
           js_binding->Bind(remote.InitWithNewEndpointAndPassReceiver());
@@ -184,8 +199,9 @@ void JsCommunication::DidClearWindowObject() {
 void JsCommunication::WillReleaseScriptContext(v8::Local<v8::Context> context,
                                                int32_t world_id) {
   for (const auto& js_binding : js_bindings_) {
-    if (js_binding)
+    if (js_binding && js_binding->world_id() == world_id) {
       js_binding->ReleaseV8GlobalObjects();
+    }
   }
 }
 
@@ -193,23 +209,38 @@ void JsCommunication::OnDestruct() {
   delete this;
 }
 
-void JsCommunication::RunScriptsAtDocumentStart() {
-  url::Origin frame_origin =
-      url::Origin(render_frame()->GetWebFrame()->GetSecurityOrigin());
-  for (const auto& script : scripts_) {
+void JsCommunication::RunScripts(mojom::DocumentInjectionTime injection_time) {
+  RunScriptsInternal(weak_ptr_factory_.GetWeakPtr(), injection_time);
+  // Careful `this` may be destroyed.
+}
+
+// static
+void JsCommunication::RunScriptsInternal(
+    base::WeakPtr<JsCommunication> js_communication,
+    mojom::DocumentInjectionTime injection_time) {
+  CHECK(js_communication);
+  url::Origin frame_origin = url::Origin(
+      js_communication->render_frame()->GetWebFrame()->GetSecurityOrigin());
+  for (const auto& script : js_communication->scripts_) {
     if (!script->origin_matcher.Matches(frame_origin)) {
       continue;
     }
-    if (script->injection_time ==
-        mojom::DocumentInjectionTime::kDocumentStart) {
+    if (script->injection_time == injection_time) {
       if (script->js_world == content::ISOLATED_WORLD_ID_GLOBAL) {
-        render_frame()->GetWebFrame()->ExecuteScript(
+        js_communication->render_frame()->GetWebFrame()->ExecuteScript(
             blink::WebScriptSource(script->script));
       } else {
-        render_frame()->GetWebFrame()->ExecuteScriptInIsolatedWorld(
-            script->js_world, blink::WebScriptSource(script->script),
-            blink::BackForwardCacheAware::kAllow);
+        js_communication->render_frame()
+            ->GetWebFrame()
+            ->ExecuteScriptInIsolatedWorld(
+                script->js_world, blink::WebScriptSource(script->script),
+                blink::BackForwardCacheAware::kAllow);
       }
+    }
+    // Careful, executing a script may cause JsCommunication object to be
+    // destroyed.
+    if (!js_communication) {
+      return;
     }
   }
 }
@@ -223,8 +254,9 @@ void JsCommunication::BindPendingReceiver(
 }
 
 mojom::JsToBrowserMessaging* JsCommunication::GetJsToJavaMessage(
-    const std::u16string& js_object_name) {
-  auto iterator = js_objects_.find(js_object_name);
+    const std::u16string& js_object_name,
+    int32_t world_id) {
+  auto iterator = js_objects_.find({js_object_name, world_id});
   if (iterator == js_objects_.end())
     return nullptr;
   return iterator->second->js_to_java_messaging();

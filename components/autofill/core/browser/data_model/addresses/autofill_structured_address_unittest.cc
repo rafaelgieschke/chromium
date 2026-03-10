@@ -3188,11 +3188,12 @@ class AutofillStructuredAddressHouseNumberTest
       public testing::WithParamInterface<HouseNumberTestCase> {
  private:
   base::test::ScopedFeatureList features_{
-      features::kAutofillUseChildrenAndReformatMergeMode};
+      features::kAutofillEnableStreetAddressMergeModes};
 };
 
+// TODO(crbug.com/447111009) Reenable when fixed.
 TEST_P(AutofillStructuredAddressHouseNumberTest,
-       DiscardWhitespaceWhenNormalizingHouseNumber) {
+       DISABLED_DiscardWhitespaceWhenNormalizingHouseNumber) {
   const HouseNumberTestCase& test_case = GetParam();
 
   AddressComponentsStore address =
@@ -3240,13 +3241,14 @@ class AutofillStructuredAddressMergeReformatTest
       public testing::WithParamInterface<MergeChildrenAndReformatTestCase> {
  private:
   base::test::ScopedFeatureList features_{
-      features::kAutofillUseChildrenAndReformatMergeMode};
+      features::kAutofillEnableStreetAddressMergeModes};
 };
 
 // Tests that the merge and reformat logic works as expected for different
-// countries with the `kAutofillUseChildrenAndReformatMergeMode` feature
+// countries with the `kAutofillEnableStreetAddressMergeModes` feature
 // enabled.
-TEST_P(AutofillStructuredAddressMergeReformatTest, MergeAndReformat) {
+// TODO(crbug.com/447111009) Reenable when fix is present.
+TEST_P(AutofillStructuredAddressMergeReformatTest, DISABLED_MergeAndReformat) {
   const MergeChildrenAndReformatTestCase& test_case = GetParam();
 
   AddressComponentsStore older_address =
@@ -3259,6 +3261,8 @@ TEST_P(AutofillStructuredAddressMergeReformatTest, MergeAndReformat) {
           AddressCountryCode(test_case.country_code));
   SetTestValues(newer_address.Root(), test_case.new_address);
 
+  EXPECT_TRUE(
+      older_address.Root()->IsMergeableWithComponent(*newer_address.Root()));
   older_address.Root()->MergeWithComponent(
       *newer_address.Root(), /*newer_was_more_recently_used=*/true);
   older_address.Root()->CompleteFullTree();

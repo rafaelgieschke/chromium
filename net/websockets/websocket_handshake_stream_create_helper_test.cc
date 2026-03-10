@@ -76,6 +76,7 @@
 #include "net/third_party/quiche/src/quiche/common/platform/api/quiche_flags.h"
 #include "net/third_party/quiche/src/quiche/http2/core/spdy_protocol.h"
 #include "net/third_party/quiche/src/quiche/quic/core/crypto/quic_crypto_client_config.h"
+#include "net/third_party/quiche/src/quiche/quic/core/http/http_constants.h"
 #include "net/third_party/quiche/src/quiche/quic/core/qpack/qpack_decoder.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_connection.h"
 #include "net/third_party/quiche/src/quiche/quic/core/quic_connection_id.h"
@@ -177,9 +178,7 @@ class MockClientSocketHandleFactory {
         scoped_refptr<ClientSocketPool::SocketParams>(),
         std::nullopt /* proxy_annotation_tag */, MEDIUM, SocketTag(),
         ClientSocketPool::RespectLimits::ENABLED, CompletionOnceCallback(),
-        ClientSocketPool::ProxyAuthCallback(),
-        /*fail_if_alias_requires_proxy_override=*/false, &pool_,
-        NetLogWithSource());
+        ClientSocketPool::ProxyAuthCallback(), &pool_, NetLogWithSource());
     return socket_handle;
   }
 
@@ -244,8 +243,7 @@ class WebSocketHandshakeStreamCreateHelperTest
       public WithTaskEnvironment {
  protected:
   WebSocketHandshakeStreamCreateHelperTest()
-      : quic_version_(quic::HandshakeProtocol::PROTOCOL_TLS1_3,
-                      quic::QuicTransportVersion::QUIC_VERSION_IETF_RFC_V1),
+      : quic_version_(quic::QuicTransportVersion::QUIC_VERSION_IETF_RFC_V1),
         mock_quic_data_(quic_version_) {}
   std::unique_ptr<WebSocketStream> CreateAndInitializeStream(
       const std::vector<std::string>& sub_protocols,
@@ -533,6 +531,10 @@ class WebSocketHandshakeStreamCreateHelperTest
 
         session_->Initialize();
 
+        // Enable extended CONNECT protocol (required for WebSocket over
+        // HTTP/3).
+        session_->OnSetting(quic::SETTINGS_ENABLE_CONNECT_PROTOCOL, 1);
+
         // Blackhole QPACK decoder stream instead of constructing mock writes.
         session_->qpack_decoder()->set_qpack_stream_sender_delegate(
             &noop_qpack_stream_sender_delegate_);
@@ -567,6 +569,11 @@ class WebSocketHandshakeStreamCreateHelperTest
         EXPECT_THAT(rv, IsOk());
 
         EXPECT_EQ(200, response.headers->response_code());
+
+        // After the handshake, byte counts should reflect the HEADERS
+        // frames exchanged over the QUIC stream.
+        EXPECT_GT(handshake->GetTotalReceivedBytes(), 0);
+        EXPECT_GT(handshake->GetTotalSentBytes(), 0);
 
         return handshake->Upgrade();
       }

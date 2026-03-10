@@ -9,9 +9,9 @@
 
 #include "base/time/time.h"
 #include "base/unguessable_token.h"
+#include "components/page_load_metrics/browser/interaction_to_next_paint_calculator.h"
 #include "components/page_load_metrics/browser/observers/core/largest_contentful_paint_handler.h"
 #include "components/page_load_metrics/browser/resource_tracker.h"
-#include "components/page_load_metrics/browser/responsiveness_metrics_normalization.h"
 #include "components/page_load_metrics/common/page_end_reason.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "ui/base/scoped_visibility_tracker.h"
@@ -196,16 +196,14 @@ class PageLoadMetricsObserverDelegate {
       BfcacheStrategy bfcache_strategy) const = 0;
   virtual const NormalizedCLSData& GetSoftNavigationIntervalNormalizedCLSData()
       const = 0;
-  // Returns normalized responsiveness metrics data. Normalization explained in
+  // Returns Interaction to Next Paint (INP) data. Details in
   // https://web.dev/inp.
-  virtual const ResponsivenessMetricsNormalization&
-  GetResponsivenessMetricsNormalization() const = 0;
+  virtual const InteractionToNextPaintCalculator&
+  GetInteractionToNextPaintCalculator() const = 0;
 
-  virtual const ResponsivenessMetricsNormalization&
-  GetSoftNavigationIntervalResponsivenessMetricsNormalization() const = 0;
+  virtual const InteractionToNextPaintCalculator&
+  GetSoftNavigationIntervalInteractionToNextPaintCalculator() const = 0;
 
-  // InputTiming data accumulated across all frames.
-  virtual const mojom::InputTiming& GetPageInputTiming() const = 0;
   virtual const PageRenderData& GetMainFrameRenderData() const = 0;
   virtual const ui::ScopedVisibilityTracker& GetVisibilityTracker() const = 0;
   virtual const ResourceTracker& GetResourceTracker() const = 0;
@@ -221,11 +219,19 @@ class PageLoadMetricsObserverDelegate {
   virtual const LargestContentfulPaintHandler&
   GetExperimentalLargestContentfulPaintHandler() const = 0;
 
-  // Returns the current soft navigation count - https://bit.ly/soft-navigation
+  // Returns the current soft navigation related Largest Contentful Paint info.
+  virtual const ContentfulPaintTimingInfo&
+  GetSoftNavigationLargestContentfulPaint() const = 0;
+
+  // Returns the current soft navigation - https://bit.ly/soft-navigation
   // Soft navigations are JS-driven same-document navigations that are using the
   // history API or the new Navigation API, triggered by a user gesture and
   // meaningfully modify the DOM, replacing the previous content with new one.
-  virtual mojom::SoftNavigationMetrics& GetSoftNavigationMetrics() const = 0;
+  virtual const mojom::SoftNavigationMetrics& GetSoftNavigationMetrics()
+      const = 0;
+
+  // The number of soft navigations that have occurred in the page load.
+  virtual uint64_t GetSoftNavigationCount() const = 0;
 
   // Maps main-frame same-document navigation identified
   // by |same_document_metrics_token| to its UKM source id.

@@ -11,10 +11,10 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/no_destructor.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -75,7 +75,7 @@ Feature::Availability IsAvailableToEnvironmentForBind(int context_id,
 
 // Gets a human-readable name for the given extension type, suitable for giving
 // to developers in an error message.
-std::string GetDisplayName(Manifest::Type type) {
+std::string_view GetDisplayName(Manifest::Type type) {
   switch (type) {
     case Manifest::Type::kUnknown:
       return "unknown";
@@ -105,7 +105,7 @@ std::string GetDisplayName(Manifest::Type type) {
 
 // Gets a human-readable name for the given context type, suitable for giving
 // to developers in an error message.
-std::string GetDisplayName(mojom::ContextType context) {
+std::string_view GetDisplayName(mojom::ContextType context) {
   switch (context) {
     case mojom::ContextType::kUnspecified:
       return "unknown";
@@ -135,7 +135,7 @@ std::string GetDisplayName(mojom::ContextType context) {
   NOTREACHED();
 }
 
-std::string GetDisplayName(mojom::FeatureSessionType session_type) {
+std::string_view GetDisplayName(mojom::FeatureSessionType session_type) {
   switch (session_type) {
     case mojom::FeatureSessionType::kInitial:
       return "user-less";
@@ -158,7 +158,7 @@ std::string ListDisplayNames(const std::vector<EnumType>& enum_types) {
   std::string display_name_list;
   for (size_t i = 0; i < enum_types.size(); ++i) {
     // Pluralize type name.
-    display_name_list += GetDisplayName(enum_types[i]) + "s";
+    base::StrAppend(&display_name_list, {GetDisplayName(enum_types[i]), "s"});
     // Comma-separate entries, with an Oxford comma if there is more than 2
     // total entries.
     if (enum_types.size() > 2) {
@@ -321,81 +321,73 @@ std::string SimpleFeature::GetAvailabilityMessage(
     case AvailabilityResult::kNotFoundInAllowlist:
     case AvailabilityResult::kFoundInBlocklist:
       return base::StringPrintf(
-          "'%s' is not allowed for specified extension ID.",
-          name().c_str());
+          "'%s' is not allowed for specified extension ID.", name());
     case AvailabilityResult::kInvalidUrl:
-      return base::StringPrintf("'%s' is not allowed on %s.",
-                                name().c_str(), url.spec().c_str());
+      return base::StringPrintf("'%s' is not allowed on %s.", name(),
+                                url.spec());
     case AvailabilityResult::kInvalidType:
       return base::StringPrintf(
-          "'%s' is only allowed for %s, but this is a %s.",
-          name().c_str(),
-          ListDisplayNames(std::vector<Manifest::Type>(
-              extension_types_.begin(), extension_types_.end())).c_str(),
-          GetDisplayName(type).c_str());
+          "'%s' is only allowed for %s, but this is a %s.", name(),
+          ListDisplayNames(std::vector<Manifest::Type>(extension_types_.begin(),
+                                                       extension_types_.end())),
+          GetDisplayName(type));
     case AvailabilityResult::kInvalidContext:
       DCHECK(contexts_);
       return base::StringPrintf(
-          "'%s' is only allowed to run in %s, but this is a %s", name().c_str(),
+          "'%s' is only allowed to run in %s, but this is a %s", name(),
           ListDisplayNames(std::vector<mojom::ContextType>(contexts_->begin(),
-                                                           contexts_->end()))
-              .c_str(),
-          GetDisplayName(context).c_str());
+                                                           contexts_->end())),
+          GetDisplayName(context));
     case AvailabilityResult::kInvalidLocation:
       return base::StringPrintf(
-          "'%s' is not allowed for specified install location.",
-          name().c_str());
+          "'%s' is not allowed for specified install location.", name());
     case AvailabilityResult::kInvalidPlatform:
-      return base::StringPrintf(
-          "'%s' is not allowed for specified platform.",
-          name().c_str());
+      return base::StringPrintf("'%s' is not allowed for specified platform.",
+                                name());
     case AvailabilityResult::kInvalidMinManifestVersion:
       DCHECK(min_manifest_version_);
       return base::StringPrintf(
-          "'%s' requires manifest version of at least %d.", name().c_str(),
+          "'%s' requires manifest version of at least %d.", name(),
           *min_manifest_version_);
     case AvailabilityResult::kInvalidMaxManifestVersion:
       DCHECK(max_manifest_version_);
       return base::StringPrintf(
-          "'%s' requires manifest version of %d or lower.", name().c_str(),
+          "'%s' requires manifest version of %d or lower.", name(),
           *max_manifest_version_);
     case AvailabilityResult::kInvalidSessionType:
       return base::StringPrintf(
           "'%s' is only allowed to run in %s sessions, but this is %s session.",
-          name().c_str(),
+          name(),
           ListDisplayNames(std::vector<mojom::FeatureSessionType>(
-                               session_types_.begin(), session_types_.end()))
-              .c_str(),
-          GetDisplayName(session_type).c_str());
+              session_types_.begin(), session_types_.end())),
+          GetDisplayName(session_type));
     case AvailabilityResult::kNotPresent:
       return base::StringPrintf(
-          "'%s' requires a different Feature that is not present.",
-          name().c_str());
+          "'%s' requires a different Feature that is not present.", name());
     case AvailabilityResult::kUnsupportedChannel:
       return base::StringPrintf(
           "'%s' requires %s channel or newer, but this is the %s channel.",
-          name().c_str(), version_info::GetChannelString(channel).data(),
+          name(), version_info::GetChannelString(channel).data(),
           version_info::GetChannelString(GetCurrentChannel()).data());
     case AvailabilityResult::kMissingCommandLineSwitch:
       DCHECK(command_line_switch_);
       return base::StringPrintf(
-          "'%s' requires the '%s' command line switch to be enabled.",
-          name().c_str(), command_line_switch_->c_str());
+          "'%s' requires the '%s' command line switch to be enabled.", name(),
+          command_line_switch_->c_str());
     case AvailabilityResult::kFeatureFlagDisabled:
       DCHECK(feature_flag_);
       return base::StringPrintf(
-          "'%s' requires the '%s' feature flag to be enabled.", name().c_str(),
-          feature_flag_->c_str());
+          "'%s' requires the '%s' feature flag to be enabled.", name(),
+          *feature_flag_);
     case AvailabilityResult::kRequiresDeveloperMode:
       return base::StringPrintf(
-          "'%s' requires the user to have developer mode enabled.",
-          name().c_str());
+          "'%s' requires the user to have developer mode enabled.", name());
     case AvailabilityResult::kMissingDelegatedAvailabilityCheck:
       return base::StringPrintf(
-          "'%s' is missing its delegated availability check", name().c_str());
+          "'%s' is missing its delegated availability check", name());
     case AvailabilityResult::kFailedDelegatedAvailabilityCheck:
       return base::StringPrintf("'%s' failed its delegated availability check.",
-                                name().c_str());
+                                name());
   }
 
   NOTREACHED();
@@ -475,21 +467,21 @@ bool SimpleFeature::IsIdInList(const HashedExtensionId& hashed_id,
   if (!IsValidHashedExtensionId(hashed_id))
     return false;
 
-  return base::Contains(list, hashed_id.value());
+  return std::ranges::contains(list, hashed_id.value());
 }
 
 bool SimpleFeature::MatchesManifestLocation(
     ManifestLocation manifest_location) const {
   DCHECK(location_);
   switch (*location_) {
-    case SimpleFeature::COMPONENT_LOCATION:
+    case SimpleFeature::Location::kComponent:
       return manifest_location == ManifestLocation::kComponent;
-    case SimpleFeature::EXTERNAL_COMPONENT_LOCATION:
+    case SimpleFeature::Location::kExternalComponent:
       return manifest_location == ManifestLocation::kExternalComponent;
-    case SimpleFeature::POLICY_LOCATION:
+    case SimpleFeature::Location::kPolicy:
       return manifest_location == ManifestLocation::kExternalPolicy ||
              manifest_location == ManifestLocation::kExternalPolicyDownload;
-    case SimpleFeature::UNPACKED_LOCATION:
+    case SimpleFeature::Location::kUnpacked:
       return Manifest::IsUnpackedLocation(manifest_location);
   }
   NOTREACHED();
@@ -500,14 +492,15 @@ bool SimpleFeature::MatchesSessionTypes(
   if (session_types_.empty())
     return true;
 
-  if (base::Contains(session_types_, session_type))
+  if (std::ranges::contains(session_types_, session_type))
     return true;
 
   // AUTOLAUNCHED_KIOSK session type is subset of KIOSK - accept auto-lauched
   // kiosk session if kiosk session is allowed. This is the only exception to
   // rejecting session type that is not present in |session_types_|
   return session_type == mojom::FeatureSessionType::kAutolaunchedKiosk &&
-         base::Contains(session_types_, mojom::FeatureSessionType::kKiosk);
+         std::ranges::contains(session_types_,
+                               mojom::FeatureSessionType::kKiosk);
 }
 
 bool SimpleFeature::RequiresDelegatedAvailabilityCheck() const {
@@ -614,7 +607,7 @@ Feature::Availability SimpleFeature::GetEnvironmentAvailability(
     int context_id,
     bool check_developer_mode) const {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (!platforms_.empty() && !base::Contains(platforms_, platform))
+  if (!platforms_.empty() && !std::ranges::contains(platforms_, platform))
     return CreateAvailability(AvailabilityResult::kInvalidPlatform);
 
   if (channel_ && *channel_ < GetCurrentChannel()) {
@@ -686,7 +679,7 @@ Feature::Availability SimpleFeature::GetManifestAvailability(
   Manifest::Type type_to_check =
       (type == Manifest::Type::kUserScript) ? Manifest::Type::kExtension : type;
   if (!extension_types_.empty() &&
-      !base::Contains(extension_types_, type_to_check)) {
+      !std::ranges::contains(extension_types_, type_to_check)) {
     return CreateAvailability(AvailabilityResult::kInvalidType, type);
   }
 
@@ -694,7 +687,7 @@ Feature::Availability SimpleFeature::GetManifestAvailability(
     return CreateAvailability(AvailabilityResult::kFoundInBlocklist);
 
   // TODO(benwells): don't grant all component extensions.
-  // See http://crbug.com/370375 for more details.
+  // See http://crbug.com/41105605 for more details.
   // Component extensions can access any feature.
   // NOTE: Deliberately does not match EXTERNAL_COMPONENT.
   if (component_extensions_auto_granted_ &&
@@ -728,7 +721,7 @@ Feature::Availability SimpleFeature::GetContextAvailability(
   // extension API calls, since there's no guarantee that the extension is
   // "active" in current renderer process when the API permission check is
   // done.
-  if (contexts_ && !base::Contains(*contexts_, context))
+  if (contexts_ && !std::ranges::contains(*contexts_, context))
     return CreateAvailability(AvailabilityResult::kInvalidContext, context);
 
   // TODO(kalman): Consider checking |matches_| regardless of context type.

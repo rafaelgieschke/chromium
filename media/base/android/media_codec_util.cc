@@ -12,7 +12,6 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
-#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "base/strings/string_util.h"
 #include "base/system/sys_info.h"
@@ -65,7 +64,7 @@ static CodecProfileLevel MediaCodecProfileLevelToChromiumProfileLevel(
 
 static bool IsDecoderSupportedByDevice(std::string_view android_mime_type) {
   if (android_mime_type == kVp8MimeType) {
-    std::string hardware = base::SysInfo::GetAndroidBuildID();
+    std::string hardware = base::SysInfo::GetAndroidHardware();
     // MediaTek decoders do not work properly on vp8 until Android T. See
     // http://crbug.com/446974 and http://crbug.com/597836.
     if (hardware.starts_with("mt") &&
@@ -80,9 +79,9 @@ static bool IsDecoderSupportedByDevice(std::string_view android_mime_type) {
   return true;
 }
 
-static jboolean JNI_MediaCodecUtil_IsDecoderSupportedForDevice(
+static bool JNI_MediaCodecUtil_IsDecoderSupportedForDevice(
     JNIEnv* env,
-    std::string& mime_type) {
+    const std::string& mime_type) {
   return IsDecoderSupportedByDevice(mime_type);
 }
 

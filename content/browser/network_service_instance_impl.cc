@@ -26,6 +26,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/sequence_checker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -35,16 +36,19 @@
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/platform_thread_metrics.h"
+#include "base/threading/scoped_thread_priority.h"
 #include "base/threading/sequence_local_storage_slot.h"
 #include "base/threading/thread.h"
+#include "base/threading/thread_checker.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "components/performance_manager/scenario_api/performance_scenario_observer.h"
+#include "components/performance_manager/scenario_api/performance_scenarios.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/first_party_sets/first_party_sets_handler_impl.h"
 #include "content/browser/network/http_cache_backend_file_operations_factory.h"
-#include "content/browser/network/socket_broker_impl.h"
 #include "content/browser/network_sandbox_grant_result.h"
 #include "content/browser/network_service_client.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -61,6 +65,7 @@
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
 #include "net/base/features.h"
 #include "net/base/network_change_notifier.h"
+#include "net/base/switches.h"
 #include "net/first_party_sets/global_first_party_sets.h"
 #include "net/log/file_net_log_observer.h"
 #include "net/log/net_log_util.h"
@@ -125,6 +130,91 @@ mojo::Remote<network::mojom::NetworkService>* g_network_service_remote =
     nullptr;
 network::NetworkConnectionTracker* g_network_connection_tracker;
 bool g_network_service_is_responding = false;
+
+// When enabled, sets the in-process network service thread to
+// base::ThreadType::kPresentation
+BASE_FEATURE(kNetworkServiceIncreasedPriorityAlways,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kNetworkServiceIncreasedPriorityWhileLoading,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Boosts the priority of the network service thread depending on the feature
+// that is enabled. If `kNetworkServiceIncreasedPriorityAlways` is enabled, the
+// network service thread will always be boosted. If
+// `kNetworkServiceIncreasedPriorityWhileLoading` is enabled, the network
+// service thread will be boosted when the scenario indicates that the user is
+// actively loading a page.
+class BoostNetworkThreadPriority
+    : public performance_scenarios::MatchingScenarioObserver {
+ public:
+  BoostNetworkThreadPriority(base::ThreadType boosted_thread_type,
+                             performance_scenarios::ScenarioPattern pattern)
+      : performance_scenarios::MatchingScenarioObserver(pattern),
+        boosted_thread_type_(boosted_thread_type) {}
+
+  ~BoostNetworkThreadPriority() override = default;
+
+  static BoostNetworkThreadPriority& GetInstance() {
+    static base::NoDestructor<BoostNetworkThreadPriority> instance{
+        base::ThreadType::kPresentation, kBoostScenarioPattern};
+    return *instance;
+  }
+
+  void Initialize() {
+    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+    // If there is no observer list, return before checking the feature list to
+    // prevent the client from entering any arm of the experiment.
+    auto observer_list =
+        performance_scenarios::PerformanceScenarioObserverList::GetForScope(
+            performance_scenarios::ScenarioScope::kGlobal);
+    if (!observer_list) {
+      return;
+    }
+
+    // The two features that boost network thread priority interact and
+    // therefore enforce that at most one of them is enabled.
+    CHECK(
+        !base::FeatureList::IsEnabled(kNetworkServiceIncreasedPriorityAlways) ||
+        !base::FeatureList::IsEnabled(
+            kNetworkServiceIncreasedPriorityWhileLoading));
+
+    if (base::FeatureList::IsEnabled(kNetworkServiceIncreasedPriorityAlways)) {
+      scoped_boost_priority_.emplace(base::ThreadType::kPresentation);
+    } else if (base::FeatureList::IsEnabled(
+                   kNetworkServiceIncreasedPriorityWhileLoading)) {
+      // Add to the global scope since the goal is to boost the network thread
+      // while any page is loading.
+      observer_list->AddMatchingObserver(this);
+    }
+  }
+
+  // performance_scenarios::MatchingScenarioObserver::OnScenarioMatchChanged
+  void OnScenarioMatchChanged(performance_scenarios::ScenarioScope scope,
+                              bool matches_pattern) override {
+    // Callbacks must be received on the thread the object was created on.
+    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+
+    if (matches_pattern) {
+      scoped_boost_priority_.emplace(boosted_thread_type_);
+    } else {
+      scoped_boost_priority_.reset();
+    }
+  }
+
+ private:
+  static constexpr performance_scenarios::ScenarioPattern
+      kBoostScenarioPattern = {
+          .loading =
+              {performance_scenarios::LoadingScenario::kFocusedPageLoading},
+          .input = performance_scenarios::InputScenarios::All()};
+
+  THREAD_CHECKER(thread_checker_);
+
+  const base::ThreadType boosted_thread_type_;
+  std::optional<base::ScopedBoostPriority> scoped_boost_priority_;
+};
 
 std::unique_ptr<network::NetworkService>& GetLocalNetworkService() {
   static base::SequenceLocalStorageSlot<
@@ -321,7 +411,7 @@ void CreateInProcessNetworkService(
     // from an unfair to a fair lock.
     if (base::android::BackgroundThreadPoolFieldTrial::
             ShouldUsePriorityInheritanceLocks()) {
-      options.thread_type = base::ThreadType::kDisplayCritical;
+      options.thread_type = base::ThreadType::kPresentation;
     }
 #endif  // BUILDFLAG(IS_ANDROID)
     GetNetworkServiceDedicatedThread().StartWithOptions(std::move(options));
@@ -344,6 +434,10 @@ void CreateInProcessNetworkService(
   GetNetworkTaskRunner()->PostTask(
       FROM_HERE, base::BindOnce(&CreateInProcessNetworkServiceOnThread,
                                 std::move(receiver)));
+  GetNetworkTaskRunner()->PostTask(
+      FROM_HERE, base::BindOnce([]() {
+        BoostNetworkThreadPriority::GetInstance().Initialize();
+      }));
 }
 
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX)
@@ -361,8 +455,7 @@ network::mojom::NetworkServiceParamsPtr CreateNetworkServiceParams() {
   network::mojom::NetworkServiceParamsPtr network_service_params =
       network::mojom::NetworkServiceParams::New();
   network_service_params->initial_connection_type =
-      network::mojom::ConnectionType(
-          net::NetworkChangeNotifier::GetConnectionType());
+      net::NetworkChangeNotifier::GetConnectionType();
   network_service_params->initial_connection_subtype =
       network::mojom::ConnectionSubtype(
           net::NetworkChangeNotifier::GetConnectionSubtype());
@@ -566,7 +659,7 @@ uint64_t GetNetLogMaximumFileSizeFromCommandLineForTesting(  // IN-TEST
 class NetworkServiceInstancePrivate {
  public:
   // Opens the specified file, blocking until the file is open. Used to open
-  // files specified by network::switches::kLogNetLog or
+  // files specified by net::switches::kLogNetLog or
   // network::switches::kSSLKeyLogFile. Since these arguments can be used to
   // debug startup behavior, asynchronously opening the file on another thread
   // would result in losing data, hence the need for blocking open operations.
@@ -651,9 +744,9 @@ network::mojom::NetworkService* GetNetworkService() {
 
       const base::CommandLine* command_line =
           base::CommandLine::ForCurrentProcess();
-      if (command_line->HasSwitch(network::switches::kLogNetLog)) {
+      if (command_line->HasSwitch(net::switches::kLogNetLog)) {
         base::FilePath log_path =
-            command_line->GetSwitchValuePath(network::switches::kLogNetLog);
+            command_line->GetSwitchValuePath(net::switches::kLogNetLog);
         if (log_path.empty()) {
           log_path = GetContentClient()->browser()->GetNetLogDefaultDirectory();
           if (!log_path.empty())

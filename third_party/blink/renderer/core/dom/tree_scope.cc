@@ -65,6 +65,7 @@
 #include "third_party/blink/renderer/core/svg/svg_text_content_element.h"
 #include "third_party/blink/renderer/core/svg/svg_tree_scope_resources.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "ui/gfx/geometry/point_conversions.h"
 
@@ -280,6 +281,10 @@ Element* TreeScope::ElementForHitTest(Node* node, HitTestPointType type) const {
   Element* element;
   if (node->IsPseudoElement() || node->IsTextNode()) {
     element = node->ParentOrShadowHostElement();
+    // Element could be inside a nested pseudo.
+    if (PseudoElement* pseudo = DynamicTo<PseudoElement>(element)) {
+      element = &pseudo->UltimateOriginatingElement();
+    }
   } else {
     element = To<Element>(node);
   }
@@ -365,7 +370,7 @@ HeapVector<Member<Element>> TreeScope::ElementsFromHitTestResult(
     if (!node->IsElementNode() && !ShouldAcceptNonElementNode(*node))
       continue;
     node = ElementForHitTest(node, HitTestPointType::kWebExposed);
-    // Prune duplicate entries. A pseduo ::before content above its parent
+    // Prune duplicate entries. A pseudo ::before content above its parent
     // node should only result in a single entry.
     if (node == last_node)
       continue;
@@ -478,9 +483,7 @@ void TreeScope::ClearAdoptedStyleSheets() {
   if (!HasAdoptedStyleSheets()) {
     return;
   }
-  HeapVector<Member<CSSStyleSheet>> removed;
-  removed.AppendRange(adopted_style_sheets_->begin(),
-                      adopted_style_sheets_->end());
+  HeapVector<Member<CSSStyleSheet>> removed(*adopted_style_sheets_);
   adopted_style_sheets_->clear();
   for (const auto& sheet : removed) {
     StyleSheetWasRemoved(sheet);
@@ -490,6 +493,8 @@ void TreeScope::ClearAdoptedStyleSheets() {
 void TreeScope::AppendAdoptedStyleSheets(
     HeapVector<Member<CSSStyleSheet>>&& adopted_style_sheets) {
   EnsureAdoptedStyleSheets();
+  adopted_style_sheets_->reserve(adopted_style_sheets_->size() +
+                                 adopted_style_sheets.size());
   for (const auto& sheet : adopted_style_sheets) {
     DCHECK(sheet->IsConstructed());
     DCHECK_EQ(sheet->ConstructorDocument(), GetDocument());
@@ -527,9 +532,19 @@ Element* TreeScope::FindAnchorWithName(const String& name) {
   for (HTMLAnchorElement& anchor :
        Traversal<HTMLAnchorElement>::StartsAfter(RootNode())) {
     if (RootNode().GetDocument().InQuirksMode()) {
-      // Quirks mode, case insensitive comparison of names.
-      if (DeprecatedEqualIgnoringCase(anchor.GetName(), name))
+      // Quirks mode: Try case-sensitive matching first to align with Firefox
+      // and Safari, but fall back to case-insensitive for legacy compat.
+      // Count usage to measure impact before removing fallback.
+      // See https://crbug.com/40829784
+      if (anchor.GetName() == name) {
+        UseCounter::Count(RootNode().GetDocument(),
+                          WebFeature::kAnchorCaseSensitiveMatch);
         return &anchor;
+      } else if (DeprecatedEqualIgnoringCase(anchor.GetName(), name)) {
+        UseCounter::Count(RootNode().GetDocument(),
+                          WebFeature::kAnchorCaseInsensitiveMatch);
+        return &anchor;
+      }
     } else {
       // Strict mode, names need to match exactly.
       if (anchor.GetName() == name)
@@ -557,7 +572,7 @@ Node* TreeScope::FindAnchor(const String& fragment) {
 
   // 4. Let fragmentBytes be the percent-decoded fragment.
   // 5. Let decodedFragment be the UTF-8 decode without BOM of fragmentBytes.
-  String name = DecodeURLEscapeSequences(fragment, DecodeURLMode::kUTF8);
+  String name = DecodeUrlEscapeSequences(fragment, DecodeUrlMode::kUtf8);
   // 6. Try decodedFragment.
   anchor = FindAnchorWithName(name);
   if (anchor)
@@ -565,8 +580,9 @@ Node* TreeScope::FindAnchor(const String& fragment) {
 
   // 7. If decodedFragment is "top", top of the document.
   // TODO(1117212) Move the IsEmpty check to step 2.
-  if (fragment.empty() || EqualIgnoringASCIICase(name, "top"))
+  if (fragment.empty() || EqualIgnoringAsciiCase(name, "top")) {
     anchor = &GetDocument();
+  }
 
   return anchor;
 }

@@ -30,6 +30,8 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "url/gurl.h"
 
+using ::base::android::AttachCurrentThread;
+using ::base::android::ScopedJavaGlobalRef;
 using ::base::test::RunOnceCallback;
 using testing::_;
 
@@ -84,7 +86,9 @@ class TestAppBannerManager : public AppBannerManagerAndroid {
       : AppBannerManagerAndroid(
             web_contents,
             std::make_unique<ChromeAppBannerManagerAndroid>(*web_contents)),
-        mock_segmentation_(segmentation_platform_service) {}
+        mock_segmentation_(segmentation_platform_service) {
+    app_banner_manager()->SetTriggeringDisabledForTesting(false);
+  }
 
   TestAppBannerManager(const TestAppBannerManager&) = delete;
   TestAppBannerManager& operator=(const TestAppBannerManager&) = delete;
@@ -97,28 +101,30 @@ class TestAppBannerManager : public AppBannerManagerAndroid {
     on_badge_done_ = std::move(on_done);
   }
 
-  bool TriggeringDisabledForTesting() const override { return false; }
-
   TestAmbientBadgeManager* GetBadgeManagerForTest() {
     return ambient_badge_test_.get();
   }
 
  protected:
   Profile* profile() {
-    return Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+    return Profile::FromBrowserContext(
+        app_banner_manager()->web_contents()->GetBrowserContext());
   }
 
   void MaybeShowAmbientBadge(
       const InstallBannerConfig& install_config) override {
     ambient_badge_test_ = std::make_unique<TestAmbientBadgeManager>(
-        web_contents(), mock_segmentation_, profile()->GetPrefs());
+        app_banner_manager()->web_contents(), mock_segmentation_,
+        profile()->GetPrefs());
 
     ambient_badge_test_->WaitForState(target_badge_state_,
                                       std::move(on_badge_done_));
 
+    auto native_java_app_data = ScopedJavaGlobalRef<jobject>(
+        AttachCurrentThread(), GetNativeJavaAppDataForTesting());
     std::unique_ptr<AddToHomescreenParams> a2hs_params =
         AppBannerManagerAndroid::CreateAddToHomescreenParams(
-            install_config, native_java_app_data_for_testing(),
+            install_config, native_java_app_data,
             InstallableMetrics::GetInstallSource(
                 &GetWebContents(), InstallTrigger::AMBIENT_BADGE));
 
@@ -130,9 +136,10 @@ class TestAppBannerManager : public AppBannerManagerAndroid {
                        GetAndroidWeakPtr(), install_config),
         // Create the params, then pass them to MaybeShow.
         base::BindOnce(&AppBannerManagerAndroid::CreateAddToHomescreenParams,
-                       install_config, native_java_app_data_for_testing())
+                       install_config, native_java_app_data)
             .Then(base::BindOnce(
-                &PwaBottomSheetController::MaybeShow, web_contents(),
+                &PwaBottomSheetController::MaybeShow,
+                app_banner_manager()->web_contents(),
                 install_config.web_app_data, /*expand_sheet=*/false,
                 base::BindRepeating(&TestAppBannerManager::OnInstallEvent,
                                     GetAndroidWeakPtr(),

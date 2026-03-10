@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <atomic>
 #include <iterator>
 #include <map>
@@ -18,7 +19,6 @@
 #include "ash/public/cpp/stylus_utils.h"
 #include "base/check.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
@@ -96,7 +96,7 @@ bool LooksLikeAndroidPackageName(const std::string& app_id) {
   // Android package names are required to contain at least one period (see
   // validateName() in PackageParser.java), while Chrome extension IDs and web
   // app IDs contain only characters in [a-p].
-  return base::Contains(app_id, '.');
+  return app_id.contains('.');
 }
 
 bool IsInstalledApp(const std::string& app_id, Profile* profile) {
@@ -433,49 +433,10 @@ NoteTakingHelper::NoteTakingHelper()
   // Track profiles so we can observe their app registries.
   profile_manager_observation_.Observe(g_browser_process->profile_manager());
   play_store_enabled_ = false;
-  for (Profile* profile :
-       g_browser_process->profile_manager()->GetLoadedProfiles()) {
-    if (apps::AppServiceProxyFactory::IsAppServiceAvailableForProfile(
-            profile)) {
-      auto& cache = apps::AppServiceProxyFactory::GetForProfile(profile)
-                        ->AppRegistryCache();
-      if (app_registry_observations_.IsObservingSource(&cache)) {
-        base::debug::DumpWithoutCrashing();
-      } else {
-        app_registry_observations_.AddObservation(&cache);
-      }
-    }
-
-    // Check if the profile has already enabled Google Play Store.
-    // IsArcPlayStoreEnabledForProfile() can return true only for the primary
-    // profile.
-    play_store_enabled_ |= arc::IsArcPlayStoreEnabledForProfile(profile);
-
-    // ArcIntentHelperBridge will notify us about changes to the list of
-    // available Android apps.
-    auto* bridge = arc::ArcIntentHelperBridge::GetForBrowserContext(profile);
-    if (bridge) {
-      if (arc_intent_helper_observations_.IsObservingSource(bridge)) {
-        base::debug::DumpWithoutCrashing();
-      } else {
-        arc_intent_helper_observations_.AddObservation(bridge);
-      }
-    }
-  }
 
   // Watch for changes of Google Play Store enabled state.
   auto* session_manager = arc::ArcSessionManager::Get();
   session_manager->AddObserver(this);
-
-  // If the ARC intent helper is ready, get the Android apps. Otherwise,
-  // UpdateAndroidApps() will be called when ArcServiceManager calls
-  // OnIntentFiltersUpdated().
-  if (play_store_enabled_ && arc::ArcServiceManager::Get()
-                                 ->arc_bridge_service()
-                                 ->intent_helper()
-                                 ->IsConnected()) {
-    UpdateAndroidApps();
-  }
 }
 
 NoteTakingHelper::~NoteTakingHelper() {
@@ -499,10 +460,10 @@ std::vector<std::string> NoteTakingHelper::GetNoteTakingAppIds(
     cache.ForOneApp(id, [&app_ids](const apps::AppUpdate& update) {
       if (!apps_util::IsInstalled(update.Readiness()))
         return;
-      if (!base::Contains(kNoteTakingAppTypes, update.AppType())) {
+      if (!std::ranges::contains(kNoteTakingAppTypes, update.AppType())) {
         return;
       }
-      DCHECK(!base::Contains(app_ids, update.AppId()));
+      DCHECK(!std::ranges::contains(app_ids, update.AppId()));
       app_ids.push_back(update.AppId());
     });
   }
@@ -510,10 +471,10 @@ std::vector<std::string> NoteTakingHelper::GetNoteTakingAppIds(
   cache.ForEachApp([&app_ids](const apps::AppUpdate& update) {
     if (!apps_util::IsInstalled(update.Readiness()))
       return;
-    if (base::Contains(app_ids, update.AppId())) {
+    if (std::ranges::contains(app_ids, update.AppId())) {
       return;
     }
-    if (!base::Contains(kNoteTakingAppTypes, update.AppType())) {
+    if (!std::ranges::contains(kNoteTakingAppTypes, update.AppType())) {
       return;
     }
     if (HasNoteTakingIntentFilter(update.IntentFilters())) {
@@ -641,13 +602,13 @@ NoteTakingHelper::LaunchResult NoteTakingHelper::LaunchAppInternal(
 }
 
 void NoteTakingHelper::OnAppUpdate(const apps::AppUpdate& update) {
-  if (!base::Contains(kNoteTakingAppTypes, update.AppType())) {
+  if (!std::ranges::contains(kNoteTakingAppTypes, update.AppType())) {
     return;
   }
   // App was added, removed, enabled, or disabled.
   if (!update.ReadinessChanged())
     return;
-  if (!base::Contains(force_allowed_app_ids_, update.AppId()) &&
+  if (!std::ranges::contains(force_allowed_app_ids_, update.AppId()) &&
       !HasNoteTakingIntentFilter(update.IntentFilters())) {
     return;
   }

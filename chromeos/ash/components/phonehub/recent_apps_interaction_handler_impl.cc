@@ -49,18 +49,12 @@ RecentAppsInteractionHandlerImpl::RecentAppsInteractionHandlerImpl(
     : pref_service_(pref_service),
       multidevice_setup_client_(multidevice_setup_client),
       multidevice_feature_access_manager_(multidevice_feature_access_manager) {
-  multidevice_setup_client_->AddObserver(this);
-  multidevice_feature_access_manager_->AddObserver(this);
+  multidevice_setup_client_observation_.Observe(multidevice_setup_client);
+  multidevice_feature_access_manager_observation_.Observe(
+      multidevice_feature_access_manager);
 }
 
-RecentAppsInteractionHandlerImpl::~RecentAppsInteractionHandlerImpl() {
-  if (eche_connection_status_handler_) {
-    eche_connection_status_handler_->RemoveObserver(this);
-  }
-
-  multidevice_setup_client_->RemoveObserver(this);
-  multidevice_feature_access_manager_->RemoveObserver(this);
-}
+RecentAppsInteractionHandlerImpl::~RecentAppsInteractionHandlerImpl() = default;
 
 void RecentAppsInteractionHandlerImpl::AddRecentAppClickObserver(
     RecentAppClickObserver* observer) {
@@ -108,14 +102,11 @@ void RecentAppsInteractionHandlerImpl::NotifyRecentAppAddedOrUpdated(
 
 void RecentAppsInteractionHandlerImpl::SetConnectionStatusHandler(
     eche_app::EcheConnectionStatusHandler* eche_connection_status_handler) {
-  if (eche_connection_status_handler_) {
-    eche_connection_status_handler_->RemoveObserver(this);
-  }
+  eche_connection_status_handler_observation_.Reset();
 
-  eche_connection_status_handler_ = eche_connection_status_handler;
-
-  if (eche_connection_status_handler_) {
-    eche_connection_status_handler_->AddObserver(this);
+  if (eche_connection_status_handler) {
+    eche_connection_status_handler_observation_.Observe(
+        eche_connection_status_handler);
   }
 }
 
@@ -160,7 +151,7 @@ void RecentAppsInteractionHandlerImpl::
     LoadRecentAppMetadataListFromPrefIfNeed() {
   if (!has_loaded_prefs_) {
     PA_LOG(INFO) << "LoadRecentAppMetadataListFromPref";
-    const base::Value::List& recent_apps_history_pref =
+    const base::ListValue& recent_apps_history_pref =
         pref_service_->GetList(prefs::kRecentAppsHistory);
     for (const auto& value : recent_apps_history_pref) {
       DCHECK(value.is_dict());
@@ -176,7 +167,7 @@ void RecentAppsInteractionHandlerImpl::SaveRecentAppMetadataListToPref() {
   PA_LOG(INFO) << "SaveRecentAppMetadataListToPref";
   size_t num_recent_apps_to_save =
       std::min(recent_app_metadata_list_.size(), kMaxSavedRecentApps);
-  base::Value::List app_metadata_value_list;
+  base::ListValue app_metadata_value_list;
   for (size_t i = 0; i < num_recent_apps_to_save; ++i) {
     app_metadata_value_list.Append(
         recent_app_metadata_list_[i].first.ToValue());

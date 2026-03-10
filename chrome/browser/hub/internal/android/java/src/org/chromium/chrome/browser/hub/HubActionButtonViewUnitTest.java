@@ -36,7 +36,8 @@ import org.robolectric.ParameterizedRobolectricTestRunner.Parameter;
 import org.robolectric.ParameterizedRobolectricTestRunner.Parameters;
 
 import org.chromium.base.DeviceInfo;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
+import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.test.BaseRobolectricTestRule;
 import org.chromium.base.test.util.Features;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
@@ -52,7 +53,6 @@ import java.util.Collection;
 @Features.DisableFeatures({
     ChromeFeatureList.ANDROID_SURFACE_COLOR_UPDATE,
     ChromeFeatureList.GRID_TAB_SWITCHER_SURFACE_COLOR_UPDATE,
-    ChromeFeatureList.GRID_TAB_SWITCHER_UPDATE
 })
 public class HubActionButtonViewUnitTest {
     // All the tests in this file will run twice, once for isXrDevice=true and once for
@@ -80,7 +80,7 @@ public class HubActionButtonViewUnitTest {
     private Button mActionButton;
     private PropertyModel mPropertyModel;
     private HubColorMixer mColorMixer;
-    private ObservableSupplierImpl<Pane> mFocusedPaneSupplier;
+    private MonotonicObservableSupplier<Pane> mFocusedPaneSupplier;
 
     @Before
     public void setUp() throws Exception {
@@ -98,13 +98,11 @@ public class HubActionButtonViewUnitTest {
         FrameLayout toolbarContainer = (FrameLayout) inflater.inflate(layoutId, null, false);
         mActionButton = toolbarContainer.findViewById(R.id.toolbar_action_button);
 
-        mFocusedPaneSupplier = new ObservableSupplierImpl<>();
+        mFocusedPaneSupplier = ObservableSuppliers.alwaysNull();
         mColorMixer =
                 spy(
                         new HubColorMixerImpl(
-                                mActivity,
-                                new ObservableSupplierImpl<>(true),
-                                mFocusedPaneSupplier));
+                                mActivity, ObservableSuppliers.alwaysTrue(), mFocusedPaneSupplier));
         mPropertyModel =
                 new PropertyModel.Builder(HubActionButtonProperties.ALL_ACTION_BUTTON_KEYS)
                         .with(ACTION_BUTTON_VISIBLE, true)
@@ -181,8 +179,13 @@ public class HubActionButtonViewUnitTest {
 
     @Test
     public void testColorMixer() {
-        // Verify that color mixer was set on the button
         mPropertyModel.set(COLOR_MIXER, mColorMixer);
-        verify(mColorMixer).registerBlend(any());
+
+        if (HubUtils.isGtsUpdateEnabled()) {
+            verify(mColorMixer, times(2)).registerBlend(any());
+        } else {
+            // Behaves differently on XR devices.
+            verify(mColorMixer).registerBlend(any());
+        }
     }
 }

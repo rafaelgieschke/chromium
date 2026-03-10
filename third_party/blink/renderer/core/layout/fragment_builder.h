@@ -18,6 +18,7 @@
 #include "third_party/blink/renderer/core/layout/logical_fragment_link.h"
 #include "third_party/blink/renderer/core/layout/oof_positioned_node.h"
 #include "third_party/blink/renderer/core/layout/physical_fragment.h"
+#include "third_party/blink/renderer/core/layout/split_axis_item.h"
 #include "third_party/blink/renderer/core/layout/style_variant.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
@@ -411,8 +412,6 @@ class CORE_EXPORT FragmentBuilder {
   void SetIsBlockInInline() { is_block_in_inline_ = true; }
   void SetIsLineForParallelFlow() { is_line_for_parallel_flow_ = true; }
 
-  void SetHasBlockFragmentation() { has_block_fragmentation_ = true; }
-
   // Set for any node that establishes a fragmentation context, such as multicol
   // containers.
   void SetIsBlockFragmentationContextRoot() {
@@ -500,22 +499,10 @@ class CORE_EXPORT FragmentBuilder {
     // We should only calculate the block-size of the tallest piece of
     // unbreakable content during the initial column balancing pass, when we
     // haven't set a tentative fragmentainer block-size yet.
-    DCHECK(IsInitialColumnBalancingPass());
+    DCHECK(space_.IsInitialColumnBalancingPass());
 
     tallest_unbreakable_block_size_ =
         std::max(tallest_unbreakable_block_size_, unbreakable_block_size);
-  }
-
-  void SetIsInitialColumnBalancingPass() {
-    // Note that we have no dedicated flag for being in the initial column
-    // balancing pass here. We'll just bump tallest_unbreakable_block_size_ to
-    // 0, so that LayoutResult knows that we need to store unbreakable
-    // block-size.
-    DCHECK_EQ(tallest_unbreakable_block_size_, LayoutUnit::Min());
-    tallest_unbreakable_block_size_ = LayoutUnit();
-  }
-  bool IsInitialColumnBalancingPass() const {
-    return tallest_unbreakable_block_size_ >= LayoutUnit();
   }
 
   void SetHasRunningAnchorTransformAnimation() {
@@ -549,7 +536,8 @@ class CORE_EXPORT FragmentBuilder {
     layout_object_ = node.GetLayoutBox();
   }
 
-  GCedHeapVector<Member<LayoutBoxModelObject>>& EnsureStickyDescendants();
+  GCedHeapVector<SplitAxisItem<LayoutBoxModelObject>>&
+  EnsureStickyDescendants();
   GCedHeapVector<Member<Element>>& EnsureSnapAreas();
 
   void PropagateFromLayoutResultAndFragment(
@@ -560,6 +548,8 @@ class CORE_EXPORT FragmentBuilder {
 
   void PropagateFromLayoutResult(const LayoutResult&);
   void PropagateScrollInitialTarget(const PhysicalFragment& child);
+
+  PhysicalAxes GetOverflowScrollAxes() const;
 
   void PropagateFromFragment(
       const PhysicalFragment& child,
@@ -585,10 +575,9 @@ class CORE_EXPORT FragmentBuilder {
   void PropagateSizeDependentData();
 
   void PropagateNamedTriggers(const PhysicalFragment& child);
-  void CreateNamedTriggersForSelf();
   TriggerScopedNameMap& EnsureNamedTriggers();
   void SetNamedTrigger(const TriggerScopedName& trigger_scoped_name,
-                       AnimationTrigger* trigger);
+                       const Element* trigger_owner);
 
   LayoutInputNode node_;
   const ConstraintSpace& space_;
@@ -605,7 +594,8 @@ class CORE_EXPORT FragmentBuilder {
   // The break token to store in the resulting fragment.
   const BreakToken* break_token_ = nullptr;
 
-  GCedHeapVector<Member<LayoutBoxModelObject>>* sticky_descendants_ = nullptr;
+  GCedHeapVector<SplitAxisItem<LayoutBoxModelObject>>* sticky_descendants_ =
+      nullptr;
   GCedHeapVector<Member<Element>>* snap_areas_ = nullptr;
   // Animation triggers belonging to the element to which this fragment belongs,
   // or an element in its subtree.
@@ -672,7 +662,6 @@ class CORE_EXPORT FragmentBuilder {
   bool has_descendant_that_depends_on_percentage_block_size_ = false;
   bool has_orthogonal_fallback_size_descendant_ = false;
   bool may_have_descendant_above_block_start_ = false;
-  bool has_block_fragmentation_ = false;
   bool is_fragmentation_context_root_ = false;
   bool is_hidden_for_paint_ = false;
   bool is_opaque_ = false;

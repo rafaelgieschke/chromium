@@ -64,6 +64,7 @@
 #include "components/javascript_dialogs/tab_modal_dialog_manager.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
 #include "components/no_state_prefetch/browser/no_state_prefetch_manager.h"
+#include "components/optimization_guide/content/browser/page_content_proto_provider.h"
 #include "components/paint_preview/buildflags/buildflags.h"
 #include "components/safe_browsing/content/browser/safe_browsing_navigation_observer.h"
 #include "content/public/browser/file_select_listener.h"
@@ -76,6 +77,7 @@
 #include "content/public/common/content_features.h"
 #include "third_party/blink/public/common/features_generated.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
+#include "third_party/blink/public/mojom/content_extraction/ai_page_content.mojom.h"
 #include "third_party/blink/public/mojom/frame/blocked_navigation_types.mojom.h"
 #include "third_party/blink/public/mojom/input/pointer_lock_result.mojom.h"
 #include "third_party/blink/public/mojom/page/draggable_region.mojom.h"
@@ -124,11 +126,8 @@ JNI_TabWebContentsDelegateAndroidImpl_CreateJavaWindowFeatures(
 static ScopedJavaLocalRef<jobject>
 JNI_TabWebContentsDelegateAndroidImpl_CreateJavaPictureInPictureWindowOptions(
     JNIEnv* env,
+    const display::Display& display,
     const blink::mojom::PictureInPictureWindowOptions& options) {
-  const display::Screen* screen = display::Screen::Get();
-  const display::Display display =
-      screen->GetDisplayNearestWindow(gfx::NativeWindow());
-
   gfx::Rect bounds =
       PictureInPictureWindowManager::GetInstance()
           ->CalculateInitialPictureInPictureWindowBounds(options, display);
@@ -413,14 +412,19 @@ WebContents* TabWebContentsDelegateAndroid::AddNewContents(
 
     ScopedJavaLocalRef<jobject> jpicture_in_picture_options;
     if (new_contents->GetPictureInPictureOptions().has_value()) {
+      const display::Screen* screen = display::Screen::Get();
+      const display::Display display =
+          screen->GetDisplayNearestWindow(source->GetTopLevelNativeWindow());
+
       jpicture_in_picture_options =
           JNI_TabWebContentsDelegateAndroidImpl_CreateJavaPictureInPictureWindowOptions(
-              env, new_contents->GetPictureInPictureOptions().value());
+              env, display, new_contents->GetPictureInPictureOptions().value());
     }
 
     handled = Java_TabWebContentsDelegateAndroidImpl_addNewContents(
-        env, obj, jsource, jnew_contents, jurl, static_cast<jint>(disposition),
-        jwindow_features, user_gesture, jpicture_in_picture_options);
+        env, obj, jsource, jnew_contents, jurl,
+        static_cast<int32_t>(disposition), jwindow_features, user_gesture,
+        jpicture_in_picture_options);
   }
 
   if (was_blocked)
@@ -453,6 +457,9 @@ void TabWebContentsDelegateAndroid::UpdateUserGestureCarryoverInfo(
 content::PictureInPictureResult
 TabWebContentsDelegateAndroid::EnterPictureInPicture(
     content::WebContents* web_contents) {
+  if (!IsPictureInPictureEnabled()) {
+    return content::PictureInPictureResult::kNotSupported;
+  }
   return PictureInPictureWindowManager::GetInstance()
       ->EnterVideoPictureInPicture(web_contents);
 }
@@ -485,6 +492,27 @@ TabWebContentsDelegateAndroid::GetInstalledWebappGeolocationContext() {
         std::make_unique<InstalledWebappGeolocationContext>();
   }
   return installed_webapp_geolocation_context_.get();
+}
+
+void TabWebContentsDelegateAndroid::GetAIPageContent(
+    content::WebContents* web_contents,
+    bool include_actionable_elements,
+    base::OnceCallback<void(const std::string&)> callback) {
+  auto options = include_actionable_elements
+                     ? optimization_guide::ActionableAIPageContentOptions(
+                           /*on_critical_path=*/false)
+                     : optimization_guide::DefaultAIPageContentOptions(
+                           /*on_critical_path=*/false);
+
+  optimization_guide::GetAIPageContent(
+      web_contents, std::move(options),
+      base::BindOnce([](optimization_guide::AIPageContentResultOrError result)
+                         -> std::string {
+        if (!result.has_value()) {
+          return "";
+        }
+        return result->proto.SerializeAsString();
+      }).Then(std::move(callback)));
 }
 
 #if BUILDFLAG(ENABLE_PRINTING)

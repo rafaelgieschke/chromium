@@ -191,9 +191,8 @@ bool IsMatchingDevice(CHROME_LUID desired_luid, ID3D11Device* device) {
     return false;
   }
   ComDXGIAdapter dxgi_adapter;
-  if (FAILED(dxgi_device->GetAdapter(&dxgi_adapter))) {
-    return false;
-  }
+  HRESULT hr = dxgi_device->GetAdapter(&dxgi_adapter);
+  CHECK_EQ(hr, S_OK);
   DXGI_ADAPTER_DESC adapter_desc{};
   if (FAILED(dxgi_adapter->GetDesc(&adapter_desc))) {
     return false;
@@ -748,8 +747,8 @@ void MediaFoundationVideoEncodeAccelerator::QueueInput(
   result.discard_output = discard_output;
 
   result.generate_sample_on_wait_sync_token =
-      command_buffer_helper_ && !frame->HasNativeGpuMemoryBuffer() &&
-      !frame->HasMappableSharedImage() && frame->HasSharedImage();
+      command_buffer_helper_ && !frame->HasMappableSharedImage() &&
+      frame->HasSharedImage();
   if (result.generate_sample_on_wait_sync_token) {
     TRACE_EVENT0("media",
                  "MediaFoundationVideoEncodeAccelerator::"
@@ -1490,7 +1489,7 @@ void MediaFoundationVideoEncodeAccelerator::SetSWRateControl() {
 #endif  // BUILDFLAG(ENABLE_PLATFORM_HEVC)
       VideoCodec::kAV1,
   };
-  if (!base::Contains(kCodecsHaveSWBRC, codec_)) {
+  if (!std::ranges::contains(kCodecsHaveSWBRC, codec_)) {
     return;
   }
 
@@ -1798,9 +1797,6 @@ HRESULT MediaFoundationVideoEncodeAccelerator::ProcessInput(
     int temporal_id = 0;
     if (input.options.quantizer.has_value()) {
       int q_val = input.options.quantizer.value();
-      if (!base::FeatureList::IsEnabled(kStandardizeVP9AndAV1Quantizer)) {
-        q_val = QuantizerToQIndex(codec_, q_val);
-      }
       quantizer = std::clamp(q_val, 1, max_quantizer);
     } else if (rate_ctrl_ && !input.discard_output) {
       VideoRateControlWrapper::FrameParams frame_params{};
@@ -1891,7 +1887,7 @@ HRESULT MediaFoundationVideoEncodeAccelerator::PopulateInputSampleBuffer(
     scoped_refptr<VideoFrame> frame) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   auto input_sample = input.input_sample;
-  if (!frame->HasMappableSharedImage() && !frame->IsMappable() &&
+  if (!frame->HasMappableSharedImage() && !frame->HasDirectCpuAccess() &&
       !input.generate_sample_on_wait_sync_token) {
     LOG(ERROR) << "Unsupported video frame storage type";
     return MF_E_INVALID_STREAM_DATA;
@@ -1946,7 +1942,7 @@ HRESULT MediaFoundationVideoEncodeAccelerator::PopulateInputSampleBuffer(
 
   if (frame->HasMappableSharedImage() ||
       input.generate_sample_on_wait_sync_token) {
-    if ((frame->HasNativeGpuMemoryBuffer() ||
+    if ((frame->HasNativeMappableSharedImage() ||
          input.generate_sample_on_wait_sync_token) &&
         dxgi_device_manager_ != nullptr) {
       if (!dxgi_resource_mapping_required_) {
@@ -1957,11 +1953,11 @@ HRESULT MediaFoundationVideoEncodeAccelerator::PopulateInputSampleBuffer(
     }
 
     // ConvertToMemoryMappedFrame() doesn't copy pixel data,
-    // it just maps GPU buffer owned by |frame| and presents it as mapped
+    // it just maps the mappable SI owned by |frame| and presents it as mapped
     // view in CPU memory. |frame| will unmap the buffer when destructed.
     frame = ConvertToMemoryMappedFrame(std::move(frame));
     if (!frame) {
-      LOG(ERROR) << "Failed to map shared memory GMB";
+      LOG(ERROR) << "Failed to map shared memory SI";
       return E_FAIL;
     }
   }
@@ -2088,7 +2084,7 @@ HRESULT MediaFoundationVideoEncodeAccelerator::CopyInputSampleBufferFromGpu(
     scoped_refptr<VideoFrame> frame,
     const PendingInput& input) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(frame->HasNativeGpuMemoryBuffer() ||
+  DCHECK(frame->HasNativeMappableSharedImage() ||
          input.generate_sample_on_wait_sync_token);
   DCHECK(dxgi_device_manager_);
   auto& input_sample = input.input_sample;
@@ -2101,7 +2097,7 @@ HRESULT MediaFoundationVideoEncodeAccelerator::CopyInputSampleBufferFromGpu(
 
   HRESULT hr;
   ComD3D11Texture2D input_texture;
-  if (frame->HasNativeGpuMemoryBuffer()) {
+  if (frame->HasNativeMappableSharedImage()) {
     gfx::GpuMemoryBufferHandle buffer_handle =
         frame->GetGpuMemoryBufferHandle();
 
@@ -2111,7 +2107,7 @@ HRESULT MediaFoundationVideoEncodeAccelerator::CopyInputSampleBufferFromGpu(
     hr = device1->OpenSharedResource1(
         buffer_handle.dxgi_handle().buffer_handle(),
         IID_PPV_ARGS(&input_texture));
-    RETURN_ON_HR_FAILURE(hr, "Failed to open shared GMB D3D texture", hr);
+    RETURN_ON_HR_FAILURE(hr, "Failed to open SharedImage's D3D texture", hr);
   } else if (input.generate_sample_on_wait_sync_token) {
     DCHECK(input_sample);
     ComMFMediaBuffer texture_buffer;
@@ -2230,7 +2226,7 @@ HRESULT MediaFoundationVideoEncodeAccelerator::PopulateInputSampleBufferGpu(
   HRESULT hr;
   ComD3D11Texture2D input_texture;
   ComD3D11Texture2D sample_texture;
-  if (frame->HasNativeGpuMemoryBuffer()) {
+  if (frame->HasNativeMappableSharedImage()) {
     gfx::GpuMemoryBufferHandle buffer_handle =
         frame->GetGpuMemoryBufferHandle();
 
@@ -2247,7 +2243,7 @@ HRESULT MediaFoundationVideoEncodeAccelerator::PopulateInputSampleBufferGpu(
     hr = device1->OpenSharedResource1(
         buffer_handle.dxgi_handle().buffer_handle(),
         IID_PPV_ARGS(&input_texture));
-    RETURN_ON_HR_FAILURE(hr, "Failed to open shared GMB D3D texture", hr);
+    RETURN_ON_HR_FAILURE(hr, "Failed to open SharedImage's D3D texture", hr);
   } else if (input.generate_sample_on_wait_sync_token) {
     ComMFMediaBuffer texture_buffer;
     hr = input_sample->GetBufferByIndex(0, &texture_buffer);

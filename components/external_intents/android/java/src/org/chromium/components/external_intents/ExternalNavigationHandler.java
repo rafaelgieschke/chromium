@@ -26,6 +26,7 @@ import android.provider.Browser;
 import android.provider.Telephony;
 import android.text.TextUtils;
 import android.util.AndroidRuntimeException;
+import android.util.Pair;
 import android.webkit.MimeTypeMap;
 import android.webkit.WebView;
 
@@ -47,7 +48,6 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.embedder_support.util.UrlUtilities;
-import org.chromium.components.embedder_support.util.UrlUtilitiesJni;
 import org.chromium.components.external_intents.ExternalNavigationParams.AsyncActionTakenParams;
 import org.chromium.components.messages.DismissReason;
 import org.chromium.components.messages.MessageBannerProperties;
@@ -92,7 +92,7 @@ import java.util.function.Supplier;
  * clicking on a http(s) link to their native app.
  */
 @NullMarked
-public class ExternalNavigationHandler {
+public class ExternalNavigationHandler implements ExternalNavigationHelper {
     private static final String TAG = "UrlHandler";
 
     private static final String WTAI_URL_PREFIX = "wtai://wp/";
@@ -105,8 +105,10 @@ public class ExternalNavigationHandler {
     @VisibleForTesting public static final String PLAY_APP_PACKAGE = "com.android.vending";
 
     private static final String MDOC_SCHEME = "mdoc";
-    private static final String HAIP_SCHEME = "haip";
+    private static final String HAIP_VP_SCHEME = "haip-vp";
+    private static final String HAIP_VCI_SCHEME = "haip-vci";
     private static final String OPENID4VP_SCHEME_PREFIX_SUFFIX = "openid4vp";
+    private static final String OPENID4VCI_SCHEME = "openid-credential-offer";
 
     private static final String PDF_EXTENSION = "pdf";
     private static final String PDF_VIEWER = "com.google.android.apps.docs";
@@ -223,7 +225,7 @@ public class ExternalNavigationHandler {
      */
     abstract class InterstitialDialogDelegate implements ModalDialogProperties.Controller {
         protected final Context mContext;
-        protected final ExternalNavigationParams mParams;
+        protected final long mNavigationId;
         protected final Intent mIntent;
 
         // https://crbug.com/1412842, https://crbug.com/1474846: It seems dialogs sometimes end up
@@ -234,13 +236,12 @@ public class ExternalNavigationHandler {
 
         /**
          * @param context The {@link Context} for creating the dialog.
-         * @param params The {@link ExternalNavigationParams} for the navigation being intercepted.
+         * @param navigationId The navigation id for the navigation being intercepted.
          * @param intent The {@link Intent} that will be launched if the user confirms.
          */
-        InterstitialDialogDelegate(
-                Context context, ExternalNavigationParams params, Intent intent) {
+        InterstitialDialogDelegate(Context context, long navigationId, Intent intent) {
             mContext = context;
-            mParams = params;
+            mNavigationId = navigationId;
             mIntent = intent;
         }
 
@@ -342,7 +343,7 @@ public class ExternalNavigationHandler {
          * @param navigationId The ID of the navigation that started.
          */
         void onNavigationStarted(long navigationId) {
-            if (navigationId == mParams.getNavigationId()) return;
+            if (navigationId == mNavigationId) return;
             // Cancel the dialog if a different navigation is started.
             cancelDialog();
         }
@@ -354,7 +355,7 @@ public class ExternalNavigationHandler {
          * @param navigationId The ID of the navigation that finished.
          */
         void onNavigationFinished(long navigationId) {
-            if (navigationId == mParams.getNavigationId()) return;
+            if (navigationId == mNavigationId) return;
             // Cancel the dialog if a different navigation is finished.
             cancelDialog();
         }
@@ -373,26 +374,34 @@ public class ExternalNavigationHandler {
         }
     }
 
-    @VisibleForTesting
     // A delegate responsible for showing a confirmation dialog in Incognito session, which upon
     // positive user confirmation would result in navigations outside of Incognito.
     class IncognitoDialogDelegate extends InterstitialDialogDelegate {
-        private final GURL mFallbackUrl;
+        private final @Nullable Runnable mOnUserConfirmation;
 
         IncognitoDialogDelegate(
-                Context context, ExternalNavigationParams params, Intent intent, GURL fallbackUrl) {
-            super(context, params, intent);
-            mFallbackUrl = fallbackUrl;
+                Context context,
+                long navigationId,
+                Intent intent,
+                @Nullable Runnable onUserConfirmation) {
+            super(context, navigationId, intent);
+
+            mOnUserConfirmation = onUserConfirmation;
         }
 
         @Override
         protected void onConfirmed() {
-            onUserDecidedWhetherToLaunchIncognitoIntent(true, mParams, mIntent, mFallbackUrl);
+            doStartActivity(mIntent, mContext);
+            if (mOnUserConfirmation != null) mOnUserConfirmation.run();
         }
 
         @Override
-        protected void onCancelled() {
-            onUserDecidedWhetherToLaunchIncognitoIntent(false, mParams, mIntent, mFallbackUrl);
+        protected void onCancelled() {}
+
+        @Override
+        public void onDismiss(PropertyModel model, int dismissalCause) {
+            super.onDismiss(model, dismissalCause);
+            mIncognitoDialogDelegate = null;
         }
 
         @Override
@@ -406,11 +415,39 @@ public class ExternalNavigationHandler {
     }
 
     @VisibleForTesting
+    // On top of IncognitoDialogDelegate, this delegate allows passing a fallback URL to navigate to
+    // if the user cancels the dialog.
+    class IncognitoDialogDelegateWithFallback extends IncognitoDialogDelegate {
+        private final ExternalNavigationParams mParams;
+        private final GURL mFallbackUrl;
+
+        IncognitoDialogDelegateWithFallback(
+                Context context, ExternalNavigationParams params, Intent intent, GURL fallbackUrl) {
+            super(context, params.getNavigationId(), intent, null);
+            mParams = params;
+            mFallbackUrl = fallbackUrl;
+        }
+
+        @Override
+        protected void onConfirmed() {
+            onUserDecidedWhetherToLaunchIncognitoIntent(true, mParams, mIntent, mFallbackUrl);
+        }
+
+        @Override
+        protected void onCancelled() {
+            onUserDecidedWhetherToLaunchIncognitoIntent(false, mParams, mIntent, mFallbackUrl);
+        }
+    }
+
+    @VisibleForTesting
     // A delegate responsible for showing a warning dialog for Digital Credentials navigations.
     class DigitalCredentialsWarningDialogDelegate extends InterstitialDialogDelegate {
+        private final ExternalNavigationParams mParams;
+
         DigitalCredentialsWarningDialogDelegate(
                 Context context, ExternalNavigationParams params, Intent intent) {
-            super(context, params, intent);
+            super(context, params.getNavigationId(), intent);
+            mParams = params;
         }
 
         @Override
@@ -666,6 +703,7 @@ public class ExternalNavigationHandler {
         mDelegate = delegate;
         WindowAndroid windowAndroid = assumeNonNull(mDelegate.getWindowAndroid());
         mModalDialogManager = assumeNonNull(windowAndroid.getModalDialogManager());
+        mDelegate.setExternalNavigationHelper(this);
     }
 
     private static boolean debug() {
@@ -733,6 +771,19 @@ public class ExternalNavigationHandler {
             params.onAsyncActionStarted();
         }
         return result;
+    }
+
+    @Override
+    public void launchExternalApp(Intent intent, Context context) {
+        doStartActivity(intent, context);
+    }
+
+    @Override
+    public void launchExternalAppWithIncognitoConfirmation(
+            Intent intent, long navigationId, Context context, Runnable onUserConfirmation) {
+        mIncognitoDialogDelegate =
+                new IncognitoDialogDelegate(context, navigationId, intent, onUserConfirmation);
+        mIncognitoDialogDelegate.showDialog();
     }
 
     private OverrideUrlLoadingResult handleFallbackUrl(
@@ -813,7 +864,7 @@ public class ExternalNavigationHandler {
         Log.i(TAG, "shouldOverrideUrlLoading result: " + resultString);
     }
 
-    private boolean resolversSubsetOf(
+    private static boolean resolversSubsetOf(
             List<ResolveInfo> infos, @Nullable List<ResolveInfo> container) {
         if (container == null) return false;
         HashSet<ComponentName> containerSet = new HashSet<>();
@@ -1351,7 +1402,7 @@ public class ExternalNavigationHandler {
 
         // We don't want the user seeing the chooser and choosing the browser, but resolving to
         // another app is fine.
-        if (resolvesToChooser(intentResolveInfo, resolvingInfos)) {
+        if (resolvesToChooser(intentResolveInfo, resolvingInfos.get())) {
             if (debug()) Log.i(TAG, "Navigation to chooser including self.");
             return true;
         }
@@ -1414,7 +1465,7 @@ public class ExternalNavigationHandler {
         return browserPackages.contains(intentResolveInfo.activityInfo.packageName);
     }
 
-    private static Set<String> getInstalledBrowserPackages() {
+    public static Set<String> getInstalledBrowserPackages() {
         List<ResolveInfo> browsers = PackageManagerUtils.queryAllWebBrowsersInfo();
 
         Set<String> packageNames = new HashSet<>();
@@ -1575,7 +1626,7 @@ public class ExternalNavigationHandler {
             final ExternalNavigationParams params,
             final Intent intent,
             final GURL fallbackUrl) {
-        return new IncognitoDialogDelegate(context, params, intent, fallbackUrl);
+        return new IncognitoDialogDelegateWithFallback(context, params, intent, fallbackUrl);
     }
 
     private void onUserDecidedWhetherToLaunchIncognitoIntent(
@@ -1871,6 +1922,13 @@ public class ExternalNavigationHandler {
         }
 
         boolean shouldReturnAsResult = mDelegate.shouldReturnAsActivityResult(intentTargetUrl);
+
+        if (allowExternalNavigationForHttpProtocols(
+                mDelegate.allowExternalNavigationForHttpProtocols(params.getUrl()),
+                shouldReturnAsResult)) {
+            return OverrideUrlLoadingResult.forNoOverride();
+        }
+
         @NavigationChainResult
         int navigationChainResult =
                 navigationChainBlocksExternalNavigation(
@@ -1981,6 +2039,7 @@ public class ExternalNavigationHandler {
                         params);
             }
         }
+
         return startActivity(
                 targetIntent,
                 params,
@@ -1989,6 +2048,11 @@ public class ExternalNavigationHandler {
                 resolveActivity,
                 browserFallbackUrl,
                 intentTargetUrl);
+    }
+
+    private boolean allowExternalNavigationForHttpProtocols(
+            boolean allowExternalNavigation, boolean shouldReturnAsResult) {
+        return allowExternalNavigation && !shouldReturnAsResult;
     }
 
     // https://crbug.com/1249964
@@ -2026,7 +2090,7 @@ public class ExternalNavigationHandler {
 
         if (resolveActivity == null) return true;
 
-        boolean result = resolvesToChooser(resolveActivity, resolvingInfosSupplier);
+        boolean result = resolvesToChooser(resolveActivity, resolvingInfosSupplier.get());
         if (debug() && result) Log.i(TAG, "Avoiding disambiguation dialog.");
         return result;
     }
@@ -2070,7 +2134,9 @@ public class ExternalNavigationHandler {
                 && (scheme.startsWith(OPENID4VP_SCHEME_PREFIX_SUFFIX)
                         || scheme.endsWith(OPENID4VP_SCHEME_PREFIX_SUFFIX)
                         || scheme.equals(MDOC_SCHEME)
-                        || scheme.equals(HAIP_SCHEME))) {
+                        || scheme.equals(OPENID4VCI_SCHEME)
+                        || scheme.equals(HAIP_VP_SCHEME)
+                        || scheme.equals(HAIP_VCI_SCHEME))) {
             if (debug()) Log.i(TAG, "Digital Credentials intent detected");
             Context context = mDelegate.getContext();
             assumeNonNull(context);
@@ -2403,29 +2469,37 @@ public class ExternalNavigationHandler {
             params.getRedirectHandler().setShouldNotOverrideUrlLoadingOnCurrentRedirectChain();
         }
 
+        forcePdfViewerAsIntentHandlerIfNeeded(intent);
+        Context context = ContextUtils.activityFromContext(mDelegate.getContext());
+        if (context == null) {
+            context = ContextUtils.getApplicationContext();
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        if (requiresIntentChooser) {
+            assumeNonNull(resolvingInfos);
+            assumeNonNull(resolveActivity);
+            return startActivityWithChooser(
+                    intent,
+                    resolvingInfos,
+                    resolveActivity,
+                    browserFallbackUrl,
+                    intentTargetUrl,
+                    params,
+                    context);
+        }
+        mDelegate.notifyCctPasswordSavingRecorderOfExternalNavigation();
+        return doStartActivity(intent, context);
+    }
+
+    private OverrideUrlLoadingResult doStartActivity(Intent intent, Context context) {
         // Only touches disk on Kitkat. See http://crbug.com/617725 for more context.
         StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskWrites();
         try {
-            forcePdfViewerAsIntentHandlerIfNeeded(intent);
-            Context context = ContextUtils.activityFromContext(mDelegate.getContext());
-            if (context == null) {
-                context = ContextUtils.getApplicationContext();
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            }
-            if (requiresIntentChooser) {
-                assumeNonNull(resolvingInfos);
-                assumeNonNull(resolveActivity);
-                return startActivityWithChooser(
-                        intent,
-                        resolvingInfos,
-                        resolveActivity,
-                        browserFallbackUrl,
-                        intentTargetUrl,
-                        params,
-                        context);
-            }
-            mDelegate.notifyCctPasswordSavingRecorderOfExternalNavigation();
-            return doStartActivity(intent, context);
+            if (debug()) Log.i(TAG, "startActivity");
+            context.startActivity(intent);
+            recordExternalNavigationDispatched(intent);
+            mDelegate.reportIntentToSafeBrowsing(intent);
+            return OverrideUrlLoadingResult.forExternalIntent();
         } catch (SecurityException e) {
             // https://crbug.com/808494: Handle the URL internally if dispatching to another
             // application fails with a SecurityException. This happens due to malformed
@@ -2443,22 +2517,20 @@ public class ExternalNavigationHandler {
         } finally {
             StrictMode.setThreadPolicy(oldPolicy);
         }
+
         return OverrideUrlLoadingResult.forNoOverride();
     }
 
-    private OverrideUrlLoadingResult doStartActivity(Intent intent, Context context) {
-        if (debug()) Log.i(TAG, "startActivity");
-        context.startActivity(intent);
-        recordExternalNavigationDispatched(intent);
-        mDelegate.reportIntentToSafeBrowsing(intent);
-        return OverrideUrlLoadingResult.forExternalIntent();
-    }
-
-    // If the |resolvingInfos| from queryIntentActivities don't contain the result of
-    // resolveActivity, it means the intent is resolving to the ResolverActivity.
-    private boolean resolvesToChooser(
-            ResolveInfo resolveActivity, QueryIntentActivitiesSupplier resolvingInfos) {
-        return !resolversSubsetOf(Arrays.asList(resolveActivity), resolvingInfos.get());
+    /**
+     * Checks if the intent is resolving to the ResolverActivity, which means the {@code
+     * resolvingInfos} do not contain the result of {@code resolveActivity}.
+     *
+     * @param resolveActivity The {@link ResolveInfo} for the activity that would handle the intent.
+     * @param resolvingInfos A list of {@link ResolveInfo} objects that can handle the intent.
+     */
+    public static boolean resolvesToChooser(
+            ResolveInfo resolveActivity, List<ResolveInfo> resolvingInfos) {
+        return !resolversSubsetOf(Arrays.asList(resolveActivity), resolvingInfos);
     }
 
     // looking up resources from other apps requires the use of getIdentifier()
@@ -2480,7 +2552,7 @@ public class ExternalNavigationHandler {
         // target app (as there will be multiple options) and we don't need to do anything.
         // Otherwise we have to make a fake option in the chooser dialog that loads the URL in the
         // embedding app.
-        if (resolvesToChooser(intentResolveInfo, resolvingInfos)) {
+        if (resolvesToChooser(intentResolveInfo, resolvingInfos.get())) {
             return doStartActivity(intent, context);
         }
 
@@ -2613,7 +2685,7 @@ public class ExternalNavigationHandler {
         // when the external navigation was otherwise blocked. In this case, we should just continue
         // to block the navigation, and sites hoping to prompt the user when navigation fails should
         // make sure to correctly target their app.
-        if (resolvesToChooser(intentResolveInfo, resolvingInfos)) {
+        if (resolvesToChooser(intentResolveInfo, resolvingInfos.get())) {
             if (debug()) Log.i(TAG, "Message resolves to multiple apps.");
             return OverrideUrlLoadingResult.forNoOverride();
         }
@@ -2628,16 +2700,12 @@ public class ExternalNavigationHandler {
 
         String packageName = intentResolveInfo.activityInfo.packageName;
         PackageManager pm = assumeNonNull(mDelegate.getContext()).getPackageManager();
-        ApplicationInfo applicationInfo;
-        try {
-            applicationInfo = pm.getApplicationInfo(packageName, 0);
-        } catch (NameNotFoundException e) {
-            return OverrideUrlLoadingResult.forNoOverride();
-        }
 
-        Drawable icon = pm.getApplicationLogo(applicationInfo);
-        if (icon == null) icon = pm.getApplicationIcon(applicationInfo);
-        CharSequence label = pm.getApplicationLabel(applicationInfo);
+        var iconAndLabel = getApplicationIconAndLabel(pm, packageName);
+        if (iconAndLabel == null) return OverrideUrlLoadingResult.forNoOverride();
+
+        Drawable icon = iconAndLabel.first;
+        CharSequence label = iconAndLabel.second;
 
         Resources res = mDelegate.getContext().getResources();
         String title = res.getString(R.string.external_navigation_continue_to_title, label);
@@ -2681,6 +2749,30 @@ public class ExternalNavigationHandler {
                         .build();
         messageDispatcher.enqueueMessage(message, webContents, MessageScopeType.NAVIGATION, false);
         return OverrideUrlLoadingResult.forAsyncAction();
+    }
+
+    /**
+     * Retrieves the application icon and label for a given package name.
+     *
+     * @param packageManager The PackageManager instance to query.
+     * @param packageName The package name of the app.
+     * @return A Pair containing the application's icon (Drawable) and label (CharSequence), or null
+     *     if the application is not found.
+     */
+    public static @Nullable Pair<Drawable, CharSequence> getApplicationIconAndLabel(
+            PackageManager packageManager, String packageName) {
+        ApplicationInfo applicationInfo;
+        try {
+            applicationInfo = packageManager.getApplicationInfo(packageName, 0);
+        } catch (NameNotFoundException e) {
+            return null;
+        }
+
+        Drawable icon = packageManager.getApplicationLogo(applicationInfo);
+        if (icon == null) icon = packageManager.getApplicationIcon(applicationInfo);
+        CharSequence label = packageManager.getApplicationLabel(applicationInfo);
+
+        return Pair.create(icon, label);
     }
 
     /**
@@ -2837,7 +2929,7 @@ public class ExternalNavigationHandler {
         GURL referrerUrl = getLastCommittedUrl();
         if (referrerUrl == null || referrerUrl.isEmpty()) return false;
 
-        return UrlUtilitiesJni.get().isGoogleSearchUrl(referrerUrl.getSpec());
+        return UrlUtilities.isGoogleSearchUrl(referrerUrl.getSpec());
     }
 
     /** @return whether this navigation is a redirect from an intent. */

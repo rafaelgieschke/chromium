@@ -49,8 +49,8 @@ void OpenDownloadDialogBridge::Show(Profile* profile,
 }
 
 void OpenDownloadDialogBridge::OnConfirmed(JNIEnv* env,
-                                           std::string& guid,
-                                           jboolean accepted) {
+                                           const std::string& guid,
+                                           bool accepted) {
   delegate_->OnConfirmed(guid, accepted);
 }
 

@@ -69,6 +69,9 @@ BASE_DECLARE_FEATURE(kApiOdfsConfigPrivate);
 // `enterprise.reportingPrivate.onDataMaskingRulesTriggered` API.
 BASE_DECLARE_FEATURE(kApiEnterpriseReportingPrivateOnDataMaskingRulesTriggered);
 
+// Controls the availability of the new `proxyOverrideRulesPrivate` API.
+BASE_DECLARE_FEATURE(kApiProxyOverrideRulesPrivate);
+
 // Controls the availability of the deprecated nacl_arch in
 // runtime.getPlatformInfo() API.
 BASE_DECLARE_FEATURE(kApiRuntimeGetPlatformInfoNaClArch);
@@ -90,12 +93,6 @@ BASE_DECLARE_FEATURE(kAllowWithholdingExtensionPermissionsOnInstall);
 // extension).
 BASE_DECLARE_FEATURE(kCheckingNoExtensionIdInExtensionIpcs);
 
-// If enabled, `ResetURLLoaderFactories()` will not reset extensions'
-// service workers URLLoaderFactories used for fetching scripts and
-// sub-resources. This avoids disrupting the worker(s) registration(s)
-// when they are in flight.
-BASE_DECLARE_FEATURE(kSkipResetServiceWorkerURLLoaderFactories);
-
 // If enabled, <webview>s will be allowed to request permission from an
 // embedding Chrome App to request access to Human Interface Devices.
 BASE_DECLARE_FEATURE(kEnableWebHidInWebView);
@@ -105,6 +102,13 @@ BASE_DECLARE_FEATURE(kEnableWebHidInWebView);
 // users on desktop Android. Otherwise they will be blocked.
 BASE_DECLARE_FEATURE(kEnableExtensionsForCorpDesktopAndroid);
 #endif
+
+// If enabled, JS content scripts injected at document start will be compiled
+// in a background thread.
+BASE_DECLARE_FEATURE(kExtensionsBackgroundCompilation);
+BASE_DECLARE_FEATURE_PARAM(base::TimeDelta, kBackgroundCompilationTimeout);
+BASE_DECLARE_FEATURE_PARAM(size_t, kMinScriptSizeForBackgroundCompilation);
+BASE_DECLARE_FEATURE_PARAM(size_t, kMaxScriptSizeForBackgroundCompilation);
 
 // If enabled, disables unpacked extensions if developer mode is off.
 BASE_DECLARE_FEATURE(kExtensionDisableUnsupportedDeveloper);
@@ -189,12 +193,6 @@ BASE_DECLARE_FEATURE(kExperimentalOmniboxLabs);
 // out of the allowlist.
 BASE_DECLARE_FEATURE(kSafeBrowsingCrxAllowlistAutoDisable);
 
-// Controls whether we show an install friction dialog when an Enhanced Safe
-// Browsing user tries to install an extension that is not included in the
-// Safe Browsing CRX allowlist. This feature also controls if we show a warning
-// in 'chrome://extensions' for extensions not included in the allowlist.
-BASE_DECLARE_FEATURE(kSafeBrowsingCrxAllowlistShowWarnings);
-
 // When enabled, cause extensions to use structured cloning (instead of JSON
 // serialization) for extension messaging, except when communicating with native
 // messaging hosts.
@@ -250,6 +248,10 @@ BASE_DECLARE_FEATURE(kDisableDisableExtensionsExceptCommandLineSwitch);
 // flag `--extensions-on-extension-urls` flag.
 BASE_DECLARE_FEATURE(kDisableExtensionsOnChromeUrlsSwitch);
 
+// If enabled, high-risk extension DOM activity is collected and reported
+// for enterprise auditing.
+BASE_DECLARE_FEATURE(kEnterpriseExtensionDOMActivityTelemetry);
+
 // Changes the chrome.userScript API to be enabled by a per-extension toggle
 // rather than the developer mode toggle on chrome://extensions.
 BASE_DECLARE_FEATURE(kUserScriptUserExtensionToggle);
@@ -261,18 +263,28 @@ BASE_DECLARE_FEATURE(kDebuggerAPIRestrictedToDevMode);
 
 // Creates a `browser` object that can be used in place of `chrome` where
 // extension APIs are available. It does not include non-extension APIs like
-// `loadTimes` , `csi`, etc. or deprecated APIs (e.g. `app`).
-BASE_DECLARE_FEATURE(kExtensionBrowserNamespaceAlternative);
-
-// Optimizes service worker start requests by checking readiness before
-// initiating a start.
-BASE_DECLARE_FEATURE(kOptimizeServiceWorkerStartRequests);
+// `loadTimes`, `csi`, etc. or deprecated APIs (e.g. `app`).
+// Also aligns one-time message (e.g. runtime.sendMessage) behavior more closely
+// with the mozilla/webextension-polyfill. This includes supporting
+// chrome.runtime.onMessage() listeners returning a Promise. Also in more error
+// cases (like listeners sending unserializable responses or throwing errors
+// during execution) the error is passed back to the sender.
+BASE_DECLARE_FEATURE(kExtensionBrowserNamespaceAndPolyfillSupport);
 
 // When enabled, a call to base::ListValue::Clone is avoided when dispatching an
 // extension function. Behind a feature to assess impact
 // (go/chrome-performance-work-should-be-finched).
 // TODO(crbug.com/424432184): Clean up when experiment is complete.
 BASE_DECLARE_FEATURE(kAvoidCloneArgsOnExtensionFunctionDispatch);
+
+// If enabled, the ContentVerifier cache key will include the extension root
+// path. This prevents collisions when an extension is updated or reloaded
+// to a new directory while keeping the same version ID.
+// This also controls content verifier behavior when starting new
+// ContentVerifyJobs: it will ensure that only jobs matching the currently
+// loaded extension's root directory are allowed to start. This helps avoid
+// memory leaks from stale cache entries and false-positive corruption reports.
+BASE_DECLARE_FEATURE(kExtensionContentVerificationUsesExtensionRoot);
 
 // Addresses content verification race conditions during extension updates. When
 // an extension updates, a content verification job for a previous version can
@@ -286,26 +298,30 @@ BASE_DECLARE_FEATURE(kAvoidCloneArgsOnExtensionFunctionDispatch);
 // these inconsistencies.
 BASE_DECLARE_FEATURE(kContentVerifyJobUseJobVersionForHashing);
 
-// Aligns one-time message (e.g. runtime.sendMessage) behavior more closely with
-// the mozilla/webextension-polyfill. This includes supporting
-// chrome.runtime.onMessage() listeners returning a Promise. Also in more error
-// cases (like listeners sending unserializable responses or throwing errors
-// during execution) the error is passed back to the sender.
-BASE_DECLARE_FEATURE(kRuntimeOnMessageWebExtensionPolyfillSupport);
-
 // Enables the shouldShowPromotion API to determine which promotion to show for
 // Chrome Enterprise on CWS.
 BASE_DECLARE_FEATURE(kEnableShouldShowPromotion);
+
+// When enabled, web searches with a newly-installed search engine-changing
+// extension will be blocked behind a new explicit-choice dialog. The dialog
+// must be used to confirm the choice of using the new search engine, or
+// returning to the previous provider.
+BASE_DECLARE_FEATURE(kSearchEngineExplicitChoiceDialog);
+BASE_DECLARE_FEATURE_PARAM(bool, kSearchEngineExplicitChoiceDialogEscapable);
+
+// When enabled, all search extensions will unconditionally get the search
+// engine override dialog.
+BASE_DECLARE_FEATURE(kSearchEngineUnconditionalDialog);
 
 // Enables the securityInfo in chrome.webRequest API for extensions.
 // Allowing them to retrieve certificate information from web requests.
 BASE_DECLARE_FEATURE(kWebRequestSecurityInfo);
 
 // When enabled, filtered webRequest event listeners for service worker-based
-// extensions are persisted to ExtensionPrefs. This allows the browser to know
-// about the listeners before starting the extension service worker (e.g. on
-// browser startup).
-BASE_DECLARE_FEATURE(kWebRequestPersistFilteredEvents);
+// extensions are persisted to ExtensionPrefs by the general mechanism in
+// EventRouter. If disabled, they're instead persisted by the custom mechanism
+// in WebRequestEventRouter.
+BASE_DECLARE_FEATURE(kWebRequestPersistFilteredEventsViaEventRouter);
 
 }  // namespace extensions_features
 

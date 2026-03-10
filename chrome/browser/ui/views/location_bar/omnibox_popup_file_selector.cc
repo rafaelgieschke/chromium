@@ -7,6 +7,8 @@
 #include "base/base64.h"
 #include "base/containers/span.h"
 #include "base/files/file_util.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/strings/strcat.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/unguessable_token.h"
@@ -14,6 +16,7 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/contextual_search/searchbox_context_data.h"
+#include "chrome/browser/ui/omnibox/omnibox_context_menu_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/cr_components/composebox/composebox_handler.h"
@@ -48,6 +51,7 @@ void OmniboxPopupFileSelector::OpenFileUploadDialog(
   edit_model_ = edit_model;
   image_encoding_options_ = image_encoding_options;
   was_ai_mode_open_ = was_ai_mode_open;
+  is_image_ = is_image;
   file_dialog_ = ui::SelectFileDialog::Create(
       this, std::make_unique<ChromeSelectFilePolicy>(web_contents));
 
@@ -101,15 +105,22 @@ void OmniboxPopupFileSelector::FileSelectionCanceled() {
 
 void OmniboxPopupFileSelector::OnFileDataReady(
     std::unique_ptr<FileData> file_data) {
+  base::UmaHistogramExactLinear(
+      "ContextualSearch.ContextAdded.ContextAddedMethod.Omnibox",
+      /*ContextMenu*/ 0, 4);
+
   lens::MimeType mime_type;
   if (file_data->mime_type.find("pdf") != std::string::npos) {
     mime_type = lens::MimeType::kPdf;
   } else if (file_data->mime_type.find("image") != std::string::npos) {
     mime_type = lens::MimeType::kImage;
   } else {
-    NOTREACHED();
+    UpdateSearchboxContextData(lens::MimeType::kUnknown, "", file_data->name,
+                               file_data->mime_type,
+                               base::ok(base::UnguessableToken::Create()));
+    edit_model_->OpenAiMode(false, /*via_context_menu=*/true);
+    return;
   }
-
 
   base::span<const uint8_t> file_data_span =
       base::as_bytes(base::span(file_data->bytes));
@@ -120,16 +131,24 @@ void OmniboxPopupFileSelector::OnFileDataReady(
 
   std::string image_data_url;
   if (mime_type == lens::MimeType::kImage) {
-    image_data_url = "data:" + file_data->mime_type + ";base64," +
-                     base::Base64Encode(file_data->bytes);
+    image_data_url = base::StrCat({"data:", file_data->mime_type, ";base64,",
+                                   base::Base64Encode(file_data->bytes)});
   }
 
   if (auto* webui = web_contents_->GetWebUI()) {
     auto* omnibox_popup_ui = webui->GetController()->GetAs<OmniboxPopupUI>();
     if (omnibox_popup_ui && omnibox_popup_ui->composebox_handler()) {
+      // The order of execution of parameter evaluation is undefined in C++. On
+      // Windows this results in `file_data->mime_type` being moved before the
+      // other mime_type use is evaluated resulting. The move results in an
+      // empty mime_type value being passed into `AddFileContextFromBrowser`.
+      // See: https://en.cppreference.com/w/cpp/language/eval_order and
+      // http://crbug.com/472510275.
+      std::string mime_type_copy = file_data->mime_type;
+      std::string file_name_copy = file_data->name;
       omnibox_popup_ui->composebox_handler()->AddFileContextFromBrowser(
-          file_data->mime_type, std::move(file_data_buffer),
-          std::move(image_encoding_options_),
+          std::move(file_name_copy), std::move(mime_type_copy),
+          std::move(file_data_buffer), std::move(image_encoding_options_),
           base::BindOnce(&OmniboxPopupFileSelector::UpdateSearchboxContextData,
                          weak_factory_.GetWeakPtr(), mime_type,
                          std::move(image_data_url), std::move(file_data->name),
@@ -138,6 +157,15 @@ void OmniboxPopupFileSelector::OnFileDataReady(
   }
 
   edit_model_->OpenAiMode(false, /*via_context_menu=*/true);
+
+  const std::string prefix = was_ai_mode_open_
+                                 ? kAimContextTypeHistogramPrefix
+                                 : kClassicContextTypeHistogramPrefix;
+  const std::string sliced_prefix = base::StrCat({prefix, ".Clicked"});
+  base::UmaHistogramEnumeration(
+      sliced_prefix, is_image_
+                         ? OmniboxContextMenuController::ContextType::kImage
+                         : OmniboxContextMenuController::ContextType::kFile);
 }
 
 void OmniboxPopupFileSelector::UpdateSearchboxContextData(
@@ -145,9 +173,13 @@ void OmniboxPopupFileSelector::UpdateSearchboxContextData(
     std::string image_data_url,
     std::string file_name,
     std::string mime_string,
-    const base::UnguessableToken& file_token) {
+    base::expected<base::UnguessableToken,
+                   contextual_search::ContextUploadErrorType> result) {
+  if (!result.has_value()) {
+    return;
+  }
   auto file_attachment = searchbox::mojom::FileAttachment::New();
-  file_attachment->uuid = file_token;
+  file_attachment->uuid = result.value();
   file_attachment->name = file_name;
   file_attachment->mime_type = mime_string;
 

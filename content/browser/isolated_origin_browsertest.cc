@@ -1566,7 +1566,7 @@ IN_PROC_BROWSER_TEST_F(OriginIsolationPrerenderOptInHeaderTest,
   GURL non_isolated_origin_url(
       https_server()->GetURL("a.foo.com", "/title2.html"));
 
-  FrameTreeNodeId host_id =
+  PrerenderHostId host_id =
       prerender_helper_.AddPrerender(non_isolated_origin_url);
 
   // In primary tab, navigate to an isolated origin.
@@ -1659,7 +1659,7 @@ IN_PROC_BROWSER_TEST_F(OriginIsolationPrerenderOptInHeaderTest,
   GURL isolated_origin_url(
       https_server()->GetURL("a.foo.com", "/isolate_origin"));
 
-  FrameTreeNodeId host_id = prerender_helper_.AddPrerender(isolated_origin_url);
+  PrerenderHostId host_id = prerender_helper_.AddPrerender(isolated_origin_url);
 
   // Verify origin is isolated in the prerender IsolationContext.
   auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
@@ -3242,7 +3242,7 @@ IN_PROC_BROWSER_TEST_F(OriginIsolationOptInHeaderTest,
   FrameTreeNode* tab1_root = web_contents()->GetPrimaryFrameTree().root();
   SiteInstanceImpl* tab1_site_instance =
       tab1_root->current_frame_host()->GetSiteInstance();
-  EXPECT_TRUE(tab1_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(tab1_site_instance->GetSecurityPrincipal().IsSandboxed());
 
   Shell* tab2 = CreateBrowser();
 
@@ -3259,7 +3259,7 @@ IN_PROC_BROWSER_TEST_F(OriginIsolationOptInHeaderTest,
                                  .root();
   SiteInstanceImpl* tab2_site_instance =
       tab2_root->current_frame_host()->GetSiteInstance();
-  EXPECT_FALSE(tab2_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_FALSE(tab2_site_instance->GetSecurityPrincipal().IsSandboxed());
 
   url::Origin isolated_origin = url::Origin::Create(isolated_origin_url);
   auto* policy = ChildProcessSecurityPolicyImpl::GetInstance();
@@ -3299,7 +3299,7 @@ IN_PROC_BROWSER_TEST_F(OriginIsolationOptInHeaderTest,
   SiteInstanceImpl* tab3_site_instance =
       tab3_root->current_frame_host()->GetSiteInstance();
   EXPECT_EQ(tab1_site_instance, tab3_site_instance);
-  EXPECT_TRUE(tab3_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_TRUE(tab3_site_instance->GetSecurityPrincipal().IsSandboxed());
   EXPECT_FALSE(
       tab3_site_instance->GetSiteInfo().agent_cluster_key().IsOriginKeyed());
 
@@ -3322,7 +3322,7 @@ IN_PROC_BROWSER_TEST_F(OriginIsolationOptInHeaderTest,
   SiteInstanceImpl* tab1_new_site_instance =
       tab1_root->current_frame_host()->GetSiteInstance();
   EXPECT_NE(tab1_site_instance, tab1_new_site_instance);
-  EXPECT_FALSE(tab1_new_site_instance->GetSiteInfo().is_sandboxed());
+  EXPECT_FALSE(tab1_new_site_instance->GetSecurityPrincipal().IsSandboxed());
   EXPECT_FALSE(tab1_new_site_instance->GetSiteInfo()
                    .agent_cluster_key()
                    .IsOriginKeyed());

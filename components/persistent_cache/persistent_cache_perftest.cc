@@ -20,6 +20,7 @@
 #include "build/build_config.h"
 #include "components/persistent_cache/backend_storage.h"
 #include "components/persistent_cache/backend_type.h"
+#include "components/persistent_cache/client.h"
 #include "components/persistent_cache/pending_backend.h"
 #include "components/persistent_cache/sqlite/sqlite_backend_impl.h"
 #include "components/persistent_cache/test_utils.h"
@@ -61,7 +62,8 @@ class PersistentCachePerftest : public testing::TestWithParam<CacheOption> {
  protected:
   void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-    backend_storage_.emplace(BackendType::kSqlite, temp_dir_.GetPath());
+    backend_storage_.emplace(Client::kTest, BackendType::kSqlite,
+                             temp_dir_.GetPath());
   }
 
   // Returns a new cache configured according to the test's parameter.
@@ -85,7 +87,7 @@ class PersistentCachePerftest : public testing::TestWithParam<CacheOption> {
     if (auto pending_backend = backend_storage_->MakePendingBackend(
             base::FilePath(kBaseName), single_connection, journal_mode_wal);
         pending_backend.has_value()) {
-      return PersistentCache::Bind(*std::move(pending_backend));
+      return PersistentCache::Bind(Client::kTest, *std::move(pending_backend));
     }
     ADD_FAILURE() << "Failed to make PendingBackend";
     return nullptr;
@@ -201,8 +203,8 @@ TEST_P(PersistentCachePerftest, OpenClose) {
   RunAndTimeTest(
       "OpenClose", kIterationCount, [this, &cache = *cache, &success_count] {
         for (size_t i = 0; i < kIterationCount; ++i) {
-          auto persistent_cache_under_test =
-              PersistentCache::Bind(*ShareReadWriteConnection(cache));
+          auto persistent_cache_under_test = PersistentCache::Bind(
+              Client::kTest, *ShareReadWriteConnection(cache));
           if (persistent_cache_under_test) {
             ++success_count;
           }
@@ -227,10 +229,10 @@ TEST_P(PersistentCachePerftest, Insert) {
 
   int success_count = 0;
   RunAndTimeTest("Insert", kIterationCount, [&] {
-    success_count =
-        std::ranges::count_if(keys, [&cache = *cache, &value](const auto& key) {
-          return cache.Insert(key, value.as_span()).has_value();
-        });
+    success_count = std::ranges::count_if(keys, [&cache = *cache,
+                                                 &value](const auto& key) {
+      return cache.Insert(base::as_byte_span(key), value.as_span()).has_value();
+    });
   });
   ASSERT_EQ(success_count, kIterationCount);
 }
@@ -246,7 +248,7 @@ TEST_P(PersistentCachePerftest, Find) {
 
   // Fill the cache.
   for (const auto& key : keys) {
-    ASSERT_OK(cache->Insert(key, value, {}));
+    ASSERT_OK(cache->Insert(base::as_byte_span(key), value, {}));
   }
 
   // Switch the cache back to using a rollback journal and close it. This will
@@ -263,12 +265,13 @@ TEST_P(PersistentCachePerftest, Find) {
 
   int success_count = 0;
   RunAndTimeTest("Find", kIterationCount, [&] {
-    success_count = std::ranges::count_if(keys, [&cache =
-                                                     *cache](const auto& key) {
-      return cache
-          .Find(key, [](size_t content_size) { return base::span<uint8_t>(); })
-          .has_value();
-    });
+    success_count =
+        std::ranges::count_if(keys, [&cache = *cache](const auto& key) {
+          return cache
+              .Find(base::as_byte_span(key),
+                    [](size_t content_size) { return base::span<uint8_t>(); })
+              .has_value();
+        });
   });
   ASSERT_EQ(success_count, kIterationCount);
 }

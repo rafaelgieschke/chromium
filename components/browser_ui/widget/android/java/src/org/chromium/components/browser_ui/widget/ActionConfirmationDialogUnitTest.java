@@ -41,9 +41,9 @@ import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.mockito.stubbing.Answer;
 import org.robolectric.Robolectric;
-import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.chrome.R;
 import org.chromium.components.browser_ui.widget.ActionConfirmationDialog.ConfirmationDialogHandler;
 import org.chromium.components.browser_ui.widget.ActionConfirmationDialog.DialogDismissType;
@@ -126,7 +126,7 @@ public class ActionConfirmationDialogUnitTest {
         assertEquals("Title", propertyModel.get(ModalDialogProperties.TITLE));
         View customView = propertyModel.get(ModalDialogProperties.CUSTOM_VIEW);
         TextView descriptionTextView = customView.findViewById(R.id.description_text_view);
-        assertEquals("Learn more", descriptionTextView.getText());
+        assertEquals("Learn more", descriptionTextView.getText().toString());
     }
 
     @Test
@@ -148,7 +148,7 @@ public class ActionConfirmationDialogUnitTest {
 
         View customView = propertyModel.get(ModalDialogProperties.CUSTOM_VIEW);
         TextView descriptionTextView = customView.findViewById(R.id.description_text_view);
-        assertEquals("Remove 'test@gmail.com'", descriptionTextView.getText());
+        assertEquals("Remove 'test@gmail.com'", descriptionTextView.getText().toString());
     }
 
     @Test
@@ -360,7 +360,7 @@ public class ActionConfirmationDialogUnitTest {
         controller.onDismiss(propertyModel, DialogDismissalCause.POSITIVE_BUTTON_CLICKED);
 
         // Flush the timeout task and verify it isn't run.
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
         verifyNoMoreInteractions(mModalDialogManager);
     }
 
@@ -402,7 +402,7 @@ public class ActionConfirmationDialogUnitTest {
         controller.onDismiss(propertyModel, DialogDismissalCause.NEGATIVE_BUTTON_CLICKED);
 
         // Flush the timeout task and verify it isn't run.
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
         verifyNoMoreInteractions(mModalDialogManager);
     }
 
@@ -438,7 +438,7 @@ public class ActionConfirmationDialogUnitTest {
         verify(mModalDialogManager, never()).dismissDialog(any(), anyInt());
 
         // Flush the timeout task.
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
         verify(mModalDialogManager)
                 .dismissDialog(propertyModel, DialogDismissalCause.CLIENT_TIMEOUT);
 

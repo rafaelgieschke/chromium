@@ -23,7 +23,6 @@
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
-#include "base/memory/memory_pressure_listener.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/no_destructor.h"
@@ -434,10 +433,6 @@ void HistoryBackend::Init(
     // browser shutdown. Continue it.
     StartDeletingForeignVisits();
   }
-
-  memory_pressure_listener_registration_ =
-      std::make_unique<base::AsyncMemoryPressureListenerRegistration>(
-          FROM_HERE, base::MemoryPressureListenerTag::kHistoryBackend, this);
 }
 
 void HistoryBackend::SetOnBackendDestroyTask(
@@ -1324,7 +1319,7 @@ void HistoryBackend::InitImpl(
 
   // Generate the history and favicon database metrics only after performing
   // any migration work.
-  if (base::RandInt(1, 100) == 50) {
+  if (base::RandIntInclusive(1, 100) == 50) {
     // Only do this computation sometimes since it can be expensive.
     db_->ComputeDatabaseMetrics(history_name);
   }
@@ -1342,19 +1337,6 @@ void HistoryBackend::InitImpl(
 
   // Start expiring old stuff.
   expirer_.StartExpiringOldStuff(base::Days(kExpireDaysThreshold));
-}
-
-void HistoryBackend::OnMemoryPressure(
-    base::MemoryPressureLevel memory_pressure_level) {
-  // TODO(sebmarchand): Check if MEMORY_PRESSURE_LEVEL_MODERATE should also be
-  // ignored.
-  if (memory_pressure_level == base::MEMORY_PRESSURE_LEVEL_NONE) {
-    return;
-  }
-  if (db_)
-    db_->TrimMemory();
-  if (favicon_backend_)
-    favicon_backend_->TrimMemory();
 }
 
 void HistoryBackend::CloseAllDatabases() {
@@ -2054,17 +2036,16 @@ HistoryCountResult HistoryBackend::GetHistoryCount(
           count};
 }
 
-std::pair<DomainDiversityResults, DomainDiversityResults>
-HistoryBackend::GetDomainDiversity(base::Time report_time,
-                                   int number_of_days_to_report,
-                                   DomainMetricBitmaskType metric_type_bitmask,
-                                   VisitQuery404sPolicy policy_for_404_visits) {
+DomainDiversityResults HistoryBackend::GetDomainDiversity(
+    base::Time report_time,
+    int number_of_days_to_report,
+    DomainMetricBitmaskType metric_type_bitmask,
+    VisitQuery404sPolicy policy_for_404_visits) {
   DCHECK_GE(number_of_days_to_report, 0);
-  DomainDiversityResults local_result;
-  DomainDiversityResults all_result;
+  DomainDiversityResults result;
 
   if (!db_)
-    return std::make_pair(local_result, all_result);
+    return result;
 
   number_of_days_to_report =
       std::min(number_of_days_to_report, kDomainDiversityMaxBacktrackedDays);
@@ -2072,48 +2053,38 @@ HistoryBackend::GetDomainDiversity(base::Time report_time,
   base::Time current_midnight = report_time.LocalMidnight();
 
   for (int days_back = 0; days_back < number_of_days_to_report; ++days_back) {
-    DomainMetricSet local_metric_set;
-    local_metric_set.end_time = current_midnight;
-    DomainMetricSet all_metric_set;
-    all_metric_set.end_time = current_midnight;
+    DomainMetricSet metric_set;
+    metric_set.end_time = current_midnight;
 
     if (metric_type_bitmask & kEnableLast1DayMetric) {
       base::Time last_midnight = MidnightNDaysLater(current_midnight, -1);
-      auto [local_domains, all_domains] = db_->CountUniqueDomainsVisited(
+      auto domains = db_->CountUniqueDomainsVisited(
           last_midnight, current_midnight, policy_for_404_visits);
-      local_metric_set.one_day_metric =
-          DomainMetricCountType(local_domains, last_midnight);
-      all_metric_set.one_day_metric =
-          DomainMetricCountType(all_domains, last_midnight);
+      metric_set.one_day_metric = DomainMetricCountType(domains, last_midnight);
     }
 
     if (metric_type_bitmask & kEnableLast7DayMetric) {
       base::Time seven_midnights_ago = MidnightNDaysLater(current_midnight, -7);
-      auto [local_domains, all_domains] = db_->CountUniqueDomainsVisited(
+      auto domains = db_->CountUniqueDomainsVisited(
           seven_midnights_ago, current_midnight, policy_for_404_visits);
-      local_metric_set.seven_day_metric =
-          DomainMetricCountType(local_domains, seven_midnights_ago);
-      all_metric_set.seven_day_metric =
-          DomainMetricCountType(all_domains, seven_midnights_ago);
+      metric_set.seven_day_metric =
+          DomainMetricCountType(domains, seven_midnights_ago);
     }
 
     if (metric_type_bitmask & kEnableLast28DayMetric) {
       base::Time twenty_eight_midnights_ago =
           MidnightNDaysLater(current_midnight, -28);
-      auto [local_domains, all_domains] = db_->CountUniqueDomainsVisited(
+      auto domains = db_->CountUniqueDomainsVisited(
           twenty_eight_midnights_ago, current_midnight, policy_for_404_visits);
-      local_metric_set.twenty_eight_day_metric =
-          DomainMetricCountType(local_domains, twenty_eight_midnights_ago);
-      all_metric_set.twenty_eight_day_metric =
-          DomainMetricCountType(all_domains, twenty_eight_midnights_ago);
+      metric_set.twenty_eight_day_metric =
+          DomainMetricCountType(domains, twenty_eight_midnights_ago);
     }
-    local_result.push_back(local_metric_set);
-    all_result.push_back(all_metric_set);
+    result.push_back(metric_set);
 
     current_midnight = MidnightNDaysLater(current_midnight, -1);
   }
 
-  return std::make_pair(local_result, all_result);
+  return result;
 }
 
 DomainsVisitedResult HistoryBackend::GetUniqueDomainsVisited(
@@ -2308,7 +2279,7 @@ std::vector<AnnotatedVisit> HistoryBackend::GetAnnotatedVisits(
     auto to_remove = std::ranges::remove_if(
         visit_rows.begin(), visit_rows.end(), [&](auto& visit) {
           // This may seem slow, but it's an indexed lookup.
-          return db_->GetClusterIdContainingVisit(visit.visit_id) > 0;
+          return (db_->GetClusterIdContainingVisit(visit.visit_id)).value() > 0;
         });
     visit_rows.erase(to_remove.begin(), to_remove.end());
   }
@@ -2456,7 +2427,7 @@ base::Time HistoryBackend::FindMostRecentClusteredTime() {
 }
 
 void HistoryBackend::ReplaceClusters(
-    const std::vector<int64_t>& ids_to_delete,
+    const std::vector<ClusterId>& ids_to_delete,
     const std::vector<Cluster>& clusters_to_add) {
   TRACE_EVENT0("browser", "HistoryBackend::ReplaceClusters");
   if (!db_)
@@ -2466,23 +2437,23 @@ void HistoryBackend::ReplaceClusters(
   ScheduleCommit();
 }
 
-int64_t HistoryBackend::ReserveNextClusterIdWithVisit(
+ClusterId HistoryBackend::ReserveNextClusterIdWithVisit(
     const ClusterVisit& cluster_visit) {
   TRACE_EVENT0("browser", "HistoryBackend::ReserveNextClusterIdWithVisit");
-  int64_t cluster_id =
+  ClusterId cluster_id =
       db_ ? db_->ReserveNextClusterId(/*originator_cache_guid=*/"",
-                                      /*originator_cluster_id=*/0)
-          : 0;
-  if (cluster_id == 0) {
+                                      /*originator_cluster_id=*/ClusterId(0))
+          : ClusterId(0);
+  if (cluster_id.value() == 0) {
     // DB write was not successful, just return.
-    return 0;
+    return ClusterId(0);
   }
   AddVisitsToCluster(cluster_id, {cluster_visit});
   return cluster_id;
 }
 
 void HistoryBackend::AddVisitsToCluster(
-    int64_t cluster_id,
+    ClusterId cluster_id,
     const std::vector<ClusterVisit>& visits) {
   TRACE_EVENT0("browser", "HistoryBackend::AddVisitsToCluster");
   if (!db_)
@@ -2494,21 +2465,21 @@ void HistoryBackend::AddVisitsToCluster(
 void HistoryBackend::AddVisitToSyncedCluster(
     const history::ClusterVisit& cluster_visit,
     const std::string& originator_cache_guid,
-    int64_t originator_cluster_id) {
+    ClusterId originator_cluster_id) {
   TRACE_EVENT0("browser", "HistoryBackend::AddVisitToSyncedCluster");
   if (!db_) {
     return;
   }
 
-  int64_t local_cluster_id = db_->GetClusterIdForSyncedDetails(
+  ClusterId local_cluster_id = db_->GetClusterIdForSyncedDetails(
       originator_cache_guid, originator_cluster_id);
-  if (local_cluster_id == 0) {
+  if (local_cluster_id.value() == 0) {
     // Reserve a new one since one with the synced details does not already
     // exist.
     local_cluster_id =
         db_->ReserveNextClusterId(originator_cache_guid, originator_cluster_id);
   }
-  if (local_cluster_id == 0) {
+  if (local_cluster_id.value() == 0) {
     // Cluster failed to be added to the DB - unclear if/how this can happen.
     return;
   }
@@ -2540,9 +2511,9 @@ void HistoryBackend::UpdateClusterVisit(
     return;
   }
 
-  int64_t cluster_id = db_->GetClusterIdContainingVisit(
+  ClusterId cluster_id = db_->GetClusterIdContainingVisit(
       cluster_visit.annotated_visit.visit_row.visit_id);
-  if (cluster_id == 0) {
+  if (cluster_id.value() == 0) {
     // No cluster visit persisted, just return.
     return;
   }
@@ -2569,7 +2540,7 @@ std::vector<Cluster> HistoryBackend::GetMostRecentClusters(
     // `cluster` should be valid in the normal flow, but DB corruption can
     // happen. `GetCluster()` returning a cluster_id` of 0 indicates an invalid
     // cluster.
-    if (cluster.cluster_id > 0) {
+    if (cluster.cluster_id.value() > 0) {
       accumulated_visits_count += cluster.visits.size();
       clusters.push_back(std::move(cluster));
       if (accumulated_visits_count >= max_visits_soft_cap)
@@ -2579,7 +2550,7 @@ std::vector<Cluster> HistoryBackend::GetMostRecentClusters(
   return clusters;
 }
 
-Cluster HistoryBackend::GetCluster(int64_t cluster_id,
+Cluster HistoryBackend::GetCluster(ClusterId cluster_id,
                                    bool include_keywords_and_duplicates) {
   TRACE_EVENT0("browser", "HistoryBackend::GetCluster");
   if (!db_)
@@ -2599,10 +2570,10 @@ Cluster HistoryBackend::GetCluster(int64_t cluster_id,
   return cluster;
 }
 
-int64_t HistoryBackend::GetClusterIdContainingVisit(VisitID visit_id) {
+ClusterId HistoryBackend::GetClusterIdContainingVisit(VisitID visit_id) {
   TRACE_EVENT0("browser", "HistoryBackend::GetClusterIdContainingVisit");
 
-  return db_ ? db_->GetClusterIdContainingVisit(visit_id) : 0;
+  return db_ ? db_->GetClusterIdContainingVisit(visit_id) : ClusterId(0);
 }
 
 VisitRow HistoryBackend::GetRedirectChainStart(VisitRow visit) {

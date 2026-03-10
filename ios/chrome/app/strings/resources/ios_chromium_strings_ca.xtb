@@ -7,11 +7,13 @@
 <translation id="1091252999271033193">Això vol dir que Chromium sol·licitarà el lloc web per a mòbils cada vegada.</translation>
 <translation id="1115463765356382667">Completa aquestes accions suggerides per treure el màxim profit de Chromium.</translation>
 <translation id="1185134272377778587">Sobre Chromium</translation>
+<translation id="119044033865561140">Obre Chromium a l'instant quan siguis a l'iPad</translation>
 <translation id="1211450393895337634">Obre Chromium més ràpidament quan estiguis a punt per navegar a l'iPad.</translation>
 <translation id="1229234641991056119">Utilitza les contrasenyes, l'historial, les adreces d'interès i les targetes de crèdit de Safari a Chromium</translation>
 <translation id="1257458525759135959">Si vols desar imatges, toca Configuració per permetre que Chromium les afegeixi a les teves fotos</translation>
 <translation id="1260702988262336471">Obre el menú de Chromium</translation>
 <translation id="12739128458173458">Per enviar aquesta pestanya a un altre dispositiu, inicia la sessió a Chromium als dos dispositius.</translation>
+<translation id="1279797561821266129">Accedeix a Chromium més ràpidament des de la barra</translation>
 <translation id="1361748954329991663">Chromium no està actualitzat. Si no hi ha cap actualització disponible a l'<ph name="BEGIN_LINK" />App Store<ph name="END_LINK" />, pot ser que el teu dispositiu ja no admeti les versions noves de Chromium.</translation>
 <translation id="1383876407941801731">Cerca</translation>
 <translation id="1423007117030725713">Inicia una cerca en una pestanya nova de Chromium.</translation>
@@ -41,6 +43,9 @@
 <translation id="1707458603865303524">Utilitza Chromium cada vegada que toquis enllaços en missatges o en altres aplicacions.</translation>
 <translation id="1722370509450468186">La contrasenya es desarà al teu compte (<ph name="EMAIL" />).</translation>
 <translation id="1747088204252710672">Un feed personalitzat per a tu</translation>
+<translation id="1761196287436320018">Has arribat al límit de <ph name="LIMIT" /> adreces d'interès de Chromium, de manera que algunes encara no s'han desat al teu Compte de Google.
+
+No es poden desar adreces d'interès noves al teu compte fins que no en suprimeixis algunes. Si tanques la sessió ara, se suprimiran les adreces d'interès no desades.</translation>
 <translation id="1811860791247653035">Per obtenir personalització i altres funcions, inclou Chromium a <ph name="FEATURE_NAME_1" /> i <ph name="FEATURE_NAME_2" /></translation>
 <translation id="1838412507805038478">Chromium ha verificat que <ph name="ISSUER" /> ha emès el certificat d'aquest lloc web.</translation>
 <translation id="1839447949248872139">Obre els enllaços a Chromium de manera predeterminada</translation>
@@ -84,6 +89,7 @@ Prova d'esperar uns quants minuts abans de tancar la sessió. Si tanques la sess
 <translation id="2517624234762908348">Sincronitza les dades de Chromium</translation>
 <translation id="2575968074225731646">Accedeix a Chromium més ràpidament des del Dock de l'iPhone.</translation>
 <translation id="2592940277904433508">Continua utilitzant Chromium</translation>
+<translation id="2601766165676560303">Tema de Chromium per a iPhone i iPad</translation>
 <translation id="2607609479243848905">Si has oblidat la frase de contrasenya o vols canviar aquesta opció de configuració, <ph name="BEGIN_LINK" />suprimeix les dades de Chromium del compte<ph name="END_LINK" />.</translation>
 <translation id="2640367368802736659">Consell de Chromium: cerca el que veus amb Google Lens</translation>
 <translation id="2650312721222849884">Per veure les pestanyes des de tots els llocs on facis servir Chromium, activa la sincronització</translation>
@@ -173,6 +179,7 @@ Per canviar aquesta opció de configuració, <ph name="BEGIN_LINK" />suprimeix l
 <translation id="4790638144988730920">Continua utilitzant les dades de Chromium al teu Compte de Google.</translation>
 <translation id="4828317641996116749">Chromium no ha pogut comprovar totes les contrasenyes. Torna-ho a provar més tard.</translation>
 <translation id="4856138222358683580">Accions de Chromium</translation>
+<translation id="4869706986935301458">Obre Chromium a l'instant quan siguis a l'iPhone</translation>
 <translation id="4904452304169763785">Alertes sobre qualsevol problema de privadesa o de seguretat que Chromium detecti.</translation>
 <translation id="4908570938463711775">Aprèn els conceptes bàsics útils sobre Chromium per començar</translation>
 <translation id="4962295957157529683">Acaba el que estaves fent a l'altra finestra de Chromium oberta.</translation>
@@ -292,11 +299,11 @@ Només les persones que sàpiguen la teva frase de contrasenya podran llegir les
 <translation id="7395825497086981028">La contrasenya es desarà al gestor de contrasenyes per a <ph name="EMAIL" />.</translation>
 <translation id="7434848749522628428">Aquesta clau d'accés es desarà al gestor de contrasenyes de Google per a <ph name="USER_EMAIL" /></translation>
 <translation id="7504829997542308412">Obre Chromium</translation>
+<translation id="7507535968973352823">Col·loca Chromium a l'àrea inferior per accedir-hi en qualsevol moment</translation>
 <translation id="7531461704633548377">De Chromium</translation>
 <translation id="7554983317097061001">Consell de Chromium: mou Chromium al Dock</translation>
 <translation id="7576863740961052505">Gestiona la configuració de Chromium</translation>
 <translation id="7674213385180944843">Obre Configuració &gt; Privacitat &gt; Càmera &gt; Chromium i activa la càmera.</translation>
-<translation id="7685160423563372998">Crea una imatge amb Gemini a Chromium</translation>
 <translation id="7733418656985455268">Consell de Chromium: cerca amb Lens</translation>
 <translation id="7747820849741499258">Cerca a Chromium</translation>
 <translation id="7753923083404296545">S'ha obert en mode d'incògnit a Chromium</translation>
@@ -368,4 +375,5 @@ Prova d'esperar uns quants minuts abans de tancar la sessió. Si tanques la sess
 <translation id="924957577793602335">Personalitza Chromium</translation>
 <translation id="981812233959540767">Juga al joc El dinosaure de Chromium</translation>
 <translation id="985602178874221306">Els autors de Chromium</translation>
+<translation id="986520777495807752">Estableix Chromium com a predeterminat</translation>
 </translationbundle>

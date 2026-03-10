@@ -24,12 +24,12 @@
 #include "base/scoped_multi_source_observation.h"
 #include "base/scoped_observation.h"
 #include "build/build_config.h"
+#include "chrome/browser/tab_list/tab_removed_reason.h"
 #include "chrome/browser/ui/tabs/tab_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_selection_state.h"
 #include "chrome/browser/ui/tabs/tab_strip_scrubbing_metrics.h"
 #include "chrome/browser/ui/tabs/tab_strip_user_gesture_details.h"
 #include "chrome/common/buildflags.h"
-#include "chrome/common/chrome_features.h"
 #include "components/sessions/core/session_id.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "components/tab_groups/tab_group_visual_data.h"
@@ -62,13 +62,13 @@ class SplitTabData;
 class SplitTabVisualData;
 enum class SplitTabLayout;
 enum class SplitTabCreatedSource;
-}
+}  // namespace split_tabs
 
 namespace tabs {
 class SplitTabCollection;
 class TabStripCollection;
 class TabGroupTabCollection;
-}
+}  // namespace tabs
 
 namespace tabs_api {
 class TabStripModelAdapterImpl;
@@ -111,7 +111,7 @@ struct DetachedTab {
               int index_at_time_of_removal,
               bool was_pinned_at_time_of_removal,
               std::unique_ptr<tabs::TabModel> tab,
-              TabStripModelChange::RemoveReason remove_reason,
+              TabRemovedReason remove_reason,
               tabs::TabInterface::DetachReason tab_detach_reason,
               std::optional<SessionID> id);
   DetachedTab(const DetachedTab&) = delete;
@@ -138,7 +138,7 @@ struct DetachedTab {
   // tab is detached for re-insertion into a browser of different type,
   // in which case the TabInterface is destroyed but the WebContents is
   // retained.
-  TabStripModelChange::RemoveReason remove_reason;
+  TabRemovedReason remove_reason;
   tabs::TabInterface::DetachReason tab_detach_reason;
 
   // The |contents| associated optional SessionID, used as key for
@@ -351,8 +351,7 @@ class TabStripModel {
   // or TabModel.
   std::unique_ptr<content::WebContents> DetachWebContentsAtForInsertion(
       int index,
-      TabStripModelChange::RemoveReason reason =
-          TabStripModelChange::RemoveReason::kInsertedIntoOtherTabStrip);
+      TabRemovedReason reason = TabRemovedReason::kInsertedIntoOtherTabStrip);
 
   // Detaches the WebContents at the specified index and immediately deletes it.
   void DetachAndDeleteWebContentsAt(int index);
@@ -449,8 +448,6 @@ class TabStripModel {
   // Cause a tab to display a UI indication to the user that it needs their
   // attention.
   void SetTabNeedsAttentionAt(int index, bool attention);
-  void SetTabGroupNeedsAttention(const tab_groups::TabGroupId& group,
-                                 bool attention);
 
   // Close all tabs at once. Code can use closing_all() above to defer
   // operations that might otherwise by invoked by the flurry of detach/select
@@ -469,10 +466,9 @@ class TabStripModel {
   // there is no opener on record.
   tabs::TabInterface* GetOpenerOfTabAt(const int index) const;
 
-  // Changes the |opener| of the WebContents at |index|.
-  // Note: |opener| must be in this tab strip. Also a tab must not be its own
-  // opener.
-  void SetOpenerOfWebContentsAt(int index, content::WebContents* opener);
+  // Changes the |opener| of the tab at |index|.
+  // Note: A tab must not be its own opener.
+  void SetOpenerOfTabAt(int index, tabs::TabInterface* opener);
 
   // Returns the index of the last WebContents in the model opened by the
   // specified opener, starting at |start_index|.
@@ -568,8 +564,11 @@ class TabStripModel {
 
   // Sets the selection to match that of |source|.
   void SetSelectionFromModel(ui::ListSelectionModel source);
+  void SetSelectionFromModel(const tabs::TabStripModelSelectionState& source);
 
-  ui::ListSelectionModel selection_model() const;
+  const tabs::TabStripModelSelectionState& selection_model() const {
+    return selection_model_;
+  }
 
   // Features that want to show tabstrip-modal UI are mutually exclusive.
   // Before showing a modal UI first check `CanShowModalUI`. Then call
@@ -663,14 +662,16 @@ class TabStripModel {
   // Create a new tab group and add the set of tabs pointed to be |indices| to
   // it. Pins all of the tabs if any of them were pinned, and reorders the tabs
   // so they are contiguous and do not split an existing group in half. Returns
-  // the new group. |indices| must be sorted in ascending order.
+  // the new group. This may unsplit split tabs if they are only partially
+  // contained in |indices|. |indices| must be sorted in ascending order.
   tab_groups::TabGroupId AddToNewGroup(const std::vector<int> indices);
 
   // Add the set of tabs pointed to by |indices| to the given tab group |group|.
   // The tabs take on the pinnedness of the tabs already in the group. Tabs
   // before the group will move to the start, while tabs after the group will
   // move to the end. If |add_to_end| is true, all tabs will instead move to
-  // the end. |indices| must be sorted in ascending order.
+  // the end. This may unsplit split tabs if they are only partially contained
+  // in |indices|. |indices| must be sorted in ascending order.
   void AddToExistingGroup(const std::vector<int> indices,
                           const tab_groups::TabGroupId group,
                           const bool add_to_end = false);
@@ -682,8 +683,9 @@ class TabStripModel {
                             const tab_groups::TabGroupId& group);
 
   // Removes the set of tabs pointed to by |indices| from the the groups they
-  // are in, if any. The tabs are moved out of the group if necessary. |indices|
-  // must be sorted in ascending order.
+  // are in, if any. The tabs are moved out of the group if necessary. This
+  // may unsplit split tabs if they are only partially contained in |indices|.
+  // |indices| must be sorted in ascending order.
   void RemoveFromGroup(const std::vector<int>& indices);
 
   // Unsplits all the tabs that are part of the split with `split_id`. The tabs
@@ -761,8 +763,6 @@ class TabStripModel {
     CommandAddToNewGroup,
     CommandAddToExistingGroup,
     CommandAddToNewGroupFromMenuItem,
-    CommandAddToNewComparisonTable,
-    CommandAddToExistingComparisonTable,
     CommandAddToSplit,
     CommandSwapWithActiveSplit,
     CommandArrangeSplit,
@@ -773,14 +773,14 @@ class TabStripModel {
     CommandCopyURL,
     CommandGoBack,
     CommandCloseAllTabs,
-    CommandCommerceProductSpecifications,
-#if BUILDFLAG(ENABLE_GLIC)
+    CommandToggleVertical,
     CommandGlicShareLimit,
     CommandGlicStartShare,
     CommandGlicStopShare,
     CommandGlicShare,
     CommandGlicCreateNewChat,
-#endif
+    CommandGlicSwitchToRecentConversation,
+    CommandGlicUnshare,
     CommandLast
   };
   // LINT.ThenChange(//tools/metrics/histograms/metadata/tab/histograms.xml:TabContextMenuCommand)
@@ -1007,7 +1007,7 @@ class TabStripModel {
   // owning TabModel may be destroyed).
   std::unique_ptr<DetachedTab> DetachTabWithReasonAt(
       int index,
-      TabStripModelChange::RemoveReason web_contents_remove_reason,
+      TabRemovedReason web_contents_remove_reason,
       tabs::TabInterface::DetachReason tab_detach_reason);
 
   // Performs all the work to detach a TabModel instance but avoids sending
@@ -1018,7 +1018,7 @@ class TabStripModel {
       int index_before_any_removals,
       int index_at_time_of_removal,
       bool create_historical_tab,
-      TabStripModelChange::RemoveReason web_contents_remove_reason,
+      TabRemovedReason web_contents_remove_reason,
       tabs::TabInterface::DetachReason tab_detach_reason);
 
   // Removes a tab collection from `contents_data_` using
@@ -1402,7 +1402,16 @@ class TabStripModel {
       const std::optional<tab_groups::TabGroupId> group,
       bool pin);
 
+  // For each split that has tabs in `indices`, remove any of them that contain
+  // tabs not in `indices`.
+  void MaybeRemoveSplitsForUpdate(const std::vector<int>& indices);
+
   void NotifyForegroundTabsWillEnterBackground();
+
+  // Prior to a split being removed, if the split is currently active, notify
+  // the inactive tab(s) in the split will become hidden as a result of the
+  // split being removed.
+  void NotifyInactiveSplitTabWillBecomeHidden(split_tabs::SplitTabId split_id);
 
   // Assues |left| and |right| have the same root tab collection, and that
   // |left| comes before |right| in traversal order. Returns a vector of tabs
@@ -1433,8 +1442,12 @@ class TabStripModel {
 
   bool tab_strip_ui_was_set_ = false;
 
-  base::ObserverList<TabStripModelObserver>::UncheckedAndDanglingUntriaged
-      observers_;
+  // TODO(crbug.com/483152816): Investigate if this can be made non-reentrant.
+  base::ObserverList<
+      TabStripModelObserver,
+      /*check_empty=*/false,
+      base::ObserverListReentrancyPolicy::kAllowReentrancyUntriaged>::
+      UncheckedAndDanglingUntriaged observers_;
 
   // A profile associated with this TabStripModel.
   raw_ptr<Profile, AcrossTasksDanglingUntriaged> profile_;

@@ -167,11 +167,8 @@ struct AiMode : Config<AiMode> {
 // If enabled, show the AIM entrypoint in the omnibox.
 struct AiModeOmniboxEntryPoint : Config<AiModeOmniboxEntryPoint> {
   AiModeOmniboxEntryPoint();
-  // Whether the AIM entrypoint is enabled for all users.
+  // Whether the AIM entrypoint is enabled.
   bool enabled;
-  // Whether the AIM entrypoint is enabled only for users whose locale is set to
-  // English and who are located in the US. Has no effect if `enabled` is true.
-  bool enabledEnUs;
 
   // Never display AIM hint text.
   bool hide_aim_hint_text;
@@ -446,32 +443,6 @@ struct ForceAllowedToBeDefault : Config<ForceAllowedToBeDefault> {
   bool enabled;
 };
 
-// If enabled, NTP Realbox second column will allow displaying contextual and
-// trending suggestions.
-struct RealboxContextualAndTrendingSuggestions
-    : Config<RealboxContextualAndTrendingSuggestions> {
-  DECLARE_FEATURE(kRealboxContextualAndTrendingSuggestions);
-  RealboxContextualAndTrendingSuggestions();
-  RealboxContextualAndTrendingSuggestions(
-      const RealboxContextualAndTrendingSuggestions&);
-  RealboxContextualAndTrendingSuggestions(
-      RealboxContextualAndTrendingSuggestions&&);
-  RealboxContextualAndTrendingSuggestions& operator=(
-      const RealboxContextualAndTrendingSuggestions&);
-  RealboxContextualAndTrendingSuggestions& operator=(
-      RealboxContextualAndTrendingSuggestions&&);
-  ~RealboxContextualAndTrendingSuggestions();
-  bool enabled;
-
-  // The total number of matches a Section can contain across all Groups.
-  size_t total_limit;
-  // The total number of matches the `omnibox::GROUP_PREVIOUS_SEARCH_RELATED`
-  // Group can contain.
-  size_t contextual_suggestions_limit;
-  // The total number of matches the `omnibox::GROUP_TRENDS` Group can contain.
-  size_t trending_suggestions_limit;
-};
-
 // If enabled, injects a mock search engine using the same format as policy
 // `EnterpriseSearchAggregatorSettings` to be applied. Ignored if feature
 // policy is set.
@@ -538,7 +509,7 @@ struct SearchAggregatorProvider : Config<SearchAggregatorProvider> {
 
   bool AreMockEnginesValid() const;
   std::vector<base::Value> CreateMockSearchEngines() const;
-  base::Value::Dict CreateMockSearchAggregator(bool featured_by_policy) const;
+  base::DictValue CreateMockSearchAggregator(bool featured_by_policy) const;
 
   // The search engine name, shown in the Omnibox.
   std::string name;

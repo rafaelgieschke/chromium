@@ -17,15 +17,19 @@ jobs:
     uses: dtolnay/.github/.github/workflows/pre_ci.yml@master
 
   test:
-    name: Rust ${{matrix.rust}} (${{matrix.arch}})
+    name: ${{matrix.os == 'macos' && 'macOS' || format('Rust {0} ({1})', matrix.rust, matrix.arch)}}
     needs: pre_ci
     if: needs.pre_ci.outputs.continue
-    runs-on: ${{matrix.arch == 'x86_64' && 'ubuntu-latest' || 'ubuntu-24.04-arm'}}
+    runs-on: ${{matrix.os == 'macos' && 'macos-latest' || matrix.arch == 'x86_64' && 'ubuntu-latest' || 'ubuntu-24.04-arm'}}
     strategy:
       fail-fast: false
       matrix:
-        rust: [nightly, beta, stable, 1.86.0, 1.68.0]
+        rust: [nightly, beta, stable, 1.86.0, 1.71.0]
         arch: [x86_64, aarch64]
+        os: [ubuntu]
+        include:
+          - rust: nightly
+            os: macos
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
@@ -39,11 +43,26 @@ jobs:
       - run: cargo build --tests --features no-panic --release
         if: matrix.rust == 'nightly'
       - run: cargo test
-        if: matrix.rust != '1.68.0'
+        if: matrix.rust != '1.71.0'
       - run: cargo test --release
-        if: matrix.rust != '1.68.0'
+        if: matrix.rust != '1.71.0'
+      - run: cargo check
+        env:
+          RUSTFLAGS: ${{env.RUSTFLAGS}} -Ctarget-cpu=native
+      - run: cargo build --tests --features no-panic --release
+        if: matrix.rust == 'nightly'
+        env:
+          RUSTFLAGS: ${{env.RUSTFLAGS}} -Ctarget-cpu=native
+      - run: cargo test
+        if: matrix.rust != '1.71.0'
+        env:
+          RUSTFLAGS: ${{env.RUSTFLAGS}} -Ctarget-cpu=native
+      - run: cargo test --release
+        if: matrix.rust != '1.71.0'
+        env:
+          RUSTFLAGS: ${{env.RUSTFLAGS}} -Ctarget-cpu=native
       - uses: actions/upload-artifact@v6
-        if: matrix.rust == 'nightly' && matrix.arch == 'x86_64' && always()
+        if: matrix.rust == 'nightly' && matrix.arch == 'x86_64' && matrix.os == 'ubuntu' && always()
         with:
           name: Cargo.lock
           path: Cargo.lock
@@ -71,7 +90,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@clippy
+        with:
+          targets: aarch64-unknown-linux-gnu
       - run: cargo clippy --tests --benches -- -Dclippy::all -Dclippy::pedantic
+      - run: cargo clippy --target=aarch64-unknown-linux-gnu -- -Dclippy::all -Dclippy::pedantic
+      - run: cargo clippy -- -Dclippy::all -Dclippy::pedantic
+        env:
+          RUSTFLAGS: ${{env.RUSTFLAGS}} -Ctarget-cpu=native
 
   miri:
     name: Miri (${{matrix.name}})
@@ -93,7 +118,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@miri
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-02-11 # https://github.com/rust-lang/miri/issues/4855
+          components: miri, rust-src
       - run: cargo miri setup
       - run: cargo miri test --target ${{matrix.target}}
         env:

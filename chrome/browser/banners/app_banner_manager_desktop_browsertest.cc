@@ -34,7 +34,6 @@
 #include "chrome/browser/web_applications/mojom/user_display_mode.mojom.h"
 #include "chrome/browser/web_applications/web_app_helpers.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/password_manager/content/common/web_ui_constants.h"
 #include "components/password_manager/core/common/password_manager_features.h"
@@ -85,7 +84,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
 
   {
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetBannerPromptReplyCallback(run_loop.QuitClosure());
 
     ASSERT_TRUE(ui_test_utils::NavigateToURL(
         browser(), GetBannerURLWithAction("stash_event")));
@@ -96,7 +95,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
   {
     // Trigger the installation prompt and wait for installation to occur.
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetCompleteCallback(run_loop.QuitClosure());
     ExecuteScript(web_contents, "callStashedPrompt();",
                   true /* with_gesture */);
     run_loop.Run();
@@ -121,7 +120,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
 
   {
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetBannerPromptReplyCallback(run_loop.QuitClosure());
 
     ASSERT_TRUE(ui_test_utils::NavigateToURL(
         browser(), GetBannerURLWithAction("verify_appinstalled_stash_event")));
@@ -132,7 +131,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
   {
     // Trigger the installation prompt and wait for installation to occur.
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetCompleteCallback(run_loop.QuitClosure());
 
     const GURL url = GetBannerURL();
     bool callback_called = false;
@@ -175,7 +174,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
 
   {
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetBannerPromptReplyCallback(run_loop.QuitClosure());
 
     ASSERT_TRUE(ui_test_utils::NavigateToURL(
         browser(), GetBannerURLWithAction("stash_event")));
@@ -220,7 +219,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
 
   {
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetBannerPromptReplyCallback(run_loop.QuitClosure());
 
     ASSERT_TRUE(ui_test_utils::NavigateToURL(
         browser(), GetBannerURLWithManifestAndQuery("/banners/minimal-ui.json",
@@ -249,7 +248,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
 
   {
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetBannerPromptReplyCallback(run_loop.QuitClosure());
 
     ASSERT_TRUE(ui_test_utils::NavigateToURL(
         browser(), GetBannerURLWithManifestAndQuery("/banners/fullscreen.json",
@@ -290,7 +289,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
   // Run promotability check.
   {
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetBannerPromptReplyCallback(run_loop.QuitClosure());
 
     ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), GetBannerURL()));
     run_loop.Run();
@@ -331,8 +330,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
                     std::map<GURL /*install_url*/, webapps::UninstallResultCode>
                         uninstall_results) {
                   EXPECT_TRUE(install_results.empty());
-                  ASSERT_TRUE(
-                      base::Contains(uninstall_results, GetBannerURL()));
+                  ASSERT_TRUE(uninstall_results.contains(GetBannerURL()));
                   EXPECT_EQ(webapps::UninstallResultCode::kAppRemoved,
                             uninstall_results[GetBannerURL()]);
                   run_loop.Quit();
@@ -343,7 +341,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
   // Run promotability check.
   {
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetBannerPromptReplyCallback(run_loop.QuitClosure());
 
     ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), GetBannerURL()));
     run_loop.Run();
@@ -365,7 +363,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
 
   {
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetBannerPromptReplyCallback(run_loop.QuitClosure());
 
     ASSERT_TRUE(ui_test_utils::NavigateToURL(
         browser(), GetBannerURLWithManifestAndQuery(
@@ -394,7 +392,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
 
   {
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetBannerPromptReplyCallback(run_loop.QuitClosure());
 
     ASSERT_TRUE(ui_test_utils::NavigateToURL(
         browser(),
@@ -408,7 +406,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
   {
     // Trigger the installation prompt and wait for installation to occur.
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetCompleteCallback(run_loop.QuitClosure());
     ExecuteScript(web_contents, "callStashedPrompt();",
                   true /* with_gesture */);
     run_loop.Run();
@@ -441,7 +439,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
   // Run promotability check.
   {
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetBannerPromptReplyCallback(run_loop.QuitClosure());
 
     ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), GetBannerURL()));
     run_loop.Run();
@@ -471,7 +469,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTestForPasswordManagerPage,
   // Simulate loading a PasswordManager page.
   {
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetBannerPromptReplyCallback(run_loop.QuitClosure());
 
     ASSERT_TRUE(ui_test_utils::NavigateToURL(
         browser(),
@@ -492,7 +490,7 @@ IN_PROC_BROWSER_TEST_F(AppBannerManagerDesktopBrowserTest,
 
   {
     base::RunLoop run_loop;
-    manager->PrepareDone(run_loop.QuitClosure());
+    manager->SetBannerPromptReplyCallback(run_loop.QuitClosure());
 
     ASSERT_TRUE(ui_test_utils::NavigateToURL(
         browser(),

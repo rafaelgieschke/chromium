@@ -14,6 +14,7 @@
 #include "base/time/time.h"
 #include "base/unguessable_token.h"
 #include "base/uuid.h"
+#include "mojo/public/cpp/bindings/receiver.h"
 #include "net/storage_access_api/status.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/cpp/permissions_policy/permissions_policy_declaration.h"
@@ -48,6 +49,7 @@
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/platform/web_url_response.h"
+#include "third_party/blink/public/web/web_agent_cluster_key.h"
 #include "third_party/blink/public/web/web_form_element.h"
 #include "third_party/blink/public/web/web_frame_load_type.h"
 #include "third_party/blink/public/web/web_history_item.h"
@@ -213,6 +215,22 @@ struct BLINK_EXPORT WebNavigationInfo {
   // src. Only container-initiated navigation report resource timing to the
   // parent.
   bool is_container_initiated = false;
+
+  // Used by the navigation API to indicate that a deferred commit should be
+  // resumed.
+  mojo::PendingReceiver<mojom::NavigationResumeDeferredCommitListener>
+      resume_defer_commit_listener;
+};
+
+// This is a container for yet-unparsed permissions policies from the manifest
+// of an Isolated Web App. It is passed within the `WebNavigationParams` to the
+// renderer for parsing, interpretation and merging with permissions policy
+// headers.
+// The only reason why it's not declared within WebNavigationParams is to allow
+// forward declaration.
+struct BLINK_EXPORT IsolatedAppPermissionPolicyEntry {
+  WebString feature;
+  std::vector<WebString> allowed_origins;
 };
 
 // This structure holds all information provided by the embedder that is
@@ -365,10 +383,7 @@ struct BLINK_EXPORT WebNavigationParams {
 
   // The origin in which a navigation should commit. When provided, Blink
   // should use this origin directly and not compute locally the new document
-  // origin. It is currently only specified on error document navigations, where
-  // the origin should be an opaque origin based on the URL that failed to load.
-  //
-  // TODO(https://crbug.com/888079): Always provide origin_to_commit.
+  // origin.
   WebSecurityOrigin origin_to_commit;
 
   // The storage key of the document that will be created by the navigation.
@@ -385,6 +400,13 @@ struct BLINK_EXPORT WebNavigationParams {
   // The devtools token for this navigation. See DocumentLoader
   // for details.
   base::UnguessableToken devtools_navigation_token;
+
+  // Token used to derive a consistent opaque origin for the initial empty
+  // document of a newly created sandboxed frame (e.g., `<iframe sandbox>`) or
+  // window (e.g., `window.open()` with sandbox flags). Set only when the frame
+  // has the `kOrigin` sandbox flag, null for regular cross-document navigation
+  // commit, which use `DocumentLoader::origin_to_commit_` instead.
+  std::unique_ptr<base::UnguessableToken> sandbox_origin_token;
 
   // Seed for all PAAPI Auction Nonces generated in this document.
   base::Uuid base_auction_nonce;
@@ -457,14 +479,10 @@ struct BLINK_EXPORT WebNavigationParams {
   // A list of origin trial names to enable for the document being loaded.
   std::vector<WebString> force_enabled_origin_trials;
 
-  // Whether the page is in an origin-keyed agent cluster.
-  // https://html.spec.whatwg.org/C/#is-origin-keyed
-  bool origin_agent_cluster = false;
-
-  // Whether the decision to use origin-keyed or site-keyed agent clustering
-  // (which itself is recorded in origin_agent_cluster, above) has been
-  // made based on absent Origin-Agent-Cluster http header.
-  bool origin_agent_cluster_left_as_default = true;
+  // The AgentClusterKey to use to obtain an agent cluster to commit the
+  // navigation.
+  // https://html.spec.whatwg.org/multipage/webappapis.html#agent-cluster-key
+  WebAgentClusterKey agent_cluster_key;
 
   // List of client hints enabled for top-level frame. These still need to be
   // checked against permissions policy before use.
@@ -486,7 +504,11 @@ struct BLINK_EXPORT WebNavigationParams {
   // take precedence over any permissions policy constructed in blink. This is
   // useful for isolated applications, which use a different base permissions
   // policy than blink, which uses a fully permissive policy as its base.
-  std::optional<network::ParsedPermissionsPolicy> permissions_policy_override;
+  // The raw string values are parsed from the JSON manifest, but individual
+  // entries themselves are not parsed and validated (in particular, this might
+  // contain malformed/invalid entries).
+  std::optional<std::vector<IsolatedAppPermissionPolicyEntry>>
+      isolated_app_policy;
 
   // These are used to construct a subset of the back/forward list for the
   // window.navigation API. They only have the attributes that are needed for
@@ -594,6 +616,14 @@ struct BLINK_EXPORT WebNavigationParams {
   // the URL seems like a match. This matters for cross-origin navigations
   // (apart from error pages with the same precursor origin).
   bool force_new_document_sequence_number = false;
+
+  // A text fragment selector (that uses the syntax defined in
+  // https://wicg.github.io/scroll-to-text-fragment/#syntax) to scroll the
+  // matched text into the viewport without applying the standard highlight
+  // styling. This is used for cross-device scroll restoration.
+  // The string should contain only the selector value (the part after
+  // "text=" in a URL directive), not the "text=" prefix itself.
+  std::optional<WebString> internal_scroll_to_text_fragment;
 };
 
 }  // namespace blink

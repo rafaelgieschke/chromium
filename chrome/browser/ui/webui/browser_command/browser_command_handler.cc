@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/browser_command/browser_command_handler.h"
 
+#include <algorithm>
+
 #include "base/command_line.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/user_metrics.h"
@@ -11,6 +13,11 @@
 #include "chrome/browser/command_updater_impl.h"
 #include "chrome/browser/enterprise/util/managed_browser_utils.h"
 #include "chrome/browser/feedback/show_feedback_page.h"
+#include "chrome/browser/glic/glic_settings_util.h"
+#include "chrome/browser/glic/public/glic_enabling.h"
+#include "chrome/browser/glic/public/glic_keyed_service.h"
+#include "chrome/browser/glic/public/glic_keyed_service_factory.h"
+#include "chrome/browser/glic/widget/glic_window_controller.h"
 #include "chrome/browser/new_tab_page/promos/promo_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/search.h"
@@ -21,25 +28,23 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/customize_chrome/side_panel_controller.h"
-#include "chrome/browser/ui/tabs/public/tab_features.h"
-#include "chrome/browser/ui/tabs/split_tab_metrics.h"
-#include "chrome/browser/ui/tabs/tab_group_model.h"
-#include "chrome/browser/ui/ui_features.h"
+#include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/browser/user_education/tutorial_identifiers.h"
 #include "chrome/browser/user_education/user_education_service.h"
 #include "chrome/browser/user_education/user_education_service_factory.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "components/performance_manager/public/features.h"
+#include "components/prefs/pref_service.h"
 #include "components/safe_browsing/content/browser/web_ui/safe_browsing_ui.h"
 #include "components/safe_browsing/core/common/safe_browsing_policy_handler.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "components/safe_browsing/core/common/safebrowsing_referral_methods.h"
 #include "components/saved_tab_groups/public/features.h"
-#include "components/tabs/public/tab_interface.h"
 #include "components/user_education/common/tutorial/tutorial_identifier.h"
 #include "components/user_education/common/tutorial/tutorial_service.h"
 #include "net/base/url_util.h"
@@ -48,15 +53,6 @@
 #include "ui/base/ui_base_features.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/base/window_open_disposition_utils.h"
-
-#if BUILDFLAG(ENABLE_GLIC)
-#include "chrome/browser/glic/glic_settings_util.h"
-#include "chrome/browser/glic/public/glic_enabling.h"
-#include "chrome/browser/glic/public/glic_keyed_service.h"
-#include "chrome/browser/glic/public/glic_keyed_service_factory.h"
-#include "chrome/browser/glic/widget/glic_window_controller.h"
-#include "chrome/browser/ui/webui/webui_embedding_context.h"
-#endif  // BUILDFLAG(ENABLE_GLIC)
 
 using browser_command::mojom::ClickInfoPtr;
 using browser_command::mojom::Command;
@@ -88,7 +84,7 @@ BrowserCommandHandler::~BrowserCommandHandler() = default;
 void BrowserCommandHandler::CanExecuteCommand(
     browser_command::mojom::Command command_id,
     CanExecuteCommandCallback callback) {
-  if (!base::Contains(supported_commands_, command_id)) {
+  if (!std::ranges::contains(supported_commands_, command_id)) {
     std::move(callback).Run(false);
     return;
   }
@@ -157,7 +153,7 @@ void BrowserCommandHandler::CanExecuteCommand(
     case Command::kPrewarmGlicFre:
       can_execute = true;
       break;
-    case Command::kOpenSplitView:
+    case Command::kEnableVerticalTabs:
       can_execute = true;
       break;
   }
@@ -167,7 +163,7 @@ void BrowserCommandHandler::CanExecuteCommand(
 void BrowserCommandHandler::ExecuteCommand(Command command_id,
                                            ClickInfoPtr click_info,
                                            ExecuteCommandCallback callback) {
-  if (!base::Contains(supported_commands_, command_id)) {
+  if (!std::ranges::contains(supported_commands_, command_id)) {
     std::move(callback).Run(false);
     return;
   }
@@ -254,10 +250,10 @@ void BrowserCommandHandler::ExecuteCommandWithDisposition(
       OpenGlicSettings();
       break;
     case Command::kPrewarmGlicFre:
-      PrewarmGlicFre();
+      // No-op: Glic FRE pre-warming is removed.
       break;
-    case Command::kOpenSplitView:
-      OpenSplitView();
+    case Command::kEnableVerticalTabs:
+      EnableVerticalTabs();
       break;
     default:
       NOTREACHED() << "Unspecified behavior for command " << id;
@@ -362,8 +358,6 @@ void BrowserCommandHandler::StartSavedTabGroupTutorial() {
 }
 
 void BrowserCommandHandler::OpenGlic() {
-#if BUILDFLAG(ENABLE_GLIC)
-
   glic::GlicKeyedService* glic_service = glic::GlicKeyedService::Get(profile_);
 
   if (!glic_service) {
@@ -375,11 +369,9 @@ void BrowserCommandHandler::OpenGlic() {
   glic_service->ToggleUI(browser_window, /*prevent_close=*/false,
                          glic::mojom::InvocationSource::kWhatsNew,
                          /*prompt_suggestion=*/std::nullopt);
-#endif  // BUILDFLAG(ENABLE_GLIC)
 }
 
 void BrowserCommandHandler::OpenGlicSettings() {
-#if BUILDFLAG(ENABLE_GLIC)
   if (glic::GlicEnabling::ShouldShowSettingsPage(profile_)) {
     glic::OpenGlicKeyboardShortcutSetting(profile_);
   } else {
@@ -404,25 +396,10 @@ void BrowserCommandHandler::OpenGlicSettings() {
     NavigateToURL(net::AppendOrReplaceQueryParameter(GURL(url), "p", ks_param),
                   WindowOpenDisposition::SINGLETON_TAB);
   }
-#endif
 }
 
-void BrowserCommandHandler::PrewarmGlicFre() {
-#if BUILDFLAG(ENABLE_GLIC)
-  glic::GlicKeyedService* glic_service = glic::GlicKeyedService::Get(profile_);
-  if (glic_service) {
-    glic_service->TryPreloadFre(glic::GlicPrewarmingFreSource::kBrowserCommand);
-  }
-#endif  // BUILDFLAG(ENABLE_GLIC)
-}
-
-void BrowserCommandHandler::OpenSplitView() {
-  tabs::TabInterface* tab =
-      tabs::TabInterface::MaybeGetFromContents(web_contents_);
-  if (tab && !tab->IsSplit()) {
-    chrome::NewSplitTab(tab->GetBrowserWindowInterface(),
-                        split_tabs::SplitTabCreatedSource::kWhatsNew);
-  }
+void BrowserCommandHandler::EnableVerticalTabs() {
+  profile_->GetPrefs()->SetBoolean(prefs::kVerticalTabsEnabled, true);
 }
 
 void BrowserCommandHandler::OpenFeedbackForm() {

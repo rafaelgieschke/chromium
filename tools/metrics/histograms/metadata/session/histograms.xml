@@ -23,7 +23,7 @@ chromium-metrics-reviews@google.com.
 <histograms>
 
 <histogram name="Session.Android.TabbedSessionContainedGoogleSearch"
-    enum="Boolean" expires_after="2026-05-03">
+    enum="Boolean" expires_after="2026-09-06">
   <owner>nafisabedin@google.com</owner>
   <owner>yfriedman@chromium.org</owner>
   <summary>
@@ -35,7 +35,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Session.Background.TotalDuration" units="ms"
-    expires_after="2026-06-28">
+    expires_after="2026-08-30">
   <owner>asvitkine@chromium.org</owner>
   <owner>src/base/metrics/OWNERS</owner>
   <summary>
@@ -49,7 +49,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Session.BrowserFullscreen.DurationUpTo24H" units="ms"
-    expires_after="2026-05-24">
+    expires_after="2026-07-26">
   <owner>avi@chromium.org</owner>
   <owner>chrome-mac-dev@google.com</owner>
   <summary>
@@ -65,7 +65,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Session.ID.RestoredDifference" units="Session IDs"
-    expires_after="2026-05-31">
+    expires_after="2026-08-02">
   <owner>gambard@chromium.org</owner>
   <owner>sdefresne@chromium.org</owner>
   <summary>
@@ -79,7 +79,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Session.IsActive" enum="BooleanActive"
-    expires_after="2026-05-03">
+    expires_after="2026-09-06">
   <owner>rogerm@chromium.org</owner>
   <owner>src/base/metrics/OWNERS</owner>
   <summary>
@@ -101,7 +101,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Session.IsActive2" enum="BooleanActive"
-    expires_after="2026-05-03">
+    expires_after="2026-09-06">
   <owner>rogerm@chromium.org</owner>
   <owner>src/base/metrics/OWNERS</owner>
   <summary>
@@ -122,8 +122,48 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="Session.LockedDuration" units="ms" expires_after="2026-10-01">
+  <owner>victortan@chromium.org</owner>
+  <owner>chrome-analysis-team@google.com</owner>
+  <summary>
+    The duration the screen was locked (OS-level lock) while Chrome was running.
+    Recorded when the screen is unlocked or the session ends.
+  </summary>
+</histogram>
+
+<histogram name="Session.LockedDuration.Restartability.{SmartRestartDuration}"
+    enum="SmartRestartability" expires_after="2026-10-01">
+  <owner>victortan@chromium.org</owner>
+  <owner>chrome-analysis-team@google.com</owner>
+  <summary>
+    Records the combination of reasons a potential restart during OS lock screen
+    was blocked, or 'None' if it was viable. Recorded when the zero-window state
+    ends while an update is pending.
+
+    The value is recorded as a bitmask of SmartRestartBlockReason flags. This
+    histogram is sliced by the duration the OS was in the Locked state.
+  </summary>
+  <token key="SmartRestartDuration">
+    <variant name="1To5Min"/>
+    <variant name="5To10Min"/>
+    <variant name="Over10Min"/>
+    <variant name="Under1Min"/>
+  </token>
+</histogram>
+
+<histogram name="Session.LockedDuration.WithUpdate" units="ms"
+    expires_after="2026-10-01">
+  <owner>victortan@chromium.org</owner>
+  <owner>chrome-analysis-team@google.com</owner>
+  <summary>
+    The duration the screen was locked (OS-level lock) while Chrome was running
+    AND an update was pending (UpgradeDetector). Recorded when the screen is
+    unlocked or the session ends.
+  </summary>
+</histogram>
+
 <histogram name="Session.OpenedTabCounts" units="operations"
-    expires_after="2026-05-03">
+    expires_after="2026-09-06">
   <owner>rohitrao@chromium.org</owner>
   <owner>marq@chromium.org</owner>
   <summary>
@@ -496,7 +536,6 @@ chromium-metrics-reviews@google.com.
 <histogram name="Session.TotalDuration.TimeInTabletMode" units="times"
     expires_after="2026-07-08">
   <owner>robliao@chromium.org</owner>
-  <owner>arakeri@microsoft.com</owner>
   <owner>gerchiko@microsoft.com</owner>
   <owner>wangsongjin@microsoft.com</owner>
   <owner>input-dev@chromium.org</owner>
@@ -953,7 +992,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Session.TotalDurationMax1Day.{HistorySyncState}" units="ms"
-    expires_after="2026-05-17">
+    expires_after="2026-07-19">
   <owner>mastiz@chromium.org</owner>
   <owner>msarda@chromium.org</owner>
   <owner>treib@chromium.org</owner>
@@ -997,7 +1036,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Session.TotalDurationMax1Day.{MsbbState}" units="ms"
-    expires_after="2026-05-17">
+    expires_after="2026-07-19">
   <owner>mastiz@chromium.org</owner>
   <owner>msarda@chromium.org</owner>
   <owner>treib@chromium.org</owner>
@@ -1042,7 +1081,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Session.WebStates.LoadingTimeOnMainThread" units="ms"
-    expires_after="2026-06-07">
+    expires_after="2026-08-09">
   <owner>fedegermi@google.com</owner>
   <owner>sdefresne@chromium.org</owner>
   <summary>
@@ -1204,8 +1243,55 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
+<histogram name="Session.ZeroWindowDuration" units="ms"
+    expires_after="2026-10-01">
+  <owner>victortan@chromium.org</owner>
+  <owner>chrome-analysis-team@google.com</owner>
+  <summary>
+    The duration Chrome was running with zero open browser windows (specifically
+    TYPE_NORMAL). Recorded when a new window is opened or Chrome quits.
+
+    This metric is only recorded on macOS.
+  </summary>
+</histogram>
+
+<histogram
+    name="Session.ZeroWindowDuration.Restartability.{SmartRestartDuration}"
+    enum="SmartRestartability" expires_after="2026-10-01">
+  <owner>victortan@chromium.org</owner>
+  <owner>chrome-analysis-team@google.com</owner>
+  <summary>
+    Records the combination of reasons a potential restart with zero windows
+    open on macOS was blocked, or 'None' if it was viable. Recorded when the
+    zero-window state ends while an update is pending.
+
+    The value is recorded as a bitmask of SmartRestartBlockReason flags. This
+    histogram is sliced by the duration the browser was in the Zero Window
+    state.
+  </summary>
+  <token key="SmartRestartDuration">
+    <variant name="1To5Min"/>
+    <variant name="5To10Min"/>
+    <variant name="Over10Min"/>
+    <variant name="Under1Min"/>
+  </token>
+</histogram>
+
+<histogram name="Session.ZeroWindowDuration.WithUpdate" units="ms"
+    expires_after="2026-10-01">
+  <owner>victortan@chromium.org</owner>
+  <owner>chrome-analysis-team@google.com</owner>
+  <summary>
+    The duration Chrome was running with zero open browser windows (specifically
+    TYPE_NORMAL) AND an update was pending. Recorded when a new window is opened
+    or Chrome quits.
+
+    This metric is only recorded on macOS.
+  </summary>
+</histogram>
+
 <histogram name="SessionRestore.ForegroundTabFirstPaint4.FinishReason"
-    enum="SessionRestoreFinishReason" expires_after="2026-06-28">
+    enum="SessionRestoreFinishReason" expires_after="2026-08-30">
   <owner>joenotcharles@google.com</owner>
   <owner>catan-team@chromium.org</owner>
   <summary>
@@ -1220,7 +1306,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="SessionRestore.ForegroundTabFirstPaint4{SessionRestoreTabCounts}"
-    units="ms" expires_after="2026-06-28">
+    units="ms" expires_after="2026-08-30">
   <owner>joenotcharles@google.com</owner>
   <owner>catan-team@chromium.org</owner>
   <improvement direction="LOWER_IS_BETTER"/>
@@ -1266,7 +1352,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="SessionRestore.PageStateOldVersions" units="version"
-    expires_after="2026-06-28">
+    expires_after="2026-08-30">
   <owner>creis@chromium.org</owner>
   <owner>chrome-security-architecture@google.com</owner>
   <summary>
@@ -1279,7 +1365,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="SessionRestore.TabCount{TabType}" units="tabs"
-    expires_after="2026-05-03">
+    expires_after="2026-09-06">
   <owner>joenotcharles@google.com</owner>
   <owner>catan-team@chromium.org</owner>
   <summary>
@@ -1299,12 +1385,6 @@ chromium-metrics-reviews@google.com.
         summary="tabs with background notification permission"/>
     <variant name=".Grouped" summary="tabs that are part of tab groups"/>
     <variant name=".InternalPage" summary="tabs hosting internal WebUI pages"/>
-    <variant name=".LowSiteEngagement"
-        summary="tabs with site engagement below the restore threshold"/>
-    <variant name=".LowSiteEngagementWithBackgroundCommunication"
-        summary="tabs with LowSiteEngagement but either
-                 BackgroundNotificationPermission or
-                 UpdatesTitleOrFaviconInBackground"/>
     <variant name=".Pinned" summary="pinned tabs"/>
     <variant name=".UpdatesTitleOrFaviconInBackground"
         summary="tabs that update their title or favicon in the background"/>
@@ -1358,18 +1438,6 @@ chromium-metrics-reviews@google.com.
     cache. Recorded each time a new database is opened in memory.
 
     Warning: Histogram expired between M95-M110. Data may be missing.
-  </summary>
-</histogram>
-
-<histogram name="SessionStorageDatabase.Open" enum="SessionStorageDatabaseOpen"
-    expires_after="never">
-<!-- expires-never: core storage metric; consumed in separate dashboard (go/chrome-storage-dashboard) -->
-
-  <owner>ayui@chromium.org</owner>
-  <owner>chrome-owp-storage@google.com</owner>
-  <summary>
-    The result (success, failure, or database recreated) of trying to open the
-    LevelDB database for sessionStorage.
   </summary>
 </histogram>
 

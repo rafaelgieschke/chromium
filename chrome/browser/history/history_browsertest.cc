@@ -9,13 +9,13 @@
 #include "base/functional/bind.h"
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/test/bind.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/actor/actor_features.h"
 #include "chrome/browser/actor/actor_keyed_service.h"
-#include "chrome/browser/actor/actor_policy_checker.h"
 #include "chrome/browser/actor/actor_task.h"
 #include "chrome/browser/actor/actor_test_util.h"
 #include "chrome/browser/actor/execution_engine.h"
@@ -39,6 +39,10 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/search_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/history/core/browser/features.h"
+#include "components/history/core/browser/history_backend.h"
+#include "components/history/core/browser/history_database.h"
+#include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
@@ -50,6 +54,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/webui_config_map.h"
+#include "content/public/common/referrer.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/fenced_frame_test_util.h"
@@ -65,6 +70,13 @@ using content::BrowserThread;
 using ::testing::_;
 
 namespace {
+
+class MockOnUpdatedHistoryForNavigationObserver {
+ public:
+  MOCK_METHOD(void,
+              OnUpdatedHistoryForNavigation,
+              (int64_t, bool, base::Time, const GURL&));
+};
 
 // Used to test if the History Service Observer gets called for both
 // `OnURLVisited()` and `OnURLVisitedWithNavigationId()`.
@@ -156,6 +168,40 @@ void VisitedLinkNavigationThrottleObserver::ReadyToCommitNavigation(
   visited_link_salt_ =
       content::GetVisitedLinkSaltForNavigation(navigation_handle);
 }
+
+// Task to check for a row in the VisitedLink database.
+class GetVisitedLinkTask : public history::HistoryDBTask {
+ public:
+  GetVisitedLinkTask(history::URLID link_url_id,
+                     const GURL& top_level_url,
+                     const GURL& frame_url,
+                     history::VisitedLinkID* visited_link_id,
+                     base::WaitableEvent* event)
+      : link_url_id_(link_url_id),
+        top_level_url_(top_level_url),
+        frame_url_(frame_url),
+        visited_link_id_(visited_link_id),
+        wait_event_(event) {}
+  ~GetVisitedLinkTask() override = default;
+
+  bool RunOnDBThread(history::HistoryBackend* backend,
+                     history::HistoryDatabase* db) override {
+    history::VisitedLinkRow row;
+    *visited_link_id_ =
+        db->GetRowForVisitedLink(link_url_id_, top_level_url_, frame_url_, row);
+    wait_event_->Signal();
+    return true;
+  }
+
+  void DoneRunOnMainThread() override {}
+
+ private:
+  history::URLID link_url_id_;
+  GURL top_level_url_;
+  GURL frame_url_;
+  raw_ptr<history::VisitedLinkID> visited_link_id_;
+  raw_ptr<base::WaitableEvent> wait_event_;
+};
 
 }  // namespace
 
@@ -451,7 +497,7 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest,
 
 // TODO(crbug.com/41000594): Disabled because of flakiness and because for a
 // while history didn't support #q=searchTerm. Now that it does support these
-// type of URLs (crbug.com/619799), this test could be re-enabled if somebody
+// type of URLs (crbug.com/41258710), this test could be re-enabled if somebody
 // goes through the effort to wait for the various stages of the page loading.
 // The loading strategy of the new, Polymer version of chrome://history is
 // sophisticated and multi-part, so we'd need to wait on or ensure a few things
@@ -846,7 +892,7 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest, BeforeUnloadCommitDuringPending) {
 
   // The beforeunload commit should happen before request start, which should
   // result in two history entries, with the newest in index 0. urls[0] was
-  // incorrectly url3 in https://crbug.com/956208.
+  // incorrectly url3 in https://crbug.com/41454894.
   {
     std::vector<GURL> urls(GetHistoryContents());
     ASSERT_EQ(2u, urls.size());
@@ -1094,9 +1140,7 @@ IN_PROC_BROWSER_TEST_F(HistoryBrowserTest,
 class HistoryTaskTagBrowserTest : public HistoryBrowserTest {
  public:
   HistoryTaskTagBrowserTest() {
-    scoped_feature_list_.InitWithFeatures(
-        /*enabled_features=*/{features::kGlicActor},
-        /*disabled_features=*/{actor::kGlicActionAllowlist});
+    scoped_feature_list_.InitAndDisableFeature(actor::kGlicActionAllowlist);
   }
 
  protected:
@@ -1116,8 +1160,8 @@ class HistoryTaskTagBrowserTest : public HistoryBrowserTest {
 
   actor::TaskId CreateActingTask(content::WebContents* web_contents) {
     auto* actor_service = actor::ActorKeyedService::Get(profile());
-    actor_service->GetPolicyChecker().set_act_on_web_for_testing(true);
-    actor::TaskId id = actor_service->CreateTask();
+    actor::TaskId id =
+        actor_service->CreateTask(actor::NoEnterprisePolicyChecker());
     std::unique_ptr<actor::ToolRequest> action = actor::MakeClickRequest(
         *tabs::TabInterface::GetFromContents(web_contents), gfx::Point(0, 0));
 
@@ -1274,6 +1318,129 @@ IN_PROC_BROWSER_TEST_F(HistoryTaskTagBrowserTest, RendererInitiated) {
   EXPECT_TRUE(IsHistoryEntryTaggedWithActorId());
 }
 
+class History404BrowserTest : public HistoryBrowserTest,
+                              public ::testing::WithParamInterface<bool> {
+ public:
+  History404BrowserTest() {
+    scoped_feature_list_.InitWithFeatureState(history::kVisitedLinksOn404,
+                                              GetParam());
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_P(History404BrowserTest, NavigationTo404) {
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(browser()->profile(),
+                                           ServiceAccessType::EXPLICIT_ACCESS);
+  ui_test_utils::WaitForHistoryToLoad(history_service);
+
+  GURL initial_url = embedded_https_test_server().GetURL("/title1.html");
+  GURL url404 = embedded_https_test_server().GetURL("/page404.html");
+
+  // Initial navigation for top_level_url and frame_url usage
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), initial_url));
+
+  NavigateParams params(browser(), url404, ui::PAGE_TRANSITION_LINK);
+  // Specify a referrer so that it is used as the frame_url
+  params.referrer = content::Referrer(
+      initial_url,
+      network::mojom::ReferrerPolicy::kStrictOriginWhenCrossOrigin);
+  ui_test_utils::NavigateToURL(&params);
+  history::BlockUntilHistoryProcessesPendingRequests(history_service);
+
+  history::QueryURLAndVisitsResult result = QueryURLAndVisits(url404);
+  if (GetParam()) {
+    // 404 visits should be added to History DB.
+    EXPECT_TRUE(result.success);
+    EXPECT_EQ(1u, result.visits.size());
+
+    // 404 visits should be added to VisitedLink DB.
+    base::CancelableTaskTracker tracker;
+    history::VisitedLinkRow row;
+    history::VisitedLinkID visited_link_id = 0;
+    base::WaitableEvent wait_event(
+        base::WaitableEvent::ResetPolicy::MANUAL,
+        base::WaitableEvent::InitialState::NOT_SIGNALED);
+    auto task = std::make_unique<GetVisitedLinkTask>(
+        result.row.id(), initial_url, initial_url, &visited_link_id,
+        &wait_event);
+    history_service->ScheduleDBTask(FROM_HERE, std::move(task), &tracker);
+    wait_event.Wait();
+
+    EXPECT_NE(history::VisitedLinkID(0), visited_link_id);
+  } else {
+    // 404 visits should not be added to History DB.
+    EXPECT_FALSE(result.success);
+    EXPECT_EQ(0u, result.visits.size());
+  }
+}
+
+IN_PROC_BROWSER_TEST_P(History404BrowserTest, HistoryRemovalRemoves404Url) {
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(browser()->profile(),
+                                           ServiceAccessType::EXPLICIT_ACCESS);
+
+  GURL url(embedded_https_test_server().GetURL("/page404.html"));
+
+  // Add url to the history.
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
+  history::BlockUntilHistoryProcessesPendingRequests(history_service);
+
+  if (GetParam()) {
+    // When feature is enabled, 404 navigations should be in history.
+    EXPECT_TRUE(HistoryContainsURL(url));
+
+    // Delete url from history
+    history_service->DeleteURLs({url});
+
+    // Wait for the asynchronous delete to complete
+    base::RunLoop run_loop;
+    history_service->FlushForTest(run_loop.QuitClosure());
+    run_loop.Run();
+
+    // Expect url to successfully be deleted from history
+    EXPECT_FALSE(HistoryContainsURL(url));
+  } else {
+    // When feature is disabled, 404 navigations should not be in history.
+    EXPECT_FALSE(HistoryContainsURL(url));
+  }
+}
+
+IN_PROC_BROWSER_TEST_P(History404BrowserTest,
+                       NoOnUpdatedHistoryForNavigationOn404) {
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(browser()->profile(),
+                                           ServiceAccessType::EXPLICIT_ACCESS);
+  HistoryTabHelper* history_tab_helper = HistoryTabHelper::FromWebContents(
+      browser()->tab_strip_model()->GetActiveWebContents());
+
+  testing::NiceMock<MockOnUpdatedHistoryForNavigationObserver> mock_observer;
+  base::CallbackListSubscription subscription =
+      history_tab_helper->RegisterOnUpdatedHistoryForNavigationCallback(
+          base::BindRepeating(&MockOnUpdatedHistoryForNavigationObserver::
+                                  OnUpdatedHistoryForNavigation,
+                              base::Unretained(&mock_observer)));
+
+  ui_test_utils::WaitForHistoryToLoad(history_service);
+
+  // The callback shouldn't be invoked on a 404 visit...
+  GURL url404 = embedded_https_test_server().GetURL("/page404.html");
+  EXPECT_CALL(mock_observer, OnUpdatedHistoryForNavigation(_, _, _, url404))
+      .Times(0);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url404));
+
+  // ... but a non-404 visit should invoke it.
+  GURL url_non_404 = embedded_https_test_server().GetURL("/title1.html");
+  EXPECT_CALL(mock_observer,
+              OnUpdatedHistoryForNavigation(_, _, _, url_non_404))
+      .Times(1);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url_non_404));
+}
+
+INSTANTIATE_TEST_SUITE_P(, History404BrowserTest, ::testing::Bool());
+
 // MPArch means Multiple Page Architecture, each WebContents may have additional
 // FrameTrees which will have their own associated Page.
 class HistoryMPArchBrowserTest : public HistoryBrowserTest {
@@ -1326,7 +1493,7 @@ IN_PROC_BROWSER_TEST_F(HistoryPrerenderBrowserTest,
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), kInitialUrl));
 
   // Start a prerender, but we don't activate it.
-  const content::FrameTreeNodeId kHostId =
+  const content::PrerenderHostId kHostId =
       prerender_helper().AddPrerender(kPrerenderingUrl);
   ASSERT_TRUE(kHostId);
 
@@ -1345,7 +1512,7 @@ IN_PROC_BROWSER_TEST_F(HistoryPrerenderBrowserTest,
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), kInitialUrl));
 
   // Start a prerender.
-  const content::FrameTreeNodeId kHostId =
+  const content::PrerenderHostId kHostId =
       prerender_helper().AddPrerender(kPrerenderingUrl);
   ASSERT_TRUE(kHostId);
 
@@ -1371,7 +1538,7 @@ IN_PROC_BROWSER_TEST_F(HistoryPrerenderBrowserTest,
   ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), kInitialUrl));
 
   // Start a prerender.
-  const content::FrameTreeNodeId kHostId =
+  const content::PrerenderHostId kHostId =
       prerender_helper().AddPrerender(kPrerenderingUrl);
   ASSERT_TRUE(kHostId);
 

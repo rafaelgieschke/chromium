@@ -15,8 +15,8 @@
 #include "build/build_config.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/prefs/pref_service.h"
-#include "components/safe_browsing/core/browser/db/hit_report.h"
 #include "components/safe_browsing/core/common/features.h"
+#include "components/safe_browsing/core/common/threat_enums.h"
 #include "components/security_interstitials/core/unsafe_resource.h"
 #include "crypto/sha2.h"
 #include "mojo/public/cpp/bindings/self_owned_receiver.h"
@@ -43,35 +43,6 @@ const char kAuthHeaderBearer[] = "Bearer ";
 // Represents the HTTP response code when it has not explicitly been set.
 const int kUnsetHttpResponseCode = 0;
 
-class CookieWriteLogger : public network::mojom::CookieAccessObserver {
- public:
-  explicit CookieWriteLogger(
-      safe_browsing::SafeBrowsingAuthenticatedEndpoint endpoint)
-      : endpoint_(endpoint) {}
-
-  // network::mojom::CookieAccessObserver:
-  void OnCookiesAccessed(
-      std::vector<network::mojom::CookieAccessDetailsPtr> details) override {
-    for (const network::mojom::CookieAccessDetailsPtr& access : details) {
-      if (access->type != network::mojom::CookieAccessDetails::Type::kChange) {
-        continue;
-      }
-
-      base::UmaHistogramEnumeration(
-          "SafeBrowsing.AuthenticatedCookieResetEndpoint", endpoint_);
-    }
-  }
-
-  void Clone(mojo::PendingReceiver<network::mojom::CookieAccessObserver>
-                 listener) override {
-    mojo::MakeSelfOwnedReceiver(std::make_unique<CookieWriteLogger>(endpoint_),
-                                std::move(listener));
-  }
-
- private:
-  safe_browsing::SafeBrowsingAuthenticatedEndpoint endpoint_;
-};
-
 }  // namespace
 
 std::string ShortURLForReporting(const GURL& url) {
@@ -90,13 +61,15 @@ std::string ShortURLForReporting(const GURL& url) {
 ChromeUserPopulation::ProfileManagementStatus GetProfileManagementStatus(
     const policy::BrowserPolicyConnector* bpc) {
 #if BUILDFLAG(IS_WIN)
-  if (base::IsManagedDevice())
+  if (base::IsManagedDevice()) {
     return ChromeUserPopulation::ENTERPRISE_MANAGED;
-  else
+  } else {
     return ChromeUserPopulation::NOT_MANAGED;
+  }
 #elif BUILDFLAG(IS_CHROMEOS)
-  if (!bpc || !bpc->IsDeviceEnterpriseManaged())
+  if (!bpc || !bpc->IsDeviceEnterpriseManaged()) {
     return ChromeUserPopulation::NOT_MANAGED;
+  }
   return ChromeUserPopulation::ENTERPRISE_MANAGED;
 #else
   return ChromeUserPopulation::UNAVAILABLE;
@@ -114,20 +87,23 @@ void SetDelayInPref(PrefService* prefs,
 
 base::TimeDelta GetDelayFromPref(PrefService* prefs, const char* pref_name) {
   const base::TimeDelta zero_delay;
-  if (!prefs->HasPrefPath(pref_name))
+  if (!prefs->HasPrefPath(pref_name)) {
     return zero_delay;
+  }
 
   int64_t seconds_since_epoch = prefs->GetInt64(pref_name);
-  if (seconds_since_epoch <= 0)
+  if (seconds_since_epoch <= 0) {
     return zero_delay;
+  }
 
   base::Time next_event = base::Time::FromDeltaSinceWindowsEpoch(
       base::Seconds(seconds_since_epoch));
   base::Time now = base::Time::Now();
-  if (now > next_event)
+  if (now > next_event) {
     return zero_delay;
-  else
+  } else {
     return next_event - now;
+  }
 }
 
 bool CanGetReputationOfUrl(const GURL& url) {
@@ -150,14 +126,6 @@ bool CanGetReputationOfUrl(const GURL& url) {
   }
 
   return true;
-}
-
-void LogAuthenticatedCookieResets(network::ResourceRequest& resource_request,
-                                  SafeBrowsingAuthenticatedEndpoint endpoint) {
-  resource_request.trusted_params = network::ResourceRequest::TrustedParams();
-  mojo::MakeSelfOwnedReceiver(std::make_unique<CookieWriteLogger>(endpoint),
-                              resource_request.trusted_params->cookie_observer
-                                  .InitWithNewPipeAndPassReceiver());
 }
 
 void SetAccessToken(network::ResourceRequest* resource_request,
@@ -183,7 +151,7 @@ bool ErrorIsRetriable(int net_error, int http_error) {
          (http_error == kUnsetHttpResponseCode || http_error == net::HTTP_OK);
 }
 
-std::string GetExtraMetricsSuffix(
+std::string_view GetExtraMetricsSuffix(
     security_interstitials::UnsafeResource unsafe_resource) {
   switch (unsafe_resource.threat_source) {
     case safe_browsing::ThreatSource::LOCAL_PVER4:
@@ -204,7 +172,7 @@ std::string GetExtraMetricsSuffix(
   NOTREACHED();
 }
 
-std::string GetExtraExtraMetricsSuffix(
+std::string_view GetExtraExtraMetricsSuffix(
     security_interstitials::UnsafeResource unsafe_resource) {
   switch (unsafe_resource.threat_subtype) {
     case safe_browsing::ThreatSubtype::SCAM_EXPERIMENT_VERDICT_1:
@@ -259,7 +227,7 @@ std::string GetThreatTypeStringForInterstitial(
     case SB_THREAT_TYPE_HIGH_CONFIDENCE_ALLOWLIST:
       NOTREACHED();
   }
-  return std::string();
+  return {};
 }
 
 }  // namespace safe_browsing

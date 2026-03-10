@@ -134,7 +134,7 @@ class HintsFetcherDisabledBrowserTest : public InProcessBrowserTest {
 
   void SetUpOnMainThread() override {
     content::NetworkConnectionChangeSimulator().SetConnectionType(
-        network::mojom::ConnectionType::CONNECTION_2G);
+        net::NetworkChangeNotifier::ConnectionType::CONNECTION_2G);
 
     // Ensure that kGoogleHost resolves to the localhost where the embedded test
     // server is listening.
@@ -239,12 +239,12 @@ class HintsFetcherDisabledBrowserTest : public InProcessBrowserTest {
 
   void SetNetworkConnectionOffline() {
     content::NetworkConnectionChangeSimulator().SetConnectionType(
-        network::mojom::ConnectionType::CONNECTION_NONE);
+        net::NetworkChangeNotifier::ConnectionType::CONNECTION_NONE);
   }
 
   void SetNetworkConnectionOnline() {
     content::NetworkConnectionChangeSimulator().SetConnectionType(
-        network::mojom::ConnectionType::CONNECTION_2G);
+        net::NetworkChangeNotifier::ConnectionType::CONNECTION_2G);
   }
 
   void SetResponseType(
@@ -377,16 +377,16 @@ class HintsFetcherDisabledBrowserTest : public InProcessBrowserTest {
     EXPECT_EQ(request.method, net::test_server::METHOD_POST);
     EXPECT_NE(request.headers.end(), request.headers.find("X-Client-Data"));
 
-    EXPECT_EQ(expected_bearer_access_token_.empty(),
-              !base::Contains(request.headers,
-                              net::HttpRequestHeaders::kAuthorization));
+    EXPECT_EQ(
+        expected_bearer_access_token_.empty(),
+        !request.headers.contains(net::HttpRequestHeaders::kAuthorization));
     if (!expected_bearer_access_token_.empty()) {
       EXPECT_EQ(expected_bearer_access_token_,
                 request.headers.at(net::HttpRequestHeaders::kAuthorization));
     }
 
     // Make sure only one of API key or access token is sent.
-    EXPECT_EQ(base::Contains(request.headers, "X-Goog-Api-Key"),
+    EXPECT_EQ(request.headers.contains("X-Goog-Api-Key"),
               expected_bearer_access_token_.empty());
 
     optimization_guide::proto::GetHintsRequest hints_request;
@@ -1490,7 +1490,7 @@ IN_PROC_BROWSER_TEST_F(HintsFetcherSearchPagePrerenderingBrowserTest,
   // Load a page in the prerender.
   GURL prerender_url = search_results_page_url();
   ResetCountHintsRequestsReceived();
-  content::FrameTreeNodeId host_id =
+  content::PrerenderHostId host_id =
       prerender_helper()->AddPrerender(prerender_url);
   EXPECT_EQ(0u, count_hints_requests_received());
   histogram_tester->ExpectBucketCount(

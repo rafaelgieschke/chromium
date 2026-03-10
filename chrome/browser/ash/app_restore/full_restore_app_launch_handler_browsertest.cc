@@ -68,7 +68,6 @@
 #include "chrome/browser/web_applications/web_app_install_info.h"
 #include "chrome/browser/web_applications/web_app_utils.h"
 #include "chrome/common/chrome_features.h"
-#include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/constants/chromeos_features.h"
 #include "components/app_constants/constants.h"
@@ -1346,7 +1345,7 @@ class FullRestoreAppLaunchHandlerArcAppBrowserTest
 
     const auto& app_id_to_launch_list =
         app_launch_handler()->restore_data()->app_id_to_launch_list();
-    EXPECT_FALSE(base::Contains(app_id_to_launch_list, app_id));
+    EXPECT_FALSE(app_id_to_launch_list.contains(app_id));
   }
 
   FullRestoreAppLaunchHandler* app_launch_handler() {
@@ -1939,7 +1938,7 @@ IN_PROC_BROWSER_TEST_F(FullRestoreAppLaunchHandlerArcAppBrowserTest,
   SaveAppLaunchInfo(app_id1, session_id3);
   arc_helper_.CreateTask(app_id1, kTaskId3, session_id3);
   ASSERT_FALSE(restore_data->app_id_to_launch_list().empty());
-  ASSERT_TRUE(base::Contains(restore_data->app_id_to_launch_list(), app_id1));
+  ASSERT_TRUE(restore_data->app_id_to_launch_list().contains(app_id1));
 
   arc_helper_.StopInstance();
 }

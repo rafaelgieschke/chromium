@@ -9,7 +9,6 @@
 <translation id="101823271612280837">S-a oprit înregistrarea. Nu poți folosi Tabloul de bord al jocului în modul tabletă.</translation>
 <translation id="1024364763893396229">Salvează <ph name="NAME" /></translation>
 <translation id="1032891413405719768">Bateria creionului este descărcată</translation>
-<translation id="1036073649888683237">Pentru a gestiona notificările, accesează Setările</translation>
 <translation id="1036348656032585052">Dezactivează</translation>
 <translation id="1037492556044956303">S-a adăugat <ph name="DEVICE_NAME" /></translation>
 <translation id="1038106730571050514">Afișează sugestii</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">Fotografia recentă <ph name="INDEX" /> din <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Restrânge Google Tasks</translation>
 <translation id="2208323208084708176">Modul Desktop unificat</translation>
-<translation id="2210311543574621570">Vei vedea clipboardul când apeși lung pe Ctrl + V. Poți să dezactivezi această comandă rapidă dezactivând funcția experimentală #clipboard-history-longpress în chrome://flags.</translation>
 <translation id="2215920961700443347">Nu există conexiune la internet. Conectează-te la internet și încearcă din nou.</translation>
 <translation id="2222841058024245321">Desktop 7</translation>
 <translation id="2223384056430485343">Pe un ecran împărțit</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">Instalați aplicația</translation>
 <translation id="2482878487686419369">Notificări</translation>
 <translation id="2484513351006226581">Apasă <ph name="KEYBOARD_SHORTCUT" /> pentru a schimba aspectul tastaturii.</translation>
+<translation id="2485422356828889247">Dezinstalează</translation>
 <translation id="2486214324139475545">Previzualizare pentru <ph name="DESK_NAME" />. Desktop activ.</translation>
 <translation id="2486405091093637109">Rezoluția pentru <ph name="DISPLAY_NAME" /> a fost modificată la <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz). Dacă nu confirmi, vor fi restabilite setările anterioare în <ph name="TIMEOUT_SECONDS" />.</translation>
 <translation id="2487915095798731898">Urmează</translation>
@@ -2195,7 +2194,6 @@ Pentru a închide dispozitivul, apasă lung pe butonul de pornire al dispozitivu
 <translation id="8241650983304689286">Adaugă o filă la noua afișare împărțită</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, puterea semnalului: <ph name="SIGNAL_STRENGTH" />, bateria telefonului: <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Afișează tot conținutul din Google Drive</translation>
-<translation id="8257510091797044096">Configurează-ți dispozitivul</translation>
 <translation id="8261506727792406068">Șterge</translation>
 <translation id="8262312463845990408">Schimbă redarea</translation>
 <translation id="8268302343625273732">Vezi toate temele în Google Classroom</translation>

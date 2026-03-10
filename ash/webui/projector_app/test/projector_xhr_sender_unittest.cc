@@ -5,7 +5,6 @@
 #include "ash/webui/projector_app/projector_xhr_sender.h"
 
 #include "ash/constants/ash_features.h"
-#include "ash/webui/projector_app/public/mojom/projector_types.mojom-forward.h"
 #include "ash/webui/projector_app/public/mojom/projector_types.mojom-shared.h"
 #include "ash/webui/projector_app/test/mock_app_client.h"
 #include "base/functional/callback.h"
@@ -212,8 +211,9 @@ TEST_F(ProjectorXhrSenderTest, TokenFetchFailure) {
       /*method=*/projector::mojom::RequestType::kGet, /*request_body=*/"",
       /*use_credentials=*/false, /*use_api_key=*/false, future.GetCallback());
 
-  mock_app_client().MakeFetchTokenFailWithError(GoogleServiceAuthError(
-      GoogleServiceAuthError::State::INVALID_GAIA_CREDENTIALS));
+  mock_app_client().MakeFetchTokenFailWithError(
+      GoogleServiceAuthError::FromInvalidGaiaCredentialsReason(
+          GoogleServiceAuthError::InvalidGaiaCredentialsReason::UNKNOWN));
   VerifySendRequestFuture(
       future, "", projector::mojom::XhrResponseCode::kTokenFetchFailure);
 }

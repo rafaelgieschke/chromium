@@ -74,7 +74,7 @@
 
 - (PromoConfig)config {
   return PromoConfig([self identifier],
-                     &feature_engagement::kIPHiOSPromoPostRestoreFeature);
+                     feature_engagement::kIPHiOSPromoPostRestoreFeature);
 }
 
 - (void)promoWasDisplayed {
@@ -161,7 +161,7 @@
     return nil;
   }
 
-  return base::SysUTF8ToNSString(_accountInfo->given_name);
+  return base::SysUTF8ToNSString(_accountInfo->GetGivenName().value_or(""));
 }
 
 // Returns the user's pre-restore email.
@@ -170,7 +170,7 @@
     return nil;
   }
 
-  return base::SysUTF8ToNSString(_accountInfo->email);
+  return base::SysUTF8ToNSString(_accountInfo->GetEmail());
 }
 
 // Shows the signin / sync UI flow.
@@ -198,8 +198,7 @@
 
 - (void)signinDone {
   if (![self isSignedIn]) {
-    // TODO(crbug.com/418696054): Convert to NOTREACHED.
-    DUMP_WILL_BE_NOTREACHED();
+    NOTREACHED(base::NotFatalUntil::M150);
     return;
   }
   _syncUserSettings->SetSelectedType(syncer::UserSelectableType::kHistory,

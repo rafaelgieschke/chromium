@@ -11,6 +11,7 @@
 
 #include "ash/constants/ash_features.h"
 #include "ash/constants/ash_pref_names.h"
+#include "ash/constants/chrome_webui_url_constants.h"
 #include "ash/shell.h"
 #include "ash/webui/os_feedback_ui/backend/histogram_util.h"
 #include "ash/webui/os_feedback_ui/mojom/os_feedback_ui.mojom.h"
@@ -35,10 +36,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/ash/system_web_apps/system_web_app_ui_utils.h"
-#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/dialogs/browser_dialogs.h"
 #include "chrome/browser/ui/webui/ash/diagnostics_dialog/diagnostics_dialog.h"
 #include "chrome/browser/ui/webui/ash/os_feedback_dialog/os_feedback_dialog.h"
-#include "chrome/common/webui_url_constants.h"
 #include "chromeos/ash/services/multidevice_setup/public/cpp/multidevice_setup_client.h"
 #include "components/feedback/content/content_tracing_manager.h"
 #include "components/feedback/feedback_common.h"
@@ -160,7 +160,7 @@ bool ChromeOsFeedbackDelegate::IsWifiDebugLogsAllowed(
     return false;
   }
 
-  const base::Value::List& allowed_list =
+  const base::ListValue& allowed_list =
       prefs->GetList(prefs::kUserFeedbackWithLowLevelDebugDataAllowed);
   for (const auto& item : allowed_list) {
     if (item == "all" || item == "wifi") {
@@ -430,19 +430,20 @@ void ChromeOsFeedbackDelegate::OpenExploreApp() {
 }
 
 void ChromeOsFeedbackDelegate::OpenMetricsDialog() {
-  OpenWebDialog(GURL(chrome::kChromeUIHistogramsURL), /*args=*/"");
+  OpenWebDialog(GURL(ash::chrome_urls::kChromeUIHistogramsURL), /*args=*/"");
 }
 
 void ChromeOsFeedbackDelegate::OpenSystemInfoDialog() {
-  GURL systemInfoUrl = GURL(
-      base::StrCat({chrome::kChromeUIFeedbackURL, "html/system_info.html"}));
+  GURL systemInfoUrl = GURL(base::StrCat(
+      {ash::chrome_urls::kChromeUIFeedbackURL, "html/system_info.html"}));
   OpenWebDialog(systemInfoUrl, /*args=*/"");
 }
 
 void ChromeOsFeedbackDelegate::OpenAutofillMetadataDialog(
     const std::string& autofill_metadata) {
-  GURL autofillInfoUrl = GURL(base::StrCat(
-      {chrome::kChromeUIFeedbackURL, "html/autofill_metadata_info.html"}));
+  GURL autofillInfoUrl =
+      GURL(base::StrCat({ash::chrome_urls::kChromeUIFeedbackURL,
+                         "html/autofill_metadata_info.html"}));
   OpenWebDialog(autofillInfoUrl, autofill_metadata);
 }
 

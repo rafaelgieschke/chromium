@@ -3165,9 +3165,6 @@ Some features are limited to increase battery life.
       <message name="IDS_ASH_QUICK_SETTINGS_JOIN_WIFI_NETWORK" desc="The label used in the network detailed page for the Join Wi-Fi network entry">
         Join Wi-Fi network
       </message>
-      <message name="IDS_ASH_QUICK_SETTINGS_SET_UP_YOUR_DEVICE" desc="The label used in the network detailed page for the Set Up Your Device network entry">
-        Set up your device
-      </message>
       <message name="IDS_ASH_QUICK_SETTINGS_ADD_ESIM" desc="The label used in the network detailed page for the Add eSIM network entry">
         Add eSIM
       </message>
@@ -5760,10 +5757,6 @@ No devices connected.
       <message name="IDS_ASH_MESSAGE_CENTER_NO_NOTIFIERS" desc="The message displayed in the message center when there are no notification sources.">
         Nothing to see just yet
       </message>
-      <message name="IDS_ASH_MESSAGE_CENTER_NOTIFICATION_SETTINGS_LABEL" desc="The message displayed in the quick settings menu to instruct users that notification management
-        has been migrated to the settings app.">
-        To manage notifications, go to Settings
-      </message>
       <if expr="_google_chrome">
         <message name="IDS_ASH_MESSAGE_CENTER_SYSTEM_APP_NAME" desc="The source of a system-generated notification, as displayed to the user.">
           ChromeOS
@@ -6917,9 +6910,6 @@ No devices connected.
       </message>
 
       <!-- Multipaste -->
-      <message name="IDS_ASH_CLIPBOARD_HISTORY_CONTROL_V_LONGPRESS_FOOTER" desc="The message used to educate users about the clipboard history menu that shows when they hold down Ctrl+V.">
-        You’ll see the clipboard when you press and hold Ctrl + V. You can turn off this shortcut by disabling the #clipboard-history-longpress flag in chrome://flags.
-      </message>
       <message name="IDS_ASH_CLIPBOARD_HISTORY_FOOTER" desc="The message used to educate users about the clipboard history menu that shows when they use the feature for the first time (or for the first time in a long time).">
         Select an item to paste it. You can see the clipboard by pressing <ph name="SHORTCUT_KEY_NAME">$1<ex>Launcher</ex></ph> + v.
       </message>
@@ -7249,10 +7239,10 @@ No devices connected.
       <message name="IDS_ASH_LAUNCHER_APPS_COLLECTIONS_DISMISS_DIALOG_SUBTITLE" desc="Subtext for the Apps Collections Tutorial View dismiss dialog that shows over the Apps Collections in the Launcher when the user attempts to sort their apps. The dialog serves as confirmation to exit the Apps Collections Tutorial View">
         You can start customizing your app layout once you exit this view.
       </message>
-      <message name="IDS_ASH_LAUNCHER_APPS_COLLECTIONS_DISMISS_DIALOG_CANCEL" desc="The label for the cancel button on the Apps Collections Tutorial View dismiss dialog that shows over the Apps Collections in the Launcher when the user attempts to sort their apps. The dialog asks for confirmation to exit the Apps Collections Tutorial View and pressing the cancel buton will close the dialog and keep the Tutorial View">
+      <message name="IDS_ASH_LAUNCHER_APPS_COLLECTIONS_DISMISS_DIALOG_CANCEL" desc="The label for the cancel button on the Apps Collections Tutorial View dismiss dialog that shows over the Apps Collections in the Launcher when the user attempts to sort their apps. The dialog asks for confirmation to exit the Apps Collections Tutorial View and pressing the cancel button will close the dialog and keep the Tutorial View">
         Cancel
       </message>
-      <message name="IDS_ASH_LAUNCHER_APPS_COLLECTIONS_DISMISS_DIALOG_EXIT" desc="The label for the exit button on the Apps Collections Tutorial View dismiss dialog that shows over the Apps Collections in the Launcher when the user attempts to sort their apps. The dialog serves as confirmation to exit the Apps Collections Tutorial View and pressing the exit buton will close the dialog and exit the Tutorial View">
+      <message name="IDS_ASH_LAUNCHER_APPS_COLLECTIONS_DISMISS_DIALOG_EXIT" desc="The label for the exit button on the Apps Collections Tutorial View dismiss dialog that shows over the Apps Collections in the Launcher when the user attempts to sort their apps. The dialog serves as confirmation to exit the Apps Collections Tutorial View and pressing the exit button will close the dialog and exit the Tutorial View">
         Exit
       </message>
       <message name="IDS_ASH_LAUNCHER_APPS_COLLECTIONS_DISCOVERY_CHIP_LABEL" desc="The label for the button displayed at the bottom of Apps Collections Tutorial View. When the user clicks the Discovery chip, it will launch a secondary app to showcase more apps.">
@@ -9076,6 +9066,9 @@ To shut down the device, press and hold the power button on the device again.
       </message>
       <message name="IDS_ASH_BOREALIS_MOTD_PLACEHOLDER_TEXT" desc="Placeholder text for Borealis MOTD. Shown if the message of the day is unable to be retrieved from the Static Content Service.">
         Unable to retrieve Steam for Chromebook news.
+      </message>
+      <message name="IDS_ASH_BOREALIS_MOTD_UNINSTALL_TEXT" desc="Text on button in Borealis MOTD. Clicking on it will trigger uninstallation of the borealis.">
+        Uninstall
       </message>
       <message name="IDS_ASH_BOREALIS_MOTD_TITLE_TEXT" desc="Title text for Borealis MOTD. Shown at the top of the dialog.">
         Steam for Chromebook News

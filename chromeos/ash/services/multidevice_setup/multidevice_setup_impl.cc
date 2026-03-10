@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "ash/constants/ash_features.h"
-#include "base/containers/contains.h"
 #include "base/containers/flat_set.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_functions.h"
@@ -164,14 +163,11 @@ MultiDeviceSetupImpl::MultiDeviceSetupImpl(
                     pref_service)
               : nullptr),
       auth_token_validator_(auth_token_validator) {
-  host_status_provider_->AddObserver(this);
-  feature_state_manager_->AddObserver(this);
+  host_status_provider_observation_.Observe(host_status_provider_.get());
+  feature_state_manager_observation_.Observe(feature_state_manager_.get());
 }
 
-MultiDeviceSetupImpl::~MultiDeviceSetupImpl() {
-  host_status_provider_->RemoveObserver(this);
-  feature_state_manager_->RemoveObserver(this);
-}
+MultiDeviceSetupImpl::~MultiDeviceSetupImpl() = default;
 
 void MultiDeviceSetupImpl::SetAccountStatusChangeDelegate(
     mojo::PendingRemote<mojom::AccountStatusChangeDelegate> delegate) {
@@ -209,7 +205,7 @@ void MultiDeviceSetupImpl::GetEligibleActiveHostDevices(
   for (const auto& host_device :
        eligible_host_devices_provider_->GetEligibleActiveHostDevices()) {
     // For metrics.
-    if (base::Contains(name_set, host_device.remote_device.name())) {
+    if (name_set.contains(host_device.remote_device.name())) {
       has_duplicate_host_name = true;
       PA_LOG(WARNING) << "MultiDeviceSetupImpl::GetEligibleActiveHostDevices: "
                       << "Detected duplicate eligible host device name \""

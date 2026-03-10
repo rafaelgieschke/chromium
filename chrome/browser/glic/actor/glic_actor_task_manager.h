@@ -5,23 +5,21 @@
 #ifndef CHROME_BROWSER_GLIC_ACTOR_GLIC_ACTOR_TASK_MANAGER_H_
 #define CHROME_BROWSER_GLIC_ACTOR_GLIC_ACTOR_TASK_MANAGER_H_
 
+#include "base/callback_list.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/raw_ref.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
+#include "chrome/browser/actor/actor_task.h"
+#include "chrome/browser/actor/tools/observation_delay_controller.h"
+#include "chrome/browser/glic/actor/glic_actor_policy_checker.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
+#include "chrome/common/actor.mojom-forward.h"
 #include "chrome/common/actor/task_id.h"
 #include "chrome/common/actor_webui.mojom.h"
 #include "components/optimization_guide/proto/features/actions_data.pb.h"
+#include "components/page_content_annotations/content/page_context_fetcher.h"
 #include "components/tabs/public/tab_interface.h"
-
-#if !BUILDFLAG(IS_ANDROID)
-#include "chrome/browser/actor/tools/observation_delay_controller.h"
-#include "chrome/common/actor.mojom-forward.h"
-#else
-namespace actor::mojom {
-enum class ActionResultCode;
-}
-#endif
 
 class Profile;
 
@@ -36,7 +34,9 @@ namespace glic {
 // Manages actor-related tasks for GlicKeyedService.
 class GlicActorTaskManager {
  public:
-  explicit GlicActorTaskManager(Profile* profile);
+  explicit GlicActorTaskManager(Profile* profile,
+                                actor::ActorKeyedService* actor_keyed_service,
+                                GlicActorPolicyChecker& actor_policy_checker);
   GlicActorTaskManager(const GlicActorTaskManager&) = delete;
   GlicActorTaskManager& operator=(const GlicActorTaskManager&) = delete;
   ~GlicActorTaskManager();
@@ -46,6 +46,8 @@ class GlicActorTaskManager {
                   mojom::WebClientHandler::CreateTaskCallback callback);
   void PerformActions(const std::vector<uint8_t>& actions_proto,
                       mojom::WebClientHandler::PerformActionsCallback callback);
+  void CancelActions(actor::TaskId task_id,
+                     mojom::WebClientHandler::CancelActionsCallback callback);
   void StopActorTask(actor::TaskId task_id,
                      mojom::ActorTaskStopReason stop_reason);
   void PauseActorTask(actor::TaskId task_id,
@@ -66,17 +68,20 @@ class GlicActorTaskManager {
   void MaybeShowDeactivationToastUi();
 
   void CancelTask();
+  void CanActOnWebChanged(bool can_act_on_web);
   bool IsActuating() const;
 
   base::WeakPtr<GlicActorTaskManager> GetWeakPtr();
 
  private:
-#if !BUILDFLAG(IS_ANDROID)
   void PerformActionsFinished(
       mojom::WebClientHandler::PerformActionsCallback callback,
       actor::TaskId task_id,
       base::TimeTicks start_time,
       bool skip_async_observation_information,
+      std::optional<page_content_annotations::ScreenshotOptions::
+                        ScreenshotCollectionOptions>
+          screenshot_collection_options,
       actor::mojom::ActionResultCode result_code,
       std::optional<size_t> index_of_failed_action,
       std::vector<actor::ActionResultWithLatencyInfo> action_results);
@@ -88,6 +93,9 @@ class GlicActorTaskManager {
       std::vector<actor::ActionResultWithLatencyInfo> action_results,
       actor::TaskId task_id,
       bool skip_async_observation_information,
+      std::optional<page_content_annotations::ScreenshotOptions::
+                        ScreenshotCollectionOptions>
+          screenshot_collection_options,
       std::unique_ptr<optimization_guide::proto::ActionsResult> result,
       std::unique_ptr<actor::AggregatedJournal::PendingAsyncEntry>
           journal_entry);
@@ -100,7 +108,10 @@ class GlicActorTaskManager {
   void ReloadObserverDone(tabs::TabHandle tab_handle,
                           base::OnceClosure callback,
                           actor::ObservationDelayController::Result result);
-  void ResetTaskState();
+  void NotifyActorTaskStateChanged(actor::TaskId task_id,
+                                   actor::ActorTask::State task_state);
+  void StopTaskImpl(actor::TaskId task_id,
+                    actor::ActorTask::StoppedReason reason);
 
   raw_ptr<Profile> profile_;
   raw_ptr<actor::ActorKeyedService> actor_keyed_service_;
@@ -114,7 +125,13 @@ class GlicActorTaskManager {
   bool attempted_reload_after_crash_ = false;
   bool attempted_observation_retry_ = false;
   std::unique_ptr<actor::ObservationDelayController> reload_observer_;
-#endif
+
+  const raw_ref<GlicActorPolicyChecker> actor_policy_checker_;
+
+  std::optional<base::CallbackListSubscription>
+      actor_task_state_changed_subscription_;
+
+  base::CallbackListSubscription can_act_on_web_changed_subscription_;
 
   base::WeakPtrFactory<GlicActorTaskManager> weak_ptr_factory_{this};
 };

@@ -16,7 +16,6 @@
 #include <utility>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/debug/crash_logging.h"
 #include "base/debug/dump_without_crashing.h"
 #include "base/debug/stack_trace.h"
@@ -74,6 +73,7 @@
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/unified_consent/unified_consent_service_factory.h"
 #include "chrome/common/buildflags.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/logging_chrome.h"
@@ -437,6 +437,9 @@ bool ShouldGoOffTheRecord(Profile* profile) {
 
 }  // namespace
 
+BASE_FEATURE(kProfileManagerDeferAsyncLoading,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 ProfileManager::ProfileManager(const base::FilePath& user_data_dir)
     : user_data_dir_(user_data_dir)
 #if !BUILDFLAG(IS_ANDROID)
@@ -535,7 +538,7 @@ Profile* ProfileManager::GetLastUsedProfile() {
           user->username_hash()));
 
   // Accessing a user profile before it is loaded may lead to policy exploit.
-  // See http://crbug.com/689206.
+  // See http://crbug.com/40505153.
   LOG_IF(FATAL, !profile) << "Calling GetLastUsedProfile() before profile "
                           << "initialization is completed.";
 
@@ -583,7 +586,7 @@ std::vector<Profile*> ProfileManager::GetLastOpenedProfiles() {
   std::vector<Profile*> to_return;
   if (local_state->HasPrefPath(prefs::kProfilesLastActive)) {
     // Make a copy because the list might change in the calls to GetProfile.
-    const base::Value::List profile_list =
+    const base::ListValue profile_list =
         local_state->GetList(prefs::kProfilesLastActive).Clone();
     for (const auto& entry : profile_list) {
       const std::string* profile_base_name = entry.GetIfString();
@@ -597,7 +600,7 @@ std::vector<Profile*> ProfileManager::GetLastOpenedProfiles() {
           profile_manager->GetProfile(profile_manager->user_data_dir().Append(
               base::FilePath::FromUTF8Unsafe(*profile_base_name)));
       if (profile) {
-        // crbug.com/823338 -> CHECK that the profiles aren't guest or
+        // crbug.com/41377418 -> CHECK that the profiles aren't guest or
         // incognito, causing a crash during session restore.
         CHECK(!profile->IsGuestSession())
             << "Guest profiles shouldn't have been saved as active profiles";
@@ -652,7 +655,7 @@ Profile* ProfileManager::GetPrimaryUserProfile(
     LOG(ERROR) << "ProfileManager::GetPrimaryUserProfile is called when "
                   "|user| is created but |user|'s profile is not yet created. "
                   "It probably means that something is wrong with a calling "
-                  "code. Please report in http://crbug.com/361528 if you see "
+                  "code. Please report in http://crbug.com/41100311 if you see "
                   "this message.";
 
     // Taking metrics to make sure this code path is not used in production.
@@ -714,9 +717,9 @@ Profile* ProfileManager::GetActiveUserProfile(
   if (IsLoggedIn()) {
     user_manager::UserManager* manager = user_manager::UserManager::Get();
     const user_manager::User* user = manager->GetActiveUser();
-    // To avoid an endless loop (crbug.com/334098) we have to additionally check
-    // if the profile of the user was already created. If the profile was not
-    // yet created we load the profile using the profile directly.
+    // To avoid an endless loop (crbug.com/41083672) we have to additionally
+    // check if the profile of the user was already created. If the profile was
+    // not yet created we load the profile using the profile directly.
     // TODO: This should be cleaned up with the new profile manager.
     if (user && user->is_profile_created())
       return ash::ProfileHelper::Get()->GetProfileByUser(user);
@@ -749,7 +752,7 @@ Profile* ProfileManager::GetActiveUserProfile(
   // is on a read-only volume (preventing Chrome from making a new one).
   // However, most callers of this function immediately dereference the result
   // which would lead to crashes in a variety of call sites. Assert here to
-  // figure out how common this is. http://crbug.com/383019
+  // figure out how common this is. http://crbug.com/40369785
   CHECK(profile) << profile_manager->user_data_dir().AsUTF8Unsafe();
   return profile;
 }
@@ -826,6 +829,15 @@ void ProfileManager::CreateProfileAsync(
   TRACE_EVENT1("browser,startup", "ProfileManager::CreateProfileAsync",
                "profile_path", profile_path.AsUTF8Unsafe());
 
+  if (defer_async_loading_ &&
+      base::FeatureList::IsEnabled(kProfileManagerDeferAsyncLoading)) {
+    deferred_asynchronous_loads_.push_back(base::BindOnce(
+        &ProfileManager::CreateProfileAsync, base::Unretained(this),
+        profile_path, std::move(initialized_callback),
+        std::move(created_callback)));
+    return;
+  }
+
   if (!CanCreateProfileAtPath(profile_path)) {
     if (!initialized_callback.is_null())
       std::move(initialized_callback).Run(nullptr);
@@ -879,7 +891,7 @@ bool ProfileManager::IsValidProfile(const void* profile) {
       return true;
     std::vector<Profile*> otr_profiles =
         candidate->GetAllOffTheRecordProfiles();
-    if (base::Contains(otr_profiles, profile)) {
+    if (std::ranges::contains(otr_profiles, profile)) {
       return true;
     }
   }
@@ -1350,9 +1362,9 @@ bool ProfileManager::AddKeepAlive(Profile* profile,
     return true;
   }
 
-  if (base::FeatureList::IsEnabled(features::kDestroyProfileOnBrowserClose)) {
-    DCHECK_NE(0, GetTotalRefCount(info->keep_alives))
-        << "AddKeepAlive() on a soon-to-be-deleted Profile is not allowed";
+  if (base::FeatureList::IsEnabled(features::kDestroyProfileOnBrowserClose) &&
+      GetTotalRefCount(info->keep_alives) == 0) {
+    return false;
   }
 
   info->keep_alives[origin]++;
@@ -1389,9 +1401,9 @@ void ProfileManager::RemoveKeepAlive(Profile* profile,
     VLOG(1) << "RemoveKeepAlive(" << profile->GetDebugName() << ", " << origin
             << ") called before the Profile was added to the "
             << "ProfileManager. The keepalive was not removed.";
-    // DumpWithoutCrashing turned off for a couple milestones until we fix the
+    // DumpWithoutCrashing turned off for the Stable channel until we fix the
     // root cause, due to the high volume of reports. See crbug.com/368360956.
-    if (version_info::GetMajorVersionNumberAsInt() >= 144) {
+    if (chrome::GetChannel() != version_info::Channel::STABLE) {
       // TODO(crbug.com/368360956): Not incrementing the refcount will cause
       // `profile` to get destroyed too early. Remove or convert to a CHECK()
       // once the root cause is fixed.
@@ -1402,7 +1414,7 @@ void ProfileManager::RemoveKeepAlive(Profile* profile,
     return;
   }
 
-  DCHECK(base::Contains(info->keep_alives, origin));
+  DCHECK(info->keep_alives.contains(origin));
 
 #if !BUILDFLAG(IS_ANDROID)
   // When removing the last keep alive of an ephemeral profile, schedule the
@@ -1732,7 +1744,7 @@ Profile* ProfileManager::GetActiveUserOrOffTheRecordProfile() {
 void ProfileManager::UnloadProfile(const base::FilePath& profile_dir) {
   TRACE_EVENT0("browser", "ProfileManager::UnloadProfile");
 
-  DCHECK(base::Contains(profiles_info_, profile_dir));
+  DCHECK(profiles_info_.contains(profile_dir));
 
   bool ephemeral =
       IsRegisteredAsEphemeral(&GetProfileAttributesStorage(), profile_dir);
@@ -1911,8 +1923,23 @@ std::optional<base::FilePath> ProfileManager::FindLastActiveProfile(
       continue;
     // Check if |entry| preferable over |found_entry|.
     bool entry_loaded = !!GetProfileByPath(entry_path);
-    if (!found_entry || (!found_entry_loaded && entry_loaded) ||
-        found_entry->GetActiveTime() < entry->GetActiveTime()) {
+    bool is_better = false;
+    if (!found_entry) {
+      is_better = true;
+    } else if (found_entry_loaded != entry_loaded) {
+      // Prefer loaded profiles over unloaded ones.
+      is_better = entry_loaded;
+    } else if (found_entry->GetActiveTime() != entry->GetActiveTime()) {
+      // Prefer profiles with more recent active time.
+      is_better = found_entry->GetActiveTime() < entry->GetActiveTime();
+    } else {
+      // Use the profile directory path as a tie-breaker, so that the function
+      // is deterministic, because the ordering of profiles in the container is
+      // unspecified.
+      is_better = entry_path.value() < found_entry->GetPath().value();
+    }
+
+    if (is_better) {
       found_entry = entry;
       found_entry_loaded = entry_loaded;
     }
@@ -2059,19 +2086,18 @@ void ProfileManager::SaveActiveProfiles() {
   PrefService* local_state = g_browser_process->local_state();
   DCHECK(local_state);
   ScopedListPrefUpdate update(local_state, prefs::kProfilesLastActive);
-  base::Value::List& profile_list = update.Get();
+  base::ListValue& profile_list = update.Get();
 
   profile_list.clear();
   has_updated_last_opened_profiles_ = true;
 
-  // crbug.com/120112 -> several non-off-the-record profiles might have the same
-  // GetBaseName(). In that case, we cannot restore both
-  // profiles. Include each base name only once in the last active profile
-  // list.
+  // crbug.com/40178555 -> several non-off-the-record profiles might have the
+  // same GetBaseName(). In that case, we cannot restore both profiles. Include
+  // each base name only once in the last active profile list.
   std::set<base::FilePath> profile_paths;
   std::vector<raw_ptr<Profile, VectorExperimental>>::const_iterator it;
   for (it = active_profiles_.begin(); it != active_profiles_.end(); ++it) {
-    // crbug.com/823338 -> CHECK that the profiles aren't guest or incognito,
+    // crbug.com/41377418 -> CHECK that the profiles aren't guest or incognito,
     // causing a crash during session restore.
     CHECK((!(*it)->IsGuestSession()))
         << "Guest profiles shouldn't be saved as active profiles";
@@ -2143,6 +2169,18 @@ void ProfileManager::SetProfileAsLastUsed(Profile* last_active) {
     if (entry) {
       entry->SetActiveTimeToNow();
     }
+  }
+}
+
+void ProfileManager::UnblockAsyncLoading() {
+  if (!defer_async_loading_) {
+    return;
+  }
+  defer_async_loading_ = false;
+  std::vector<base::OnceClosure> deferred_tasks;
+  deferred_tasks.swap(deferred_asynchronous_loads_);
+  for (auto& closure : deferred_tasks) {
+    std::move(closure).Run();
   }
 }
 

@@ -16,6 +16,7 @@
 #include "cc/animation/animation_export.h"
 #include "cc/animation/keyframe_model.h"
 #include "cc/base/protected_sequence_synchronizer.h"
+#include "cc/trees/layer_tree_mutator.h"
 #include "cc/trees/mutator_host.h"
 #include "cc/trees/mutator_host_client.h"
 #include "ui/gfx/geometry/point_f.h"
@@ -24,6 +25,7 @@
 namespace cc {
 
 class Animation;
+class AnimationEvents;
 class AnimationTrigger;
 class AnimationTimeline;
 class ElementAnimations;
@@ -88,6 +90,7 @@ class CC_ANIMATION_EXPORT AnimationHost : public MutatorHost,
 
   scoped_refptr<AnimationTimeline> GetScopedRefTimelineById(int timeline_id);
   const AnimationTrigger* GetTriggerById(int id) const;
+  AnimationTrigger* GetTriggerById(int id);
 
   void RegisterAnimationForElement(ElementId element_id, Animation* animation);
   void UnregisterAnimationForElement(ElementId element_id,
@@ -145,7 +148,8 @@ class CC_ANIMATION_EXPORT AnimationHost : public MutatorHost,
   bool ActivateAnimations(MutatorEvents* events) override;
   bool TickAnimations(base::TimeTicks monotonic_time,
                       const ScrollTree& scroll_tree,
-                      bool is_active_tree) override;
+                      bool is_active_tree,
+                      MutatorEvents* events) override;
   void TickScrollAnimations(base::TimeTicks monotonic_time,
                             const ScrollTree& scroll_tree) override;
   void TickWorkletAnimations() override;
@@ -279,11 +283,17 @@ class CC_ANIMATION_EXPORT AnimationHost : public MutatorHost,
   void PushPropertiesToImplThread(AnimationHost* host_impl);
 
   void EraseTimeline(scoped_refptr<AnimationTimeline> timeline);
+  void EraseTrigger(scoped_refptr<AnimationTrigger> trigger);
 
   // Return true if there are any animations that get mutated.
   void TickMutator(base::TimeTicks monotonic_time,
                    const ScrollTree& scroll_tree,
                    bool is_active_tree);
+
+  // Update animation triggers[1].
+  // [1] https://drafts.csswg.org/web-animations/#animation-triggers
+  void UpdateTriggers(const ScrollTree& scroll_tree,
+                      AnimationEvents* events) const;
 
   // Return the state representing all ticking worklet animations.
   std::unique_ptr<MutatorInputState> CollectWorkletAnimationsState(

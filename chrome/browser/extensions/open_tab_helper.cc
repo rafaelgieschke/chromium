@@ -11,11 +11,11 @@
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_host/chrome_navigation_ui_data.h"
+#include "chrome/browser/tab_list/tab_list_interface.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/create_browser_window.h"
-#include "chrome/browser/ui/tabs/tab_list_interface.h"
 #include "chrome/common/webui_url_constants.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/site_instance.h"
@@ -85,7 +85,8 @@ OpenTabHelper::FindOrCreateBrowser(const GURL& validated_url,
     return base::unexpected(ExtensionTabUtil::kNoCurrentWindowError);
   }
 
-  BrowserWindowInterface* browser = controller->GetBrowserWindowInterface();
+  BrowserWindowInterface* browser =
+      controller ? controller->GetBrowserWindowInterface() : nullptr;
 
   // We can't load extension URLs into incognito windows unless the extension
   // uses split mode. Special case to fall back to a tabbed window or, if
@@ -204,14 +205,7 @@ base::expected<content::WebContents*, std::string> OpenTabHelper::OpenTab(
   // the navigation capturing behavior.
   navigate_params.pwa_navigation_capturing_force_off = true;
 
-  // Treat PDF open-in-new-window navigations consistently with other PDF
-  // navigations, as done in TabsUpdateFunction::UpdateURL().
-  if (extension && extension->id() == extension_misc::kPdfExtensionId) {
-    navigate_params.is_renderer_initiated = true;
-    navigate_params.initiator_origin = extension->origin();
-    navigate_params.source_site_instance = content::SiteInstance::CreateForURL(
-        function.browser_context(), navigate_params.initiator_origin->GetURL());
-  }
+  MaybeSetPdfNavigateParams(function, navigate_params);
 
   base::WeakPtr<content::NavigationHandle> handle = Navigate(&navigate_params);
   if (handle && params.bookmark_id) {
@@ -233,6 +227,21 @@ base::expected<content::WebContents*, std::string> OpenTabHelper::OpenTab(
   }
 
   return new_contents;
+}
+
+// static
+bool OpenTabHelper::MaybeSetPdfNavigateParams(const ExtensionFunction& function,
+                                              NavigateParams& navigate_params) {
+  auto* const extension = function.extension();
+  if (!extension || extension->id() != extension_misc::kPdfExtensionId) {
+    return false;
+  }
+
+  navigate_params.is_renderer_initiated = true;
+  navigate_params.initiator_origin = extension->origin();
+  navigate_params.source_site_instance = content::SiteInstance::CreateForURL(
+      function.browser_context(), navigate_params.initiator_origin->GetURL());
+  return true;
 }
 
 }  // namespace extensions

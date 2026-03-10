@@ -11,6 +11,7 @@
 #include "chrome/browser/extensions/test_extension_environment.h"
 #include "chrome/common/extensions/permissions/chrome_permission_message_provider.h"
 #include "components/version_info/version_info.h"
+#include "extensions/buildflags/buildflags.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/features/feature_channel.h"
 #include "extensions/common/features/simple_feature.h"
@@ -19,6 +20,8 @@
 #include "extensions/common/switches.h"
 #include "testing/gmock/include/gmock/gmock-matchers.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+static_assert(BUILDFLAG(ENABLE_EXTENSIONS_CORE));
 
 namespace extensions {
 
@@ -29,7 +32,7 @@ const char kAllowlistedExtensionID[] = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 class PermissionMessageCombinationsUnittest : public testing::Test {
  public:
   PermissionMessageCombinationsUnittest()
-      : message_provider_(new ChromePermissionMessageProvider()),
+      : message_provider_(std::make_unique<ChromePermissionMessageProvider>()),
         allowlisted_extension_id_(kAllowlistedExtensionID) {}
 
   PermissionMessageCombinationsUnittest(
@@ -38,11 +41,6 @@ class PermissionMessageCombinationsUnittest : public testing::Test {
       const PermissionMessageCombinationsUnittest&) = delete;
 
   ~PermissionMessageCombinationsUnittest() override = default;
-
-  // Overridden from testing::Test:
-  void SetUp() override {
-    testing::Test::SetUp();
-  }
 
  protected:
   // Create and install an app or extension with the given manifest JSON string.
@@ -213,8 +211,10 @@ class PermissionMessageCombinationsUnittest : public testing::Test {
   SimpleFeature::ScopedThreadUnsafeAllowlistForTest allowlisted_extension_id_;
 };
 
+#if !BUILDFLAG(IS_ANDROID)
 // Test that the USB, Bluetooth and Serial permissions do not coalesce on their
 // own, but do coalesce when more than 1 is present.
+// NOTE: Android does not support the serial API, so does not run this test.
 TEST_F(PermissionMessageCombinationsUnittest, USBSerialBluetoothCoalescing) {
   // Test that the USB permission does not coalesce on its own.
   CreateAndInstall(
@@ -245,6 +245,7 @@ TEST_F(PermissionMessageCombinationsUnittest, USBSerialBluetoothCoalescing) {
   ASSERT_TRUE(CheckManifestProducesPermissions(
       "Access USB devices from an unknown vendor"));
 
+#if BUILDFLAG(IS_CHROMEOS)
   // Test that the serial permission does not coalesce on its own.
   CreateAndInstall(
       "{"
@@ -258,6 +259,7 @@ TEST_F(PermissionMessageCombinationsUnittest, USBSerialBluetoothCoalescing) {
       "  ]"
       "}");
   ASSERT_TRUE(CheckManifestProducesPermissions("Access your serial devices"));
+#endif
 
   // Test that the bluetooth permission does not coalesce on its own.
   CreateAndInstall(
@@ -290,6 +292,7 @@ TEST_F(PermissionMessageCombinationsUnittest, USBSerialBluetoothCoalescing) {
       "Access information about Bluetooth devices paired with your system and "
       "discover nearby Bluetooth devices."));
 
+#if BUILDFLAG(IS_CHROMEOS)
   // Test that the USB and Serial permissions coalesce.
   CreateAndInstall(
       "{"
@@ -347,7 +350,9 @@ TEST_F(PermissionMessageCombinationsUnittest, USBSerialBluetoothCoalescing) {
   ASSERT_TRUE(CheckManifestProducesPermissions(
       "Access USB devices from an unknown vendor",
       "Access your Bluetooth and Serial devices"));
+#endif  // BUILDFLAG(IS_CHROMEOS)
 }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 // Test that the History permission takes precedence over the Tabs permission,
 // and that the Sessions permission modifies the Tabs permission message.
@@ -410,9 +415,11 @@ TEST_F(PermissionMessageCombinationsUnittest, TabsHistorySessionsCoalescing) {
       "Read and change your browsing history on all your signed-in devices"));
 }
 
+#if !BUILDFLAG(IS_ANDROID)
 // Test that the fileSystem permission produces no messages by itself, unless it
 // has both the 'write' and 'directory' additional permissions, in which case it
 // displays a message.
+// NOTE: Android does not support the fileSystem API.
 TEST_F(PermissionMessageCombinationsUnittest, FileSystemReadWriteCoalescing) {
   CreateAndInstall(
       "{"
@@ -456,6 +463,7 @@ TEST_F(PermissionMessageCombinationsUnittest, FileSystemReadWriteCoalescing) {
   ASSERT_TRUE(CheckManifestProducesPermissions(
       "Write to files and folders that you open in the application"));
 }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 // Check that host permission messages are generated correctly when URLs are
 // entered as permissions.
@@ -809,8 +817,10 @@ TEST_F(PermissionMessageCombinationsUnittest,
 // TODO(sashab): Add tests for SettingsOverrideAPIPermission (an API permission
 // with custom messages).
 
+#if !BUILDFLAG(IS_ANDROID)
 // Check that permission messages are generated correctly for SocketPermission
 // (an API permission with custom messages).
+// NOTE: Android does not support the sockets API.
 TEST_F(PermissionMessageCombinationsUnittest, SocketPermissionMessages) {
   CreateAndInstall(
       "{"
@@ -928,6 +938,7 @@ TEST_F(PermissionMessageCombinationsUnittest, SocketPermissionMessages) {
   ASSERT_TRUE(CheckManifestProducesPermissions(
       "Exchange data with any device on the local network or internet"));
 }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 // Check that permission messages are generated correctly for
 // USBDevicePermission (an API permission with custom messages).
@@ -1003,7 +1014,9 @@ TEST_F(PermissionMessageCombinationsUnittest, USBDevicePermissionMessages) {
   // TODO(sashab): Add a test with a valid product/vendor USB device.
 }
 
+#if !BUILDFLAG(IS_ANDROID)
 // Test that hosted apps are not given any messages for host permissions.
+// NOTE: Android does not support packaged apps.
 TEST_F(PermissionMessageCombinationsUnittest,
        PackagedAppsHaveNoHostPermissions) {
   CreateAndInstall(
@@ -1028,13 +1041,14 @@ TEST_F(PermissionMessageCombinationsUnittest,
       "    }"
       "  },"
       "  'permissions': ["
-      "    'serial',"
+      "    'clipboardRead',"
       "    'http://www.blogger.com/',"
       "    'http://*.google.com/',"
       "  ]"
       "}");
-  ASSERT_TRUE(CheckManifestProducesPermissions("Access your serial devices"));
+  ASSERT_TRUE(CheckManifestProducesPermissions("Read data you copy and paste"));
 }
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 // Test various apps with lots of permissions, including those with no
 // permission messages, or those that only apply to apps or extensions even when
@@ -1087,8 +1101,6 @@ TEST_F(PermissionMessageCombinationsUnittest, PermissionMessageCombos) {
       "    'tabs',"
       "    'sessions',"
       "    'bookmarks',"
-      "    'accessibilityFeatures.read',"
-      "    'accessibilityFeatures.modify',"
       "    'alarms',"
       "    'browsingData',"
       "    'cookies',"
@@ -1117,12 +1129,12 @@ TEST_F(PermissionMessageCombinationsUnittest, PermissionMessageCombos) {
       std::vector<std::string>(), "Capture content of your screen",
       std::vector<std::string>(), "Read and change your bookmarks",
       std::vector<std::string>(),
-      "Read and change your data on a number of websites", submessages,
-      "Read and change your accessibility settings",
-      std::vector<std::string>()));
+      "Read and change your data on a number of websites", submessages));
 
+#if !BUILDFLAG(IS_ANDROID)
   // Create an App instead, ensuring that the host permission messages are not
   // added.
+  // NOTE: Android does not support Chrome Apps or accessibilityFeatures.
   CreateAndInstall(
       "{"
       "  'app': {"
@@ -1138,7 +1150,7 @@ TEST_F(PermissionMessageCombinationsUnittest, PermissionMessageCombos) {
       "    'alarms',"
       "    'power',"
       "    'cookies',"
-      "    'serial',"
+      "    'clipboardRead',"
       "    'usb',"
       "    'storage',"
       "    'gcm',"
@@ -1155,9 +1167,9 @@ TEST_F(PermissionMessageCombinationsUnittest, PermissionMessageCombos) {
       "}");
 
   ASSERT_TRUE(CheckManifestProducesPermissions(
-      "Access your serial devices", "Store data in your Google Drive account",
+      "Read data you copy and paste", "Store data in your Google Drive account",
       "Read and change your accessibility settings"));
-
+#endif  // !BUILDFLAG(IS_ANDROID)
 }
 
 // Tests that the deprecated 'plugins' manifest key produces no permission.

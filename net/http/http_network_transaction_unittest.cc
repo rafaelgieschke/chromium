@@ -26,7 +26,6 @@
 #include "base/functional/bind.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
-#include "base/memory/memory_pressure_listener_registry.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
@@ -192,11 +191,11 @@ const char kAlternativeServiceHttpHeader[] =
     "Alt-Svc: h2=\"mail.example.org:443\"\r\n";
 
 constexpr char kStreamRequestSuccessHistogram[] =
-    "Net.NetworkTransaction.StreamRequestCompleteTime2.Success";
+    "Net.NetworkTransaction.StreamRequestCompleteTime3.Success";
 constexpr char kStreamRequestFailureHistogram[] =
-    "Net.NetworkTransaction.StreamRequestCompleteTime2.Failure";
+    "Net.NetworkTransaction.StreamRequestCompleteTime3.Failure";
 constexpr char kStreamRequestH3SuccessHistogram[] =
-    "Net.NetworkTransaction.StreamRequestCompleteTime2.GoogleHost.Success";
+    "Net.NetworkTransaction.StreamRequestCompleteTime3.GoogleHost.Success";
 
 int GetIdleSocketCountInTransportSocketPool(HttpNetworkSession* session) {
   if (base::FeatureList::IsEnabled(features::kHappyEyeballsV3)) {
@@ -225,8 +224,8 @@ bool IsTransportSocketPoolStalled(HttpNetworkSession* session) {
 // Takes in a Value created from a NetLogHttpResponseParameter, and returns
 // a JSONified list of headers as a single string.  Uses single quotes instead
 // of double quotes for easier comparison.
-std::string GetHeaders(const base::Value::Dict& params) {
-  const base::Value::List* header_list = params.FindList("headers");
+std::string GetHeaders(const base::DictValue& params) {
+  const base::ListValue* header_list = params.FindList("headers");
   if (!header_list) {
     return "";
   }
@@ -419,15 +418,20 @@ TransportInfo EmbeddedHttpServerTransportInfo() {
 }
 
 struct TestParams {
-  explicit TestParams(bool happy_eyeballs_v3_enabled)
-      : happy_eyeballs_v3_enabled(happy_eyeballs_v3_enabled) {}
+  explicit TestParams(int happy_eyeballs_version)
+      : happy_eyeballs_version(happy_eyeballs_version) {
+    CHECK_LE(1, happy_eyeballs_version);
+    CHECK_LE(happy_eyeballs_version, 3);
+  }
 
-  bool happy_eyeballs_v3_enabled;
+  // Value from 1 to 3.
+  int happy_eyeballs_version;
 };
 
 std::vector<TestParams> GetTestParams() {
-  return {TestParams(/*happy_eyeballs_v3_enabled=*/false),
-          TestParams(/*happy_eyeballs_v3_enabled=*/true)};
+  return {TestParams(/*happy_eyeballs_version=*/1),
+          TestParams(/*happy_eyeballs_version=*/2),
+          TestParams(/*happy_eyeballs_version=*/3)};
 }
 
 }  // namespace
@@ -655,8 +659,6 @@ class HttpNetworkTransactionTestBase : public PlatformTest,
       NetworkIsolationKey(SchemefulSite(GURL("https://foo.test/")),
                           SchemefulSite(GURL("https://bar.test/")));
 
-  base::MemoryPressureListenerRegistry memory_pressure_listener_registry_;
-
   // These clocks are defined here, even though they're only used in the
   // Reporting tests below, since they need to be destroyed after
   // |session_deps_|.
@@ -681,17 +683,27 @@ class HttpNetworkTransactionTest
     std::vector<base::test::FeatureRef> enabled_features;
     std::vector<base::test::FeatureRef> disabled_features;
 
+    if (HappyEyeballsV2Enabled()) {
+      enabled_features.emplace_back(features::kHappyEyeballsV2);
+    } else {
+      disabled_features.emplace_back(features::kHappyEyeballsV2);
+    }
     if (HappyEyeballsV3Enabled()) {
       enabled_features.emplace_back(features::kHappyEyeballsV3);
     } else {
       disabled_features.emplace_back(features::kHappyEyeballsV3);
     }
+    disabled_features.emplace_back(features::kTcpSocketPoolLimitRandomization);
 
     feature_list_.InitWithFeatures(enabled_features, disabled_features);
   }
 
+  bool HappyEyeballsV2Enabled() const {
+    return GetParam().happy_eyeballs_version == 2;
+  }
+
   bool HappyEyeballsV3Enabled() const {
-    return GetParam().happy_eyeballs_v3_enabled;
+    return GetParam().happy_eyeballs_version == 3;
   }
 
   base::HistogramTester histogram_tester_;
@@ -778,7 +790,6 @@ class CaptureGroupIdTransportSocketPool : public TransportClientSocketPool {
       ClientSocketHandle* handle,
       CompletionOnceCallback callback,
       const ClientSocketPool::ProxyAuthCallback& proxy_auth_callback,
-      bool fail_if_alias_requires_proxy_override,
       const NetLogWithSource& net_log) override {
     last_group_id_ = group_id;
     socket_requested_ = true;
@@ -13469,223 +13480,6 @@ TEST_P(HttpNetworkTransactionTest, CloseConnectionOnDestruction) {
   }
 }
 
-// Grab a socket, use it, and put it back into the pool. Then, make
-// low memory notification and ensure the socket pool is flushed.
-TEST_P(HttpNetworkTransactionTest, FlushSocketPoolOnLowMemoryNotifications) {
-  HttpRequestInfo request;
-  request.method = "GET";
-  request.url = GURL("http://www.example.org/");
-  request.load_flags = 0;
-  request.traffic_annotation =
-      MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
-
-  std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
-
-  HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
-
-  MockRead data_reads[] = {
-      // A part of the response body is received with the response headers.
-      MockRead("HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\nhel"),
-      // The rest of the response body is received in two parts.
-      MockRead("lo"),
-      MockRead(" world"),
-      MockRead("junk"),  // Should not be read!!
-      MockRead(SYNCHRONOUS, OK),
-  };
-
-  StaticSocketDataProvider data(data_reads, base::span<MockWrite>());
-  session_deps_.socket_factory->AddSocketDataProvider(&data);
-
-  TestCompletionCallback callback;
-
-  int rv = trans.Start(&request, callback.callback(), NetLogWithSource());
-  EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
-
-  EXPECT_THAT(callback.GetResult(rv), IsOk());
-
-  const HttpResponseInfo* response = trans.GetResponseInfo();
-  ASSERT_TRUE(response);
-  EXPECT_TRUE(response->headers);
-  std::string status_line = response->headers->GetStatusLine();
-  EXPECT_EQ("HTTP/1.1 200 OK", status_line);
-
-  // Make memory critical notification and ensure the transaction still has been
-  // operating right.
-  base::MemoryPressureListener::NotifyMemoryPressure(
-      base::MEMORY_PRESSURE_LEVEL_CRITICAL);
-  base::RunLoop().RunUntilIdle();
-
-  // Socket should not be flushed as long as it is not idle.
-  EXPECT_EQ(0, GetIdleSocketCountInTransportSocketPool(session.get()));
-
-  std::string response_data;
-  rv = ReadTransaction(&trans, &response_data);
-  EXPECT_THAT(rv, IsOk());
-  EXPECT_EQ("hello world", response_data);
-
-  // Empty the current queue.  This is necessary because idle sockets are
-  // added to the connection pool asynchronously with a PostTask.
-  base::RunLoop().RunUntilIdle();
-
-  // We now check to make sure the socket was added back to the pool.
-  EXPECT_EQ(1, GetIdleSocketCountInTransportSocketPool(session.get()));
-
-  // Idle sockets should be flushed now.
-  base::MemoryPressureListener::NotifyMemoryPressure(
-      base::MEMORY_PRESSURE_LEVEL_CRITICAL);
-  base::RunLoop().RunUntilIdle();
-
-  EXPECT_EQ(0, GetIdleSocketCountInTransportSocketPool(session.get()));
-}
-
-// Disable idle socket closing on memory pressure.
-// Grab a socket, use it, and put it back into the pool. Then, make
-// low memory notification and ensure the socket pool is NOT flushed.
-TEST_P(HttpNetworkTransactionTest, NoFlushSocketPoolOnLowMemoryNotifications) {
-  HttpRequestInfo request;
-  request.method = "GET";
-  request.url = GURL("http://www.example.org/");
-  request.load_flags = 0;
-  request.traffic_annotation =
-      MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
-
-  // Disable idle socket closing on memory pressure.
-  session_deps_.disable_idle_sockets_close_on_memory_pressure = true;
-  std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
-
-  HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
-
-  MockRead data_reads[] = {
-      // A part of the response body is received with the response headers.
-      MockRead("HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\nhel"),
-      // The rest of the response body is received in two parts.
-      MockRead("lo"),
-      MockRead(" world"),
-      MockRead("junk"),  // Should not be read!!
-      MockRead(SYNCHRONOUS, OK),
-  };
-
-  StaticSocketDataProvider data(data_reads, base::span<MockWrite>());
-  session_deps_.socket_factory->AddSocketDataProvider(&data);
-
-  TestCompletionCallback callback;
-
-  int rv = trans.Start(&request, callback.callback(), NetLogWithSource());
-  EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
-
-  EXPECT_THAT(callback.GetResult(rv), IsOk());
-
-  const HttpResponseInfo* response = trans.GetResponseInfo();
-  ASSERT_TRUE(response);
-  EXPECT_TRUE(response->headers);
-  std::string status_line = response->headers->GetStatusLine();
-  EXPECT_EQ("HTTP/1.1 200 OK", status_line);
-
-  // Make memory critical notification and ensure the transaction still has been
-  // operating right.
-  base::MemoryPressureListener::NotifyMemoryPressure(
-      base::MEMORY_PRESSURE_LEVEL_CRITICAL);
-  base::RunLoop().RunUntilIdle();
-
-  // Socket should not be flushed as long as it is not idle.
-  EXPECT_EQ(0, GetIdleSocketCountInTransportSocketPool(session.get()));
-
-  std::string response_data;
-  rv = ReadTransaction(&trans, &response_data);
-  EXPECT_THAT(rv, IsOk());
-  EXPECT_EQ("hello world", response_data);
-
-  // Empty the current queue.  This is necessary because idle sockets are
-  // added to the connection pool asynchronously with a PostTask.
-  base::RunLoop().RunUntilIdle();
-
-  // We now check to make sure the socket was added back to the pool.
-  EXPECT_EQ(1, GetIdleSocketCountInTransportSocketPool(session.get()));
-
-  // Idle sockets should NOT be flushed on moderate memory pressure.
-  base::MemoryPressureListener::NotifyMemoryPressure(
-      base::MEMORY_PRESSURE_LEVEL_MODERATE);
-  base::RunLoop().RunUntilIdle();
-
-  EXPECT_EQ(1, GetIdleSocketCountInTransportSocketPool(session.get()));
-
-  // Idle sockets should NOT be flushed on critical memory pressure.
-  base::MemoryPressureListener::NotifyMemoryPressure(
-      base::MEMORY_PRESSURE_LEVEL_CRITICAL);
-  base::RunLoop().RunUntilIdle();
-
-  EXPECT_EQ(1, GetIdleSocketCountInTransportSocketPool(session.get()));
-}
-
-// Grab an SSL socket, use it, and put it back into the pool. Then, make
-// low memory notification and ensure the socket pool is flushed.
-TEST_P(HttpNetworkTransactionTest, FlushSSLSocketPoolOnLowMemoryNotifications) {
-  HttpRequestInfo request;
-  request.method = "GET";
-  request.url = GURL("https://www.example.org/");
-  request.load_flags = 0;
-  request.traffic_annotation =
-      MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
-
-  MockWrite data_writes[] = {
-      MockWrite("GET / HTTP/1.1\r\n"
-                "Host: www.example.org\r\n"
-                "Connection: keep-alive\r\n\r\n"),
-  };
-
-  MockRead data_reads[] = {
-      MockRead("HTTP/1.1 200 OK\r\n"), MockRead("Content-Length: 11\r\n\r\n"),
-      MockRead("hello world"), MockRead(ASYNC, ERR_CONNECTION_CLOSED)};
-
-  SSLSocketDataProvider ssl(ASYNC, OK);
-  session_deps_.socket_factory->AddSSLSocketDataProvider(&ssl);
-
-  StaticSocketDataProvider data(data_reads, data_writes);
-  session_deps_.socket_factory->AddSocketDataProvider(&data);
-
-  TestCompletionCallback callback;
-
-  std::unique_ptr<HttpNetworkSession> session(CreateSession(&session_deps_));
-  HttpNetworkTransaction trans(DEFAULT_PRIORITY, session.get());
-
-  EXPECT_EQ(0, GetIdleSocketCountInTransportSocketPool(session.get()));
-  int rv = trans.Start(&request, callback.callback(), NetLogWithSource());
-
-  EXPECT_THAT(callback.GetResult(rv), IsOk());
-
-  const HttpResponseInfo* response = trans.GetResponseInfo();
-  ASSERT_TRUE(response);
-  ASSERT_TRUE(response->headers);
-  EXPECT_EQ("HTTP/1.1 200 OK", response->headers->GetStatusLine());
-
-  // Make memory critical notification and ensure the transaction still has been
-  // operating right.
-  base::MemoryPressureListener::NotifyMemoryPressure(
-      base::MEMORY_PRESSURE_LEVEL_CRITICAL);
-  base::RunLoop().RunUntilIdle();
-
-  EXPECT_EQ(0, GetIdleSocketCountInTransportSocketPool(session.get()));
-
-  std::string response_data;
-  rv = ReadTransaction(&trans, &response_data);
-  EXPECT_THAT(rv, IsOk());
-  EXPECT_EQ("hello world", response_data);
-
-  // Empty the current queue.  This is necessary because idle sockets are
-  // added to the connection pool asynchronously with a PostTask.
-  base::RunLoop().RunUntilIdle();
-
-  // We now check to make sure the socket was added back to the pool.
-  EXPECT_EQ(1, GetIdleSocketCountInTransportSocketPool(session.get()));
-
-  // Make memory notification once again and ensure idle socket is closed.
-  base::MemoryPressureListener::NotifyMemoryPressure(
-      base::MEMORY_PRESSURE_LEVEL_CRITICAL);
-  base::RunLoop().RunUntilIdle();
-
-  EXPECT_EQ(0, GetIdleSocketCountInTransportSocketPool(session.get()));
-}
-
 // Make sure that we recycle a socket after a zero-length response.
 // http://crbug.com/9880
 TEST_P(HttpNetworkTransactionTest, RecycleSocketAfterZeroContentLength) {
@@ -22304,6 +22098,14 @@ TEST_P(HttpNetworkTransactionTest, FailedAlternativeServiceIsNotUserVisible) {
 // HTTP/1.1 socket open to the alternative server.  That socket should not be
 // used.
 TEST_P(HttpNetworkTransactionTest, AlternativeServiceShouldNotPoolToHttp11) {
+  // HEv3 won't use HTTP/1.x to service the request, but it does currently not
+  // merge its connection attempts with the non-alt-service requests, so will
+  // ignore the existence of HTTP/1.1 sockets and try to establish a new H2
+  // connection.
+  if (HappyEyeballsV3Enabled()) {
+    GTEST_SKIP();
+  }
+
   url::SchemeHostPort server("https", "origin.example.org", 443);
   HostPortPair alternative("alternative.example.org", 443);
   std::string origin_url = "https://origin.example.org:443";

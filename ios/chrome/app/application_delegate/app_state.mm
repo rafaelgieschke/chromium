@@ -20,10 +20,11 @@
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
 #import "ios/chrome/browser/shared/model/browser/browser_provider.h"
 #import "ios/chrome/browser/shared/model/browser/browser_provider_interface.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/help_commands.h"
 #import "ios/chrome/browser/shared/public/commands/open_new_tab_command.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
+#import "ios/chrome/browser/shared/public/features/features.h"
 
 namespace {
 
@@ -116,6 +117,9 @@ BOOL ApplicationIsInBackground() {
     _appCommandDispatcher = [[CommandDispatcher alloc] init];
     _deferredRunner = [[DeferredInitializationRunner alloc]
         initWithQueue:[DeferredInitializationQueue sharedInstance]];
+    if (IsEnableNewStartupFlowEnabled()) {
+      _taskOrchestrator = [[TaskOrchestrator alloc] init];
+    }
 
     // Subscribe to scene connection notifications.
     [[NSNotificationCenter defaultCenter]

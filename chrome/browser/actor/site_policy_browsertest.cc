@@ -14,6 +14,7 @@
 #include "chrome/browser/actor/actor_keyed_service.h"
 #include "chrome/browser/actor/actor_switches.h"
 #include "chrome/browser/actor/actor_test_util.h"
+#include "chrome/browser/actor/origin_checker.h"
 #include "chrome/browser/lookalikes/lookalike_test_helper.h"
 #include "chrome/browser/optimization_guide/browser_test_util.h"
 #include "chrome/browser/ui/browser.h"
@@ -99,11 +100,10 @@ class ActorSitePolicyBrowserTest : public InProcessBrowserTest {
 
     base::test::TestFuture<MayActOnUrlBlockReason> allowed;
     auto* actor_service = ActorKeyedService::Get(browser()->profile());
-    auto enterprise_policy_eval_url = base::BindOnce(
-        [](const GURL&) { return EnterprisePolicyBlockReason::kNotBlocked; });
     MayActOnTab(*browser()->tab_strip_model()->GetActiveTab(),
-                actor_service->GetJournal(), TaskId(), ConfirmedOriginSet(),
-                std::move(enterprise_policy_eval_url), allowed.GetCallback());
+                actor_service->GetJournal(), TaskId(), OriginChecker(),
+                MockPolicyChecker(EnterprisePolicyBlockReason::kNotBlocked),
+                allowed.GetCallback());
     // The result should not be provided synchronously.
     EXPECT_FALSE(allowed.IsReady());
     EXPECT_EQ(expected_allowed,
@@ -176,11 +176,10 @@ IN_PROC_BROWSER_TEST_F(ActorSitePolicyMissingBlocklistBrowserTest, FailOpen) {
 
   base::test::TestFuture<MayActOnUrlBlockReason> allowed;
   auto* actor_service = ActorKeyedService::Get(browser()->profile());
-  auto enterprise_policy_eval_url = base::BindOnce(
-      [](const GURL&) { return EnterprisePolicyBlockReason::kNotBlocked; });
   MayActOnTab(*browser()->tab_strip_model()->GetActiveTab(),
-              actor_service->GetJournal(), TaskId(), ConfirmedOriginSet(),
-              std::move(enterprise_policy_eval_url), allowed.GetCallback());
+              actor_service->GetJournal(), TaskId(), OriginChecker(),
+              MockPolicyChecker(EnterprisePolicyBlockReason::kNotBlocked),
+              allowed.GetCallback());
   EXPECT_TRUE(allowed.Get() == MayActOnUrlBlockReason::kAllowed);
 }
 

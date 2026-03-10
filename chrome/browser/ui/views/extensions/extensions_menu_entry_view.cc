@@ -11,7 +11,6 @@
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/controls/hover_button.h"
-#include "chrome/browser/ui/views/extensions/extensions_menu_button.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/vector_icons/vector_icons.h"
 #include "extensions/common/extension_features.h"
@@ -81,6 +80,7 @@ ExtensionsMenuEntryView::ExtensionsMenuEntryView(
     Browser* browser,
     bool is_enterprise,
     ToolbarActionViewModel* view_model,
+    views::Button::PressedCallback action_button_callback,
     base::RepeatingCallback<void(bool)> site_access_toggle_callback,
     views::Button::PressedCallback site_permissions_button_callback)
     : extension_id_(view_model->GetId()) {
@@ -115,11 +115,13 @@ ExtensionsMenuEntryView::ExtensionsMenuEntryView(
               .SetOrientation(views::LayoutOrientation::kHorizontal)
               .SetIgnoreDefaultMainAxisMargins(true)
               .AddChildren(
-                  // Primary action button.
-                  views::Builder<ExtensionsMenuButton>(
-                      std::make_unique<ExtensionsMenuButton>(browser,
-                                                             view_model))
-                      .CopyAddressTo(&primary_action_button_)
+                  // Action button.
+                  views::Builder<HoverButton>(
+                      std::make_unique<HoverButton>(
+                          std::move(action_button_callback), std::u16string()))
+                      .CopyAddressTo(&action_button_)
+                      // Button is always visible.
+                      .SetVisible(true)
                       .SetTitleTextStyle(views::style::STYLE_BODY_3_EMPHASIS,
                                          ui::kColorDialogBackground,
                                          kColorExtensionsMenuText)
@@ -127,7 +129,14 @@ ExtensionsMenuEntryView::ExtensionsMenuEntryView(
                                    views::FlexSpecification(
                                        views::LayoutOrientation::kHorizontal,
                                        views::MinimumFlexSizeRule::kScaleToZero,
-                                       views::MaximumFlexSizeRule::kUnbounded)),
+                                       views::MaximumFlexSizeRule::kUnbounded))
+                      // Remove the button's border since we are adding margins
+                      // in between menu items.
+                      .SetBorder(views::CreateEmptyBorder(gfx::Insets(0)))
+                      .SetFocusRingCornerRadius(provider->GetCornerRadiusMetric(
+                          views::ShapeContextTokens::
+                              kExtensionsMenuButtonRadius))
+                      .SetFocusBehavior(views::View::FocusBehavior::ALWAYS),
                   // Site access toggle.
                   views::Builder<views::ToggleButton>()
                       .CopyAddressTo(&site_access_toggle_)
@@ -154,7 +163,7 @@ ExtensionsMenuEntryView::ExtensionsMenuEntryView(
                           views::kMarginsKey,
                           gfx::Insets::TLBR(0, horizontal_spacing, 0, 0))
                       // Override the hover button border since we are
-                      // adding vertical spacing in between menu items.
+                      // adding vertical spacing in between menu entries.
                       // Instead, set the border to be the padding around the
                       // icon when hovering.
                       .SetBorder(views::CreateEmptyBorder(icon_padding))
@@ -178,7 +187,7 @@ ExtensionsMenuEntryView::ExtensionsMenuEntryView(
                   .CopyAddressTo(&site_permissions_button_)))
       .BuildChildren();
 
-  SetupContextMenuButton(browser, view_model);
+  SetupContextMenuButton(view_model);
 
   // By default, the button's accessible description is set to the button's
   // tooltip text. This is the accepted workaround to ensure only accessible
@@ -198,32 +207,43 @@ ExtensionsMenuEntryView::ExtensionsMenuEntryView(
 ExtensionsMenuEntryView::~ExtensionsMenuEntryView() = default;
 
 void ExtensionsMenuEntryView::Update(
-    ExtensionsMenuViewModel::MenuEntryState menu_item_state) {
+    ExtensionsMenuViewModel::MenuEntryState entry_state) {
   site_access_toggle_->SetVisible(
-      menu_item_state.site_access_toggle.status !=
+      entry_state.site_access_toggle.status !=
       ExtensionsMenuViewModel::ControlState::Status::kHidden);
-  site_access_toggle_->SetIsOn(menu_item_state.site_access_toggle.is_on);
+  site_access_toggle_->SetIsOn(entry_state.site_access_toggle.is_on);
   site_access_toggle_->SetTooltipText(
-      menu_item_state.site_access_toggle.tooltip_text);
+      entry_state.site_access_toggle.tooltip_text);
 
   site_permissions_button_->SetVisible(
-      menu_item_state.site_permissions_button.status !=
+      entry_state.site_permissions_button.status !=
       ExtensionsMenuViewModel::ControlState::Status::kHidden);
   site_permissions_button_->SetEnabled(
-      menu_item_state.site_permissions_button.status ==
+      entry_state.site_permissions_button.status ==
       ExtensionsMenuViewModel::ControlState::Status::kEnabled);
-  site_permissions_button_->SetText(
-      menu_item_state.site_permissions_button.text);
+  site_permissions_button_->SetText(entry_state.site_permissions_button.text);
   site_permissions_button_->SetTooltipText(
-      menu_item_state.site_permissions_button.tooltip_text);
+      entry_state.site_permissions_button.tooltip_text);
   site_permissions_button_->GetViewAccessibility().SetName(
-      menu_item_state.site_permissions_button.accessible_name);
+      entry_state.site_permissions_button.accessible_name);
 
   // Update button size after changing its contents so it fits in the menu
-  // item row.
+  // entry row.
   site_permissions_button_->PreferredSizeChanged();
 
-  UpdateContextMenuButton(menu_item_state.context_menu_button);
+  UpdateActionButton(entry_state.action_button);
+  UpdateContextMenuButton(entry_state.context_menu_button);
+}
+
+void ExtensionsMenuEntryView::UpdateActionButton(
+    const ExtensionsMenuViewModel::ControlState& button_state) {
+  action_button_->SetImageModel(views::Button::STATE_NORMAL, button_state.icon);
+  action_button_->SetText(button_state.text);
+  action_button_->SetTooltipText(button_state.tooltip_text);
+  action_button_->SetAccessibleName(button_state.accessible_name);
+  action_button_->SetEnabled(
+      button_state.status ==
+      ExtensionsMenuViewModel::ControlState::Status::kEnabled);
 }
 
 void ExtensionsMenuEntryView::UpdateContextMenuButton(
@@ -249,7 +269,6 @@ void ExtensionsMenuEntryView::UpdateContextMenuButton(
 }
 
 void ExtensionsMenuEntryView::SetupContextMenuButton(
-    Browser* browser,
     ToolbarActionViewModel* view_model) {
   // Add a controller to the context menu
   context_menu_controller_ = std::make_unique<ExtensionContextMenuController>(

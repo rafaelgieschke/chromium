@@ -7,6 +7,7 @@ import {assert, assertNotReachedCase} from 'chrome://resources/js/assert.js';
 import {getRequiredElement} from 'chrome://resources/js/util.js';
 
 import type {BrowserProxyImpl} from './browser_proxy.js';
+import type {ZoomAction} from './glic.mojom-webui.js';
 import {PanelStateKind, PrepareForClientResult, ProfileReadyState, WebUiState} from './glic.mojom-webui.js';
 import type {ApiHostEmbedder} from './glic_api_impl/host/glic_api_host.js';
 import {WebClientState} from './glic_api_impl/host/glic_api_host.js';
@@ -215,7 +216,7 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
       if (this.enteredUnresponsiveTimestampMs !== undefined) {
         const unresponsiveDuration =
             Date.now() - this.enteredUnresponsiveTimestampMs;
-        chrome.metricsPrivate.recordMediumTime(
+        chrome.histograms.recordMediumTime(
             'Glic.Host.WebClientUnresponsiveState.Duration',
             unresponsiveDuration);
         this.enteredUnresponsiveTimestampMs = undefined;
@@ -226,7 +227,7 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
     }
 
     // Record unresponsive state detections and transitions.
-    chrome.metricsPrivate.recordEnumerationValue(
+    chrome.histograms.recordEnumerationValue(
         'Glic.Host.WebClientUnresponsiveState', newState,
         WebClientUnresponsiveState.MAX_VALUE + 1);
   }
@@ -424,7 +425,7 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
       return;
     }
 
-    chrome.metricsPrivate.recordMediumTime(
+    chrome.histograms.recordMediumTime(
         'Glic.Host.LoadingStageDuration.' +
             LoadingStage[this.getLoadingStage()],
         Math.floor(performance.now() - this.loadingStageStartTimestampMs!));
@@ -539,7 +540,7 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
       }
 
       if (this.state !== WebUiState.kReady) {
-        chrome.metricsPrivate.recordEnumerationValue(
+        chrome.histograms.recordEnumerationValue(
             'Glic.Host.LoadingTimedOut', this.getLoadingStage(),
             LoadingStage.MAX_VALUE + 1);
         this.webview?.onLoadTimeOut();
@@ -558,6 +559,15 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
 
     const panelStateKindSection = getRequiredElement('localPanels');
     panelStateKindSection.classList.toggle('hidden', id === 'guestPanel');
+
+    if (loadTimeData.getBoolean('glicWebContentsWarming')) {
+      // These resizes really aren't needed at all for multi-instance, but in
+      // instance warming mode they get dropped most of the time. In the move to
+      // webContentsWarming, they're causing unwanted size changes on
+      // conversation switching in floaty. They can be deleted as part of single
+      // instance cleanup.
+      return;
+    }
     // Resize widget to size of new panel.
     if (id === 'guestPanel') {
       // For the guest webview, use the most recently requested size.
@@ -741,6 +751,10 @@ export class GlicAppController implements WebviewDelegate, ApiHostEmbedder {
         'sidePanel', this.panelStateKind === PanelStateKind.kAttached);
     panelStateKindSection.classList.toggle(
         'floating', this.panelStateKind === PanelStateKind.kDetached);
+  }
+
+  zoom(zoomAction: ZoomAction) {
+    this.webview?.zoom(zoomAction);
   }
 
   // Called before the WebUI is shown. If we're in an error state, automatically

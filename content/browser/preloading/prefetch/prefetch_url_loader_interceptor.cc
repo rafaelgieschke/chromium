@@ -13,7 +13,7 @@
 #include "content/browser/preloading/prefetch/prefetch_match_resolver.h"
 #include "content/browser/preloading/prefetch/prefetch_params.h"
 #include "content/browser/preloading/prefetch/prefetch_service.h"
-#include "content/browser/preloading/prefetch/prefetch_url_loader_helper.h"
+#include "content/browser/preloading/prefetch/prefetch_serving_handle.h"
 #include "content/browser/renderer_host/frame_tree.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/renderer_host/navigation_request.h"
@@ -29,8 +29,9 @@ BrowserContext* BrowserContextFromFrameTreeNodeId(
     FrameTreeNodeId frame_tree_node_id) {
   WebContents* web_content =
       WebContents::FromFrameTreeNodeId(frame_tree_node_id);
-  if (!web_content)
+  if (!web_content) {
     return nullptr;
+  }
   return web_content->GetBrowserContext();
 }
 
@@ -44,6 +45,17 @@ PrefetchCompleteCallbackForTesting& GetPrefetchCompleteCallbackForTesting() {
   static base::NoDestructor<PrefetchCompleteCallbackForTesting>
       get_prefetch_complete_callback_for_testing;
   return *get_prefetch_complete_callback_for_testing;
+}
+
+// Just to call to a `PrefetchServingHandle&&` method via `base::BindOnce()`.
+void OnGotPrefetchToServe(
+    FrameTreeNodeId frame_tree_node_id,
+    const GURL& url,
+    base::OnceCallback<void(PrefetchServingHandle)> get_prefetch_callback,
+    PrefetchServingHandle serving_handle) {
+  std::move(serving_handle)
+      .OnGotPrefetchToServe(frame_tree_node_id, url,
+                            std::move(get_prefetch_callback));
 }
 
 }  // namespace
@@ -109,10 +121,10 @@ void PrefetchURLLoaderInterceptor::MaybeCreateLoader(
   // `skip_service_worker` check here assumes prefetching-time
   // `skip_service_worker` is always false (see the
   // `CHECK(!skip_service_worker)` in
-  // `PrefetchContainer::MakeResourceRequest()`). We should revisit the check
-  // when we support prefetch-time `skip_service_worker`. Probably a prefetch
-  // whose request's `skip_service_worker` == `true` shouldn't serve navigation
-  // whose request's `skip_service_worker` == `false`.
+  // `PrefetchContainer::MakeInitialResourceRequest()`). We should revisit the
+  // check when we support prefetch-time `skip_service_worker`. Probably a
+  // prefetch whose request's `skip_service_worker` == `true` shouldn't serve
+  // navigation whose request's `skip_service_worker` == `false`.
   if (tentative_resource_request.skip_service_worker &&
       expected_service_worker_state_ ==
           PrefetchServiceWorkerState::kControlled) {
@@ -138,16 +150,17 @@ void PrefetchURLLoaderInterceptor::MaybeCreateLoader(
           std::nullopt);
     } else {
       TRACE_EVENT_END("loading");
-      OnGotPrefetchToServe(
-          frame_tree_node_id_, tentative_resource_request.url,
-          base::BindOnce(&PrefetchURLLoaderInterceptor::OnGetPrefetchComplete,
-                         weak_factory_.GetWeakPtr(),
+      std::move(redirect_serving_handle_)
+          .OnGotPrefetchToServe(
+              frame_tree_node_id_, tentative_resource_request.url,
+              base::BindOnce(
+                  &PrefetchURLLoaderInterceptor::OnGetPrefetchComplete,
+                  weak_factory_.GetWeakPtr(),
 
-                         tentative_resource_request.url,
-                         ServiceWorkerMainResourceHandle::
-                             TopFrameOriginForInitializeForRequest(
-                                 tentative_resource_request)),
-          std::move(redirect_serving_handle_));
+                  tentative_resource_request.url,
+                  ServiceWorkerMainResourceHandle::
+                      TopFrameOriginForInitializeForRequest(
+                          tentative_resource_request)));
       return;
     }
   }

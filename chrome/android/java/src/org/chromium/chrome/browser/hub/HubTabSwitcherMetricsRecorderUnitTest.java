@@ -25,10 +25,12 @@ import org.junit.runner.RunWith;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
-import org.robolectric.shadows.ShadowLooper;
 
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.base.test.util.UserActionTester;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -65,9 +67,9 @@ public class HubTabSwitcherMetricsRecorderUnitTest {
     private MockTabModel mIncognitoTabModel;
 
     private UserActionTester mActionTester;
-    private ObservableSupplierImpl<Pane> mFocusedPaneSupplier;
-    private ObservableSupplierImpl<TabModel> mCurrentTabModelSupplier;
-    private ObservableSupplierImpl<Boolean> mHubVisibilitySupplier;
+    private SettableMonotonicObservableSupplier<Pane> mFocusedPaneSupplier;
+    private SettableMonotonicObservableSupplier<TabModel> mCurrentTabModelSupplier;
+    private SettableNonNullObservableSupplier<Boolean> mHubVisibilitySupplier;
 
     private HubTabSwitcherMetricsRecorder mMetricsRecorder;
 
@@ -111,24 +113,23 @@ public class HubTabSwitcherMetricsRecorderUnitTest {
         when(mTabModelSelector.getModel(false)).thenReturn(mRegularTabModel);
         when(mTabModelSelector.getModel(true)).thenReturn(mIncognitoTabModel);
 
-        mCurrentTabModelSupplier = new ObservableSupplierImpl<>();
+        mCurrentTabModelSupplier = ObservableSuppliers.createMonotonic();
         mCurrentTabModelSupplier.set(mRegularTabModel);
         when(mTabModelSelector.getCurrentTabModelSupplier()).thenReturn(mCurrentTabModelSupplier);
 
         when(mTabSwitcherPane.getPaneId()).thenReturn(PaneId.TAB_SWITCHER);
         when(mIncognitoTabSwitcherPane.getPaneId()).thenReturn(PaneId.INCOGNITO_TAB_SWITCHER);
-        mFocusedPaneSupplier = new ObservableSupplierImpl<>();
+        mFocusedPaneSupplier = ObservableSuppliers.createMonotonic();
         mFocusedPaneSupplier.set(mTabSwitcherPane);
 
-        mHubVisibilitySupplier = new ObservableSupplierImpl<>();
-        mHubVisibilitySupplier.set(false);
+        mHubVisibilitySupplier = ObservableSuppliers.createNonNull(false);
 
         mActionTester = new UserActionTester();
 
         mMetricsRecorder =
                 new HubTabSwitcherMetricsRecorder(
                         mTabModelSelector, mHubVisibilitySupplier, mFocusedPaneSupplier);
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
     }
 
     @After
@@ -144,7 +145,7 @@ public class HubTabSwitcherMetricsRecorderUnitTest {
     @SmallTest
     public void testToggleHubVisibility() {
         mHubVisibilitySupplier.set(true);
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         assertTrue(mCurrentTabModelSupplier.hasObservers());
         verify(mRegularTabModel).addObserver(any());
         verify(mIncognitoTabModel).addObserver(any());
@@ -160,7 +161,7 @@ public class HubTabSwitcherMetricsRecorderUnitTest {
     @SmallTest
     public void testSamePane_NoTabChange() {
         mHubVisibilitySupplier.set(true);
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         HistogramWatcher watcher =
                 HistogramWatcher.newSingleRecordWatcher(
@@ -178,7 +179,7 @@ public class HubTabSwitcherMetricsRecorderUnitTest {
         Tab regularTab1 = mRegularTabModel.getTabAt(REGULAR_TAB_1_INDEX);
         when(mRegularTabGroupModelFilter.isTabInTabGroup(regularTab1)).thenReturn(true);
         mHubVisibilitySupplier.set(true);
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         HistogramWatcher watcher =
                 HistogramWatcher.newSingleRecordWatcher(
@@ -193,7 +194,7 @@ public class HubTabSwitcherMetricsRecorderUnitTest {
     @SmallTest
     public void testSamePane_ChangedTabs_WithoutGroup() {
         mHubVisibilitySupplier.set(true);
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         HistogramWatcher watcher =
                 HistogramWatcher.newSingleRecordWatcher(
@@ -249,6 +250,6 @@ public class HubTabSwitcherMetricsRecorderUnitTest {
         when(mTabModelSelector.getCurrentTabGroupModelFilter())
                 .thenReturn(mIncognitoTabGroupModelFilter);
         mCurrentTabModelSupplier.set(mIncognitoTabModel);
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
     }
 }

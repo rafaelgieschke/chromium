@@ -53,12 +53,13 @@ TextEncoder* TextEncoder::Create(ExecutionContext* context,
 TextEncoder::TextEncoder(const TextEncoding& encoding)
     : encoding_(encoding), codec_(NewTextCodec(encoding)) {
   DCHECK_EQ(encoding_.GetName(), "UTF-8");
+  CHECK(codec_) << encoding_.GetName();
 }
 
 TextEncoder::~TextEncoder() = default;
 
 String TextEncoder::encoding() const {
-  String name = encoding_.GetName().GetString().DeprecatedLower();
+  String name = encoding_.GetName().GetString().LowerASCII();
   DCHECK_EQ(name, "utf-8");
   return name;
 }

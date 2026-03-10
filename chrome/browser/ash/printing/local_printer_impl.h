@@ -16,7 +16,6 @@ namespace ash {
 class LocalPrinterImpl : public LocalPrinter {
  public:
   static void Initialize();
-  static LocalPrinter* Get();
 
   LocalPrinterImpl();
   LocalPrinterImpl(const LocalPrinterImpl&) = delete;
@@ -24,11 +23,15 @@ class LocalPrinterImpl : public LocalPrinter {
   ~LocalPrinterImpl() override;
 
   // LocalPrinter override:
+  // Guest users are not supported for all functions.
   void GetPrinters(const AccountId& accountId,
                    GetPrintersCallback callback) override;
   void GetCapability(const AccountId& accountId,
                      const std::string& printer_id,
                      GetCapabilityCallback callback) override;
+  void GetStatus(const AccountId& accountId,
+                 const std::string& printer_id,
+                 GetStatusCallback callback) override;
 };
 
 }  // namespace ash

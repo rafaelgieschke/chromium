@@ -7,6 +7,7 @@
 #import <CoreText/CoreText.h>
 
 #import "base/apple/foundation_util.h"
+#import "base/check_is_test.h"
 #import "base/check_op.h"
 #import "base/command_line.h"
 #import "base/ios/ios_util.h"
@@ -20,7 +21,6 @@
 #import "ios/chrome/browser/omnibox/public/omnibox_ui_features.h"
 #import "ios/chrome/browser/omnibox/public/omnibox_util.h"
 #import "ios/chrome/browser/omnibox/ui/omnibox_text_input_delegate.h"
-#import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/public/features/system_flags.h"
 #import "ios/chrome/browser/shared/ui/util/animation_util.h"
 #import "ios/chrome/browser/shared/ui/util/dynamic_type_util.h"
@@ -156,9 +156,7 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
                   action:@selector(textFieldDidChange:)
         forControlEvents:UIControlEventEditingChanged];
 
-    NSArray<UITrait>* traits = TraitCollectionSetForTraits(
-        @[ UITraitPreferredContentSizeCategory.class ]);
-    [self registerForTraitChanges:(traits)
+    [self registerForTraitChanges:@[ UITraitPreferredContentSizeCategory.class ]
                        withAction:@selector(updateTextProperitesOnTraitChange)];
   }
   return self;
@@ -532,11 +530,6 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
 - (void)beginFloatingCursorAtPoint:(CGPoint)point {
   // Exit preedit because it blocks the view of the textfield.
   [self exitPreEditState];
-  // Remove selection and put the caret at the end of the string.
-  if (!base::FeatureList::IsEnabled(kBeginCursorAtPointTentativeFix)) {
-    self.selectedTextRange = [self textRangeFromPosition:self.endOfDocument
-                                              toPosition:self.endOfDocument];
-  }
   [super beginFloatingCursorAtPoint:point];
 }
 
@@ -784,10 +777,8 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
 #pragma mark - UIAccessibilityElement
 
 - (NSString*)accessibilityValue {
-  if (NSClassFromString(@"XCTest")) {
-    return [NSString stringWithFormat:@"%@||||%@||||%@", self.userText ?: @"",
-                                      self.autocompleteText ?: @"",
-                                      self.attributedAdditionalText ?: @""];
+  if (self.text.length == 0) {
+    return self.attributedPlaceholder.string;
   }
   return self.text;
 }
@@ -1064,14 +1055,7 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
          autocompleteLength == 0);
   }
   if (updateText) {
-    // TODO(crbug.com/330964534): Remove DUMP_WILL_BE_CHECK after investigating
-    // crash.
-    if (!self.endOfDocument || !self.beginningOfDocument) {
-      DUMP_WILL_BE_NOTREACHED()
-          << "autocomplete length: " << autocompleteLength
-          << " text length: " << text.length << " has text position: "
-          << (self.beginningOfDocument || self.endOfDocument);
-    } else {
+    if (self.endOfDocument && self.beginningOfDocument) {
       self.attributedText = fieldText;
 
       UITextPosition* endOfUserText =
@@ -1087,11 +1071,6 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
         // Preserve the cursor position at the end of the user input.
         self.selectedTextRange = [self textRangeFromPosition:endOfUserText
                                                   toPosition:endOfUserText];
-      } else {
-        DUMP_WILL_BE_NOTREACHED()
-            << "autocomplete length: " << autocompleteLength
-            << " text length: " << text.length
-            << " has endOfUserText: " << !!endOfUserText;
       }
     }
   }
@@ -1111,10 +1090,9 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
 
 - (void)pasteboardDidChange:(NSNotification*)notification {
   __weak __typeof(self) weakSelf = self;
-  GetGeneralPasteboard(base::FeatureList::IsEnabled(kOnlyAccessClipboardAsync),
-                       base::BindOnce(^(UIPasteboard* pasteboard) {
-                         [weakSelf pasteboardDidChangeCallback:pasteboard];
-                       }));
+  GetGeneralPasteboard(base::BindOnce(^(UIPasteboard* pasteboard) {
+    [weakSelf pasteboardDidChangeCallback:pasteboard];
+  }));
 }
 
 - (void)pasteboardDidChangeCallback:(UIPasteboard*)pasteboard {
@@ -1160,6 +1138,14 @@ NSString* const kOmniboxFadeAnimationKey = @"OmniboxFadeAnimation";
 - (void)setCustomPlaceholderText:(NSString*)customPlaceholderText {
   _customPlaceholderText = [customPlaceholderText copy];
   [self updatePlaceholder];
+}
+
+- (NSString*)textValueForTesting {
+  CHECK_IS_TEST();
+  return
+      [NSString stringWithFormat:@"%@||||%@||||%@", self.userText ?: @"",
+                                 self.autocompleteText ?: @"",
+                                 self.attributedAdditionalText.string ?: @""];
 }
 
 #pragma mark - UITextFieldDelegate

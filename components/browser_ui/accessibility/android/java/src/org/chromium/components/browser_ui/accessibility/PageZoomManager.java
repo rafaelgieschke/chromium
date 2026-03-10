@@ -66,11 +66,7 @@ public class PageZoomManager {
         return index;
     }
 
-    /**
-     * Returns the current zoom level of the current WebContents.
-     *
-     * @return The current zoom level of the current WebContents.
-     */
+    /** Returns the zoom level of the current WebContents. */
     @VisibleForTesting
     public double getZoomLevel() {
         WebContents webContents = mDelegate.getWebContents();
@@ -80,21 +76,19 @@ public class PageZoomManager {
         return HostZoomMap.getZoomLevel(webContents);
     }
 
-    /**
-     * Returns the default zoom level of the current Profile.
-     *
-     * @return The default zoom level of the current Profile.
-     */
+    /** Returns the default zoom level of the current Profile. */
     @VisibleForTesting
     public double getDefaultZoomLevel() {
         return HostZoomMap.getDefaultZoomLevel(mDelegate.getBrowserContextHandle());
     }
 
-    /**
-     * Returns the WebContents of the current tab.
-     *
-     * @return The WebContents of the current tab.
-     */
+    /** Returns the adjusted default zoom level of the current Profile. */
+    @VisibleForTesting
+    public double getAdjustedDefaultZoomLevel() {
+        return HostZoomMap.getAdjustedDefaultZoomLevel(mDelegate.getBrowserContextHandle());
+    }
+
+    /** Returns the WebContents of the current tab. */
     @VisibleForTesting
     public @Nullable WebContents getWebContents() {
         return mDelegate.getWebContents();
@@ -107,7 +101,9 @@ public class PageZoomManager {
      */
     @VisibleForTesting
     public void setZoomLevel(double newZoomLevel) {
-        HostZoomMap.setZoomLevel(mDelegate.getWebContents(), newZoomLevel);
+        WebContents webContents = mDelegate.getWebContents();
+        assert webContents != null;
+        HostZoomMap.setZoomLevel(webContents, newZoomLevel);
     }
 
     /**

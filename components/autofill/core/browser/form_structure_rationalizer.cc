@@ -6,9 +6,12 @@
 
 #include <algorithm>
 
-#include "base/containers/contains.h"
+#include "base/containers/fixed_flat_map.h"
+#include "base/containers/map_util.h"
 #include "base/containers/to_vector.h"
+#include "base/feature_list.h"
 #include "components/autofill/core/browser/autofill_field.h"
+#include "components/autofill/core/browser/autofill_format_string.h"
 #include "components/autofill/core/browser/data_model/data_model_utils.h"
 #include "components/autofill/core/browser/field_type_utils.h"
 #include "components/autofill/core/browser/field_types.h"
@@ -643,7 +646,7 @@ void FormStructureRationalizer::RationalizeCreditCardNumberOffsets(
                CREDIT_CARD_NUMBER &&
            group.front()->renderer_form_id() ==
                group.back()->renderer_form_id() &&
-           group.front()->IsFocusable() == group.back()->IsFocusable() &&
+           group.front()->is_focusable() == group.back()->is_focusable() &&
            (group.size() == 1 || group.front()->max_length() ==
                                      group[group.size() - 2]->max_length());
   };
@@ -899,38 +902,43 @@ void FormStructureRationalizer::RationalizeBetweenStreetFields(
 
 void FormStructureRationalizer::RationalizePhoneNumberTrunkTypes(
     LogManager* log_manager) {
-  // Changes the `field`'s type to `new_type` if it isn't `new_type` already.
-  // If the type is changed, logs to `log_manager`.
-  auto change_type_and_log =
-      [&](AutofillField& field, FieldType new_type) {
-        FieldType current_type = field.ComputedType().GetAddressType();
-        if (current_type == new_type) {
-          return;
-        }
-        field.SetTypeTo(AutofillType(new_type),
-                        AutofillPredictionSource::kRationalization);
-        LOG_AF(log_manager)
-            << LoggingScope::kRationalization << LogMessage::kRationalization
-            << "Converting " << FieldTypeToStringView(current_type) << " to "
-            << FieldTypeToStringView(new_type)
-            << " as part of phone number trunk type rationalization";
-      };
+  // These two maps contain the pair of `(old_type, new_type)` such that
+  // `old_type` should be converted to `new_type` if a field is preceded by a
+  // `PHONE_HOME_COUNTRY_CODE` field or not respectively.
+  static constexpr auto kPhoneNumberConversionAfterCountryCodeField =
+      base::MakeFixedFlatMap<FieldType, FieldType>(
+          {{PHONE_HOME_WHOLE_NUMBER,
+            PHONE_HOME_CITY_AND_NUMBER_WITHOUT_TRUNK_PREFIX},
+           {PHONE_HOME_CITY_AND_NUMBER,
+            PHONE_HOME_CITY_AND_NUMBER_WITHOUT_TRUNK_PREFIX},
+           {PHONE_HOME_CITY_CODE_WITH_TRUNK_PREFIX, PHONE_HOME_CITY_CODE}});
+  static constexpr auto kPhoneNumberConversionNotAfterCountryCodeField =
+      base::MakeFixedFlatMap<FieldType, FieldType>(
+          {{PHONE_HOME_CITY_AND_NUMBER_WITHOUT_TRUNK_PREFIX,
+            PHONE_HOME_CITY_AND_NUMBER},
+           {PHONE_HOME_CITY_CODE, PHONE_HOME_CITY_CODE_WITH_TRUNK_PREFIX}});
 
   // Indicates whether the previous field was a phone country code.
   bool preceding_phone_country_code = false;
   for (const std::unique_ptr<AutofillField>& field : fields_) {
-    FieldType type = field->ComputedType().GetAddressType();
-    if (type == PHONE_HOME_CITY_AND_NUMBER ||
-        type == PHONE_HOME_CITY_AND_NUMBER_WITHOUT_TRUNK_PREFIX) {
-      change_type_and_log(*field,
-                          preceding_phone_country_code
-                              ? PHONE_HOME_CITY_AND_NUMBER_WITHOUT_TRUNK_PREFIX
-                              : PHONE_HOME_CITY_AND_NUMBER);
-    } else if (type == PHONE_HOME_CITY_CODE ||
-               type == PHONE_HOME_CITY_CODE_WITH_TRUNK_PREFIX) {
-      change_type_and_log(*field, preceding_phone_country_code
-                                      ? PHONE_HOME_CITY_CODE
-                                      : PHONE_HOME_CITY_CODE_WITH_TRUNK_PREFIX);
+    const FieldType type = field->ComputedType().GetAddressType();
+    const FieldType* new_type =
+        preceding_phone_country_code
+            ? base::FindOrNull(kPhoneNumberConversionAfterCountryCodeField,
+                               type)
+            : base::FindOrNull(kPhoneNumberConversionNotAfterCountryCodeField,
+                               type);
+    if (new_type &&
+        (type != PHONE_HOME_WHOLE_NUMBER ||
+         base::FeatureList::IsEnabled(
+             features::kAutofillImprovePhoneNumberRationalization))) {
+      field->SetTypeTo(AutofillType(*new_type),
+                       AutofillPredictionSource::kRationalization);
+      LOG_AF(log_manager)
+          << LoggingScope::kRationalization << LogMessage::kRationalization
+          << "Converting " << FieldTypeToStringView(type) << " to "
+          << FieldTypeToStringView(*new_type)
+          << " as part of phone number trunk type rationalization";
     }
     preceding_phone_country_code = type == PHONE_HOME_COUNTRY_CODE;
   }
@@ -951,7 +959,7 @@ void FormStructureRationalizer::RationalizeRepeatedStreetAddressFields(
   // Group ADDRESS_HOME_STREET_ADDRESS `fields_` by section.
   std::map<Section, std::vector<AutofillField*>> street_address_fields;
   for (const std::unique_ptr<AutofillField>& field : fields_) {
-    if (field->IsFocusable() &&
+    if (field->is_focusable() &&
         field->ComputedType().GetAddressType() == ADDRESS_HOME_STREET_ADDRESS) {
       street_address_fields[field->section()].push_back(field.get());
     }
@@ -1069,9 +1077,24 @@ void FormStructureRationalizer::RationalizePhoneCountryCode(
   constexpr static FieldTypeSet kRelevantPhoneTypes{
       PHONE_HOME_NUMBER, PHONE_HOME_NUMBER_PREFIX, PHONE_HOME_CITY_AND_NUMBER,
       PHONE_HOME_CITY_AND_NUMBER_WITHOUT_TRUNK_PREFIX};
+  bool improve_phone_number_rationalization_experiment_enabled =
+      base::FeatureList::IsEnabled(
+          features::kAutofillImprovePhoneNumberRationalization);
   if (std::ranges::any_of(fields_, [&](const auto& field) {
-        return kRelevantPhoneTypes.contains(
-            field->ComputedType().GetAddressType());
+        FieldType computed_type = field->ComputedType().GetAddressType();
+        FieldType rationalized_type =
+            field->PredictionSource() ==
+                    AutofillPredictionSource::kRationalization
+                ? field->Type().GetAddressType()
+                : computed_type;
+        // Some rationalization rule changes `PHONE_HOME_WHOLE_NUMBER` (not in
+        // `kRelevantPhoneTypes`) to
+        // `PHONE_HOME_CITY_AND_NUMBER_WITHOUT_TRUNK_PREFIX` (in
+        // `kRelevantPhoneTypes`). Which is why we need to look at both
+        // `computed_type` and `rationalized_type`.
+        return (kRelevantPhoneTypes.contains(computed_type) ||
+                (improve_phone_number_rationalization_experiment_enabled &&
+                 kRelevantPhoneTypes.contains(rationalized_type)));
       })) {
     return;
   }

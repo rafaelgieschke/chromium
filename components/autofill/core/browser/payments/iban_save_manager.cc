@@ -202,10 +202,15 @@ bool IbanSaveManager::AttemptToOfferUploadSave(Iban& import_candidate) {
       autofill_metrics::UploadIbanActionMetric::kOffered);
   bool show_save_prompt = !GetIbanSaveStrikeDatabase()->ShouldBlockFeature(
       GetPartialIbanHashString(base::UTF16ToUTF8(import_candidate.value())));
+#if BUILDFLAG(IS_ANDROID)
+  upload_request_details_.client_behavior_signals.push_back(
+      ClientBehaviorConstants::kShowAccountEmailInLegalMessage);
+#endif
   client_->GetPaymentsAutofillClient()
       ->GetPaymentsNetworkInterface()
       ->GetIbanUploadDetails(
           payments_data_manager().app_locale(),
+          upload_request_details_.client_behavior_signals,
           payments::GetBillingCustomerId(payments_data_manager()),
           import_candidate.GetCountryCode(),
           base::BindOnce(&IbanSaveManager::OnDidGetUploadDetails,
@@ -226,10 +231,10 @@ void IbanSaveManager::OnUserDidDecideOnLocalSave(
     Iban import_candidate,
     payments::PaymentsAutofillClient::SaveIbanOfferUserDecision user_decision,
     std::u16string_view nickname) {
-  if (!nickname.empty()) {
-    std::u16string trimmed_nickname;
-    base::TrimWhitespace(nickname, base::TRIM_ALL, &trimmed_nickname);
-    import_candidate.set_nickname(trimmed_nickname);
+  const std::u16string_view trimmed_nickname =
+      base::TrimWhitespace(nickname, base::TRIM_ALL);
+  if (!trimmed_nickname.empty()) {
+    import_candidate.set_nickname(std::u16string(trimmed_nickname));
   }
 
   const std::string& partial_iban_hash =
@@ -266,12 +271,10 @@ void IbanSaveManager::OnUserDidDecideOnUploadSave(
     payments::PaymentsAutofillClient::SaveIbanOfferUserDecision user_decision,
     std::u16string_view nickname) {
   CHECK_NE(import_candidate.record_type(), Iban::kServerIban);
-  if (!nickname.empty()) {
-    std::u16string trimmed_nickname;
-    base::TrimWhitespace(nickname, base::TRIM_ALL, &trimmed_nickname);
-    if (!trimmed_nickname.empty()) {
-      import_candidate.set_nickname(trimmed_nickname);
-    }
+  const std::u16string_view trimmed_nickname =
+      base::TrimWhitespace(nickname, base::TRIM_ALL);
+  if (!trimmed_nickname.empty()) {
+    import_candidate.set_nickname(std::u16string(trimmed_nickname));
   }
 
   autofill_metrics::UploadIbanActionMetric action_metric;
@@ -314,7 +317,7 @@ void IbanSaveManager::OnDidGetUploadDetails(
     PaymentsRpcResult result,
     const std::u16string& validation_regex,
     const std::u16string& context_token,
-    std::unique_ptr<base::Value::Dict> legal_message) {
+    std::unique_ptr<base::DictValue> legal_message) {
   if (observer_for_testing_) {
     observer_for_testing_->OnReceivedGetUploadDetailsResponse();
   }

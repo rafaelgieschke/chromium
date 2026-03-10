@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <memory>
 #include <optional>
-#include <set>
 #include <utility>
 #include <variant>
 
@@ -342,14 +341,6 @@ void HttpProxyConnectJob::OnNeedsProxyAuth(
   NOTREACHED();
 }
 
-Error HttpProxyConnectJob::OnDestinationDnsAliasesResolved(
-    const std::set<std::string>& aliases,
-    ConnectJob* job) {
-  // Do nothing and return OK when DNS aliases for HTTP proxy hostnames since
-  // higher-level layers will not take action on these.
-  return OK;
-}
-
 base::TimeDelta HttpProxyConnectJob::AlternateNestedConnectionTimeout(
     const HttpProxySocketParams& params,
     const NetworkQualityEstimator* network_quality_estimator) {
@@ -505,7 +496,7 @@ int HttpProxyConnectJob::DoBeginConnect() {
 int HttpProxyConnectJob::DoTransportConnect() {
   ProxyServer::Scheme scheme = GetProxyServerScheme();
   if (scheme == ProxyServer::SCHEME_HTTP) {
-    nested_connect_job_ = std::make_unique<TransportConnectJob>(
+    nested_connect_job_ = TransportConnectJob::Factory::CreateJob(
         priority(), socket_tag(), common_connect_job_params(),
         params_->transport_params(), this, &net_log());
   } else {

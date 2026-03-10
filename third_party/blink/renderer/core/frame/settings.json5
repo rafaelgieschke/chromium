@@ -54,6 +54,12 @@
 
   data: [
     {
+      name: "acceptLanguages",
+      type: "String",
+      invalidate: ["AcceptLanguages"],
+    },
+
+    {
       name: "defaultTextEncodingName",
       type: "String",
     },
@@ -453,6 +459,11 @@
       name: "forceZeroLayoutHeight",
       initial: false,
       invalidate: ["ViewportDescription"],
+    },
+
+    {
+      name: "scaleAllFontsIfNoMetaTextScaleTag",
+      initial: false,
     },
 
     {

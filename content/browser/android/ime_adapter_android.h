@@ -55,7 +55,7 @@ class CONTENT_EXPORT ImeAdapterAndroid : public RenderWidgetHostConnector {
                     const base::android::JavaRef<jobject>& original_key_event,
                     int type,
                     int modifiers,
-                    jlong time_ms,
+                    int64_t time_ms,
                     int key_code,
                     int scan_code,
                     bool is_system_key,
@@ -64,7 +64,8 @@ class CONTENT_EXPORT ImeAdapterAndroid : public RenderWidgetHostConnector {
                         const base::android::JavaRef<jobject>& obj,
                         const base::android::JavaRef<jobject>& text,
                         const base::android::JavaRef<jstring>& text_str,
-                        int relative_cursor_pos);
+                        int relative_cursor_pos,
+                        bool is_text_suggestion_selected);
   void CommitText(JNIEnv* env,
                   const base::android::JavaRef<jobject>& obj,
                   const base::android::JavaRef<jobject>& text,
@@ -84,7 +85,7 @@ class CONTENT_EXPORT ImeAdapterAndroid : public RenderWidgetHostConnector {
   void RequestCursorUpdate(JNIEnv*, bool immediateRequest, bool monitorRequest);
   bool RequestTextInputStateUpdate(JNIEnv*);
   void HandleStylusWritingGestureAction(JNIEnv*,
-                                        const jint,
+                                        const int32_t,
                                         const base::android::JavaRef<jobject>&);
 
   void OnStylusWritingGestureActionCompleted(
@@ -114,9 +115,9 @@ class CONTENT_EXPORT ImeAdapterAndroid : public RenderWidgetHostConnector {
       const gfx::Rect& focused_edit_bounds,
       const gfx::Rect& caret_bounds);
 
-  bool InsertMediaFromURL(JNIEnv* env,
-
-                          const base::android::JavaRef<jstring>& url);
+  bool InsertMediaFromBytes(JNIEnv* env,
+                            const base::android::JavaRef<jbyteArray>& bytes,
+                            const base::android::JavaRef<jstring>& extension);
 
   base::android::ScopedJavaLocalRef<jobject> java_ime_adapter_for_testing(
       JNIEnv* env) {
@@ -126,12 +127,16 @@ class CONTENT_EXPORT ImeAdapterAndroid : public RenderWidgetHostConnector {
   void UpdateState(const ui::mojom::TextInputState& state);
   void UpdateOnTouchDown();
 
-  void AdvanceFocusForIME(JNIEnv*, jint);
+  void AdvanceFocusForIME(JNIEnv*, int32_t);
 
   base::android::ScopedJavaLocalRef<jobjectArray> GetSupportedMimeTypes(
       JNIEnv*);
 
   void PerformSpellCheck(JNIEnv* env);
+
+  void AppendAutocorrectUnderlineSpan(JNIEnv* env, int32_t start, int32_t end);
+
+  void ClearAllAutocorrectUnderlineSpans(JNIEnv* env);
 
  private:
   RenderWidgetHostImpl* GetFocusedWidget();
@@ -142,6 +147,7 @@ class CONTENT_EXPORT ImeAdapterAndroid : public RenderWidgetHostConnector {
       const base::android::JavaRef<jobject>& obj,
       const base::android::JavaRef<jobject>& text,
       const std::u16string& text16);
+  void OnPasteFromImageBytesCompleted(bool success);
 
   gfx::SizeF old_viewport_size_;
 

@@ -6,14 +6,13 @@
 
 #include <memory>
 
-#include "base/containers/contains.h"
 #include "base/memory/weak_ptr.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/promos/ios_promo_trigger_service.h"
-#include "chrome/browser/ui/promos/ios_promo_trigger_service_factory.h"
+#include "chrome/browser/ui/desktop_to_mobile_promos/ios_promo_trigger_service.h"
+#include "chrome/browser/ui/desktop_to_mobile_promos/ios_promo_trigger_service_factory.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/views/chrome_views_test_base.h"
 #include "components/desktop_to_mobile_promos/desktop_to_mobile_promos_metrics.h"
@@ -136,10 +135,9 @@ class IOSPromoBubbleViewTest : public ChromeViewsTestBase {
   void CreateAndShowBubble(PromoType promo_type = PromoType::kLens,
                            BubbleType bubble_type = BubbleType::kQRCode) {
     auto bubble = std::make_unique<IOSPromoBubbleView>(
-        GetProfile(), promo_type, bubble_type, anchor_view_,
+        nullptr, GetProfile(), promo_type, bubble_type, anchor_view_,
         views::BubbleBorder::TOP_RIGHT);
     bubble_view_ = bubble.get();
-
     user_action_subscription_ =
         bubble_view_->AddUserActionCallback(user_action_callback_.Get());
 
@@ -271,8 +269,8 @@ TEST_F(IOSPromoBubbleViewTest, AcceptOpensUrl_QRCode) {
       .WillOnce([](const content::OpenURLParams& params) {
         EXPECT_EQ(params.url.host(), "www.google.com");
         EXPECT_EQ(params.url.path(), "/chrome/go-mobile/");
-        EXPECT_TRUE(base::Contains(params.url.query(), "ios-campaign"));
-        EXPECT_TRUE(base::Contains(params.url.query(), "android-campaign"));
+        EXPECT_TRUE(params.url.query().contains("ios-campaign"));
+        EXPECT_TRUE(params.url.query().contains("android-campaign"));
         EXPECT_EQ(params.disposition,
                   WindowOpenDisposition::NEW_FOREGROUND_TAB);
       });

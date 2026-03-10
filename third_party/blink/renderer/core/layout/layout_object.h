@@ -322,6 +322,9 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   // id attributes, if present).
   String ToString() const;
 
+  // TODO(crbug.com/478682594): Remove when done investigating.
+  void DumpForBug478682594() const;
+
   // This is an inexact determination of whether the display of this objects is
   // altered or obscured by CSS effects.
   bool HasDistortingVisualEffects() const;
@@ -502,6 +505,7 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
     }
   }
 
+#if EXPENSIVE_DCHECKS_ARE_ON()
   // This function checks if the fragment tree is consistent with the
   // |LayoutObject| tree. This consistency is critical, as sometimes we traverse
   // the fragment tree, sometimes the |LayoutObject| tree, or mix the
@@ -520,7 +524,7 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
       layout_object->AssertClearedPaintInvalidationFlags();
     }
   }
-
+#endif  // EXPENSIVE_DCHECKS_ARE_ON()
 #endif  // DCHECK_IS_ON()
 
   // LayoutObject tree manipulation
@@ -615,10 +619,14 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
            RespectsCSSOverflow();
   }
 
-  inline bool IsEligibleForPaintOrLayoutContainment() const {
+  virtual bool IsEligibleForPaintOrLayoutContainment() const {
     NOT_DESTROYED();
-    return (!IsInline() || IsAtomicInlineLevel()) &&
-           (!IsTablePart() || IsLayoutBlockFlow());
+    return false;
+  }
+
+  virtual bool IsEligibleForSizeContainment() const {
+    NOT_DESTROYED();
+    return false;
   }
 
   inline bool ShouldApplyPaintContainment(const ComputedStyle& style) const {
@@ -641,11 +649,6 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
     return ShouldApplyLayoutContainment(StyleRef());
   }
 
-  inline bool IsEligibleForSizeContainment() const {
-    NOT_DESTROYED();
-    return (!IsInline() || IsAtomicInlineLevel()) &&
-           (!IsTablePart() || IsTableCaption()) && !IsTable();
-  }
   inline bool ShouldApplySizeContainment() const {
     NOT_DESTROYED();
     return StyleRef().ContainsSize() && IsEligibleForSizeContainment();
@@ -704,8 +707,12 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
     // common logic, which is extracted here to avoid repeated computation.
     return style.IsStackingContextWithoutContainment() ||
            ((style.ContainsLayout() || style.ContainsPaint()) &&
-            (!IsInline() || IsAtomicInlineLevel()) &&
-            (!IsTablePart() || IsLayoutBlockFlow()));
+            IsEligibleForPaintOrLayoutContainment());
+  }
+
+  virtual bool IsReplacedNormalFlowStackingContext(const ComputedStyle&) const {
+    NOT_DESTROYED();
+    return false;
   }
 
   inline bool IsStacked() const {
@@ -715,7 +722,9 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   inline bool IsStacked(const ComputedStyle& style) const {
     NOT_DESTROYED();
     return style.GetPosition() != EPosition::kStatic ||
-           IsStackingContext(style);
+           (IsStackingContext(style) &&
+            (!RuntimeEnabledFeatures::StackingContextIsNotStackedEnabled() ||
+             !IsReplacedNormalFlowStackingContext(style)));
   }
 
   // Returns true if the LayoutObject is rendered in the top layer or the layer
@@ -1049,9 +1058,14 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   inline bool IsScrollButtonOrMarkerContent() const;
   inline bool IsBeforeOrAfterContent() const;
   inline bool IsInterestHintContent() const;
-  inline bool IsPseudo(PseudoId id) const;
   static inline bool IsAfterContent(const LayoutObject* obj) {
     return obj && obj->IsAfterContent();
+  }
+
+  bool IsOverscrollAreaParent() const {
+    NOT_DESTROYED();
+    const Node* node = GetNode();
+    return node && node->GetPseudoId() == kPseudoIdOverscrollAreaParent;
   }
 
   // Returns true if the text is generated (from, e.g., list marker,
@@ -1367,9 +1381,13 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
     NOT_DESTROYED();
     return bitfields_.IsInLayoutNGInlineFormattingContext();
   }
-  bool IsAtomicInlineLevel() const {
+  bool IsAtomicInline() const {
     NOT_DESTROYED();
-    return bitfields_.IsAtomicInlineLevel();
+    return IsInline() && IsBox();
+  }
+  bool IsNonAtomicInline() const {
+    NOT_DESTROYED();
+    return IsInline() && !IsBox();
   }
   bool IsBlockInInline() const {
     NOT_DESTROYED();
@@ -1518,8 +1536,8 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   // pseudo check after they can host scrollable overflow.
   bool IsOverscrollContainer() const {
     NOT_DESTROYED();
-    return StyleRef().HasOverscrollArea() ||
-           IsPseudo(kPseudoIdOverscrollAreaParent);
+    return StyleRef().IsInternalOverscrollAreaAuto() ||
+           IsOverscrollAreaParent();
   }
 
   bool IsScrollContainer() const {
@@ -1696,12 +1714,12 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   }
 
   // Returns the styled node that caused the generation of this layoutObject.
-  // This is the same as node() except for layoutObjects of :before, :after and
-  // :first-letter pseudo-elements for which their parent node is returned.
-  Node* GeneratingNode() const {
-    NOT_DESTROYED();
-    return IsPseudoElement() ? GetNode()->ParentOrShadowHostNode() : GetNode();
-  }
+  // It will its GetNode(), or the first layout ancestor GetNode().
+  //
+  // For layout objects as :before, :after or :first-letter pseudo-elements, it
+  // will return the generating node of the first non-pseudo-element parent
+  // node.
+  Node* GeneratingNode() const;
 
   // Return the Node of this object, or, if it has none (anonymous object),
   // return that of the nearest ancestor that has one.
@@ -2011,10 +2029,6 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
 
   void SetHasBoxDecorationBackground(bool);
 
-  void SetIsAtomicInlineLevel(bool is_atomic_inline_level) {
-    NOT_DESTROYED();
-    bitfields_.SetIsAtomicInlineLevel(is_atomic_inline_level);
-  }
   void SetHorizontalWritingMode(bool has_horizontal_writing_mode) {
     NOT_DESTROYED();
     bitfields_.SetHorizontalWritingMode(has_horizontal_writing_mode);
@@ -2227,6 +2241,10 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   // See container() for the function that returns the containing block.
   // See layout_block.h for some extra explanations on containing blocks.
   LayoutBlock* ContainingBlock(AncestorSkipInfo* = nullptr) const;
+
+  // Returns the containing block, resolving anonymous blocks to their
+  // Parent(). This mirrors the lookup in ShouldTruncateOverflowingText().
+  LayoutObject* NonAnonymousContainingBlock() const;
 
   // Returns the nearest ancestor in the layout tree that IsForElement(),
   // or null if there is none.
@@ -2609,12 +2627,6 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
   virtual PhysicalRect LocalCaretRect(int caret_offset,
                                       CaretShape caret_shape) const;
 
-  // When performing a global document tear-down, the layoutObject of the
-  // document is cleared. We use this as a hook to detect the case of document
-  // destruction and don't waste time doing unnecessary work.
-  bool DocumentBeingDestroyed() const;
-  bool DocumentBeingDestroyedActual() const;
-
   void DestroyAndCleanupAnonymousWrappers(bool performing_reattach);
 
   void Destroy();
@@ -2711,7 +2723,7 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
 
     // Convenience functions to initialize outline info.
     static OutlineInfo GetFromStyle(const ComputedStyle& style) {
-      return {style.OutlineWidth(), style.OutlineOffset().ToInt()};
+      return {style.OutlineWidth(), style.OutlineOffset()};
     }
 
     static float getUnzoomedWidth(const ComputedStyle& style) {
@@ -3023,7 +3035,7 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
     void SetShouldDoFullPaintInvalidation(PaintInvalidationReason reason) {
       DCHECK_EQ(layout_object_.GetDocument().Lifecycle().GetState(),
                 DocumentLifecycle::kInPrePaint);
-      // This call to MutableForPainting::SetShouldCheckForPaintInvaldiation()
+      // This call to MutableForPainting::SetShouldCheckForPaintInvalidation()
       // prevents LayoutObject::SetShouldDoFullPaintInvalidation() from marking
       // ancestors for paint invalidation, which is not needed when this is
       // called during PrePaint.
@@ -3402,12 +3414,26 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
     bitfields_.SetIsMulticolContainer(b);
   }
 
+  bool ContainsSelectionFocus() const {
+    NOT_DESTROYED();
+    return bitfields_.ContainsSelectionFocus();
+  }
+  void SetContainsSelectionFocus(bool b) {
+    NOT_DESTROYED();
+    bitfields_.SetContainsSelectionFocus(b);
+  }
+
   // Returns true if this layout object is created for an element which will be
   // changing behaviour for overflow: visible.
   // See
   // https://groups.google.com/a/chromium.org/g/blink-dev/c/MuTeW_AFgxA/m/IlT4QVEfAgAJ
   // for details.
   bool BelongsToElementChangingOverflowBehaviour() const;
+
+  // Should be called after this object has been reinserted into the
+  // layout-tree after a style update. Invoked when its out-of-flow/in-flow
+  // state changes.
+  void UpdateAfterReinsert(const ComputedStyle& old_style);
 
  protected:
   void SetDestroyedForTesting() {
@@ -3614,8 +3640,6 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
                                          const LayoutBoxModelObject* ancestor,
                                          MapCoordinatesFlags = 0) const;
 
-  void ClearLayoutRootIfNeeded() const;
-
   void ScheduleRelayout();
 
   void AddAsImageObserver(StyleImage*);
@@ -3763,7 +3787,6 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
           is_anonymous(!node),
           is_inline_(true),
           is_in_layout_ng_inline_formatting_context_(false),
-          is_atomic_inline_level_(false),
           horizontal_writing_mode_(true),
           has_layer_(false),
           has_non_visible_overflow_(false),
@@ -3821,7 +3844,8 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
           has_valid_cached_geometry_(false),
           may_be_non_contiguous_ifc_(false),
           has_svg_text_descendants_(false),
-          is_multicol_container_(false) {}
+          is_multicol_container_(false),
+          contains_selection_focus_(false) {}
 
     // Typically indicates that this object has had its style changed, and
     // requires a "full" layout.
@@ -3917,21 +3941,6 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
     ADD_BOOLEAN_BITFIELD(is_in_layout_ng_inline_formatting_context_,
                          IsInLayoutNGInlineFormattingContext);
 
-    // This boolean is set if the element is an atomic inline-level box.
-    //
-    // In CSS, atomic inline-level boxes are laid out on a line but they
-    // are opaque from the perspective of line layout. This means that they
-    // can't be split across lines like normal inline boxes (LayoutInline).
-    // Examples of atomic inline-level elements: inline tables, inline
-    // blocks and replaced inline elements.
-    // See http://www.w3.org/TR/CSS2/visuren.html#inline-boxes.
-    //
-    // Our code is confused about the use of this boolean and confuses it
-    // with being replaced (see LayoutReplaced about this).
-    // TODO(jchaffraix): We should inspect callers and clarify their use.
-    // TODO(jchaffraix): We set this boolean for replaced elements that are
-    // not inline but shouldn't (crbug.com/567964). This should be enforced.
-    ADD_BOOLEAN_BITFIELD(is_atomic_inline_level_, IsAtomicInlineLevel);
     ADD_BOOLEAN_BITFIELD(horizontal_writing_mode_, HorizontalWritingMode);
 
     ADD_BOOLEAN_BITFIELD(has_layer_, HasLayer);
@@ -4192,6 +4201,10 @@ class CORE_EXPORT LayoutObject : public GarbageCollected<LayoutObject>,
 
     // True if this is a LayoutBlockFlow that establishes a multicol container.
     ADD_BOOLEAN_BITFIELD(is_multicol_container_, IsMulticolContainer);
+
+    // Whether the selection focus is inside this element.
+    // Used for text-overflow ellipsis.
+    ADD_BOOLEAN_BITFIELD(contains_selection_focus_, ContainsSelectionFocus);
   };
 
 #undef ADD_BOOLEAN_BITFIELD
@@ -4244,18 +4257,6 @@ struct ThreadingTrait<T> {
 // Allow equality comparisons of LayoutObjects by reference or pointer,
 // interchangeably.
 DEFINE_COMPARISON_OPERATORS_WITH_REFERENCES(LayoutObject)
-
-inline bool LayoutObject::DocumentBeingDestroyed() const {
-  NOT_DESTROYED();
-  if (RuntimeEnabledFeatures::DisableDocumentBeingDestroyedEnabled()) {
-    return false;
-  }
-  return GetDocument().Lifecycle().GetState() >= DocumentLifecycle::kStopping;
-}
-inline bool LayoutObject::DocumentBeingDestroyedActual() const {
-  NOT_DESTROYED();
-  return GetDocument().Lifecycle().GetState() >= DocumentLifecycle::kStopping;
-}
 
 inline bool LayoutObject::IsPseudoElementContent(PseudoId pseudo_id) const {
   NOT_DESTROYED();
@@ -4323,12 +4324,6 @@ inline bool LayoutObject::IsInterestHintContent() const {
 inline bool LayoutObject::IsBeforeOrAfterContent() const {
   NOT_DESTROYED();
   return IsBeforeContent() || IsAfterContent();
-}
-
-inline bool LayoutObject::IsPseudo(PseudoId id) const {
-  NOT_DESTROYED();
-  PseudoElement* pseudo = DynamicTo<PseudoElement>(GetNode());
-  return pseudo && pseudo->GetPseudoId() == id;
 }
 
 inline void LayoutObject::ClearNeedsLayoutWithoutPaintInvalidation() {

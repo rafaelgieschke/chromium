@@ -48,6 +48,8 @@ extern const char kOnDevicePerformanceClass[];
 COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
 extern const char kOnDevicePerformanceClassVersion[];
 COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
+extern const char kOnDeviceVramMb[];
+COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
 extern const char kLastUsageByFeature[];
 COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
 extern const char kLastTimeEligibleForOnDeviceModelDownload[];
@@ -59,16 +61,13 @@ extern const char kGenAILocalFoundationalModelEnterprisePolicySettings[];
 COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
 bool IsLocalFoundationalModelEnterprisePolicyAllowed();
 
+COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
+extern const char kOnDeviceAiUserSettingsEnabled[];
+
 }  // namespace localstate
 
 COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
 void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
-
-COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
-void RegisterLegacyUsagePrefsForMigration(PrefRegistrySimple* registry);
-
-COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
-void MigrateLegacyUsagePrefs(PrefService* local_state);
 
 COMPONENT_EXPORT(OPTIMIZATION_GUIDE_FEATURES)
 void PruneOldUsagePrefs(PrefService* local_state);

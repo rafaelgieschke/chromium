@@ -305,9 +305,8 @@ class SpeechRecognitionBrowserTest : public ContentBrowserTest {
 
     std::unique_ptr<media::AudioBus> audio_bus =
         media::AudioBus::Create(audio_params);
-    audio_bus->FromInterleaved<media::SignedInt16SampleTypeTraits>(
-        reinterpret_cast<int16_t*>(&audio_buffer.data()[0]),
-        audio_bus->frames());
+    audio_bus->FromInterleavedBytes<media::SignedInt16SampleTypeTraits>(
+        audio_buffer);
     capture_callback->Capture(audio_bus.get(), base::TimeTicks::Now(), {}, 0.0);
   }
 
@@ -507,13 +506,17 @@ IN_PROC_BROWSER_TEST_F(SpeechRecognitionBrowserTest,
         shell->web_contents()->GetSiteInstance());
   };
 
-  EXPECT_EQ(GetSiteInstance(shell)->GetStoragePartitionConfig(),
+  EXPECT_EQ(GetSiteInstance(shell)
+                ->GetSecurityPrincipal()
+                .GetStoragePartitionConfig(),
             storage_partition_config);
   EXPECT_TRUE(GetSiteInstance(shell)->IsFixedStoragePartition());
 
   ASSERT_TRUE(
       NavigateToURL(shell, embedded_test_server()->GetURL("/title1.html")));
-  EXPECT_EQ(GetSiteInstance(shell)->GetStoragePartitionConfig(),
+  EXPECT_EQ(GetSiteInstance(shell)
+                ->GetSecurityPrincipal()
+                .GetStoragePartitionConfig(),
             storage_partition_config);
   EXPECT_TRUE(GetSiteInstance(shell)->IsFixedStoragePartition());
 

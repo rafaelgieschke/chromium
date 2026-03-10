@@ -96,9 +96,7 @@
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_WIN)
-#include "components/viz/common/overlay_state/win/overlay_state_service.h"
 #include "gpu/command_buffer/service/shared_image/d3d_image_backing_factory.h"
-#include "media/base/win/mf_feature_checks.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 #include "ui/gl/dcomp_surface_registry.h"
 #include "ui/gl/direct_composition_support.h"
@@ -111,10 +109,6 @@
 #if BUILDFLAG(SKIA_USE_DAWN)
 #include "gpu/command_buffer/service/dawn_context_provider.h"
 #include "gpu/command_buffer/service/gpu_persistent_cache.h"
-#endif
-
-#if BUILDFLAG(SKIA_USE_METAL)
-#include "gpu/command_buffer/service/metal_context_provider.h"
 #endif
 
 #if BUILDFLAG(CLANG_PROFILING_INSIDE_SANDBOX)
@@ -161,8 +155,14 @@ void RunGetPeakGpuMemoryUsageCallbackOnMainThread(
 gpu::GpuPersistentCache::AsyncDiskWriteOpts
 GetPersistentCacheAsyncDiskWriteOpts() {
   gpu::GpuPersistentCache::AsyncDiskWriteOpts async_opts;
+  // The GpuPersistentCache uses a task runner for doing disk writes in the
+  // background. These are low priority tasks but once the task starts running,
+  // we do not want it to be interrupted because it holds locks on the database.
+  // This behaviour is achieved with the BEST_EFFORT priority and
+  // MUST_USE_FOREGROUND policy.
   async_opts.task_runner = base::ThreadPool::CreateSequencedTaskRunner(
       {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+       base::ThreadPolicy::MUST_USE_FOREGROUND,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
   async_opts.max_pending_bytes_to_write = gpu::GetDefaultGpuDiskCacheSize();
   return async_opts;
@@ -229,8 +229,8 @@ GpuServiceImpl::GpuServiceImpl(
       std::make_unique<gpu::webgpu::DawnCachingInterfaceFactory>();
 #endif
 
-  if (gpu_preferences_.gr_context_type == gpu::GrContextType::kGraphiteDawn) {
 #if BUILDFLAG(SKIA_USE_DAWN)
+  if (gpu_preferences_.gr_context_type == gpu::GrContextType::kGraphiteDawn) {
     dawn_context_provider_ = std::move(init_params.dawn_context_provider);
 
     if (dawn_context_provider_) {
@@ -257,26 +257,8 @@ GpuServiceImpl::GpuServiceImpl(
             std::move(dawn_caching_interface));
       }
     }
+  }
 #endif  // BUILDFLAG(SKIA_USE_DAWN)
-  } else if (gpu_preferences_.gr_context_type ==
-             gpu::GrContextType::kGraphiteMetal) {
-#if BUILDFLAG(SKIA_USE_METAL)
-    metal_context_provider_ = MetalContextProvider::Create();
-    if (!metal_context_provider_) {
-      DLOG(ERROR) << "Failed to create Metal context provider for Graphite.";
-    }
-#endif  // BUILDFLAG(SKIA_USE_METAL)
-  }
-
-#if BUILDFLAG(IS_WIN)
-  if (media::SupportMediaFoundationClearPlayback()) {
-    // Initialize the OverlayStateService using the GPUServiceImpl task
-    // sequence.
-    auto* overlay_state_service = OverlayStateService::GetInstance();
-    overlay_state_service->Initialize(
-        base::SequencedTaskRunner::GetCurrentDefault());
-  }
-#endif
 
   weak_ptr_ = weak_ptr_factory_.GetWeakPtr();
 }
@@ -488,9 +470,9 @@ void GpuServiceImpl::InitializeWithHostInternal(
       gpu_preferences_, this, watchdog_thread_.get(), main_runner_, io_runner_,
       scheduler_, sync_point_manager, shared_image_manager, gpu_feature_info_,
       &use_shader_cache_shm_count_->data, std::move(default_offscreen_surface),
-      vulkan_context_provider(), metal_context_provider(),
-      dawn_context_provider(), dawn_caching_interface_factory(),
-      gr_context_options_provider_, &persistent_caches_);
+      vulkan_context_provider(), dawn_context_provider(),
+      dawn_caching_interface_factory(), gr_context_options_provider_,
+      &persistent_caches_);
 
   media_gpu_channel_manager_ = std::make_unique<media::MediaGpuChannelManager>(
       gpu_channel_manager_.get());
@@ -565,10 +547,10 @@ scoped_refptr<gpu::SharedContextState> GpuServiceImpl::GetContextState() {
   return gpu_channel_manager_->GetSharedContextState(&result);
 }
 
-void GpuServiceImpl::SetVisibilityChangedCallback(
-    VisibilityChangedCallback callback) {
+void GpuServiceImpl::SetPriorityChangedCallback(
+    PriorityChangedCallback callback) {
   DCHECK(main_runner_->BelongsToCurrentThread());
-  visibility_changed_callback_ = std::move(callback);
+  priority_changed_callback_ = std::move(callback);
 }
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -649,12 +631,14 @@ void GpuServiceImpl::CreateVideoEncodeAcceleratorProvider(
 
 void GpuServiceImpl::BindWebNNContextProvider(
     mojo::PendingReceiver<webnn::mojom::WebNNContextProvider> pending_receiver,
-    int client_id) {
+    int client_id,
+    uint64_t client_tracing_id,
+    bool is_incognito) {
   if (!main_runner_->BelongsToCurrentThread()) {
     main_runner_->PostTask(
-        FROM_HERE,
-        base::BindOnce(&GpuServiceImpl::BindWebNNContextProvider, weak_ptr_,
-                       std::move(pending_receiver), client_id));
+        FROM_HERE, base::BindOnce(&GpuServiceImpl::BindWebNNContextProvider,
+                                  weak_ptr_, std::move(pending_receiver),
+                                  client_id, client_tracing_id, is_incognito));
     return;
   }
 
@@ -668,13 +652,14 @@ void GpuServiceImpl::BindWebNNContextProvider(
     // `client_id` in order to support memory metrics.
     webnn_context_provider_ = webnn::WebNNContextProviderImpl::Create(
         std::move(shared_context_state), gpu_feature_info_, gpu_info_,
-        shared_image_manager(),
+        shared_image_manager(), gpu_channel_manager_->peak_memory_monitor(),
         base::BindOnce(&GpuServiceImpl::LoseAllContexts, weak_ptr_),
-        main_runner(), GetGpuScheduler(), client_id, gpu_host_);
+        main_runner(), GetGpuScheduler(), gpu_host_);
   }
 
   webnn_context_provider_->BindWebNNContextProvider(
-      std::move(pending_receiver));
+      std::move(pending_receiver),
+      {is_incognito, client_id, client_tracing_id});
 }
 
 void GpuServiceImpl::GetVideoMemoryUsageStats(
@@ -1121,8 +1106,8 @@ void GpuServiceImpl::OnBackgrounded() {
 void GpuServiceImpl::OnBackgroundedOnMainThread() {
   gpu_channel_manager_->OnApplicationBackgrounded();
 
-  if (visibility_changed_callback_) {
-    visibility_changed_callback_.Run(false);
+  if (priority_changed_callback_) {
+    priority_changed_callback_.Run(base::Process::Priority::kBestEffort);
     if (gpu_preferences_.enable_gpu_benchmarking_extension) {
       ++gpu_info_.visibility_callback_call_count;
       UpdateGPUInfoGL();
@@ -1145,8 +1130,8 @@ void GpuServiceImpl::OnForegrounded() {
 }
 
 void GpuServiceImpl::OnForegroundedOnMainThread() {
-  if (visibility_changed_callback_) {
-    visibility_changed_callback_.Run(true);
+  if (priority_changed_callback_) {
+    priority_changed_callback_.Run(base::Process::Priority::kUserBlocking);
     if (gpu_preferences_.enable_gpu_benchmarking_extension) {
       ++gpu_info_.visibility_callback_call_count;
       UpdateGPUInfoGL();
@@ -1155,16 +1140,6 @@ void GpuServiceImpl::OnForegroundedOnMainThread() {
   gpu_channel_manager_->OnApplicationForegounded();
   base::allocator::PartitionAllocSupport::Get()->OnForegrounded();
 }
-
-#if !BUILDFLAG(IS_ANDROID)
-void GpuServiceImpl::OnMemoryPressure(base::MemoryPressureLevel level) {
-  // Forward the notification to the registry of MemoryPressureListeners.
-  base::SingleThreadTaskRunner::GetMainThreadDefault()->PostTask(
-      FROM_HERE,
-      base::BindOnce(
-          &base::MemoryPressureListenerRegistry::NotifyMemoryPressure, level));
-}
-#endif
 
 #if BUILDFLAG(IS_APPLE)
 void GpuServiceImpl::BeginCATransaction() {

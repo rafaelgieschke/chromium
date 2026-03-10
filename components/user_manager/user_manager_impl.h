@@ -233,7 +233,6 @@ class USER_MANAGER_EXPORT UserManagerImpl : public UserManager {
   void NotifyUserProfileImageUpdated(
       const User& user,
       const gfx::ImageSkia& profile_image) override;
-  void NotifyUsersSignInConstraintsChanged() override;
   void NotifyUserAffiliationUpdated(const User& user) override;
   void NotifyUserToBeRemoved(const AccountId& account_id) override;
   void NotifyUserRemoved(const AccountId& account_id,
@@ -259,7 +258,7 @@ class USER_MANAGER_EXPORT UserManagerImpl : public UserManager {
   // Helper function that converts users from |users_list| to |users_vector| and
   // |users_set|. Duplicates and users already present in |existing_users| are
   // skipped.
-  void ParseUserList(const base::Value::List& users_list,
+  void ParseUserList(const base::ListValue& users_list,
                      const std::set<AccountId>& existing_users,
                      std::vector<AccountId>* users_vector,
                      std::set<AccountId>* users_set);
@@ -305,9 +304,6 @@ class USER_MANAGER_EXPORT UserManagerImpl : public UserManager {
 
   // Notifies that user has logged in.
   virtual void NotifyOnLogin();
-
-  // Notifies observers that another user was added to the session.
-  void NotifyUserAddedToSession(const User* added_user);
 
   // Removes a regular or supervised user from the user list.
   // Returns the user if found or NULL otherwise.
@@ -441,9 +437,6 @@ class USER_MANAGER_EXPORT UserManagerImpl : public UserManager {
 
   // Sends metrics in response to a user with gaia account (regular) logging in.
   void SendGaiaUserLoginMetrics(const AccountId& account_id);
-
-  // Sends metrics for multi user sign-in.
-  void SendMultiUserSignInMetrics();
 
   // Updates user account after locale was resolved.
   void DoUpdateAccountLocale(const AccountId& account_id,

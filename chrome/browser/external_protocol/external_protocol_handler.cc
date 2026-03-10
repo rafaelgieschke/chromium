@@ -307,12 +307,12 @@ bool IsSchemeOriginPairAllowedByPolicy(const std::string& scheme,
   if (!initiating_origin)
     return false;
 
-  const base::Value::List& exempted_protocols =
+  const base::ListValue& exempted_protocols =
       prefs->GetList(prefs::kAutoLaunchProtocolsFromOrigins);
 
-  const base::Value::List* origin_patterns = nullptr;
+  const base::ListValue* origin_patterns = nullptr;
   for (const base::Value& entry : exempted_protocols) {
-    const base::Value::Dict& protocol_origins_map = entry.GetDict();
+    const base::DictValue& protocol_origins_map = entry.GetDict();
     const std::string* protocol = protocol_origins_map.FindString(
         policy::external_protocol::kProtocolNameKey);
     DCHECK(protocol);
@@ -428,10 +428,10 @@ ExternalProtocolHandler::BlockState ExternalProtocolHandler::GetBlockState(
 
     if (MayRememberAllowDecisionsForThisOrigin(initiating_origin)) {
       // Check if there is a matching {Origin+Protocol} pair exemption:
-      const base::Value::Dict& allowed_origin_protocol_pairs =
+      const base::DictValue& allowed_origin_protocol_pairs =
           profile_prefs->GetDict(
               prefs::kProtocolHandlerPerOriginAllowedProtocols);
-      const base::Value::Dict* allowed_protocols_for_origin =
+      const base::DictValue* allowed_protocols_for_origin =
           allowed_origin_protocol_pairs.FindDict(
               initiating_origin->Serialize());
       if (allowed_protocols_for_origin) {
@@ -470,11 +470,11 @@ void ExternalProtocolHandler::SetBlockState(
           profile_prefs, prefs::kProtocolHandlerPerOriginAllowedProtocols);
 
       const std::string serialized_origin = initiating_origin.Serialize();
-      base::Value::Dict* allowed_protocols_for_origin =
+      base::DictValue* allowed_protocols_for_origin =
           update_allowed_origin_protocol_pairs->FindDict(serialized_origin);
       if (!allowed_protocols_for_origin) {
         update_allowed_origin_protocol_pairs->Set(serialized_origin,
-                                                  base::Value::Dict());
+                                                  base::DictValue());
         allowed_protocols_for_origin =
             update_allowed_origin_protocol_pairs->FindDict(serialized_origin);
       }
@@ -525,7 +525,7 @@ void ExternalProtocolHandler::LaunchUrl(
   // TODO(mgiuca): This essentially amounts to "remove illegal characters from
   // the URL", something that probably should be done by the GURL constructor
   // itself. The GURL constructor does do it in some cases (e.g., mailto) but
-  // not in general. https://crbug.com/788244.
+  // not in general. https://crbug.com/40551459.
   std::string escaped_url_string = base::EscapeExternalHandlerValue(url.spec());
   GURL escaped_url(escaped_url_string);
 

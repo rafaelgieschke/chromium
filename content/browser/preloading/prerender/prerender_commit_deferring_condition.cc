@@ -38,8 +38,9 @@ PrerenderCommitDeferringCondition::MaybeCreate(
     NavigationType navigation_type,
     std::optional<FrameTreeNodeId> candidate_prerender_frame_tree_node_id) {
   // Don't create if this navigation is not for prerender page activation.
-  if (navigation_type != NavigationType::kPrerenderedPageActivation)
+  if (navigation_type != NavigationType::kPrerenderedPageActivation) {
     return nullptr;
+  }
 
   return base::WrapUnique(new PrerenderCommitDeferringCondition(
       navigation_request, candidate_prerender_frame_tree_node_id.value()));
@@ -94,6 +95,7 @@ PrerenderCommitDeferringCondition::WillCommitNavigation(
   // navigation commits.
   done_closure_ = std::move(resume);
   defer_start_time_ = base::TimeTicks::Now();
+  observation_.Observe(&prerender_host);
   return Result::kDefer;
 }
 
@@ -109,8 +111,9 @@ void PrerenderCommitDeferringCondition::DidFinishNavigation(
       GetRootPrerenderFrameTreeNode(candidate_prerender_frame_tree_node_id_);
 
   // If the prerender frame tree node is gone, there is nothing to do.
-  if (!prerender_frame_tree_node)
+  if (!prerender_frame_tree_node) {
     return;
+  }
 
   // If the finished navigation is not for the prerendering main frame,
   // ignore this event.
@@ -136,6 +139,15 @@ void PrerenderCommitDeferringCondition::DidFinishNavigation(
     RecordPrerenderActivationCommitDeferTime(
         delta, prerender_host.trigger_type(),
         prerender_host.embedder_histogram_suffix());
+  }
+}
+
+void PrerenderCommitDeferringCondition::OnHostDestroyed(
+    PrerenderFinalStatus status) {
+  observation_.Reset();
+  if (done_closure_) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, std::move(done_closure_));
   }
 }
 

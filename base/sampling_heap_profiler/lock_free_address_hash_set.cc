@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "base/check_op.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/sampling_heap_profiler/lock_free_bloom_filter.h"
@@ -21,7 +20,7 @@
 
 namespace base {
 
-BASE_FEATURE(kUseLockFreeBloomFilter, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kUseLockFreeBloomFilter, base::FEATURE_ENABLED_BY_DEFAULT);
 
 namespace {
 

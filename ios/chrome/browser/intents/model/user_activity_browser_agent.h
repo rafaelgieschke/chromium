@@ -14,6 +14,7 @@
 #import "ios/chrome/app/app_startup_parameters.h"
 #import "ios/chrome/app/application_delegate/startup_information.h"
 #import "ios/chrome/app/application_delegate/tab_opening.h"
+#import "ios/chrome/browser/intents/model/intent_type.h"
 #import "ios/chrome/browser/shared/coordinator/scene/connection_information.h"
 #import "ios/chrome/browser/shared/model/browser/browser_user_data.h"
 #import "url/gurl.h"
@@ -47,6 +48,11 @@ class UserActivityBrowserAgent
   // browser will proceed the request.
   BOOL ProceedWithUserActivity(NSUserActivity* user_activity);
 
+  // If users request to open tab or search and Chrome is not opened in the mode
+  // they expected, show a toast to clarify that the expected mode is not
+  // available.
+  void ShowToastWhenOpenExternalIntentInUnexpectedMode();
+
  private:
   friend class BrowserUserData<UserActivityBrowserAgent>;
 
@@ -54,6 +60,9 @@ class UserActivityBrowserAgent
 
   // Private helper methods.
   //
+  // Records metrics of siri shortcuts with type 'intent_type'.
+  void RecordMetricsForSiriShortcut(IntentType intent_type);
+
   // Returns an app startup parameter for opening a new tab with a post action.
   AppStartupParameters* StartupParametersForOpeningNewTab(
       TabOpeningPostOpeningAction action);

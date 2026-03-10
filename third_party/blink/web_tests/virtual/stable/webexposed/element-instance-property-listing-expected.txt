@@ -24,6 +24,7 @@ namespace http://www.w3.org/1999/xhtml
     property PROCESSING_INSTRUCTION_NODE
     property TEXT_NODE
     property accessKey
+    property activeViewTransition
     property addEventListener
     property after
     property animate
@@ -108,6 +109,7 @@ namespace http://www.w3.org/1999/xhtml
     property contains
     property contentEditable
     property currentCSSZoom
+    property customElementRegistry
     property dataset
     property dir
     property dispatchEvent
@@ -298,6 +300,7 @@ namespace http://www.w3.org/1999/xhtml
     property prepend
     property previousElementSibling
     property previousSibling
+    property pseudo
     property querySelector
     property querySelectorAll
     property releasePointerCapture
@@ -326,12 +329,14 @@ namespace http://www.w3.org/1999/xhtml
     property setAttributeNS
     property setAttributeNode
     property setAttributeNodeNS
+    property setHTML
     property setHTMLUnsafe
     property setPointerCapture
     property shadowRoot
     property showPopover
     property slot
     property spellcheck
+    property startViewTransition
     property style
     property tabIndex
     property tagName
@@ -1097,6 +1102,7 @@ html element td
 html element template
     property content
     property shadowRootClonable
+    property shadowRootCustomElementRegistry
     property shadowRootDelegatesFocus
     property shadowRootMode
     property shadowRootSerializable
@@ -1288,6 +1294,7 @@ namespace http://www.w3.org/2000/svg
     property NOTATION_NODE
     property PROCESSING_INSTRUCTION_NODE
     property TEXT_NODE
+    property activeViewTransition
     property addEventListener
     property after
     property animate
@@ -1368,6 +1375,7 @@ namespace http://www.w3.org/2000/svg
     property computedStyleMap
     property contains
     property currentCSSZoom
+    property customElementRegistry
     property dataset
     property dispatchEvent
     property elementTiming
@@ -1541,6 +1549,7 @@ namespace http://www.w3.org/2000/svg
     property prepend
     property previousElementSibling
     property previousSibling
+    property pseudo
     property querySelector
     property querySelectorAll
     property releasePointerCapture
@@ -1569,10 +1578,12 @@ namespace http://www.w3.org/2000/svg
     property setAttributeNS
     property setAttributeNode
     property setAttributeNodeNS
+    property setHTML
     property setHTMLUnsafe
     property setPointerCapture
     property shadowRoot
     property slot
+    property startViewTransition
     property style
     property tabIndex
     property tagName

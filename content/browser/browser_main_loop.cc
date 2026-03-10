@@ -21,13 +21,11 @@
 #include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/memory/memory_pressure_monitor.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
-#include "base/no_destructor.h"
 #include "base/path_service.h"
 #include "base/pending_task.h"
 #include "base/power_monitor/power_monitor.h"
@@ -72,6 +70,7 @@
 #include "content/browser/browser_thread_impl.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/compositor/viz_process_transport_factory.h"
+#include "content/browser/cpu_performance/cpu_performance.h"
 #include "content/browser/download/save_file_manager.h"
 #include "content/browser/field_trial_synchronizer.h"
 #include "content/browser/first_party_sets/first_party_set_parser.h"
@@ -156,7 +155,6 @@
 #include "services/tracing/public/cpp/trace_startup_config.h"
 #include "services/video_capture/public/cpp/features.h"
 #include "skia/ext/event_tracer_impl.h"
-#include "skia/ext/font_utils.h"
 #include "skia/ext/legacy_display_globals.h"
 #include "skia/ext/skia_memory_dump_provider.h"
 #include "sql/sql_memory_dump_provider.h"
@@ -214,8 +212,6 @@
 
 #if defined(USE_GLIB)
 #include <glib-object.h>
-
-#include "base/synchronization/lock.h"
 #endif
 
 #if BUILDFLAG(IS_WIN)
@@ -273,18 +269,7 @@ static void GLibLogHandler(const gchar* log_domain,
   if (!message)
     message = "<no message>";
 
-  GLogLevelFlags always_fatal_flags;
-  GLogLevelFlags fatal_flags;
-  {
-    static base::NoDestructor<base::Lock> lock;
-    base::AutoLock auto_lock(*lock);
-    always_fatal_flags = g_log_set_always_fatal(G_LOG_LEVEL_MASK);
-    g_log_set_always_fatal(always_fatal_flags);
-    fatal_flags = g_log_set_fatal_mask(log_domain, G_LOG_LEVEL_MASK);
-    g_log_set_fatal_mask(log_domain, fatal_flags);
-  }
-
-  if ((always_fatal_flags | fatal_flags) & log_level) {
+  if (log_level & (G_LOG_FLAG_FATAL)) {
     LOG(DFATAL) << log_domain << ": " << message;
   } else if (log_level & (G_LOG_LEVEL_ERROR | G_LOG_LEVEL_CRITICAL)) {
     LOG(ERROR) << log_domain << ": " << message;
@@ -373,8 +358,8 @@ void SetFileUrlPathAliasForIpcFuzzer() {
 }
 #endif
 
-std::unique_ptr<base::MemoryPressureMonitor> CreateMemoryPressureMonitor(
-    const base::CommandLine& command_line) {
+std::unique_ptr<memory_pressure::MultiSourceMemoryPressureMonitor>
+CreateMemoryPressureMonitor(const base::CommandLine& command_line) {
   // Behavior of browser tests should not depend on things outside of their
   // control (like the amount of memory on the system running the tests).
   if (command_line.HasSwitch(switches::kBrowserTest))
@@ -383,7 +368,7 @@ std::unique_ptr<base::MemoryPressureMonitor> CreateMemoryPressureMonitor(
   std::unique_ptr<memory_pressure::MultiSourceMemoryPressureMonitor> monitor;
 
 #if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_FUCHSIA) || \
-    BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+    BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
   monitor =
       std::make_unique<memory_pressure::MultiSourceMemoryPressureMonitor>();
 #endif
@@ -391,6 +376,13 @@ std::unique_ptr<base::MemoryPressureMonitor> CreateMemoryPressureMonitor(
 
   if (monitor)
     monitor->MaybeStartPlatformVoter();
+
+#if BUILDFLAG(IS_ANDROID)
+  if (auto evaluator = UserLevelMemoryPressureSignalGenerator::MaybeCreate(
+          monitor->CreateVoter())) {
+    monitor->SetSystemEvaluator(std::move(evaluator));
+  }
+#endif
 
   return monitor;
 }
@@ -573,8 +565,7 @@ int BrowserMainLoop::EarlyInitialization() {
   // SetCurrentThreadType relies on CurrentUIThread on some platforms. The
   // MessagePumpForUI needs to be bound to the main thread by this point.
   DCHECK(base::CurrentUIThread::IsSet());
-  base::PlatformThread::SetCurrentThreadType(
-      base::ThreadType::kDisplayCritical);
+  base::PlatformThread::SetCurrentThreadType(base::ThreadType::kPresentation);
 
 #if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
     BUILDFLAG(IS_ANDROID)
@@ -638,7 +629,10 @@ void BrowserMainLoop::CreateMainMessageLoop() {
 
   TRACE_EVENT0("startup", "BrowserMainLoop::CreateMainMessageLoop");
 
-  base::PlatformThread::SetName("CrBrowserMain");
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableMainThreadNameOverride)) {
+    base::PlatformThread::SetName("CrBrowserMain");
+  }
 
   // Register the main thread. The main thread's task runner should already have
   // been initialized but it's not yet known as BrowserThread::UI.
@@ -717,7 +711,6 @@ void BrowserMainLoop::PostCreateMainMessageLoop() {
         discardable_memory::DiscardableSharedMemoryManager::Get());
   }
 
-
   {
     // The process-wide accessibility state must be created before we complete
     // the initialization of main loop for the extra parts, who use it.
@@ -788,9 +781,6 @@ int BrowserMainLoop::PreCreateThreads() {
   }
 
   InitializeMemoryManagementComponent();
-#if BUILDFLAG(IS_ANDROID)
-  content::UserLevelMemoryPressureSignalGenerator::Initialize();
-#endif
 
 #if BUILDFLAG(ENABLE_PLUGINS)
   // Prior to any processing happening on the IO thread, we create the
@@ -1003,7 +993,6 @@ int BrowserMainLoop::PreMainMessageLoopRun() {
           font_render_params.subpixel_rendering),
       font_render_params.text_contrast, font_render_params.text_gamma);
   viz::GpuHostImpl::InitFontRenderParams(font_render_params);
-  skia::InitializeFontRendering();
 
 #if BUILDFLAG(IS_ANDROID)
   bool use_display_wide_color_gamut =
@@ -1487,6 +1476,12 @@ void BrowserMainLoop::PostCreateThreadsImpl() {
 #if defined(ENABLE_IPC_FUZZER)
   SetFileUrlPathAliasForIpcFuzzer();
 #endif
+
+  {
+    TRACE_EVENT0("startup",
+                 "BrowserMainLoop::PostCreateThreads:InitCpuPerformance");
+    content::cpu_performance::Initialize();
+  }
 }
 
 bool BrowserMainLoop::UsingInProcessGpu() const {

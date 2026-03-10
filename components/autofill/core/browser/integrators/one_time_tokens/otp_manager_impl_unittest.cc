@@ -15,6 +15,7 @@
 #include "components/autofill/core/browser/foundations/test_autofill_driver.h"
 #include "components/autofill/core/browser/foundations/test_browser_autofill_manager.h"
 #include "components/autofill/core/browser/foundations/with_test_autofill_client_driver_manager.h"
+#include "components/autofill/core/browser/integrators/one_time_tokens/otp_manager_impl_test_api.h"
 #include "components/autofill/core/browser/test_utils/autofill_form_test_utils.h"
 #include "components/autofill/core/common/autofill_test_utils.h"
 #include "components/autofill/core/common/form_data.h"
@@ -67,7 +68,7 @@ class MockOtpPhishGuardDelegate : public OtpPhishGuardDelegate {
 class OtpManagerImplTest : public testing::Test,
                            public WithTestAutofillClientDriverManager<> {
  public:
-  OtpManagerImplTest() = default;
+  OtpManagerImplTest() : one_time_token_service_(&sms_otp_backend_, nullptr) {}
   ~OtpManagerImplTest() override = default;
 
   void SetUp() override {
@@ -93,8 +94,8 @@ class OtpManagerImplTest : public testing::Test,
     autofill_manager().NotifyObservers(
         &TestBrowserAutofillManager::Observer::OnFieldTypesDetermined,
         form.global_id(),
-        TestBrowserAutofillManager::Observer::FieldTypeSource::
-            kAutofillAiModel);
+        TestBrowserAutofillManager::Observer::FieldTypeSource::kAutofillAiModel,
+        /*small_forms_were_parsed=*/false);
   }
 
   void AddFormWithOtpField() {
@@ -123,7 +124,7 @@ class OtpManagerImplTest : public testing::Test,
       base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   test::AutofillUnitTestEnvironment autofill_test_environment_;
   MockSmsOtpBackend sms_otp_backend_;
-  OneTimeTokenServiceImpl one_time_token_service_{&sms_otp_backend_};
+  OneTimeTokenServiceImpl one_time_token_service_;
   base::HistogramTester histogram_tester_;
 };
 
@@ -544,6 +545,27 @@ TEST_F(OtpManagerImplTest, OnBeforeFocusOnNonFormField_ClearsPendingCallback) {
   std::move(sms_backend_callback).Run(otp);
   EXPECT_TRUE(future.IsReady());
   EXPECT_TRUE(future.Get().empty());
+}
+
+// Tests that `SelectMostRecentToken` returns the most recent token.
+TEST_F(OtpManagerImplTest, SelectMostRecentToken) {
+  std::vector<one_time_tokens::OneTimeToken> tokens = {
+      {one_time_tokens::OneTimeTokenType::kSmsOtp, "123",
+       base::Time::FromDeltaSinceWindowsEpoch(base::Seconds(10))},
+      {one_time_tokens::OneTimeTokenType::kSmsOtp, "456",
+       base::Time::FromDeltaSinceWindowsEpoch(base::Seconds(20))},
+      {one_time_tokens::OneTimeTokenType::kSmsOtp, "789",
+       base::Time::FromDeltaSinceWindowsEpoch(base::Seconds(15))}};
+
+  OtpManagerImpl otp_manager(autofill_manager(), &one_time_token_service_);
+  test_api(otp_manager).SetReceivedOtps(tokens);
+
+  auto selected_token = otp_manager.SelectMostRecentToken();
+  ASSERT_TRUE(selected_token.has_value());
+  EXPECT_EQ(selected_token->value(), "456");
+
+  test_api(otp_manager).SetReceivedOtps({});
+  EXPECT_FALSE(otp_manager.SelectMostRecentToken().has_value());
 }
 
 }  // namespace autofill

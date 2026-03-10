@@ -13,7 +13,6 @@
 #include <set>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/memory/raw_ptr.h"
@@ -35,6 +34,7 @@
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/clipboard/clipboard.h"
+#include "ui/base/clipboard/test/clipboard_test_util.h"
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_header_macros.h"
@@ -191,7 +191,7 @@ void ConstructTree(views::View* view, int depth) {
   if (depth == 0) {
     return;
   }
-  int count = base::RandInt(1, 5);
+  int count = base::RandIntInclusive(1, 5);
   for (int i = 0; i < count; i++) {
     views::View* v = new views::View;
     view->AddChildViewRaw(v);
@@ -2970,6 +2970,10 @@ TEST_F(ViewTest, GetCanProcessEventsWithinSubtree) {
 
   v_grandchild->SetCanProcessEventsWithinSubtree(false);
 
+  EXPECT_TRUE(v->GetCanProcessEventsWithinSubtree());
+  EXPECT_TRUE(v_child->GetCanProcessEventsWithinSubtree());
+  EXPECT_FALSE(v_grandchild->GetCanProcessEventsWithinSubtree());
+
   result_view = root_view->GetEventHandlerForRect(rect_in_v_grandchild);
   EXPECT_EQ(v_child, result_view);
   result_view = nullptr;
@@ -3008,6 +3012,10 @@ TEST_F(ViewTest, GetCanProcessEventsWithinSubtree) {
   v_grandchild->Reset();
   v_child->SetCanProcessEventsWithinSubtree(false);
 
+  EXPECT_TRUE(v->GetCanProcessEventsWithinSubtree());
+  EXPECT_FALSE(v_child->GetCanProcessEventsWithinSubtree());
+  EXPECT_FALSE(v_grandchild->GetCanProcessEventsWithinSubtree());
+
   result_view = root_view->GetEventHandlerForRect(rect_in_v_grandchild);
   EXPECT_EQ(v, result_view);
   result_view = nullptr;
@@ -3036,6 +3044,10 @@ TEST_F(ViewTest, GetCanProcessEventsWithinSubtree) {
   v_child->Reset();
   v->SetCanProcessEventsWithinSubtree(false);
 
+  EXPECT_FALSE(v->GetCanProcessEventsWithinSubtree());
+  EXPECT_FALSE(v_child->GetCanProcessEventsWithinSubtree());
+  EXPECT_FALSE(v_grandchild->GetCanProcessEventsWithinSubtree());
+
   result_view = root_view->GetEventHandlerForRect(rect_in_v_grandchild);
   EXPECT_EQ(root_view, result_view);
   result_view = nullptr;
@@ -3055,6 +3067,53 @@ TEST_F(ViewTest, GetCanProcessEventsWithinSubtree) {
   result_view = nullptr;
   result_view = root_view->GetTooltipHandlerForPoint(point_in_v);
   EXPECT_EQ(root_view, result_view);
+
+  widget->CloseNow();
+}
+
+TEST_F(ViewTest, CanProcessEventsWithinSubtree_DirectEvents) {
+  auto widget = std::make_unique<Widget>();
+  Widget::InitParams params = CreateParams(
+      Widget::InitParams::CLIENT_OWNS_WIDGET, Widget::InitParams::TYPE_POPUP);
+  widget->Init(std::move(params));
+  View* root_view = widget->GetRootView();
+
+  TestView* parent = root_view->AddChildView(std::make_unique<TestView>());
+  parent->SetBounds(0, 0, 100, 100);
+
+  TestView* child = parent->AddChildView(std::make_unique<TestView>());
+  child->SetBounds(0, 0, 50, 50);
+
+  ui::MouseEvent mouse_event(ui::EventType::kMousePressed, gfx::Point(10, 10),
+                             gfx::Point(10, 10), base::TimeTicks::Now(),
+                             ui::EF_LEFT_MOUSE_BUTTON,
+                             ui::EF_LEFT_MOUSE_BUTTON);
+
+  // Both should accept events.
+  EXPECT_TRUE(parent->CanAcceptEvent(mouse_event));
+  EXPECT_TRUE(child->CanAcceptEvent(mouse_event));
+
+  // Sending event directly should dispatch to TestView's overrides.
+  child->Reset();
+  child->OnEvent(&mouse_event);
+  EXPECT_EQ(ui::EventType::kMousePressed, child->last_mouse_event_type_);
+
+  // Disable processing on the parent.
+  parent->SetCanProcessEventsWithinSubtree(false);
+
+  // Now, both the parent and the child should reject the event via
+  // CanAcceptEvent.
+  EXPECT_FALSE(parent->CanAcceptEvent(mouse_event));
+  EXPECT_FALSE(child->CanAcceptEvent(mouse_event));
+
+  // The event should be "eaten" by OnEvent without dispatching to OnMouseEvent.
+  child->Reset();
+  ui::MouseEvent mouse_event2(ui::EventType::kMouseReleased, gfx::Point(10, 10),
+                              gfx::Point(10, 10), base::TimeTicks::Now(),
+                              ui::EF_LEFT_MOUSE_BUTTON,
+                              ui::EF_LEFT_MOUSE_BUTTON);
+  child->OnEvent(&mouse_event2);
+  EXPECT_EQ(ui::EventType::kUnknown, child->last_mouse_event_type_);
 
   widget->CloseNow();
 }
@@ -3266,26 +3325,26 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
   //
 
   normal->SelectAll(false);
-  normal->ExecuteCommand(Textfield::kCut, 0);
-  std::u16string result;
-  clipboard->ReadText(ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr,
-                      &result);
+  normal->ExecuteCommand(
+      std::to_underlying(ui::TouchEditable::MenuCommands::kCut), 0);
+  std::u16string result = ui::clipboard_test_util::ReadText(
+      clipboard, ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr);
   EXPECT_EQ(kNormalText, result);
   normal->SetText(kNormalText);  // Let's revert to the original content.
 
   read_only->SelectAll(false);
-  read_only->ExecuteCommand(Textfield::kCut, 0);
-  result.clear();
-  clipboard->ReadText(ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr,
-                      &result);
+  read_only->ExecuteCommand(
+      std::to_underlying(ui::TouchEditable::MenuCommands::kCut), 0);
+  result = ui::clipboard_test_util::ReadText(
+      clipboard, ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr);
   // Cut should have failed, so the clipboard content should not have changed.
   EXPECT_EQ(kNormalText, result);
 
   password->SelectAll(false);
-  password->ExecuteCommand(Textfield::kCut, 0);
-  result.clear();
-  clipboard->ReadText(ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr,
-                      &result);
+  password->ExecuteCommand(
+      std::to_underlying(ui::TouchEditable::MenuCommands::kCut), 0);
+  result = ui::clipboard_test_util::ReadText(
+      clipboard, ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr);
   // Cut should have failed, so the clipboard content should not have changed.
   EXPECT_EQ(kNormalText, result);
 
@@ -3295,24 +3354,24 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
 
   // Start with |read_only| to observe a change in clipboard text.
   read_only->SelectAll(false);
-  read_only->ExecuteCommand(Textfield::kCopy, 0);
-  result.clear();
-  clipboard->ReadText(ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr,
-                      &result);
+  read_only->ExecuteCommand(
+      std::to_underlying(ui::TouchEditable::MenuCommands::kCopy), 0);
+  result = ui::clipboard_test_util::ReadText(
+      clipboard, ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr);
   EXPECT_EQ(kReadOnlyText, result);
 
   normal->SelectAll(false);
-  normal->ExecuteCommand(Textfield::kCopy, 0);
-  result.clear();
-  clipboard->ReadText(ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr,
-                      &result);
+  normal->ExecuteCommand(
+      std::to_underlying(ui::TouchEditable::MenuCommands::kCopy), 0);
+  result = ui::clipboard_test_util::ReadText(
+      clipboard, ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr);
   EXPECT_EQ(kNormalText, result);
 
   password->SelectAll(false);
-  password->ExecuteCommand(Textfield::kCopy, 0);
-  result.clear();
-  clipboard->ReadText(ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr,
-                      &result);
+  password->ExecuteCommand(
+      std::to_underlying(ui::TouchEditable::MenuCommands::kCopy), 0);
+  result = ui::clipboard_test_util::ReadText(
+      clipboard, ui::ClipboardBuffer::kCopyPaste, /* data_dst = */ nullptr);
   // Text cannot be copied from an obscured field; the clipboard won't change.
   EXPECT_EQ(kNormalText, result);
 
@@ -3322,18 +3381,22 @@ TEST_F(ViewTest, TextfieldCutCopyPaste) {
 
   // Attempting to paste kNormalText in a read-only text-field should fail.
   read_only->SelectAll(false);
-  read_only->ExecuteCommand(Textfield::kPaste, 0);
+  read_only->ExecuteCommand(
+      std::to_underlying(ui::TouchEditable::MenuCommands::kPaste), 0);
   EXPECT_EQ(kReadOnlyText, read_only->GetText());
 
   password->SelectAll(false);
-  password->ExecuteCommand(Textfield::kPaste, 0);
+  password->ExecuteCommand(
+      std::to_underlying(ui::TouchEditable::MenuCommands::kPaste), 0);
   EXPECT_EQ(kNormalText, password->GetText());
 
   // Copy from |read_only| to observe a change in the normal textfield text.
   read_only->SelectAll(false);
-  read_only->ExecuteCommand(Textfield::kCopy, 0);
+  read_only->ExecuteCommand(
+      std::to_underlying(ui::TouchEditable::MenuCommands::kCopy), 0);
   normal->SelectAll(false);
-  normal->ExecuteCommand(Textfield::kPaste, 0);
+  normal->ExecuteCommand(
+      std::to_underlying(ui::TouchEditable::MenuCommands::kPaste), 0);
   EXPECT_EQ(kReadOnlyText, normal->GetText());
   widget->CloseNow();
 }
@@ -4018,6 +4081,86 @@ TEST_F(ViewTest, OnVisibleBoundsChanged) {
   EXPECT_TRUE(child->received_notification());
   EXPECT_EQ(1, child->GetVisibleBounds().height());
   child->set_received_notification(false);
+}
+
+TEST_F(ViewTest, ScopedNotifyObserversOnVisibleBoundsChanged) {
+  class TestObserver : public ViewObserver {
+   public:
+    void OnViewVisibleBoundsChanged(View* view) override { notifications_++; }
+    int notifications_ = 0;
+  };
+  TestObserver observer;
+
+  auto widget = std::make_unique<Widget>();
+  Widget::InitParams params = CreateParams(
+      Widget::InitParams::CLIENT_OWNS_WIDGET, Widget::InitParams::TYPE_POPUP);
+  widget->Init(std::move(params));
+
+  View* contents = widget->SetContentsView(std::make_unique<View>());
+  View* child = contents->AddChildView(std::make_unique<View>());
+  child->SetBoundsRect(gfx::Rect(0, 0, 10, 10));
+
+  child->AddObserver(&observer);
+
+  // By default, no notification on bounds change because nothing wants it.
+  child->SetBoundsRect(gfx::Rect(0, 0, 20, 20));
+  EXPECT_EQ(0, observer.notifications_);
+
+  {
+    View::ScopedNotifyObserversOnVisibleBoundsChanged scoped(*child);
+    child->SetBoundsRect(gfx::Rect(0, 0, 30, 30));
+    EXPECT_EQ(1, observer.notifications_);
+  }
+
+  // After scope, no notification again.
+  child->SetBoundsRect(gfx::Rect(0, 0, 40, 40));
+  EXPECT_EQ(1, observer.notifications_);
+
+  // Test nesting.
+  {
+    View::ScopedNotifyObserversOnVisibleBoundsChanged scoped1(*child);
+    {
+      View::ScopedNotifyObserversOnVisibleBoundsChanged scoped2(*child);
+      child->SetBoundsRect(gfx::Rect(0, 0, 50, 50));
+      EXPECT_EQ(2, observer.notifications_);
+    }
+    // Destruction of scoped2 should not have triggered
+    // OnViewVisibleBoundsChanged.
+    EXPECT_EQ(2, observer.notifications_);
+
+    child->SetBoundsRect(gfx::Rect(0, 0, 60, 60));
+    EXPECT_EQ(3, observer.notifications_);
+  }
+
+  // After scope, no notification again.
+  child->SetBoundsRect(gfx::Rect(0, 0, 70, 70));
+  EXPECT_EQ(3, observer.notifications_);
+}
+
+TEST_F(ViewTest, ReparentRegisteredViewFromNoWidgetToWidget) {
+  auto parent1 = std::make_unique<View>();
+  View* child = parent1->AddChildView(std::make_unique<View>());
+
+  // 1. Register child while it has no widget.
+  std::optional<View::ScopedNotifyObserversOnVisibleBoundsChanged> scoped;
+  scoped.emplace(*child);
+
+  // 2. Add parent1 to a widget.
+  auto widget = std::make_unique<Widget>();
+  Widget::InitParams params =
+      CreateParams(Widget::InitParams::TYPE_WINDOW_FRAMELESS);
+  params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  widget->Init(std::move(params));
+
+  View* root = widget->GetRootView();
+  // This calls AddChildViewAtImpl(root, parent1).
+  root->AddChildView(std::move(parent1));
+
+  // 3. Now unregister 'child'.
+  scoped.reset();
+
+  // 4. Destroy the widget.
+  widget.reset();
 }
 
 TEST_F(ViewTest, SetBoundsPaint) {
@@ -4971,8 +5114,8 @@ TEST_F(ViewTest, GetViewByID) {
   View::Views views;
   v1.GetViewsInGroup(kGroup, &views);
   EXPECT_EQ(2U, views.size());
-  EXPECT_TRUE(base::Contains(views, &v3));
-  EXPECT_TRUE(base::Contains(views, &v4));
+  EXPECT_TRUE(std::ranges::contains(views, &v3));
+  EXPECT_TRUE(std::ranges::contains(views, &v4));
 }
 
 TEST_F(ViewTest, AddExistingChild) {

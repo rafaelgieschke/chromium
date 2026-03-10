@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_COMMON_SWITCHES_H_
 #define THIRD_PARTY_BLINK_PUBLIC_COMMON_SWITCHES_H_
 
+#include "build/build_config.h"
 #include "third_party/blink/public/common/common_export.h"
 
 namespace blink {
@@ -26,13 +27,19 @@ BLINK_COMMON_EXPORT extern const char kDisablePreferCompositingToLCDText[];
 BLINK_COMMON_EXPORT extern const char kDisableRGBA4444Textures[];
 BLINK_COMMON_EXPORT extern const char kDisableZeroCopy[];
 BLINK_COMMON_EXPORT extern const char kDumpRuntimeCallStats[];
+BLINK_COMMON_EXPORT extern const char kEnableDesktopAndroidScrollbars[];
 BLINK_COMMON_EXPORT extern const char
     kEnableGpuMemoryBufferCompositorResources[];
 BLINK_COMMON_EXPORT extern const char kEnableLeakDetectionHeapSnapshot[];
 BLINK_COMMON_EXPORT extern const char kEnablePreferCompositingToLCDText[];
 BLINK_COMMON_EXPORT extern const char kEnableRasterSideDarkModeForImages[];
 BLINK_COMMON_EXPORT extern const char kEnableRGBA4444Textures[];
+#if BUILDFLAG(IS_CHROMEOS)
+BLINK_COMMON_EXPORT extern const char kEnableWebGLImageChromium[];
+#endif
 BLINK_COMMON_EXPORT extern const char kEnableZeroCopy[];
+BLINK_COMMON_EXPORT extern const char
+    kGpuMemoryBufferReadbackFromTextureForceDisabledForDebugging[];
 BLINK_COMMON_EXPORT extern const char kGpuRasterizationMSAASampleCount[];
 BLINK_COMMON_EXPORT extern const char kForceGpuMemAvailableMb[];
 BLINK_COMMON_EXPORT extern const char
@@ -48,6 +55,7 @@ BLINK_COMMON_EXPORT extern const char kDisableBlobUrlPartitioning[];
 BLINK_COMMON_EXPORT extern const char kCSSCustomStateDeprecatedSyntaxEnabled[];
 BLINK_COMMON_EXPORT extern const char kMinHeightForGpuRasterTile[];
 BLINK_COMMON_EXPORT extern const char kNetworkQuietTimeout[];
+BLINK_COMMON_EXPORT extern const char kShowContentfulPaintRects[];
 BLINK_COMMON_EXPORT extern const char kShowLayoutShiftRegions[];
 BLINK_COMMON_EXPORT extern const char kShowPaintRects[];
 BLINK_COMMON_EXPORT extern const char kTouchTextSelectionStrategy[];
@@ -56,6 +64,7 @@ BLINK_COMMON_EXPORT extern const char kTouchTextSelectionStrategy_Direction[];
 BLINK_COMMON_EXPORT extern const char kDisableStandardizedBrowserZoom[];
 BLINK_COMMON_EXPORT extern const char kWebAudioBypassOutputBufferingOptOut[];
 BLINK_COMMON_EXPORT extern const char kDisableReduceAcceptLanguage[];
+BLINK_COMMON_EXPORT extern const char kXSLTEnabledPolicy[];
 }  // namespace switches
 }  // namespace blink
 

@@ -100,6 +100,7 @@ source_set("impl") {
         "//base:build_time",
         "//chrome/browser:buildflags",
         "//chrome/browser/google",
+        "//chrome/browser/obsolete_system",
         "//content/public/browser",
       ]
     } else {
@@ -107,7 +108,7 @@ source_set("impl") {
         "installed_version_updater_chromeos.cc",
         "upgrade_detector_chromeos.cc",
       ]
-      deps += [ "//chromeos/crosapi/cpp:crosapi_constants" ]
+      deps += [ "//chromeos/ash/components/channel" ]
     }
   }
 

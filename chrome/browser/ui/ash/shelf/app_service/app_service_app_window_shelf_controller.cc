@@ -14,7 +14,6 @@
 #include "ash/public/cpp/shelf_model.h"
 #include "ash/public/cpp/window_properties.h"
 #include "ash/shell.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "chrome/browser/apps/app_service/app_service_proxy.h"
 #include "chrome/browser/apps/app_service/app_service_proxy_factory.h"
@@ -40,7 +39,6 @@
 #include "chrome/browser/ui/ash/shelf/chrome_shelf_controller.h"
 #include "chrome/browser/ui/ash/shelf/crostini_app_window.h"
 #include "chrome/browser/web_applications/web_app_utils.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/grit/chrome_unscaled_resources.h"
 #include "chromeos/ash/components/borealis/borealis_util.h"
 #include "chromeos/ash/experiences/arc/app/arc_app_constants.h"
@@ -431,7 +429,7 @@ void AppServiceAppWindowShelfController::UnregisterWindow(
 void AppServiceAppWindowShelfController::AddWindowToShelf(
     aura::Window* window,
     const ash::ShelfID& shelf_id) {
-  if (base::Contains(aura_window_to_app_window_, window)) {
+  if (aura_window_to_app_window_.contains(window)) {
     return;
   }
 
@@ -463,7 +461,7 @@ void AppServiceAppWindowShelfController::AddWindowToShelf(
 
 AppWindowBase* AppServiceAppWindowShelfController::GetAppWindow(
     aura::Window* window) {
-  if (!base::Contains(aura_window_to_app_window_, window)) {
+  if (!aura_window_to_app_window_.contains(window)) {
     return nullptr;
   }
   return aura_window_to_app_window_[window].get();

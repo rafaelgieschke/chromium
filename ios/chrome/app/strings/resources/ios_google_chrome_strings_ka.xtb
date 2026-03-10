@@ -1,6 +1,7 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="ka">
+<translation id="1035560095760914532">განათავსეთ Chrome ქვედა არეში, რომ ნებისმიერ დროს შეძლოთ მასზე წვდომა</translation>
 <translation id="1076643793026027628">Chrome ავტომატურად გახსნის YouTube-ის ინკოგნიტო ბმულებს ინკოგნიტო რეჟიმში.</translation>
 <translation id="1081114897601629648">შემდეგი პაროლები არ იქნა იმპორტირებული Google პაროლების მმართველში, რადგან ისინი არ აკმაყოფილებს მოთხოვნებს.</translation>
 <translation id="1086486568852410168">ძიება Google Lens-ით</translation>
@@ -86,6 +87,10 @@
 <translation id="2767464022270041271">შენახული პაროლები არ არის. Google პაროლების მმართველი თქვენი პაროლების შემოწმებას შეძლებს მათი შენახვის შემდეგ.</translation>
 <translation id="2788811701191021538">გახსნის გადახდის მეთოდების პარამეტრების გვერდს Chrome-ში.</translation>
 <translation id="2876628302275096482">შეიტყვეთ მეტი იმის შესახებ, თუ <ph name="BEGIN_LINK" />როგორ ინარჩუნებს Chrome თქვენი მონაცემების კონფიდენციალურობას<ph name="END_LINK" /></translation>
+<translation id="288992067439702510">თქვენ მიაღწიეთ Google Chrome-ის <ph name="LIMIT" /> სანიშნის ლიმიტს, ამიტომ თქვენი ზოგიერთი სანიშნე ჯერ არ შენახულა თქვენს Google ანგარიშში.
+
+ახალი სანიშნეების შენახვა თქვენს ანგარიშში ვერ მოხერხდება, სანამ რამდენიმეს არ წაშლით. ახლა გასვლის შემთხვევაში შეუნახავი სანიშნები წაიშლება.</translation>
+<translation id="2901621928549457170">მყისიერად გახსენით Chrome, როცა iPad-ს იყენებთ</translation>
 <translation id="2922914028977213693">შეეხეთ აქ, რომ მაქსიმალურად გამოიყენოთ Chrome თქვენს iPad-ში.</translation>
 <translation id="292371311537977079">Chrome-ის პარამეტრები</translation>
 <translation id="2923827943290349720">Chrome-ის დახურვისას ინკოგნიტო ჩანართების ჩაკეტვა</translation>
@@ -170,6 +175,8 @@
 <translation id="5119391094379141756">აირჩიეთ Chrome</translation>
 <translation id="5123188916260706415">ხმით ძიება Chrome-ში</translation>
 <translation id="5162467219239570114">Chrome მოძველდა. თუ <ph name="BEGIN_LINK" />App Store<ph name="END_LINK" />-ში განახლება მიუწვდომელია, შესაძლოა, რომ თქვენს მოწყობილობაზე Chrome-ის ახალი ვერსიები მხარდაჭერილი აღარ იყოს.</translation>
+<translation id="5172049865623113551">მყისიერად გახსენით Chrome, როცა iPhone-ს იყენებთ</translation>
+<translation id="5179095426828744632">მიიღეთ უფრო სწრაფი წვდომა Chrome-ზე სამაგრიდან</translation>
 <translation id="5184329579814168207">Chrome-ში გახსნა</translation>
 <translation id="5190139289262548459">თქვენი ორგანიზაცია, <ph name="DOMAIN" />, მართავს როგორც ანგარიშს, რომელშიც შესული ხართ, ისე Chrome-ის გამოყენების პროცესს.</translation>
 <translation id="5209238444239954363">Chrome-მა ვერ შეამოწმა განახლებები. ცადეთ მოგვიანებით.</translation>
@@ -308,7 +315,6 @@
 <translation id="787226752901403048">შედით Chrome-ში, რომ გააზიაროთ ჩანართების ჯგუფები, შეუერთდეთ მათ და ერთად იმუშაოთ იდეებზე</translation>
 <translation id="7897703007638178753">Chrome-ის ბოლოდროინდელი ჩანართების ნახვა</translation>
 <translation id="7948283758957877064">სიახლეები Chrome-ში</translation>
-<translation id="7996707498590516621">სურათის შექმნა Gemini-ს მეშვეობით Chrome-ში</translation>
 <translation id="8000174216052461231">მინიშნება Chrome-ისთვის: მიიღეთ Chrome-ის უსაფრთხოების დაცვის უძლიერესი ფუნქციები</translation>
 <translation id="8006014511203279255">გამოიყენეთ Chrome შეტყობინებებში ან სხვა აპებში არსებულ ბმულებზე ყოველი შეხებისას.</translation>
 <translation id="8014670471808569312">Chrome შემოგთავაზებთ თქვენი პაროლის შენახვას.</translation>
@@ -320,6 +326,7 @@
 <translation id="8136856065410661948">ამის მეშვეობით შესაძლებელი გახდება, Chrome-ისა და Google Lens-ის მეშვეობით შექმნათ მოვლენები თქვენს Apple Calendar-ში.</translation>
 <translation id="8154120522323162874">მაქსიმალურად გამოიყენეთ Chrome-ის შესაძლებლობები, რისთვისაც ბრაუზერის დაყენება უნდა განაგრძოთ.</translation>
 <translation id="8160472928944011082">Chrome ვერ განახლდება</translation>
+<translation id="8213550501565480896">Chrome-ის ნაგულისხმევად დაყენება</translation>
 <translation id="8245080522851805544">დატოვეთ დათვალიერება კონფიდენციალურად მოწყობილობის ავტორიზაციით, როცა Chrome-ს დახურავთ</translation>
 <translation id="8248887045858762645">Chrome მინიშნება</translation>
 <translation id="8265730590513812063">გახსენით Chrome-ის მენიუ</translation>
@@ -351,6 +358,7 @@
 <translation id="8788269841521769222">ამ პაროლის დამახსოვრება არ დაგჭირდებათ. ის შეინახება Google პაროლების მმართველში <ph name="EMAIL" />-თვის</translation>
 <translation id="8796490717897731471"><ph name="EMAIL" />. Chrome მართულია.</translation>
 <translation id="880967149107462122">Chrome-ის პარამეტრებზე გადასვლა</translation>
+<translation id="8840947648682778034">Chrome-ის თემა iPhone-ისა და iPad-ისთვის</translation>
 <translation id="8842132678697187091">Google Lens-ის გახსნა შეგიძლიათ აქ.</translation>
 <translation id="8850736900032787670">თქვენი ინტერესების მიხედვით პერსონალიზებული კონტენტის მისაღებად შედით Chrome-ში.</translation>
 <translation id="8855781063981781621">Chrome-ში ჩაკეტვის რეჟიმის გასათიშად გამორთეთ ის თქვენს iPad-ზე.</translation>

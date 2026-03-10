@@ -16,7 +16,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/test/test_browser_dialog.h"
-#include "chrome/browser/ui/views/extensions/extensions_toolbar_container.h"
+#include "chrome/browser/ui/views/extensions/extensions_toolbar_desktop.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/browser/ui/web_applications/test/web_app_browsertest_util.h"
@@ -205,7 +205,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionUninstallDialogImplBrowserTest,
 }
 
 // Test that we don't crash when uninstalling an extension from a web app
-// window in Ash. Context: crbug.com/825554
+// window in Ash. Context: crbug.com/40568607
 // TODO(crbug.com/415937950): Fix and re-enable flaky test.
 IN_PROC_BROWSER_TEST_F(ExtensionUninstallDialogImplBrowserTest,
                        DISABLED_WebAppWindowAshCrash) {
@@ -367,7 +367,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionUninstallDialogImplBrowserTest,
 
 // Tests the dialog is anchored in the correct place based on whether the
 // extensions container is visible.
-// Regression test for crbug.com/133249.
+// Regression test for crbug.com/40227690.
 IN_PROC_BROWSER_TEST_F(ExtensionUninstallDialogImplBrowserTest,
                        DialogAnchoredInCorrectPlace) {
   extensions::ExtensionRegistrar* extension_registrar =
@@ -382,7 +382,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionUninstallDialogImplBrowserTest,
 
   // Extensions container should be visible since there are enabled
   // extensions.
-  ExtensionsToolbarContainer* const container =
+  ExtensionsToolbarDesktop* const container =
       browser()->GetBrowserView().toolbar()->extensions_container();
   ASSERT_TRUE(container->GetVisible());
   ASSERT_TRUE(container->GetViewForId(extensionA->id()));

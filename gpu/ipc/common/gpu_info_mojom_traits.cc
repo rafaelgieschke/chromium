@@ -58,8 +58,8 @@ EnumTraits<gpu::mojom::SkiaBackendType, gpu::SkiaBackendType>::ToMojom(
       return gpu::mojom::SkiaBackendType::kGraphiteDawnD3D11;
     case gpu::SkiaBackendType::kGraphiteDawnD3D12:
       return gpu::mojom::SkiaBackendType::kGraphiteDawnD3D12;
-    case gpu::SkiaBackendType::kGraphiteMetal:
-      return gpu::mojom::SkiaBackendType::kGraphiteMetal;
+    case gpu::SkiaBackendType::kGraphiteDawnOpenGLES:
+      return gpu::mojom::SkiaBackendType::kGraphiteDawnOpenGLES;
   }
   NOTREACHED() << "Invalid SkiaBackendType:" << static_cast<int>(type);
 }
@@ -93,8 +93,8 @@ bool EnumTraits<gpu::mojom::SkiaBackendType, gpu::SkiaBackendType>::FromMojom(
     case gpu::mojom::SkiaBackendType::kGraphiteDawnD3D12:
       *out = gpu::SkiaBackendType::kGraphiteDawnD3D12;
       return true;
-    case gpu::mojom::SkiaBackendType::kGraphiteMetal:
-      *out = gpu::SkiaBackendType::kGraphiteMetal;
+    case gpu::mojom::SkiaBackendType::kGraphiteDawnOpenGLES:
+      *out = gpu::SkiaBackendType::kGraphiteDawnOpenGLES;
       return true;
   }
   NOTREACHED() << "Invalid SkiaBackendType: " << input;
@@ -173,6 +173,10 @@ EnumTraits<gpu::mojom::VideoCodecProfile, gpu::VideoCodecProfile>::ToMojom(
       return gpu::mojom::VideoCodecProfile::DOLBYVISION_PROFILE8;
     case gpu::VideoCodecProfile::DOLBYVISION_PROFILE9:
       return gpu::mojom::VideoCodecProfile::DOLBYVISION_PROFILE9;
+    case gpu::VideoCodecProfile::DOLBYVISION_PROFILE10:
+      return gpu::mojom::VideoCodecProfile::DOLBYVISION_PROFILE10;
+    case gpu::VideoCodecProfile::DOLBYVISION_PROFILE20:
+      return gpu::mojom::VideoCodecProfile::DOLBYVISION_PROFILE20;
     case gpu::VideoCodecProfile::THEORAPROFILE_ANY:
       return gpu::mojom::VideoCodecProfile::THEORAPROFILE_ANY;
     case gpu::VideoCodecProfile::AV1PROFILE_PROFILE_MAIN:
@@ -181,36 +185,6 @@ EnumTraits<gpu::mojom::VideoCodecProfile, gpu::VideoCodecProfile>::ToMojom(
       return gpu::mojom::VideoCodecProfile::AV1PROFILE_PROFILE_HIGH;
     case gpu::VideoCodecProfile::AV1PROFILE_PROFILE_PRO:
       return gpu::mojom::VideoCodecProfile::AV1PROFILE_PROFILE_PRO;
-    case gpu::VideoCodecProfile::VVCPROFILE_MAIN10:
-      return gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN10;
-    case gpu::VideoCodecProfile::VVCPROFILE_MAIN12:
-      return gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN12;
-    case gpu::VideoCodecProfile::VVCPROFILE_MAIN12_INTRA:
-      return gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN12_INTRA;
-    case gpu::VideoCodecProfile::VVCPROIFLE_MULTILAYER_MAIN10:
-      return gpu::mojom::VideoCodecProfile::VVCPROIFLE_MULTILAYER_MAIN10;
-    case gpu::VideoCodecProfile::VVCPROFILE_MAIN10_444:
-      return gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN10_444;
-    case gpu::VideoCodecProfile::VVCPROFILE_MAIN12_444:
-      return gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN12_444;
-    case gpu::VideoCodecProfile::VVCPROFILE_MAIN16_444:
-      return gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN16_444;
-    case gpu::VideoCodecProfile::VVCPROFILE_MAIN12_444_INTRA:
-      return gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN12_444_INTRA;
-    case gpu::VideoCodecProfile::VVCPROFILE_MAIN16_444_INTRA:
-      return gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN16_444_INTRA;
-    case gpu::VideoCodecProfile::VVCPROFILE_MULTILAYER_MAIN10_444:
-      return gpu::mojom::VideoCodecProfile::VVCPROFILE_MULTILAYER_MAIN10_444;
-    case gpu::VideoCodecProfile::VVCPROFILE_MAIN10_STILL_PICTURE:
-      return gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN10_STILL_PICTURE;
-    case gpu::VideoCodecProfile::VVCPROFILE_MAIN12_STILL_PICTURE:
-      return gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN12_STILL_PICTURE;
-    case gpu::VideoCodecProfile::VVCPROFILE_MAIN10_444_STILL_PICTURE:
-      return gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN10_444_STILL_PICTURE;
-    case gpu::VideoCodecProfile::VVCPROFILE_MAIN12_444_STILL_PICTURE:
-      return gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN12_444_STILL_PICTURE;
-    case gpu::VideoCodecProfile::VVCPROFILE_MAIN16_444_STILL_PICTURE:
-      return gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN12_444_STILL_PICTURE;
   }
   NOTREACHED() << "Invalid VideoCodecProfile:" << video_codec_profile;
 }
@@ -321,6 +295,12 @@ bool EnumTraits<gpu::mojom::VideoCodecProfile, gpu::VideoCodecProfile>::
     case gpu::mojom::VideoCodecProfile::DOLBYVISION_PROFILE9:
       *out = gpu::VideoCodecProfile::DOLBYVISION_PROFILE9;
       return true;
+    case gpu::mojom::VideoCodecProfile::DOLBYVISION_PROFILE10:
+      *out = gpu::VideoCodecProfile::DOLBYVISION_PROFILE10;
+      return true;
+    case gpu::mojom::VideoCodecProfile::DOLBYVISION_PROFILE20:
+      *out = gpu::VideoCodecProfile::DOLBYVISION_PROFILE20;
+      return true;
     case gpu::mojom::VideoCodecProfile::THEORAPROFILE_ANY:
       *out = gpu::VideoCodecProfile::THEORAPROFILE_ANY;
       return true;
@@ -332,51 +312,6 @@ bool EnumTraits<gpu::mojom::VideoCodecProfile, gpu::VideoCodecProfile>::
       return true;
     case gpu::mojom::VideoCodecProfile::AV1PROFILE_PROFILE_PRO:
       *out = gpu::VideoCodecProfile::AV1PROFILE_PROFILE_PRO;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN10:
-      *out = gpu::VideoCodecProfile::VVCPROFILE_MAIN10;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN12:
-      *out = gpu::VideoCodecProfile::VVCPROFILE_MAIN12;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN12_INTRA:
-      *out = gpu::VideoCodecProfile::VVCPROFILE_MAIN12_INTRA;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROIFLE_MULTILAYER_MAIN10:
-      *out = gpu::VideoCodecProfile::VVCPROIFLE_MULTILAYER_MAIN10;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN10_444:
-      *out = gpu::VideoCodecProfile::VVCPROFILE_MAIN10_444;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN12_444:
-      *out = gpu::VideoCodecProfile::VVCPROFILE_MAIN12_444;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN16_444:
-      *out = gpu::VideoCodecProfile::VVCPROFILE_MAIN16_444;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN12_444_INTRA:
-      *out = gpu::VideoCodecProfile::VVCPROFILE_MAIN12_444_INTRA;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN16_444_INTRA:
-      *out = gpu::VideoCodecProfile::VVCPROFILE_MAIN16_444_INTRA;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROFILE_MULTILAYER_MAIN10_444:
-      *out = gpu::VideoCodecProfile::VVCPROFILE_MULTILAYER_MAIN10_444;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN10_STILL_PICTURE:
-      *out = gpu::VideoCodecProfile::VVCPROFILE_MAIN10_STILL_PICTURE;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN12_STILL_PICTURE:
-      *out = gpu::VideoCodecProfile::VVCPROFILE_MAIN12_STILL_PICTURE;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN10_444_STILL_PICTURE:
-      *out = gpu::VideoCodecProfile::VVCPROFILE_MAIN10_444_STILL_PICTURE;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN12_444_STILL_PICTURE:
-      *out = gpu::VideoCodecProfile::VVCPROFILE_MAIN12_444_STILL_PICTURE;
-      return true;
-    case gpu::mojom::VideoCodecProfile::VVCPROFILE_MAIN16_444_STILL_PICTURE:
-      *out = gpu::VideoCodecProfile::VVCPROFILE_MAIN12_444_STILL_PICTURE;
       return true;
   }
   NOTREACHED() << "Invalid VideoCodecProfile: " << input;
@@ -414,89 +349,6 @@ bool StructTraits<gpu::mojom::VideoEncodeAcceleratorSupportedProfileDataView,
   return data.ReadMinResolution(&out->min_resolution) &&
          data.ReadMaxResolution(&out->max_resolution) &&
          data.ReadProfile(&out->profile);
-}
-
-// static
-gpu::mojom::ImageDecodeAcceleratorType EnumTraits<
-    gpu::mojom::ImageDecodeAcceleratorType,
-    gpu::ImageDecodeAcceleratorType>::ToMojom(gpu::ImageDecodeAcceleratorType
-                                                  image_type) {
-  switch (image_type) {
-    case gpu::ImageDecodeAcceleratorType::kJpeg:
-      return gpu::mojom::ImageDecodeAcceleratorType::kJpeg;
-    case gpu::ImageDecodeAcceleratorType::kWebP:
-      return gpu::mojom::ImageDecodeAcceleratorType::kWebP;
-    case gpu::ImageDecodeAcceleratorType::kUnknown:
-      return gpu::mojom::ImageDecodeAcceleratorType::kUnknown;
-  }
-  NOTREACHED() << "Invalid ImageDecodeAcceleratorType: "
-               << static_cast<int>(image_type);
-}
-
-// static
-bool EnumTraits<gpu::mojom::ImageDecodeAcceleratorType,
-                gpu::ImageDecodeAcceleratorType>::
-    FromMojom(gpu::mojom::ImageDecodeAcceleratorType input,
-              gpu::ImageDecodeAcceleratorType* out) {
-  switch (input) {
-    case gpu::mojom::ImageDecodeAcceleratorType::kJpeg:
-      *out = gpu::ImageDecodeAcceleratorType::kJpeg;
-      return true;
-    case gpu::mojom::ImageDecodeAcceleratorType::kWebP:
-      *out = gpu::ImageDecodeAcceleratorType::kWebP;
-      return true;
-    case gpu::mojom::ImageDecodeAcceleratorType::kUnknown:
-      *out = gpu::ImageDecodeAcceleratorType::kUnknown;
-      return true;
-  }
-  NOTREACHED() << "Invalid ImageDecodeAcceleratorType: " << input;
-}
-
-// static
-gpu::mojom::ImageDecodeAcceleratorSubsampling
-EnumTraits<gpu::mojom::ImageDecodeAcceleratorSubsampling,
-           gpu::ImageDecodeAcceleratorSubsampling>::
-    ToMojom(gpu::ImageDecodeAcceleratorSubsampling subsampling) {
-  switch (subsampling) {
-    case gpu::ImageDecodeAcceleratorSubsampling::k420:
-      return gpu::mojom::ImageDecodeAcceleratorSubsampling::k420;
-    case gpu::ImageDecodeAcceleratorSubsampling::k422:
-      return gpu::mojom::ImageDecodeAcceleratorSubsampling::k422;
-    case gpu::ImageDecodeAcceleratorSubsampling::k444:
-      return gpu::mojom::ImageDecodeAcceleratorSubsampling::k444;
-  }
-  NOTREACHED() << "Invalid ImageDecodeAcceleratorSubsampling: "
-               << static_cast<int>(subsampling);
-}
-
-// static
-bool EnumTraits<gpu::mojom::ImageDecodeAcceleratorSubsampling,
-                gpu::ImageDecodeAcceleratorSubsampling>::
-    FromMojom(gpu::mojom::ImageDecodeAcceleratorSubsampling input,
-              gpu::ImageDecodeAcceleratorSubsampling* out) {
-  switch (input) {
-    case gpu::mojom::ImageDecodeAcceleratorSubsampling::k420:
-      *out = gpu::ImageDecodeAcceleratorSubsampling::k420;
-      return true;
-    case gpu::mojom::ImageDecodeAcceleratorSubsampling::k422:
-      *out = gpu::ImageDecodeAcceleratorSubsampling::k422;
-      return true;
-    case gpu::mojom::ImageDecodeAcceleratorSubsampling::k444:
-      *out = gpu::ImageDecodeAcceleratorSubsampling::k444;
-      return true;
-  }
-  NOTREACHED() << "Invalid ImageDecodeAcceleratorSubsampling: " << input;
-}
-
-// static
-bool StructTraits<gpu::mojom::ImageDecodeAcceleratorSupportedProfileDataView,
-                  gpu::ImageDecodeAcceleratorSupportedProfile>::
-    Read(gpu::mojom::ImageDecodeAcceleratorSupportedProfileDataView data,
-         gpu::ImageDecodeAcceleratorSupportedProfile* out) {
-  return data.ReadImageType(&out->image_type) &&
-         data.ReadMinEncodedDimensions(&out->min_encoded_dimensions) &&
-         data.ReadMaxEncodedDimensions(&out->max_encoded_dimensions) &&
-         data.ReadSubsamplings(&out->subsamplings);
 }
 
 #if BUILDFLAG(IS_WIN)

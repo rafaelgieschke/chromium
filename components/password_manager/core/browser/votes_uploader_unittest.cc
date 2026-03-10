@@ -617,21 +617,6 @@ TEST_F(VotesUploaderTest, GeneratePasswordAttributesMetadata_NonAsciiPassword) {
   }
 }
 
-TEST_F(VotesUploaderTest, NoSingleUsernameDataNoUpload) {
-  VotesUploader votes_uploader(&client_, false);
-  EXPECT_CALL(mock_autofill_crowdsourcing_manager_, StartUploadRequest)
-      .Times(0);
-  base::HistogramTester histogram_tester;
-  votes_uploader.set_should_send_username_first_flow_votes(true);
-  votes_uploader.MaybeSendSingleUsernameVotes();
-
-  histogram_tester.ExpectUniqueSample(
-      "PasswordManager.SingleUsername.VoteDataAvailability",
-      static_cast<int>(
-          VotesUploader::SingleUsernameVoteDataAvailability::kNone),
-      1);
-}
-
 TEST_F(VotesUploaderTest, UploadSingleUsernameMultipleFieldsInUsernameForm) {
   VotesUploader votes_uploader(&client_, false);
 
@@ -674,14 +659,7 @@ TEST_F(VotesUploaderTest, UploadSingleUsernameMultipleFieldsInUsernameForm) {
         .Times(0);
   }
 
-  base::HistogramTester histogram_tester;
   votes_uploader.MaybeSendSingleUsernameVotes();
-
-  histogram_tester.ExpectUniqueSample(
-      "PasswordManager.SingleUsername.VoteDataAvailability",
-      static_cast<int>(VotesUploader::SingleUsernameVoteDataAvailability::
-                           kUsernameFirstOnly),
-      1);
 }
 
 // Tests that a negative vote is sent if the username candidate field
@@ -893,67 +871,6 @@ TEST_F(VotesUploaderTest, NotSingleUsernameValueDeletedInPrompt) {
   votes_uploader.MaybeSendSingleUsernameVotes();
 }
 
-// Tests FieldNameCollisionInVotes metric doesn't report "true" when multiple
-// fields in the form to be uploaded have the same name.
-TEST_F(VotesUploaderTest, FieldNameCollisionInVotes) {
-  VotesUploader votes_uploader(&client_, false);
-  std::u16string password_element = GetFieldNameByIndex(5);
-  form_to_upload_.password_element = password_element;
-  form_to_upload_.password_element_renderer_id = FieldRendererId(5);
-  submitted_form_.password_element = password_element;
-  submitted_form_.password_element_renderer_id = FieldRendererId(5);
-  form_to_upload_.confirmation_password_element = password_element;
-  form_to_upload_.confirmation_password_element_renderer_id =
-      FieldRendererId(11);
-  submitted_form_.confirmation_password_element = password_element;
-  submitted_form_.confirmation_password_element_renderer_id =
-      FieldRendererId(11);
-
-  auto upload_contents_matcher = IsPasswordUpload(
-      FormSignatureIs(CalculateFormSignature(form_to_upload_.form_data)),
-      LoginFormSignatureIs(login_form_signature_),
-      FieldsContain(UploadField(5, FieldType::PASSWORD),
-                    UploadField(11, FieldType::CONFIRMATION_PASSWORD)));
-  EXPECT_CALL(mock_autofill_crowdsourcing_manager_,
-              StartUploadRequest(upload_contents_matcher, _,
-                                 /*is_password_manager_upload=*/true));
-  base::HistogramTester histogram_tester;
-  EXPECT_TRUE(votes_uploader.UploadPasswordVote(
-      form_to_upload_, submitted_form_, FieldType::PASSWORD,
-      login_form_signature_));
-
-  histogram_tester.ExpectUniqueSample(
-      "PasswordManager.FieldNameCollisionInVotes", false, 1);
-}
-
-// Tests FieldNameCollisionInVotes metric reports "false" when all fields in the
-// form to be uploaded have different names.
-TEST_F(VotesUploaderTest, NoFieldNameCollisionInVotes) {
-  VotesUploader votes_uploader(&client_, false);
-  form_to_upload_.password_element_renderer_id = FieldRendererId(5);
-  submitted_form_.password_element_renderer_id = FieldRendererId(5);
-  form_to_upload_.confirmation_password_element_renderer_id =
-      FieldRendererId(12);
-  submitted_form_.confirmation_password_element_renderer_id =
-      FieldRendererId(12);
-
-  auto upload_contents_matcher = IsPasswordUpload(
-      FormSignatureIs(CalculateFormSignature(form_to_upload_.form_data)),
-      LoginFormSignatureIs(login_form_signature_),
-      FieldsContain(UploadField(5, FieldType::PASSWORD),
-                    UploadField(12, FieldType::CONFIRMATION_PASSWORD)));
-  EXPECT_CALL(mock_autofill_crowdsourcing_manager_,
-              StartUploadRequest(upload_contents_matcher, _,
-                                 /*is_password_manager_upload=*/true));
-  base::HistogramTester histogram_tester;
-  EXPECT_TRUE(votes_uploader.UploadPasswordVote(
-      form_to_upload_, submitted_form_, FieldType::PASSWORD,
-      login_form_signature_));
-
-  histogram_tester.ExpectUniqueSample(
-      "PasswordManager.FieldNameCollisionInVotes", false, 1);
-}
-
 TEST_F(VotesUploaderTest, ForgotPasswordFormVote) {
   VotesUploader votes_uploader(&client_, false);
   std::u16string single_username_candidate_value = u"username_candidate_value";
@@ -976,64 +893,9 @@ TEST_F(VotesUploaderTest, ForgotPasswordFormVote) {
               StartUploadRequest(upload_contents_matcher, _,
                                  /*is_password_manager_upload=*/true));
 
-  base::HistogramTester histogram_tester;
   votes_uploader.MaybeSendSingleUsernameVotes();
-
-  histogram_tester.ExpectUniqueSample(
-      "PasswordManager.SingleUsername.VoteDataAvailability",
-      static_cast<int>(VotesUploader::SingleUsernameVoteDataAvailability::
-                           kForgotPasswordOnly),
-      1);
 }
 
-// Tests "PasswordManager.SingleUsername.VoteDataAvailability" UMA recording
-// when both UFF and FPF data is available and has info about the same form.
-TEST_F(VotesUploaderTest, SingleUsernameVoteDataUffOverlapsWithFpf) {
-  VotesUploader votes_uploader(&client_, false);
 
-  SingleUsernameVoteData data(kSingleUsernameRendererId, u"possible_username",
-                              MakeSimpleSingleUsernamePredictions(),
-                              /*stored_credentials=*/{},
-                              PasswordFormHadMatchingUsername(false));
-
-  votes_uploader.add_single_username_vote_data(data);
-  votes_uploader.AddForgotPasswordVoteData(data);
-
-  base::HistogramTester histogram_tester;
-  votes_uploader.MaybeSendSingleUsernameVotes();
-
-  histogram_tester.ExpectUniqueSample(
-      "PasswordManager.SingleUsername.VoteDataAvailability",
-      static_cast<int>(
-          VotesUploader::SingleUsernameVoteDataAvailability::kBothWithOverlap),
-      1);
-}
-
-// Tests "PasswordManager.SingleUsername.VoteDataAvailability" UMA recording
-// when both UFF and FPF data is available and has info about different forms.
-TEST_F(VotesUploaderTest, SingleUsernameVoteDataUffNoOverlapWithFpf) {
-  VotesUploader votes_uploader(&client_, false);
-
-  SingleUsernameVoteData data1(FieldRendererId(100), u"maybe_username",
-                               MakeSimpleSingleUsernamePredictions(),
-                               /*stored_credentials=*/{},
-                               PasswordFormHadMatchingUsername(false));
-  votes_uploader.add_single_username_vote_data(data1);
-
-  SingleUsernameVoteData data2(FieldRendererId(200), u"also_maybe_username",
-                               MakeSimpleSingleUsernamePredictions(),
-                               /*stored_credentials=*/{},
-                               PasswordFormHadMatchingUsername(false));
-  votes_uploader.AddForgotPasswordVoteData(data2);
-
-  base::HistogramTester histogram_tester;
-  votes_uploader.MaybeSendSingleUsernameVotes();
-
-  histogram_tester.ExpectUniqueSample(
-      "PasswordManager.SingleUsername.VoteDataAvailability",
-      static_cast<int>(
-          VotesUploader::SingleUsernameVoteDataAvailability::kBothNoOverlap),
-      1);
-}
 
 }  // namespace password_manager

@@ -50,6 +50,7 @@
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
 #include "third_party/blink/renderer/core/dom/events/simulated_click_options.h"
 #include "third_party/blink/renderer/core/dom/id_target_observer.h"
+#include "third_party/blink/renderer/core/dom/opaque_range.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
@@ -70,6 +71,7 @@
 #include "third_party/blink/renderer/core/html/forms/html_data_list_options_collection.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_option_element.h"
+#include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/html/forms/input_type.h"
 #include "third_party/blink/renderer/core/html/forms/radio_button_group_scope.h"
 #include "third_party/blink/renderer/core/html/forms/search_input_type.h"
@@ -189,6 +191,12 @@ Vector<String> HTMLInputElement::FilesFromFileInputFormControlState(
 }
 
 bool HTMLInputElement::ShouldAutocomplete() const {
+  if (IsBaseAppearanceCombobox()) {
+    // If we are rendering the combobox's options inside the document using a
+    // popover, then we don't need to show the same options in the browser
+    // autofill popup.
+    return false;
+  }
   if (autocomplete_ != kUninitialized)
     return autocomplete_ == kOn;
   return TextControlElement::ShouldAutocomplete();
@@ -431,6 +439,15 @@ void HTMLInputElement::UpdateType(const AtomicString& type_attribute_value) {
     return;
   }
 
+  if (isConnected()) {
+    UseCounter::Count(GetDocument(),
+                      WebFeature::kHTMLInputElementTypeChangedWhileConnected);
+  } else {
+    UseCounter::Count(
+        GetDocument(),
+        WebFeature::kHTMLInputElementTypeChangedWhileDisconnected);
+  }
+
   InputType* new_type = InputType::Create(*this, new_type_name);
   RemoveFromRadioButtonGroup();
 
@@ -464,6 +481,9 @@ void HTMLInputElement::UpdateType(const AtomicString& type_attribute_value) {
   if (input_type_->ShouldRespectListAttribute() !=
       new_type->ShouldRespectListAttribute())
     PseudoStateChanged(CSSSelector::kPseudoHasDatalist);
+  if (input_type_->IsTextFieldInputType() != new_type->IsTextFieldInputType()) {
+    PseudoStateChanged(CSSSelector::kPseudoTextField);
+  }
 
   bool placeholder_changed =
       input_type_->SupportsPlaceholder() != new_type->SupportsPlaceholder();
@@ -479,7 +499,7 @@ void HTMLInputElement::UpdateType(const AtomicString& type_attribute_value) {
 
   const AtomicString& dir = FastGetAttribute(html_names::kDirAttr);
   if ((!dir && (old_type->IsTelephoneInputType() || IsTelephone())) ||
-      (EqualIgnoringASCIICase(dir, "auto") &&
+      (EqualIgnoringAsciiCase(dir, "auto") &&
        (old_type->IsAutoDirectionalityFormAssociated() ||
         IsAutoDirectionalityFormAssociated()))) {
     const AtomicString& value_dir = AtomicString(DirectionForFormData());
@@ -607,6 +627,11 @@ void HTMLInputElement::UpdateType(const AtomicString& type_attribute_value) {
   // and set its selection direction to "none".
   if (!previously_selectable && now_selectable)
     SetSelectionRange(0, 0, kSelectionHasNoDirection);
+
+  // Disconnect all OpaqueRanges on any type change.
+  if (previously_selectable && RuntimeEnabledFeatures::OpaqueRangeEnabled()) {
+    DisconnectAllOpaqueRanges();
+  }
 
   UpdateHasBeenPasswordField(new_type_name);
 
@@ -841,7 +866,7 @@ void HTMLInputElement::ParseAttribute(
     AddToRadioButtonGroup();
     TextControlElement::ParseAttribute(params);
   } else if (name == html_names::kAutocompleteAttr) {
-    if (EqualIgnoringASCIICase(value, keywords::kOff)) {
+    if (EqualIgnoringAsciiCase(value, keywords::kOff)) {
       autocomplete_ = kOff;
     } else {
       if (value.empty())
@@ -1627,7 +1652,7 @@ static inline bool IsRFC2616TokenCharacter(UChar ch) {
          (ch < '[' || ch > ']') && ch != '{' && ch != '}' && ch != 0x7f;
 }
 
-static bool IsValidMIMEType(const String& type) {
+static bool IsValidMIMEType(const StringView& type) {
   size_t slash_position = type.find('/');
   if (slash_position == kNotFound || !slash_position ||
       slash_position == type.length() - 1)
@@ -1639,27 +1664,27 @@ static bool IsValidMIMEType(const String& type) {
   return true;
 }
 
-static bool IsValidFileExtension(const String& type) {
+static bool IsValidFileExtension(const StringView& type) {
   if (type.length() < 2)
     return false;
   return type[0] == '.';
 }
 
-static Vector<String> ParseAcceptAttribute(const String& accept_string,
-                                           bool (*predicate)(const String&)) {
+static Vector<String> ParseAcceptAttribute(
+    const String& accept_string,
+    bool (*predicate)(const StringView&)) {
   Vector<String> types;
   if (accept_string.empty())
     return types;
 
-  Vector<String> split_types;
-  accept_string.Split(',', false, split_types);
-  for (const String& split_type : split_types) {
-    String trimmed_type = StripLeadingAndTrailingHTMLSpaces(split_type);
+  Vector<StringView> split_types = StringView(accept_string).Split(',');
+  for (const StringView& split_type : split_types) {
+    StringView trimmed_type = split_type.StripWhiteSpace(IsHTMLSpace);
     if (trimmed_type.empty())
       continue;
     if (!predicate(trimmed_type))
       continue;
-    types.push_back(trimmed_type.DeprecatedLower());
+    types.push_back(trimmed_type.ToString().DeprecatedLower());
   }
 
   return types;
@@ -1917,16 +1942,23 @@ HTMLInputElement::FilteredDataListOptions() const {
   if (!data_list)
     return filtered;
 
+  if (IsBaseAppearanceCombobox()) {
+    // This method is only used for the "native" autofill popup, which we don't
+    // want to render at all when we are also rendering the same datalist
+    // options in the base appearance datalist. Returning zero options here will
+    // prevent the autofill popup from rendering.
+    return filtered;
+  }
+
   // Ensure the editor has been created as InnerEditorValue() returns an empty
   // string if the editor wasn't created.
   EnsureInnerEditorElement();
 
   String editor_value = InnerEditorValue();
   if (Multiple() && FormControlType() == FormControlType::kInputEmail) {
-    Vector<String> emails;
-    editor_value.Split(',', true, emails);
+    auto emails = StringView(editor_value).SplitSkippingEmpty(',');
     if (!emails.empty())
-      editor_value = emails.back().StripWhiteSpace();
+      editor_value = emails.back().StripWhiteSpace().ToString();
   }
 
   HTMLDataListOptionsCollection* options = data_list->options();
@@ -1939,7 +1971,7 @@ HTMLInputElement::FilteredDataListOptions() const {
   if (iter) {
     for (int word_start = iter->current(), word_end = iter->next();
          word_end != kTextBreakDone; word_end = iter->next()) {
-      String value = editor_value.Substring(word_start, word_end - word_start);
+      StringView value(editor_value, word_start, word_end - word_start);
       word_start = word_end;
 
       if (!IsWordBreak(value[0]))
@@ -1953,15 +1985,16 @@ HTMLInputElement::FilteredDataListOptions() const {
         if (!value.empty()) {
           // Firefox shows OPTIONs with matched labels, Edge shows OPTIONs
           // with matches values. We show both.
-          if (!(option->value()
-                        .FoldCase()
-                        .RemoveCharacters(IsWhitespace)
-                        .Find(value) == kNotFound &&
-                option->label()
-                        .FoldCase()
-                        .RemoveCharacters(IsWhitespace)
-                        .Find(value) == kNotFound))
+          if (option->value()
+                  .FoldCase()
+                  .RemoveCharacters(IsWhitespace)
+                  .contains(value) ||
+              option->label()
+                  .FoldCase()
+                  .RemoveCharacters(IsWhitespace)
+                  .contains(value)) {
             continue;
+          }
         }
         filtering_flag[i] = false;
       }
@@ -2115,7 +2148,8 @@ bool HTMLInputElement::ShouldAppearIndeterminate() const {
   return input_type_->ShouldAppearIndeterminate();
 }
 
-PopoverTriggerSupport HTMLInputElement::SupportsPopoverTriggering() const {
+HTMLFormControlElement::PopoverTriggerSupport
+HTMLInputElement::SupportsPopoverTriggering() const {
   return input_type_->SupportsPopoverTriggering();
 }
 
@@ -2210,6 +2244,22 @@ void HTMLInputElement::setRangeText(const String& replacement,
 
   TextControlElement::setRangeText(replacement, start, end, selection_mode,
                                    exception_state);
+}
+
+OpaqueRange* HTMLInputElement::createValueRange(
+    unsigned start_offset,
+    unsigned end_offset,
+    ExceptionState& exception_state) {
+  CHECK(RuntimeEnabledFeatures::OpaqueRangeEnabled());
+  if (!InputSupportsSelectionAPI()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNotSupportedError,
+        "<input> element must be of a text field type: text, search, url, tel, "
+        "or password.");
+    return nullptr;
+  }
+  return TextControlElement::createValueRange(start_offset, end_offset,
+                                              exception_state);
 }
 
 bool HTMLInputElement::SetupDateTimeChooserParameters(
@@ -2309,6 +2359,16 @@ void HTMLInputElement::DispatchSimulatedEnter() {
 
 bool HTMLInputElement::IsInteractiveContent() const {
   return input_type_->IsInteractiveContent();
+}
+
+FocusgroupFlags HTMLInputElement::NativeArrowKeyAxes() const {
+  // Text fields use arrow keys for cursor movement (both axes).
+  // Steppable inputs (number, range, date, etc.) use arrow keys for value
+  // adjustment.
+  if (IsTextField() || IsSteppable()) {
+    return FocusgroupFlags::kInline | FocusgroupFlags::kBlock;
+  }
+  return HTMLElement::NativeArrowKeyAxes();
 }
 
 void HTMLInputElement::AdjustStyle(ComputedStyleBuilder& builder) {
@@ -2505,6 +2565,30 @@ void HTMLInputElement::SetFocused(bool is_focused,
 bool HTMLInputElement::SupportsBaseAppearanceInternal(
     BaseAppearanceValue value) const {
   return input_type_->SupportsBaseAppearance(value);
+}
+
+bool HTMLInputElement::IsBaseAppearanceCombobox() const {
+  if (!RuntimeEnabledFeatures::CustomizableComboboxEnabled() || !IsTextField()) {
+    return false;
+  }
+  if (HTMLDataListElement* datalist = DataList()) {
+    return IsAppearanceBase() && datalist->IsAppearanceBase();
+  }
+  return false;
+}
+
+HTMLSelectElement* HTMLInputElement::FilterTarget() const {
+  if (!RuntimeEnabledFeatures::FilterableSelectEnabled()) {
+    return nullptr;
+  }
+  if (auto* select = DynamicTo<HTMLSelectElement>(
+          GetElementAttributeResolvingReferenceTarget(
+              html_names::kFilterAttr))) {
+    if (!select->UsesMenuList()) {
+      return select;
+    }
+  }
+  return nullptr;
 }
 
 }  // namespace blink

@@ -397,6 +397,8 @@ class CONTENT_EXPORT WebContentsDelegate {
       const GURL& opener_url,
       const std::string& frame_name,
       const GURL& target_url,
+      WindowOpenDisposition disposition,
+      const blink::mojom::WindowFeatures& window_features,
       const StoragePartitionConfig& partition_config,
       SessionStorageNamespace* session_storage_namespace);
 
@@ -497,9 +499,6 @@ class CONTENT_EXPORT WebContentsDelegate {
                                base::OnceCallback<void()> on_confirm,
                                base::OnceCallback<void()> on_cancel);
 
-  // Notifies `BrowserView` about the resizable boolean having been set vith
-  // `window.setResizable(bool)` API.
-  virtual void OnWebApiWindowResizableChanged() {}
   // Returns the overall resizability of the `BrowserView` when considering
   // both the value set by the AWC API and browser's "native" resizability.
   virtual bool GetCanResize();
@@ -514,6 +513,7 @@ class CONTENT_EXPORT WebContentsDelegate {
   virtual void MinimizeFromWebAPI() {}
   virtual void MaximizeFromWebAPI() {}
   virtual void RestoreFromWebAPI() {}
+  virtual void SetResizableFromWebAPI(bool resizable) {}
 #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 
   // This returns the current state of the window, mappable to display-state
@@ -613,6 +613,16 @@ class CONTENT_EXPORT WebContentsDelegate {
   // Returns true if we are waiting for the user to make a selection on the
   // pointer lock permission request dialog.
   virtual bool IsWaitingForPointerLockPrompt(WebContents* web_contents);
+
+  // Returns true if keyboard lock should be allowed for |web_contents| when
+  // it is an inner WebContents (i.e. GetOuterWebContents() is non-null).
+  // Defaults to false, which blocks keyboard lock for most inner WebContents.
+  // Override to return true for embedders that host top-level browser tabs
+  // as inner WebContents.
+  // TODO(crbug.com/480028270): Remove this when tab WebContents are embedded
+  // via SurfaceEmbed in webium, for which GetOuterWebContents() will be null
+  // and keyboard lock will work without this opt-in.
+  virtual bool AllowKeyboardLockForInnerContents(WebContents* web_contents);
 
   // Requests keyboard lock. Once the request is approved or rejected,
   // GotResponseToKeyboardLockRequest() will be called on |web_contents|.

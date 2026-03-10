@@ -49,7 +49,7 @@ class ContextualTasksService : public KeyedService {
  public:
   // Whether a task was updated by  a change in the local or remote client.
   enum class TriggerSource {
-    kUnown,
+    kUnknown,
     kLocal,
     kRemote,
   };
@@ -64,7 +64,7 @@ class ContextualTasksService : public KeyedService {
 
     // The service is initialized and ready to take calls and return stored
     // tasks and threads.
-    virtual void OnInitialized() {}
+    virtual void OnContextualTasksServiceInitialized() {}
 
     // A new task was added at the given |source|.
     virtual void OnTaskAdded(const ContextualTask& task, TriggerSource source) {
@@ -155,7 +155,6 @@ class ContextualTasksService : public KeyedService {
       SessionID tab_id) const = 0;
   virtual std::vector<SessionID> GetTabsAssociatedWithTask(
       const base::Uuid& task_id) const = 0;
-  virtual void ClearAllTabAssociationsForTask(const base::Uuid& task_id) = 0;
 
   // Add / remove observers.
   virtual void AddObserver(Observer* observer) = 0;
@@ -163,6 +162,8 @@ class ContextualTasksService : public KeyedService {
   // Returns DataTypeControllerDelegate for the contextual task thread datatype.
   virtual base::WeakPtr<syncer::DataTypeControllerDelegate>
   GetAiThreadControllerDelegate() = 0;
+  virtual base::WeakPtr<syncer::DataTypeControllerDelegate>
+  GetGeminiThreadControllerDelegate() = 0;
 };
 
 }  // namespace contextual_tasks

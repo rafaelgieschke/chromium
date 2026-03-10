@@ -57,11 +57,12 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.supplier.NonNullObservableSupplier;
+import org.chromium.base.supplier.SupplierUtils;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.chrome.R;
@@ -81,6 +82,7 @@ import org.chromium.chrome.browser.signin.services.SigninManager;
 import org.chromium.chrome.browser.sync.SyncServiceFactory;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.test.util.browser.signin.AccountManagerTestRule;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.widget.DateDividedAdapter;
 import org.chromium.components.browser_ui.widget.MoreProgressButton;
 import org.chromium.components.browser_ui.widget.gesture.BackPressHandler;
@@ -99,14 +101,18 @@ import org.chromium.components.signin.test.util.TestAccounts;
 import org.chromium.components.sync.SyncService;
 import org.chromium.components.user_prefs.UserPrefs;
 import org.chromium.components.user_prefs.UserPrefsJni;
+import org.chromium.ui.base.ActivityResultTracker;
 import org.chromium.ui.base.DeviceInput;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.base.TestActivity;
+import org.chromium.ui.base.WindowAndroid;
+import org.chromium.ui.modaldialog.ModalDialogManager;
 import org.chromium.url.GURL;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.function.Supplier;
 
 /** Tests the History UI. */
 @RunWith(BaseRobolectricTestRunner.class)
@@ -140,7 +146,11 @@ public class HistoryUiTest {
     private LifecycleOwner mLifecycleOwner;
     private BackPressManager mBackPressManager;
 
+    @Mock private WindowAndroid mWindowAndroid;
     @Mock private SnackbarManager mSnackbarManager;
+    @Mock private BottomSheetController mBottomSheetController;
+    @Mock private Supplier<ModalDialogManager> mModalDialogManagerSupplier;
+    @Mock private ActivityResultTracker mActivityResultTracker;
     @Mock private Profile mProfile;
     @Mock LargeIconBridge.Natives mMockLargeIconBridgeJni;
     @Mock private UserPrefs.Natives mUserPrefsJni;
@@ -196,12 +206,15 @@ public class HistoryUiTest {
         mBackPressManager = new BackPressManager();
         mHistoryManager =
                 new HistoryManager(
+                        mProfile,
+                        mWindowAndroid,
                         mActivity,
                         true,
                         mSnackbarManager,
-                        mProfile,
-                        /* bottomSheetController= */ null,
-                        /* Supplier<Tab>= */ null,
+                        SupplierUtils.of(mBottomSheetController),
+                        /* modalDialogManagerSupplier= */ mModalDialogManagerSupplier,
+                        /* activityResultTracker= */ mActivityResultTracker,
+                        /* tabSupplier= */ null,
                         mHistoryProvider,
                         new HistoryUmaRecorder(),
                         /* clientPackageName= */ null,
@@ -238,12 +251,72 @@ public class HistoryUiTest {
         itemView.getRemoveButtonForTests().performClick();
 
         // Check that one item was removed.
-        ShadowLooper.idleMainLooper();
+        RobolectricUtil.runAllBackgroundAndUi();
         Assert.assertEquals(1, mHistoryProvider.markItemForRemovalCallback.getCallCount());
         Assert.assertEquals(1, mHistoryProvider.removeItemsCallback.getCallCount());
         Assert.assertEquals(3, mAdapter.getItemCount());
         Assert.assertEquals(View.VISIBLE, mRecyclerView.getVisibility());
         Assert.assertEquals(View.GONE, mHistoryManager.getEmptyViewForTests().getVisibility());
+    }
+
+    @Test
+    @SmallTest
+    public void testSparkVisibility() {
+        // Use a timestamp older than the ones in setUp() to ensure they appear after Item 1 and 2.
+        long timestamp = mItem2.getTimestamp() - 1000;
+
+        // Item with spark (actor visit, not blocked)
+        HistoryItem actorItem =
+                StubbedHistoryProvider.createHistoryItem(
+                        0, timestamp, /* blockedVisit= */ false, /* isActorVisit= */ true);
+
+        // Item without spark (not actor visit)
+        HistoryItem nonActorItem =
+                StubbedHistoryProvider.createHistoryItem(
+                        1, timestamp - 1, /* blockedVisit= */ false, /* isActorVisit= */ false);
+
+        // Item without spark (actor visit, but blocked)
+        HistoryItem blockedActorItem =
+                StubbedHistoryProvider.createHistoryItem(
+                        2, timestamp - 2, /* blockedVisit= */ true, /* isActorVisit= */ true);
+
+        mHistoryProvider.addItem(actorItem);
+        mHistoryProvider.addItem(nonActorItem);
+        mHistoryProvider.addItem(blockedActorItem);
+
+        mAdapter.startLoadingItems();
+        RobolectricUtil.runAllBackgroundAndUi();
+
+        // Recalculate height and layout to ensure all items are visible.
+        mRecyclerView.measure(0, 0);
+        mHeight = mRecyclerView.getMeasuredHeight();
+        layoutRecyclerView();
+
+        // The items are added after the initial ones in setUp().
+        // setUp() adds 2 items. They are at position 2 and 3.
+        // New items are at 4, 5, 6 because they have older timestamps.
+        Assert.assertEquals(7, mAdapter.getItemCount());
+
+        HistoryItemView actorView = (HistoryItemView) getItemView(4);
+        Assert.assertEquals(actorItem, actorView.getItem());
+        Assert.assertEquals(View.VISIBLE, actorView.getSparkContainerForTests().getVisibility());
+
+        // Select the actor visit item and check that the spark is hidden.
+        toggleItemSelection(4);
+        Assert.assertEquals(View.GONE, actorView.getSparkContainerForTests().getVisibility());
+
+        // Unselect the actor visit item and check that the spark is shown again.
+        toggleItemSelection(4);
+        Assert.assertEquals(View.VISIBLE, actorView.getSparkContainerForTests().getVisibility());
+
+        HistoryItemView nonActorView = (HistoryItemView) getItemView(5);
+        Assert.assertEquals(nonActorItem, nonActorView.getItem());
+        Assert.assertEquals(View.GONE, nonActorView.getSparkContainerForTests().getVisibility());
+
+        HistoryItemView blockedActorView = (HistoryItemView) getItemView(6);
+        Assert.assertEquals(blockedActorItem, blockedActorView.getItem());
+        Assert.assertEquals(
+                View.GONE, blockedActorView.getSparkContainerForTests().getVisibility());
     }
 
     @Test
@@ -712,7 +785,7 @@ public class HistoryUiTest {
         toolbar.onSignInStateChange();
         mAdapter.onSignInStateChange();
 
-        ShadowLooper.idleMainLooper();
+        RobolectricUtil.runAllBackgroundAndUi();
         DateDividedAdapter.ItemGroup firstGroup = mAdapter.getFirstGroupForTests();
         Assert.assertTrue(infoMenuItem.isVisible());
         Assert.assertTrue(mAdapter.hasListHeader());
@@ -721,7 +794,7 @@ public class HistoryUiTest {
         // Enter search mode
         performMenuAction(R.id.search_menu_id);
 
-        ShadowLooper.idleMainLooper();
+        RobolectricUtil.runAllBackgroundAndUi();
         firstGroup = mAdapter.getFirstGroupForTests();
         assertFalse(infoMenuItem.isVisible());
         // The first group should be the history item group from SetUp()
@@ -736,12 +809,15 @@ public class HistoryUiTest {
         DeviceInput.setSupportsKeyboardForTesting(true);
         mHistoryManager =
                 new HistoryManager(
+                        mProfile,
+                        mWindowAndroid,
                         mActivity,
                         true,
                         mSnackbarManager,
-                        mProfile,
-                        /* bottomSheetController= */ null,
-                        /* Supplier<Tab>= */ null,
+                        SupplierUtils.of(mBottomSheetController),
+                        /* modalDialogManagerSupplier= */ mModalDialogManagerSupplier,
+                        /* activityResultTracker= */ mActivityResultTracker,
+                        /* tabSupplier= */ null,
                         mHistoryProvider,
                         new HistoryUmaRecorder(),
                         /* clientPackageName= */ null,
@@ -760,7 +836,7 @@ public class HistoryUiTest {
         mAccountManagerTestRule.addAccount(TestAccounts.ACCOUNT1);
         setHasOtherFormsOfBrowsingData(true);
 
-        ShadowLooper.idleMainLooper();
+        RobolectricUtil.runAllBackgroundAndUi();
         DateDividedAdapter.ItemGroup firstGroup = mAdapter.getFirstGroupForTests();
         Assert.assertNull(toolbar.getItemById(R.id.search_menu_id));
         Assert.assertTrue(mAdapter.hasListHeader());
@@ -792,12 +868,15 @@ public class HistoryUiTest {
         when(mPackageManager.getApplicationInfo(eq(appId), anyInt())).thenReturn(mPackageAppInfo);
         mHistoryManager =
                 new HistoryManager(
+                        mProfile,
+                        mWindowAndroid,
                         mActivity,
                         true,
                         mSnackbarManager,
-                        mProfile,
-                        /* bottomSheetController= */ null,
-                        /* Supplier<Tab>= */ null,
+                        SupplierUtils.of(mBottomSheetController),
+                        /* modalDialogManagerSupplier= */ mModalDialogManagerSupplier,
+                        /* activityResultTracker= */ mActivityResultTracker,
+                        /* tabSupplier= */ null,
                         mHistoryProvider,
                         new HistoryUmaRecorder(),
                         /* clientPackageName= */ appId,
@@ -830,12 +909,15 @@ public class HistoryUiTest {
         when(mPackageManager.getApplicationInfo(eq(appId), anyInt())).thenReturn(mPackageAppInfo);
         mHistoryManager =
                 new HistoryManager(
+                        mProfile,
+                        mWindowAndroid,
                         mActivity,
                         true,
                         mSnackbarManager,
-                        mProfile,
-                        /* bottomSheetController= */ null,
-                        /* Supplier<Tab>= */ null,
+                        SupplierUtils.of(mBottomSheetController),
+                        /* modalDialogManagerSupplier= */ mModalDialogManagerSupplier,
+                        /* activityResultTracker= */ mActivityResultTracker,
+                        /* tabSupplier= */ null,
                         mHistoryProvider,
                         new HistoryUmaRecorder(),
                         /* clientPackageName= */ appId,
@@ -1007,20 +1089,23 @@ public class HistoryUiTest {
         DeviceInput.setSupportsKeyboardForTesting(true);
         HistoryManager historyManager =
                 new HistoryManager(
+                        mProfile,
+                        mWindowAndroid,
                         mActivity,
                         true,
                         mSnackbarManager,
-                        mProfile,
-                        null,
-                        null,
+                        SupplierUtils.of(mBottomSheetController),
+                        /* modalDialogManagerSupplier= */ mModalDialogManagerSupplier,
+                        /* activityResultTracker= */ mActivityResultTracker,
+                        /* tabSupplier= */ null,
                         mHistoryProvider,
                         new HistoryUmaRecorder(),
-                        null,
-                        true,
-                        false,
-                        false,
-                        null,
-                        null);
+                        /* clientPackageName= */ null,
+                        /* shouldShowClearData= */ true,
+                        /* launchedForApp= */ false,
+                        /* showAppFilter= */ false,
+                        /* openHistoryItemCallback= */ null,
+                        /* edgeToEdgePadAdjusterGenerator= */ null);
 
         // Arrange 2: Create a test-only handler that delegates to THIS specific historyManager.
         BackPressHandler testHandler =

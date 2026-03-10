@@ -6,10 +6,15 @@
 #define CHROME_BROWSER_ACTOR_ACTOR_METRICS_H_
 
 #include <cstddef>
+#include <string_view>
 
 #include "chrome/browser/actor/actor_task.h"
 #include "chrome/browser/actor/execution_engine.h"
 #include "chrome/common/actor.mojom.h"
+
+namespace optimization_guide::proto {
+class ActionsResult;
+}  // namespace optimization_guide::proto
 
 namespace actor {
 
@@ -75,8 +80,72 @@ void RecordDownloadSaveAsDialogTriggered(bool success);
 void RecordActorNavigationGatingListSize(size_t allow_list_size,
                                          size_t confirmed_list_size);
 
+// Records script tool specific metrics.
+void RecordScriptToolActionResultCode(
+    actor::mojom::ActionResultCode action_result_code);
+void RecordScriptToolInputSizeBytes(size_t size_bytes);
+void RecordScriptToolOutputSizeBytes(size_t size_bytes);
+
 // Records the outcome of navigation gating decisions.
 void RecordNavigationGatingDecision(ExecutionEngine::GatingDecision decision);
+
+void RecordObservationOutcomeHistogram(
+    const optimization_guide::proto::ActionsResult& result,
+    bool is_for_retry);
+
+// Histogram for tracking the overall outcome of a page context fetch after
+// performActions.
+inline constexpr std::string_view kActorPageContextObservationOutcome =
+    "Actor.PageContext.ObservationOutcome";
+
+enum class ActorObservationOutcome {
+  kSuccess,
+  kSuccessAfterRetry,
+  kFailure,
+  kFailureAfterRetry,
+  kMaxValue = kFailureAfterRetry,
+};
+
+// Records the outcome of an post-performActions observation fetch.
+void RecordTabObservationResultHistogram(
+    const optimization_guide::proto::ActionsResult& result);
+
+// Histogram for tracking the individual result codes for tab observations in a
+// fetch.
+inline constexpr std::string_view kActorPageContextTabObservationResult =
+    "Actor.PageContext.TabObservationResult";
+
+enum class ActorTabObservationResult {
+  kSuccess,
+  kTabWentAway,
+  kPageCrashed,
+  kUnknown,
+  kWebContentsChanged,
+  kPageContextNotEligible,
+  kApcTimeout,
+  kApcError,
+  kScreenshotTimeout,
+  kScreenshotError,
+  kApcAndScreenshotNotOk,
+  kMaxValue = kApcAndScreenshotNotOk,
+};
+
+// LINT.IfChange(SplitModeTimeOfUseFrameStatus)
+enum class SplitModeTimeOfUseFrameStatus {
+  kMatch = 0,
+  kInitializedFrameDestroyed = 1,
+  kFrameMismatch = 2,
+  kMaxValue = kFrameMismatch,
+};
+// LINT.ThenChange(//tools/metrics/histograms/metadata/actor/enums.xml:SplitModeTimeOfUseFrameStatus)
+
+// Records whether the target frame changed or was destroyed between the
+// Validate and Invoke steps when the renderer resolved target feature is
+// enabled.
+void RecordSplitModeTimeOfUseFrameStatus(SplitModeTimeOfUseFrameStatus status);
+
+// Records whether target observation succeeded during TimeOfUseValidation.
+void RecordTimeOfUseObservationSuccess(bool success);
 
 }  // namespace actor
 #endif  // CHROME_BROWSER_ACTOR_ACTOR_METRICS_H_

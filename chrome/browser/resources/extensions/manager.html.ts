@@ -16,8 +16,8 @@ export function getHtml(this: ExtensionsManagerElement) {
     ?is-child-account="${this.isChildAccount_}"
     ?dev-mode-controlled-by-policy="${this.devModeControlledByPolicy}"
     .delegate="${this.delegate}"
-    @cr-toolbar-menu-click="${this.onMenuButtonClick_}"
-    @search-changed="${this.onFilterChanged_}"
+    @cr-toolbar-menu-click="${this.onCrToolbarMenuClick_}"
+    @search-changed="${this.onSearchChanged_}"
     .extensions="${this.extensions_}"
     ?narrow="${this.narrow_}"
     @narrow-changed="${this.onNarrowChanged_}">
@@ -39,7 +39,8 @@ ${this.showDrawer_ ? html`
       </picture>
     </if>
   </cr-drawer>` : ''}
-<div id="container">
+<div id="container" class="cr-scrollable">
+  <div id="scrollableShadow" class="cr-scrollable-top-shadow"></div>
   <div id="left" ?hidden="${this.narrow_}">
     <extensions-sidebar @close-drawer="${this.onCloseDrawer_}"
         ?in-dev-mode="${this.inDevMode}"
@@ -47,7 +48,7 @@ ${this.showDrawer_ ? html`
     </extensions-sidebar>
   </div>
   <cr-view-manager id="viewManager" role="main">
-    <extensions-item-list id="items-list" .delegate="${this.delegate}"
+    <extensions-item-list id="itemsList" .delegate="${this.delegate}"
         ?in-dev-mode="${this.inDevMode}"
         ?is-mv2-deprecation-notice-dismissed=
             "${this.isMv2DeprecationNoticeDismissed}"

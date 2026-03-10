@@ -15,6 +15,7 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -41,7 +42,6 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
-#include "components/remote_cocoa/common/native_widget_ns_window.mojom-shared.h"
 #include "components/remote_cocoa/common/native_widget_ns_window.mojom.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/theme_provider.h"
@@ -117,6 +117,11 @@ BrowserFrameViewMac::~BrowserFrameViewMac() {
 // BrowserFrameViewMac, BrowserFrameView implementation:
 
 void BrowserFrameViewMac::OnFullscreenStateChanged() {
+  if (GetBrowserView()->IsFullscreen()) {
+    PictureInPictureWindowManager::GetInstance()
+        ->OnAnyBrowserEnteredFullscreen();
+  }
+
   // Record the start of a browser fullscreen session. Content fullscreen is
   // ignored.
   if (GetBrowserView()->IsFullscreen() &&
@@ -158,6 +163,22 @@ void BrowserFrameViewMac::OnFullscreenStateChanged() {
   GetBrowserView()->DeprecatedLayoutImmediately();
 }
 
+void BrowserFrameViewMac::OnTabStripStateChanged() {
+  NSWindow* const window = GetWidget()->GetNativeWindow().GetNativeNSWindow();
+  if (!window) {
+    return;
+  }
+
+  // When switching between horizontal and vertical tab strip, the height of the
+  // caption button container may change so it needs to be repositioned.
+  // Toggling the full size content view mask is a hacky way to force the
+  // caption button to re-layout. Note that this will only work for normal
+  // browser windows (not PWAs or anything using a remote `NSWindow`).
+  const NSUInteger style_mask = [window styleMask];
+  [window setStyleMask:style_mask ^ NSWindowStyleMaskFullSizeContentView];
+  [window setStyleMask:style_mask];
+}
+
 bool BrowserFrameViewMac::CaptionButtonsOnLeadingEdge() const {
   // In "partial" RTL mode (where the OS is in LTR mode while Chrome is in RTL
   // mode, or vice versa), the traffic lights are on the trailing edge rather
@@ -175,49 +196,6 @@ bool BrowserFrameViewMac::CaptionButtonsOnLeadingEdge() const {
       [window windowTitlebarLayoutDirection];
   return base::i18n::IsRTL() ==
          (direction == NSUserInterfaceLayoutDirectionRightToLeft);
-}
-
-gfx::Rect BrowserFrameViewMac::GetBoundsForTabStripRegion(
-    const gfx::Size& tabstrip_minimum_size) const {
-  // TODO(weili): In the future, we should hide the title bar, and show the
-  // tab strip directly under the menu bar. For now, just lay our content
-  // under the native title bar. Use the default title bar height to avoid
-  // calling through private APIs.
-  const bool restored =
-      !browser_widget()->IsMaximized() && !browser_widget()->IsFullscreen();
-  gfx::Rect bounds(0, GetTopInset(restored), width(),
-                   tabstrip_minimum_size.height());
-
-  // If we do not inset, the leftmost tab doesn't blend well with the bottom of
-  // the tab strip. Normally, we would naturally have an inset from either the
-  // caption buttons or the tab search button.
-  if (browser_widget()->IsFullscreen()) {
-    if (!GetBrowserView()->UsesImmersiveFullscreenMode()) {
-      bounds.Inset(
-          gfx::Insets::TLBR(0, GetLayoutConstant(TOOLBAR_CORNER_RADIUS), 0, 0));
-    }
-  } else {
-    // The bottom curve of the first/last tab swoops into the caption button
-    // region, so account for this when calculating insets.
-    const gfx::Insets insets = GetCaptionButtonInsets(
-        /*visual_overlap=*/TabStyle::Get()->GetBottomCornerRadius());
-    bounds.Inset(insets);
-  }
-
-  return bounds;
-}
-
-gfx::Rect BrowserFrameViewMac::GetBoundsForWebAppFrameToolbar(
-    const gfx::Size& toolbar_preferred_size) const {
-  gfx::Rect bounds(0, 0, width(),
-                   toolbar_preferred_size.height() + kWebAppMenuMargin * 2);
-
-  // Do not draw caption buttons on fullscreen.
-  if (!browser_widget()->IsFullscreen()) {
-    bounds.Inset(GetCaptionButtonInsets());
-  }
-
-  return bounds;
 }
 
 BrowserLayoutParams BrowserFrameViewMac::GetBrowserLayoutParams() const {
@@ -337,36 +315,21 @@ void BrowserFrameViewMac::OnThemeChanged() {
   BrowserFrameView::OnThemeChanged();
 }
 
-void BrowserFrameViewMac::LayoutWebAppWindowTitle(
-    const gfx::Rect& available_space,
-    views::Label& window_title_label) const {
-  // LINT.IfChange(mac_title_padding_width_fraction)
-  static constexpr double kTitlePaddingWidthFraction = 0.1;
-  // LINT.ThenChange(//chrome/browser/ui/views/web_apps/frame_toolbar/web_app_frame_toolbar_browsertest.cc:mac_title_padding_width_fraction)
+views::LayoutAlignment BrowserFrameViewMac::GetWindowTitleAlignment() const {
+  if (@available(macOS 26, *)) {
+    return views::LayoutAlignment::kStart;
+  } else {
+    return views::LayoutAlignment::kCenter;
+  }
+}
 
-  gfx::Rect toolbar_bounds(0, 0, width(), available_space.height());
-  gfx::Rect title_bounds = available_space;
-
-  const int title_padding =
-      base::ClampRound(width() * kTitlePaddingWidthFraction);
-  title_bounds.Inset(gfx::Insets::VH(0, title_padding));
-
-  // Center in the container and make it fit in the available space.
-  int preferred_title_width =
-      window_title_label
-          .GetPreferredSize(views::SizeBounds(window_title_label.width(), {}))
-          .width();
-  toolbar_bounds.ClampToCenteredSize(
-      gfx::Size(preferred_title_width, toolbar_bounds.height()));
-  toolbar_bounds.AdjustToFit(title_bounds);
-
-  window_title_label.SetBoundsRect(toolbar_bounds);
-
-  // The background of the title area is always opaquely drawn, but when in
-  // immersive fullscreen, it is drawn in a way that isn't detected by the
-  // DCHECK in Label. As such, disable the DCHECK.
-  window_title_label.SetSkipSubpixelRenderingOpacityCheck(
-      ImmersiveModeController::From(GetBrowserView()->browser())->IsEnabled());
+gfx::RoundedCornersF BrowserFrameViewMac::GetWindowRoundedCorners() const {
+  if (auto* const widget = GetWidget();
+      widget && !widget->IsFullscreen() && !widget->IsMaximized()) {
+    return gfx::RoundedCornersF(
+        GetLayoutConstant(LayoutConstant::kToolbarCornerRadius));
+  }
+  return gfx::RoundedCornersF();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -426,9 +389,6 @@ void BrowserFrameViewMac::WindowControlsOverlayEnabledChanged() {
 
 gfx::Size BrowserFrameViewMac::GetMinimumSize() const {
   gfx::Size client_size = browser_widget()->client_view()->GetMinimumSize();
-  if (GetBrowserView()->browser()->is_type_normal()) {
-    client_size.SetToMax(GetBrowserView()->tab_strip_view()->GetMinimumSize());
-  }
 
   // macOS apps generally don't allow their windows to get shorter than a
   // certain height, which empirically seems to be related to their *minimum*
@@ -469,6 +429,7 @@ BrowserFrameViewMac::GetCaptionButtonBounds() const {
     return result;
   }
 
+  // LINT.IfChange(MacTabStripInsets)
   // These are empirically determined; feel free to change them if they're
   // not precise.
   if (@available(macOS 26, *)) {
@@ -478,6 +439,7 @@ BrowserFrameViewMac::GetCaptionButtonBounds() const {
     result.bounds = gfx::RectF(20, 11, 54, 16);
     result.margins = gfx::OutsetsF::VH(11, 20);
   }
+  // LINT.ThenChange(//chrome/browser/ui/views/frame/immersive_mode_controller_mac.mm:MacTabStripInsets)
 
   // Mirror for when caption buttons are on the "wrong" side.
   if (!CaptionButtonsOnLeadingEdge()) {
@@ -486,26 +448,6 @@ BrowserFrameViewMac::GetCaptionButtonBounds() const {
 
   return result;
 }
-
-// LINT.IfChange(MacTabStripInsets)
-gfx::Insets BrowserFrameViewMac::GetCaptionButtonInsets(
-    int visual_overlap) const {
-  const gfx::Rect bounds = GetCaptionButtonBounds().ToEnclosingRect();
-  int caption_button_inset =
-      CaptionButtonsOnLeadingEdge() ? bounds.right() : width() - bounds.x();
-
-  // Subtract out the overlap, if any.
-  caption_button_inset = std::max(0, caption_button_inset - visual_overlap);
-
-  // Which side the inset goes on depends on which side the caption buttons are
-  // on.
-  if (CaptionButtonsOnLeadingEdge()) {
-    return gfx::Insets::TLBR(0, caption_button_inset, 0, 0);
-  } else {
-    return gfx::Insets::TLBR(0, 0, 0, caption_button_inset);
-  }
-}
-// LINT.ThenChange(//chrome/browser/ui/views/frame/immersive_mode_controller_mac.mm:MacTabStripInsets)
 
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserFrameViewMac, protected:
@@ -538,23 +480,10 @@ void BrowserFrameViewMac::Layout(PassKey) {
 ///////////////////////////////////////////////////////////////////////////////
 // BrowserFrameViewMac, private:
 
-gfx::Rect BrowserFrameViewMac::GetCenteredTitleBounds(
-    gfx::Rect frame,
-    gfx::Rect available_space,
-    int preferred_title_width) {
-  // Center in container.
-  frame.ClampToCenteredSize(gfx::Size(preferred_title_width, frame.height()));
-
-  // Make it fit in available space.
-  frame.AdjustToFit(available_space);
-
-  return frame;
-}
-
 void BrowserFrameViewMac::PaintThemedFrame(gfx::Canvas* canvas) {
   // On macOS the origin of the BrowserFrameViewMac is (0,0) so no
   // further modification is necessary. See
-  // TopContainerBackground::PaintThemeCustomImage for details.
+  // ThemedBackground::PaintThemeCustomImage for details.
   gfx::Point theme_image_offset =
       GetBrowserView()->GetThemeOffsetFromBrowserView();
 

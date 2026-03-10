@@ -12,6 +12,7 @@
 #include "base/functional/callback.h"
 #include "base/functional/callback_helpers.h"
 #include "build/build_config.h"
+#include "chrome/browser/glic/public/glic_keyed_service.h"
 #include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/reading_list/reading_list_model_factory.h"
@@ -44,19 +45,15 @@
 #include "components/sessions/content/content_live_tab.h"
 #include "components/sessions/core/session_id.h"
 #include "components/sessions/core/tab_restore_service.h"
+#include "components/split_tabs/split_tab_id.h"
+#include "components/split_tabs/split_tab_visual_data.h"
 #include "components/tab_groups/tab_group_id.h"
-#include "components/tabs/public/split_tab_id.h"
-#include "components/tabs/public/split_tab_visual_data.h"
 #include "components/tabs/public/tab_group.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "ui/base/mojom/window_show_state.mojom.h"
 #include "ui/gfx/range/range.h"
-
-#if BUILDFLAG(ENABLE_GLIC)
-#include "chrome/browser/glic/public/glic_keyed_service.h"
-#endif  // BUILDFLAG(ENABLE_GLIC)
 
 namespace chrome {
 
@@ -68,7 +65,6 @@ BrowserTabStripModelDelegate::BrowserTabStripModelDelegate(Browser* browser)
 
 BrowserTabStripModelDelegate::~BrowserTabStripModelDelegate() = default;
 
-#if BUILDFLAG(ENABLE_GLIC)
 bool BrowserTabStripModelDelegate::IsTabGlicPinned(tabs::TabHandle tab_handle) {
   auto* service =
       glic::GlicKeyedServiceFactory::GetGlicKeyedService(browser_->profile());
@@ -101,7 +97,14 @@ void BrowserTabStripModelDelegate::OpenGlicWindowFromSharedTab() {
                       glic::mojom::InvocationSource::kSharedTab);
   }
 }
-#endif
+
+void BrowserTabStripModelDelegate::GlicUnpinTabsFromAllConversations(
+    base::span<const tabs::TabHandle> tab_handles) {
+  auto* service =
+      glic::GlicKeyedServiceFactory::GetGlicKeyedService(browser_->profile());
+  service->UnpinTabsFromAllInstances(tab_handles,
+                                     glic::GlicUnpinTrigger::kContextMenu);
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserTabStripModelDelegate, TabStripModelDelegate implementation:
@@ -233,7 +236,7 @@ std::optional<SessionID> BrowserTabStripModelDelegate::CreateHistoricalTab(
   if (service && browser_->CanSupportWindowFeature(
                      Browser::WindowFeature::kFeatureTabStrip)) {
     return service->CreateHistoricalTab(
-        sessions::ContentLiveTab::GetForWebContents(contents),
+        sessions::ContentLiveTab::GetOrCreateForWebContents(contents),
         browser_->tab_strip_model()->GetIndexOfWebContents(contents));
   }
   return std::nullopt;
@@ -281,7 +284,6 @@ bool BrowserTabStripModelDelegate::ShouldRunUnloadListenerBeforeClosing(
     content::WebContents* contents) {
   return browser_->ShouldRunUnloadListenerBeforeClosing(contents);
 }
-
 
 bool BrowserTabStripModelDelegate::CanReload() const {
   return chrome::CanReload(browser_);

@@ -379,10 +379,6 @@ class AddressDataManager : public AutofillWebDataServiceObserverOnUISequence {
   // Triggered when a profile is added/updated/removed on db.
   void OnAutofillProfileChanged(const AutofillProfileChange& change);
 
-  // Update a profile in AutofillTable asynchronously. The change only surfaces
-  // in the PDM after the task on the DB sequence has finished.
-  void UpdateProfileInDB(const AutofillProfile& profile);
-
   // Look at the next `ongoing_profile_changes_` and schedules the corresponding
   // database operation.
   void HandleNextProfileChange();
@@ -403,7 +399,12 @@ class AddressDataManager : public AutofillWebDataServiceObserverOnUISequence {
   virtual void RemoveProfileImpl(const std::string& guid,
                                  bool non_permanent_account_profile_removal);
 
-  base::ObserverList<Observer> observers_;
+  // TODO(crbug.com/484371187): Investigate if reentrancy can be removed.
+  base::ObserverList<
+      Observer,
+      /*check_empty=*/false,
+      base::ObserverListReentrancyPolicy::kAllowReentrancyUntriaged>
+      observers_;
 
   std::unique_ptr<ContactInfoPreconditionChecker>
       contact_info_precondition_checker_;

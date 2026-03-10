@@ -38,7 +38,9 @@ class TextDecoderStream::Transformer final : public TransformStreamTransformer {
         script_state_(script_state),
         fatal_(fatal),
         ignore_bom_(ignore_bom),
-        encoding_has_bom_removal_(EncodingHasBomRemoval(encoding)) {}
+        encoding_has_bom_removal_(EncodingHasBomRemoval(encoding)) {
+    CHECK(decoder_) << encoding.GetName();
+  }
 
   Transformer(const Transformer&) = delete;
   Transformer& operator=(const Transformer&) = delete;
@@ -144,7 +146,7 @@ TextDecoderStream* TextDecoderStream::Create(ScriptState* script_state,
   // The replacement encoding is not valid, but the Encoding API also
   // rejects aliases of the replacement encoding.
   if (!encoding.IsValid() ||
-      EqualIgnoringASCIICase(encoding.GetName(), "replacement")) {
+      EqualIgnoringAsciiCase(encoding.GetName(), "replacement")) {
     exception_state.ThrowRangeError(
         StrCat({"The encoding label provided ('", label, "') is invalid."}));
     return nullptr;

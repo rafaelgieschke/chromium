@@ -199,7 +199,11 @@ std::optional<gfx::PointF> InteractionPointFromWebNode(
        test_point.has_value(); test_point = ipr.GetPoint()) {
     const blink::WebHitTestResult hit_test_result =
         widget->HitTestResultAt(test_point.value());
-    blink::WebElement hit_element = hit_test_result.GetElement();
+    auto hit_element =
+        hit_test_result.GetNodeOrPseudoNode().DynamicTo<blink::WebElement>();
+    if (hit_element.IsNull()) {
+      return test_point;
+    }
 
     // The action target from APC is not as granular as the live DOM hit
     // test. Include shadow host element as the hit test would land on
@@ -241,8 +245,7 @@ blink::WebNode GetNodeFromId(const content::RenderFrame& local_root_frame,
 
 bool IsNodeFocused(const content::RenderFrame& frame,
                    const blink::WebNode& node) {
-  blink::WebDocument document = frame.GetWebFrame()->GetDocument();
-  blink::WebElement currently_focused = document.FocusedElement();
+  blink::WebElement currently_focused = FindFocusedElement(frame);
   blink::WebElement element = node.To<blink::WebElement>();
   return element == currently_focused;
 }
@@ -305,6 +308,11 @@ std::string NodeToDebugString(const blink::WebNode& node) {
     return "document";
   }
   return "";
+}
+
+blink::WebElement FindFocusedElement(const content::RenderFrame& frame) {
+  blink::WebDocument document = frame.GetWebFrame()->GetDocument();
+  return document.FocusedElement();
 }
 
 }  // namespace actor

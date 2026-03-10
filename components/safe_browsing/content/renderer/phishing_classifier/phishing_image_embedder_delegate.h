@@ -20,14 +20,26 @@ class Scorer;
 
 enum class SBPhishingImageEmbedderEvent {
   kPhishingImageEmbeddingRequested = 0,
-  // Phishing image embedding could not start because the url was not specified
+  // Image embedding could not start because the url was not specified
   // to be processed for image embedding
   kPageTextCaptured = 1,
+  // Image embedding did not start because page text has not fully
+  // loaded yet.
   kPageTextNotLoaded = 2,
+  // Image embedding did not start because while page text was loaded,
+  // the request from browser has not arrived yet.
   kUrlShouldNotBeUsedForImageEmbedding = 3,
   // Phishing image embedding could not finish because the class was destructed.
   kDestructedBeforeImageEmbeddingDone = 4,
-  kMaxValue = kDestructedBeforeImageEmbeddingDone,
+  // Image embedding begins.
+  kImageEmbeddingBegins = 5,
+  // Image embedding completes.
+  kImageEmbeddingComplete = 6,
+  // Image embedding callback is empty on completion.
+  kImageEmbeddingCallbackEmptyOnCompletion = 7,
+  // Image embedding request responded.
+  kImageEmbeddingRequestResponded = 8,
+  kMaxValue = kImageEmbeddingRequestResponded,
 };
 
 // This class is used by the RenderView to interact with a
@@ -74,7 +86,8 @@ class PhishingImageEmbedderDelegate
     kPageRecaptured,
     kShutdown,
     kNewPhishingScorer,
-    kMaxValue = kNewPhishingScorer,
+    kScorerCleared,
+    kMaxValue = kScorerCleared,
   };
 
   void PhishingImageEmbedderReceiver(
@@ -99,6 +112,7 @@ class PhishingImageEmbedderDelegate
   // the phishing detection finishes for the same URL and the browser deems the
   // URL to be phishy, or LLAMA forcefully triggers the CSPP ping.
   void StartImageEmbedding(const GURL& url,
+                           bool can_extract_visual_features,
                            StartImageEmbeddingCallback callback) override;
 
   // Called when the image embedding for the current page finishes. This will
@@ -107,10 +121,11 @@ class PhishingImageEmbedderDelegate
   // 1. Visual extraction fails
   // 2. Model TfLite metadata is missing for embedding tflite model dimensions
   // 3. Embedder failed due to embedder creation or process failure.
-  void ImageEmbeddingDone(const ImageFeatureEmbedding& image_feature_embedding);
+  void ImageEmbeddingDone(const ImageFeatureEmbedding& image_feature_embedding,
+                          const VisualFeatures& visual_features);
 
   // Shared code to begin image embedding if all conditions are met.
-  void MaybeStartImageEmbedding();
+  void MaybeStartImageEmbedding(bool can_extract_visual_features = false);
 
   // ScorerStorage::Observer implementation:
   void OnScorerChanged() override;

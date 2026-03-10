@@ -71,7 +71,7 @@ bool ValidatePseudoElement(String& pseudo, ExceptionState& exception_state) {
   }
 
   AtomicString pseudo_argument = g_null_atom;
-  PseudoId pseudo_id = pseudo.StartsWith(":")
+  PseudoId pseudo_id = pseudo.starts_with(':')
                            ? CSSSelectorParser::ParsePseudoElement(
                                  pseudo, /*parent=*/nullptr, pseudo_argument)
                            : kPseudoIdInvalid;
@@ -98,7 +98,7 @@ bool ValidatePseudoElement(String& pseudo, ExceptionState& exception_state) {
 
     default:
       // Convert to canonical form.
-      if (!pseudo.StartsWith("::")) {
+      if (!pseudo.starts_with("::")) {
         StringBuilder sb;
         sb.Append(":");
         sb.Append(pseudo);
@@ -468,12 +468,7 @@ KeyframeEffect::CheckCanStartAnimationOnCompositor(
   // no visual result.
   if (!effect_target_) {
     reasons |= CompositorAnimations::kInvalidAnimationOrEffect;
-  } else if (!IsCurrent()) {
-    // There is no reason to composite an effect that is not current, and
-    // CheckCanStartAnimationOnCompositor might assert about having some but
-    // not all properties if we call it on such an animation.
-    reasons |= CompositorAnimations::kInvalidAnimationOrEffect;
-  } else {
+  } else if (IsCurrent()) {
     if (effect_target_->GetComputedStyle() &&
         effect_target_->GetComputedStyle()->HasOffset())
       reasons |= CompositorAnimations::kTargetHasCSSOffset;
@@ -708,7 +703,8 @@ void KeyframeEffect::ApplyEffects() {
     return;
 
   if (GetAnimation() && HasIncompatibleStyle()) {
-    GetAnimation()->CancelAnimationOnCompositor();
+    GetAnimation()->SetCompositorPending(
+        Animation::CompositorPendingReason::kPendingCancel);
   }
 
   std::optional<double> iteration = CurrentIteration();

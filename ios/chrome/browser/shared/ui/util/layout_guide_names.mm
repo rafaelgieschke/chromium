@@ -4,6 +4,7 @@
 
 #import "ios/chrome/browser/shared/ui/util/layout_guide_names.h"
 
+GuideName* const kAppContentGuide = @"AppContentGuide";
 GuideName* const kContentAreaGuide = @"ContentAreaGuide";
 GuideName* const kPrimaryToolbarGuide = @"kPrimaryToolbarGuide";
 GuideName* const kSecondaryToolbarGuide = @"kSecondaryToolbarGuide";
@@ -37,6 +38,8 @@ GuideName* const kPageActionMenuEntrypointGuide =
 GuideName* const kReaderModeOptionsEntrypointGuide =
     @"kReaderModeOptionsEntrypointGuide";
 GuideName* const kNTPIdentityDiscButtonGuide = @"kNTPIdentityDiscButtonGuide";
+GuideName* const kNTPFirstMostVisitedTileGuide =
+    @"kNTPFirstMostVisitedTileGuide";
 GuideName* const kSelectedRegularCellGuide = @"kSelectedRegularCellGuide";
 GuideName* const kLocationBarBadgeLargeEntrypointGuide =
     @"kLocationBarBadgeLargeEntrypointGuide";

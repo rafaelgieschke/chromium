@@ -13,10 +13,10 @@
 #include "chrome/browser/ui/actions/chrome_actions.h"
 #include "chrome/browser/ui/browser_actions.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
+#include "chrome/browser/ui/tabs/tab_strip_prefs.h"
 #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
 #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model_factory.h"
 #include "chrome/browser/ui/toolbar/toolbar_pref_names.h"
-#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/test_with_browser_view.h"
 #include "chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.h"
@@ -33,7 +33,6 @@
 #include "ui/actions/action_id.h"
 #include "ui/actions/actions.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
-#include "ui/base/dragdrop/mojom/drag_drop_types.mojom-shared.h"
 #include "ui/base/dragdrop/mojom/drag_drop_types.mojom.h"
 #include "ui/compositor/layer_tree_owner.h"
 #include "ui/events/base_event_utils.h"
@@ -52,7 +51,8 @@ class PinnedToolbarActionsContainerTest : public TestWithBrowserView {
     ASSERT_TRUE(model_);
 
     model_->UpdatePinnedState(kActionShowChromeLabs, false);
-    if (features::HasTabSearchToolbarButton()) {
+    if (tabs::GetTabSearchPosition(browser_view()->browser()) ==
+        tabs::TabSearchPosition::kToolbarButton) {
       model_->UpdatePinnedState(kActionTabSearch, false);
     }
     WaitForAnimations();
@@ -156,7 +156,7 @@ class PinnedToolbarActionsContainerTest : public TestWithBrowserView {
 
   void UpdatePref(const std::vector<actions::ActionId>& updated_list) {
     ScopedListPrefUpdate update(profile()->GetPrefs(), prefs::kPinnedActions);
-    base::Value::List& list_of_values = update.Get();
+    base::ListValue& list_of_values = update.Get();
     list_of_values.clear();
     for (auto id : updated_list) {
       const std::optional<std::string>& id_string =
@@ -208,7 +208,7 @@ TEST_F(PinnedToolbarActionsContainerTest, ContainerMargins) {
           container()->GetAnimatingLayoutManager()->target_layout_manager())
           ->interior_margin()
           .right(),
-      -GetLayoutConstant(TOOLBAR_ICON_DEFAULT_MARGIN));
+      -GetLayoutConstant(LayoutConstant::kToolbarIconDefaultMargin));
 }
 
 TEST_F(PinnedToolbarActionsContainerTest, PinningAndUnpinning) {
@@ -687,6 +687,9 @@ TEST_F(PinnedToolbarActionsContainerTest, ActiveActionSkipsExecution) {
 }
 
 TEST_F(PinnedToolbarActionsContainerTest, MetricsRecordedForPinnableActions) {
+  bool is_tab_search_pinnable =
+      tabs::GetTabSearchPosition(browser_view()->browser()) ==
+      tabs::TabSearchPosition::kToolbarButton;
   // Verify all pinnable buttons have a suffix listed in actions.xml.
   actions::ActionItemVector action_items;
   actions::ActionManager::Get().GetActions(
@@ -701,13 +704,11 @@ TEST_F(PinnedToolbarActionsContainerTest, MetricsRecordedForPinnableActions) {
   const auto pinnable_action_variants = base::test::ReadActionVariantsForAction(
       "Actions.PinnedToolbarButtonActivation", ".");
   EXPECT_EQ(1U, pinnable_action_variants.size());
-  // Only one of history or history clusters should be pinnable. The Split View
-  // action is not available via `root_action_item()`.
-  size_t expected_pinnable_count = pinnable_action_variants[0].size() - 2;
-  if (!features::HasTabSearchToolbarButton()) {
-    // Tab search is not pinnable if the feature is disabled.
-    expected_pinnable_count -= 1;
-  }
+  // Only one of history or history clusters should be pinnable. The split view
+  // action is not available via `root_action_item()`. Tab search is only
+  // pinnable if its position is in the toolbar.
+  size_t expected_pinnable_count =
+      pinnable_action_variants[0].size() - (is_tab_search_pinnable ? 2 : 3);
 #if BUILDFLAG(IS_CHROMEOS)
   // Downloads action item does not exist for ChromeOS.
   EXPECT_EQ(pinnable_count, expected_pinnable_count - 1);

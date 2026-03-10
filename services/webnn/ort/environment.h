@@ -15,6 +15,7 @@
 #include "base/no_destructor.h"
 #include "base/strings/cstring_view.h"
 #include "base/synchronization/lock.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/types/expected.h"
 #include "base/types/pass_key.h"
 #include "gpu/config/gpu_feature_info.h"
@@ -56,6 +57,8 @@ class Environment : public base::subtle::RefCountedThreadSafeBase {
       base::span<const OrtEpDevice* const> available_devices,
       OrtHardwareDeviceType device_type);
 
+  static bool IsDefaultCpuEpDevice(const OrtEpDevice* device);
+
   // Returns a span of registered execution provider devices in `env`. The span
   // is guaranteed to be valid until `env_` is released or the list of execution
   // providers is modified.
@@ -71,6 +74,11 @@ class Environment : public base::subtle::RefCountedThreadSafeBase {
   EpWorkarounds GetEpWorkarounds(OrtHardwareDeviceType device_type) const;
 
   const OrtEnv* get() const { return env_.get(); }
+
+  scoped_refptr<base::SequencedTaskRunner> graph_compilation_task_runner()
+      const {
+    return graph_compilation_task_runner_;
+  }
 
   // Get all EP-specific session configuration entries for the EPs that will be
   // selected according to the given device type.
@@ -88,6 +96,9 @@ class Environment : public base::subtle::RefCountedThreadSafeBase {
   ~Environment();
 
   ScopedOrtEnv env_;
+
+  // A sequence runner for graph compilation tasks.
+  const scoped_refptr<base::SequencedTaskRunner> graph_compilation_task_runner_;
 
   static base::Lock& GetLock();
   // Make `Environment` a singleton to avoid duplicate `OrtEnv` creation.

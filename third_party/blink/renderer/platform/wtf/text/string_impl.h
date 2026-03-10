@@ -24,12 +24,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_TEXT_STRING_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WTF_TEXT_STRING_IMPL_H_
 
+#include <hwy/highway.h>
 #include <limits.h>
 #include <string.h>
 
 #include <array>
 #include <atomic>
 #include <functional>
+#include <new>
 
 #include "base/check_op.h"
 #include "base/compiler_specific.h"
@@ -93,8 +95,7 @@ class WTF_EXPORT StringImpl {
   // StringImpls are allocated out of the WTF buffer partition.
   void* operator new(size_t);
   void* operator new(size_t, void* ptr) { return ptr; }
-  void operator delete(void*);
-  void operator delete(void*, size_t);
+  void operator delete(StringImpl* impl, std::destroying_delete_t);
 
   // Used to construct static strings, which have a special ref_count_ that can
   // never hit zero. This means that the static string will never be destroyed.
@@ -217,10 +218,6 @@ class WTF_EXPORT StringImpl {
   // The character content is always copied.
   std::u16string ToU16String() const;
 
-  // Use Span instead.
-  template <typename CharType>
-  UNSAFE_BUFFER_USAGE ALWAYS_INLINE const CharType* GetCharacters() const;
-
   template <typename CharType>
   ALWAYS_INLINE base::span<CharType> Span() const;
 
@@ -246,9 +243,8 @@ class WTF_EXPORT StringImpl {
     return hash_and_flags_.load(std::memory_order_relaxed) & kIsStatic;
   }
 
-  bool ContainsOnlyASCIIOrEmpty() const;
-
-  bool IsLowerASCII() const;
+  bool ContainsOnlyAsciiOrEmpty() const;
+  bool ContainsNoAsciiUpper() const;
 
   // The high bits of 'hash' are always empty, but we prefer to store our
   // flags in the low bits because it makes them slightly more efficient to
@@ -315,7 +311,7 @@ class WTF_EXPORT StringImpl {
   //    Table Add and Removal operations (including the fetch_sub to 0) are
   //    done under a lock.
 
-  ALWAYS_INLINE void Release() const {
+  ALWAYS_INLINE void Release() {
     if (!IsStatic()) {
       // This can be a relaxed load as long as the subtraction is performed
       // with acq_rel order. Any modification to `ref_count_` reordered after
@@ -361,12 +357,51 @@ class WTF_EXPORT StringImpl {
     destination.copy_from(source);
   }
 
+#if HWY_TARGET != HWY_SCALAR
+  ALWAYS_INLINE static void SimdCopyChars(base::span<UChar> destination,
+                                          base::span<const LChar> source) {
+    namespace hw = hwy::HWY_NAMESPACE;
+
+    constexpr hw::FixedTag<uint16_t, 8> d16;
+    constexpr hw::FixedTag<uint8_t, 16> d8;
+    HWY_LANES_CONSTEXPR size_t kLanes = hw::Lanes(d8);
+
+    const size_t length = source.size();
+    const LChar* src = source.data();
+    UChar* dst = destination.data();
+
+    // SAFETY: The SIMD code requires raw buffer access.
+    UNSAFE_BUFFERS({
+      size_t i = 0;
+      if (length >= kLanes) {
+        for (; i + kLanes <= length; i += kLanes) {
+          const auto v8 = hw::LoadU(d8, src + i);
+          const auto v16_low = hw::PromoteLowerTo(d16, v8);
+          const auto v16_high = hw::PromoteUpperTo(d16, v8);
+          hw::StoreU(v16_low, d16, reinterpret_cast<uint16_t*>(dst + i));
+          hw::StoreU(v16_high, d16,
+                     reinterpret_cast<uint16_t*>(dst + i + hw::Lanes(d16)));
+        }
+      }
+
+      for (; i < length; ++i) {
+        dst[i] = src[i];
+      }
+    });
+  }
+#endif  // HWY_TARGET != HWY_SCALAR
+
   ALWAYS_INLINE static void CopyChars(base::span<UChar> destination,
                                       base::span<const LChar> source) {
     CHECK_EQ(destination.size(), source.size());
+
+#if HWY_TARGET != HWY_SCALAR
+    return SimdCopyChars(destination, source);
+#else
     for (size_t i = 0; i < source.size(); ++i) {
       destination[i] = source[i];
     }
+#endif  // HWY_TARGET != HWY_SCALAR
   }
 
   // It is no longer required to create isolated copies for thread-safety
@@ -390,23 +425,8 @@ class WTF_EXPORT StringImpl {
 
   bool ContainsOnlyWhitespaceOrEmpty();
 
-  int ToInt(NumberParsingOptions, bool* ok) const;
-  wtf_size_t ToUInt(NumberParsingOptions, bool* ok) const;
-  int64_t ToInt64(NumberParsingOptions, bool* ok) const;
-  uint64_t ToUInt64(NumberParsingOptions, bool* ok) const;
-
-  wtf_size_t HexToUIntStrict(bool* ok);
-  uint64_t HexToUInt64Strict(bool* ok);
-
-  // FIXME: Like NumberParsingOptions::kStrict, these give false for "ok" when
-  // there is trailing garbage.  Like NumberParsingOptions::kLoose, these return
-  // the value when there is trailing garbage.  It would be better if these were
-  // more consistent with the above functions instead.
-  double ToDouble(bool* ok = nullptr);
-  float ToFloat(bool* ok = nullptr);
-
   scoped_refptr<StringImpl> LowerASCII();
-  scoped_refptr<StringImpl> UpperASCII();
+  scoped_refptr<StringImpl> ToAsciiUpper();
 
   scoped_refptr<StringImpl> Fill(UChar);
   // FIXME: Do we need fill(char) or can we just do the right thing if UChar is
@@ -451,7 +471,7 @@ class WTF_EXPORT StringImpl {
   // platform features.  See crbug.com/40476285.
   wtf_size_t DeprecatedFindIgnoringCase(const StringView&,
                                         wtf_size_t index = 0) const;
-  wtf_size_t FindIgnoringASCIICase(const StringView&,
+  wtf_size_t FindIgnoringAsciiCase(const StringView&,
                                    wtf_size_t index = 0) const;
 
   wtf_size_t ReverseFind(UChar, wtf_size_t index = UINT_MAX) const;
@@ -464,7 +484,7 @@ class WTF_EXPORT StringImpl {
   // platform features.  See crbug.com/40476285.
   bool DeprecatedStartsWithIgnoringCase(const StringView&) const;
   bool StartsWithIgnoringCaseAndAccents(const StringView&) const;
-  bool StartsWithIgnoringASCIICase(const StringView&) const;
+  bool StartsWithIgnoringAsciiCase(const StringView&) const;
 
   bool EndsWith(UChar) const;
   bool EndsWith(const StringView&) const;
@@ -472,7 +492,7 @@ class WTF_EXPORT StringImpl {
   // match to ASCII characters. This function is rarely used to implement web
   // platform features.  See crbug.com/40476285.
   bool DeprecatedEndsWithIgnoringCase(const StringView&) const;
-  bool EndsWithIgnoringASCIICase(const StringView&) const;
+  bool EndsWithIgnoringAsciiCase(const StringView&) const;
 
   // Replace parts of the string.
   scoped_refptr<StringImpl> Replace(UChar pattern, UChar replacement);
@@ -623,7 +643,7 @@ class WTF_EXPORT StringImpl {
       StripBehavior);
   NOINLINE wtf_size_t HashSlowCase() const;
 
-  void DestroyIfNeeded() const;
+  void DestroyIfNeeded();
 
   // Calculates the kContainsOnlyAscii and kIsLowerAscii flags. Returns
   // a bitfield with those 2 values.
@@ -652,16 +672,6 @@ class WTF_EXPORT StringImpl {
   const unsigned length_;
   mutable std::atomic<uint32_t> hash_and_flags_;
 };
-
-template <>
-ALWAYS_INLINE const LChar* StringImpl::GetCharacters<LChar>() const {
-  return Characters8();
-}
-
-template <>
-ALWAYS_INLINE const UChar* StringImpl::GetCharacters<UChar>() const {
-  return Characters16();
-}
 
 template <>
 ALWAYS_INLINE base::span<LChar> StringImpl::Span<LChar>() const {
@@ -696,7 +706,7 @@ inline bool Equal(const StringImpl* a, base::span<const char> b) {
 }
 WTF_EXPORT bool EqualNonNull(const StringImpl* a, const StringImpl* b);
 
-ALWAYS_INLINE bool StringImpl::ContainsOnlyASCIIOrEmpty() const {
+ALWAYS_INLINE bool StringImpl::ContainsOnlyAsciiOrEmpty() const {
   uint32_t flags = hash_and_flags_.load(std::memory_order_relaxed);
   if (flags & kAsciiPropertyCheckDone)
     return flags & kContainsOnlyAscii;
@@ -710,7 +720,7 @@ ALWAYS_INLINE size_t StringImpl::GetAllocatedSize() const {
   return size;
 }
 
-ALWAYS_INLINE bool StringImpl::IsLowerASCII() const {
+ALWAYS_INLINE bool StringImpl::ContainsNoAsciiUpper() const {
   uint32_t flags = hash_and_flags_.load(std::memory_order_relaxed);
   if (flags & kAsciiPropertyCheckDone)
     return flags & kIsLowerAscii;
@@ -720,7 +730,7 @@ ALWAYS_INLINE bool StringImpl::IsLowerASCII() const {
 // Unicode aware case insensitive string matching. Non-ASCII characters might
 // match to ASCII characters. These functions are rarely used to implement web
 // platform features.
-// These functions are deprecated. Use EqualIgnoringASCIICase(), or introduce
+// These functions are deprecated. Use EqualIgnoringAsciiCase(), or introduce
 // EqualIgnoringUnicodeCase(). See crbug.com/627682
 WTF_EXPORT bool DeprecatedEqualIgnoringCase(base::span<const LChar>,
                                             base::span<const LChar>);
@@ -736,7 +746,7 @@ WTF_EXPORT bool DeprecatedEqualIgnoringCase(base::span<const UChar>,
 WTF_EXPORT bool EqualIgnoringNullity(StringImpl*, StringImpl*);
 
 template <typename CharacterTypeA, typename CharacterTypeB>
-inline bool EqualIgnoringASCIICase(base::span<const CharacterTypeA> a,
+inline bool EqualIgnoringAsciiCase(base::span<const CharacterTypeA> a,
                                    base::span<const CharacterTypeB> b) {
   CHECK_EQ(a.size(), b.size());
   size_t length = a.size();
@@ -752,15 +762,147 @@ inline bool EqualIgnoringASCIICase(base::span<const CharacterTypeA> a,
   return true;
 }
 
-WTF_EXPORT int CodeUnitCompareIgnoringASCIICase(const StringImpl*,
-                                                const StringImpl*);
-WTF_EXPORT int CodeUnitCompareIgnoringASCIICase(const StringImpl*,
-                                                const LChar*);
+#if HWY_TARGET != HWY_SCALAR
+ALWAYS_INLINE bool SimdEqualIgnoringAsciiCase(base::span<const LChar> a,
+                                              base::span<const LChar> b) {
+  namespace hw = hwy::HWY_NAMESPACE;
+  constexpr hw::FixedTag<uint8_t, 16> d;
+  HWY_LANES_CONSTEXPR size_t kLanes = hw::Lanes(d);
 
-template <typename CharacterType1, typename CharacterType2>
-int CodeUnitCompareIgnoringAsciiCase(base::span<const CharacterType1> c1,
-                                     base::span<const CharacterType2> c2) {
-  return CodeUnitCompare(c1, c2, [](auto c) { return ToASCIILower(c); });
+  // SAFETY: The SIMD code requires raw buffer access.
+  UNSAFE_BUFFERS({
+    size_t i = 0;
+    if (a.size() >= kLanes) {
+      const auto upper_A = hw::Set(d, 'A');
+      const auto upper_Z = hw::Set(d, 'Z');
+      const auto case_bit = hw::Set(d, 0x20);
+      for (; i + kLanes <= a.size(); i += kLanes) {
+        auto va = hw::LoadU(d, reinterpret_cast<const uint8_t*>(a.data() + i));
+        auto vb = hw::LoadU(d, reinterpret_cast<const uint8_t*>(b.data() + i));
+        auto is_upper_a = hw::And(hw::Ge(va, upper_A), hw::Le(va, upper_Z));
+        va = hw::IfThenElse(is_upper_a, hw::Or(va, case_bit), va);
+        auto is_upper_b = hw::And(hw::Ge(vb, upper_A), hw::Le(vb, upper_Z));
+        vb = hw::IfThenElse(is_upper_b, hw::Or(vb, case_bit), vb);
+        if (!hw::AllTrue(d, hw::Eq(va, vb))) {
+          return false;
+        }
+      }
+    }
+    for (; i < a.size(); ++i) {
+      if (ToASCIILower(a.data()[i]) != ToASCIILower(b.data()[i])) {
+        return false;
+      }
+    }
+  });
+  return true;
+}
+
+ALWAYS_INLINE bool SimdEqualIgnoringAsciiCase(base::span<const UChar> a,
+                                              base::span<const LChar> b) {
+  namespace hw = hwy::HWY_NAMESPACE;
+  constexpr hw::FixedTag<uint16_t, 8> d16;
+  constexpr hw::FixedTag<uint8_t, 8> d8;
+  HWY_LANES_CONSTEXPR size_t kLanes = hw::Lanes(d16);
+
+  // SAFETY: The SIMD code requires raw buffer access.
+  UNSAFE_BUFFERS({
+    size_t i = 0;
+    if (a.size() >= kLanes) {
+      const auto upper_A = hw::Set(d16, 'A');
+      const auto upper_Z = hw::Set(d16, 'Z');
+      const auto case_bit = hw::Set(d16, 0x20);
+      for (; i + kLanes <= a.size(); i += kLanes) {
+        auto va =
+            hw::LoadU(d16, reinterpret_cast<const uint16_t*>(a.data() + i));
+        auto vb_8 =
+            hw::LoadU(d8, reinterpret_cast<const uint8_t*>(b.data() + i));
+        auto vb = hw::PromoteTo(d16, vb_8);
+        auto is_upper_a = hw::And(hw::Ge(va, upper_A), hw::Le(va, upper_Z));
+        va = hw::IfThenElse(is_upper_a, hw::Or(va, case_bit), va);
+        auto is_upper_b = hw::And(hw::Ge(vb, upper_A), hw::Le(vb, upper_Z));
+        vb = hw::IfThenElse(is_upper_b, hw::Or(vb, case_bit), vb);
+        if (!hw::AllTrue(d16, hw::Eq(va, vb))) {
+          return false;
+        }
+      }
+    }
+    for (; i < a.size(); ++i) {
+      if (ToASCIILower(a.data()[i]) != ToASCIILower(b.data()[i])) {
+        return false;
+      }
+    }
+  });
+  return true;
+}
+
+ALWAYS_INLINE bool SimdEqualIgnoringAsciiCase(base::span<const UChar> a,
+                                              base::span<const UChar> b) {
+  namespace hw = hwy::HWY_NAMESPACE;
+  constexpr hw::FixedTag<uint16_t, 8> d;
+  HWY_LANES_CONSTEXPR size_t kLanes = hw::Lanes(d);
+
+  // SAFETY: The SIMD code requires raw buffer access.
+  UNSAFE_BUFFERS({
+    size_t i = 0;
+    if (a.size() >= kLanes) {
+      const auto upper_A = hw::Set(d, 'A');
+      const auto upper_Z = hw::Set(d, 'Z');
+      const auto case_bit = hw::Set(d, 0x20);
+      for (; i + kLanes <= a.size(); i += kLanes) {
+        auto va = hw::LoadU(d, reinterpret_cast<const uint16_t*>(a.data() + i));
+        auto vb = hw::LoadU(d, reinterpret_cast<const uint16_t*>(b.data() + i));
+        auto is_upper_a = hw::And(hw::Ge(va, upper_A), hw::Le(va, upper_Z));
+        va = hw::IfThenElse(is_upper_a, hw::Or(va, case_bit), va);
+        auto is_upper_b = hw::And(hw::Ge(vb, upper_A), hw::Le(vb, upper_Z));
+        vb = hw::IfThenElse(is_upper_b, hw::Or(vb, case_bit), vb);
+        if (!hw::AllTrue(d, hw::Eq(va, vb))) {
+          return false;
+        }
+      }
+    }
+    for (; i < a.size(); ++i) {
+      if (ToASCIILower(a.data()[i]) != ToASCIILower(b.data()[i])) {
+        return false;
+      }
+    }
+  });
+  return true;
+}
+#endif  // HWY_TARGET != HWY_SCALAR
+
+ALWAYS_INLINE bool EqualIgnoringAsciiCase(base::span<const LChar> a,
+                                          base::span<const LChar> b) {
+  CHECK_EQ(a.size(), b.size());
+#if HWY_TARGET != HWY_SCALAR
+  return SimdEqualIgnoringAsciiCase(a, b);
+#else
+  return EqualIgnoringAsciiCase<LChar, LChar>(a, b);
+#endif  // HWY_TARGET != HWY_SCALAR
+}
+
+ALWAYS_INLINE bool EqualIgnoringAsciiCase(base::span<const UChar> a,
+                                          base::span<const LChar> b) {
+  CHECK_EQ(a.size(), b.size());
+#if HWY_TARGET != HWY_SCALAR
+  return SimdEqualIgnoringAsciiCase(a, b);
+#else
+  return EqualIgnoringAsciiCase<UChar, LChar>(a, b);
+#endif  // HWY_TARGET != HWY_SCALAR
+}
+
+ALWAYS_INLINE bool EqualIgnoringAsciiCase(base::span<const LChar> a,
+                                          base::span<const UChar> b) {
+  return EqualIgnoringAsciiCase(b, a);
+}
+
+ALWAYS_INLINE bool EqualIgnoringAsciiCase(base::span<const UChar> a,
+                                          base::span<const UChar> b) {
+  CHECK_EQ(a.size(), b.size());
+#if HWY_TARGET != HWY_SCALAR
+  return SimdEqualIgnoringAsciiCase(a, b);
+#else
+  return EqualIgnoringAsciiCase<UChar, UChar>(a, b);
+#endif  // HWY_TARGET != HWY_SCALAR
 }
 
 template <typename CharType>
@@ -880,18 +1022,6 @@ UNSAFE_BUFFER_USAGE inline wtf_size_t LengthOfNullTerminatedString(
   return base::checked_cast<wtf_size_t>(length);
 }
 
-template <wtf_size_t inlineCapacity>
-bool EqualIgnoringNullity(const Vector<UChar, inlineCapacity>& a,
-                          StringImpl* b) {
-  if (!b)
-    return !a.size();
-  if (a.size() != b->length())
-    return false;
-  if (b->Is8Bit())
-    return Equal(a.data(), b->Characters8(), b->length());
-  return Equal(a.data(), b->Characters16(), b->length());
-}
-
 template <typename CharacterType1,
           typename CharacterType2,
           typename Projection = std::identity>
@@ -948,9 +1078,9 @@ inline void StringImpl::AppendTo(BufferType& result,
   if (!number_of_characters_to_copy)
     return;
   if (Is8Bit())
-    result.AppendSpan(Span8().subspan(start, number_of_characters_to_copy));
+    result.append_range(Span8().subspan(start, number_of_characters_to_copy));
   else
-    result.AppendSpan(Span16().subspan(start, number_of_characters_to_copy));
+    result.append_range(Span16().subspan(start, number_of_characters_to_copy));
 }
 
 template <typename T>

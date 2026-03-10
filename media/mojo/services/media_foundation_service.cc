@@ -32,6 +32,7 @@
 #include "media/base/key_systems.h"
 #include "media/base/media_switches.h"
 #include "media/base/video_codecs.h"
+#include "media/base/win/media_foundation_package_runtime_locator.h"
 #include "media/cdm/win/media_foundation_cdm_module.h"
 #include "media/cdm/win/media_foundation_cdm_util.h"
 #include "media/media_buildflags.h"
@@ -427,10 +428,10 @@ CdmCapabilityOrStatus GetCdmCapability(
 #endif
 
     if (is_os_cdm && is_hw_secure) {
-      // Remove VP9 from the OS CDM capabilities check since it does
-      // not support clearlead. Remove AV1 from the hardware secure
-      // OS CDM capabilities check if the feature is disabled.
-      if (video_codec == VideoCodec::kVP9 ||
+      // Remove VP9/AV1 from the hardware secure OS CDM capabilities check if
+      // the feature is disabled.
+      if ((video_codec == VideoCodec::kVP9 &&
+           !base::FeatureList::IsEnabled(kHardwareSecureDecryptionVp9)) ||
           (video_codec == VideoCodec::kAV1 &&
            !base::FeatureList::IsEnabled(kHardwareSecureDecryptionAv1))) {
         continue;
@@ -589,6 +590,8 @@ void MediaFoundationService::IsKeySystemSupported(
   IsTypeSupportedCallback is_type_supported_cb;
 
   if (is_os_cdm_) {
+    media::ReportMediaFoundationPackageDecoderStatus();
+
     // `IMFContentDecryptionModuleFactory::IsTypeSupported()` returns
     // 'supported' for OS PlayReady backed implementation regardless of the
     // value passed in for the `contentType` parameter. Use

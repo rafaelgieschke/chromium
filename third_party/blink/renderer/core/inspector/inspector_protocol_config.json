@@ -114,10 +114,15 @@
                             "getSecurityIsolationStatus",
                             "loadNetworkResource",
                             "enableReportingApi",
+                            "enableDeviceBoundSessions",
+                            "fetchSchemefulSite",
                             "setCookieControls",
                             "configureDurableMessages"
                           ],
                 "async": ["getResponseBody", "getRequestPostData"]
+            },
+            {
+                "domain": "WebMCP"
             },
             {
                 "domain": "WebAudio"

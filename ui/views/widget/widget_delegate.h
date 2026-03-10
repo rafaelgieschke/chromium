@@ -49,6 +49,7 @@ class ScreenCaptureNotificationUIViews;
 class SearchEngineChoiceDialog;
 class ShareThisTabDialogView;
 class SigninViewControllerDelegateViews;
+class SimpleWebViewDialog;
 class TabModalConfirmDialogViews;
 class TestBaseWidgetDelegate;
 class UpdateRecommendedMessageBox;
@@ -116,7 +117,6 @@ class RootWindowControllerTest;
 class ShelfNavigationWidgetDelegate;
 class ShelfWidgetDelegateView;
 class ShellTest;
-class SimpleWebViewDialog;
 class StatusAreaWidgetDelegate;
 class StuckWidgetDelegate;
 class SystemDialogDelegateView;
@@ -233,10 +233,6 @@ class BorealisDisallowedDialog;
 class BorealisLaunchErrorDialog;
 }  // namespace borealis
 
-namespace examples {
-class ExamplesWindowContents;
-}
-
 namespace test {
 FORWARD_DECLARE_TEST(DesktopWidgetTest, LockPaintAsActiveAndCloseParent);
 }
@@ -340,7 +336,7 @@ class VIEWS_EXPORT WidgetDelegate {
     // contexts. Never displayed to the user, and not translated.
     std::string internal_name;
 
-    // The widget's modality type. Note that MODAL_TYPE_SYSTEM does not work at
+    // The widget's modality type. Note that ModalType::kSystem does not work at
     // all on Mac.
     ui::mojom::ModalType modal_type = ui::mojom::ModalType::kNone;
 
@@ -424,7 +420,7 @@ class VIEWS_EXPORT WidgetDelegate {
     friend class ::ash::ShelfNavigationWidgetDelegate;
     friend class ::ash::ShelfWidgetDelegateView;
     friend class ::ash::ShellTest;
-    friend class ::ash::SimpleWebViewDialog;
+    friend class ::SimpleWebViewDialog;
     friend class ::ash::StatusAreaWidgetDelegate;
     friend class ::ash::StuckWidgetDelegate;
     friend class ::ash::SystemUIComponentsStyleViewerView;
@@ -974,7 +970,6 @@ class VIEWS_EXPORT WidgetDelegateView : public WidgetDelegate, public View {
   friend class ShapedWidgetDelegate;
   FRIEND_TEST_ALL_PREFIXES(NativeViewHostAuraTest,
                            FocusManagerUpdatedDuringDestruction);
-  friend class examples::ExamplesWindowContents;
   friend class test::GetNativeThemeFromDestructorView;
   friend class test::TestingWidgetDelegateView;
   friend class webid::TestAccountSelectionView;

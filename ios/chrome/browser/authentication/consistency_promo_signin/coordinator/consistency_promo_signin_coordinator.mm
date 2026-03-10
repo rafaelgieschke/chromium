@@ -496,12 +496,11 @@
 - (void)consistencyDefaultAccountCoordinatorSignin:
     (ConsistencyDefaultAccountCoordinator*)coordinator {
   DCHECK_EQ(coordinator, self.defaultAccountCoordinator);
-  if (base::FeatureList::IsEnabled(switches::kEnableIdentityInAuthError) &&
-      !self.selectedIdentity.hasValidAuth) {
+  if (self.selectedIdentity.hasValidAuth) {
+    [self startSignIn];
+  } else {
     [self startReauthFlowWithIdentity:self.selectedIdentity];
-    return;
   }
-  [self startSignIn];
 }
 
 - (void)consistencyDefaultAccountCoordinatorOpenAddAccount:
@@ -524,7 +523,7 @@
     ChromeAccountManagerService* accountManagerService =
         ChromeAccountManagerServiceFactory::GetForProfile(self.profile);
     BOOL identityValid =
-        accountManagerService->IsValidIdentity(self.selectedIdentity);
+        accountManagerService->IsValidIdentity(self.selectedIdentity.gaiaId);
     BOOL identityEqual =
         self.defaultAccountCoordinator.selectedIdentity.gaiaId == *gaiaID;
     if (identityValid && identityEqual && result == ReauthResult::kSuccess) {

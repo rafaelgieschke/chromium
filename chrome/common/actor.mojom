@@ -6,6 +6,7 @@ module actor.mojom;
 
 import "mojo/public/mojom/base/time.mojom";
 import "third_party/blink/public/mojom/content_extraction/ai_page_content.mojom";
+import "third_party/blink/public/mojom/content_extraction/script_tools.mojom";
 import "ui/gfx/geometry/mojom/geometry.mojom";
 
 // This interface is meant to largely mirror the
@@ -19,6 +20,10 @@ union ToolTarget {
   // An x,y pair representing a location relative to the origin at the top-left
   // corner of the local root frame (i.e. the blink::WebWidget/RenderWidget). In
   // DIP.
+  //
+  // Note: Renderer-side hit testing uses BlinkSpace (device pixels). This
+  // coordinate is converted via WebFrameWidget::DIPsToBlinkSpace() before
+  // performing a hit test.
   gfx.mojom.Point coordinate_dip;
 };
 
@@ -27,21 +32,22 @@ struct ObservedToolTarget {
   blink.mojom.AIPageContentAttributes node_attribute;
 };
 
+// Corresponds to ClickAction.ClickType
+enum ClickType {
+  kLeft = 1,
+  kRight = 2,
+};
+
+// Corresponds to ClickAction.ClickCount
+enum ClickCount {
+  kSingle = 1,
+  kDouble = 2,
+};
+
 // Information specific to a click action.
 struct ClickAction {
-  // Corresponds to ClickAction.ClickType
-  enum Type {
-    kLeft = 1,
-    kRight = 2,
-  };
-
-  // Corresponds to ClickAction.ClickCount
-  enum Count {
-    kSingle = 1,
-    kDouble = 2,
-  };
-  Type type;
-  Count count;
+  ClickType type;
+  ClickCount count;
 };
 
 // Information specific to a mouse move action.
@@ -218,7 +224,7 @@ enum ActionResultCode {
 
   // The target element from hit test observed page content cannot be found in
   // the live DOM.
-  kObservedTargetElementDestroyed  = 30,
+  kObservedTargetElementDestroyed = 30,
 
   // The target element from hit test observed page content is different from
   // hit test on the live DOM.
@@ -256,6 +262,30 @@ enum ActionResultCode {
 
   // The PageTool invocation was canceled.
   kInvokeCanceled = 41,
+
+  // The task is in an invalid state for an Act request.
+  kInvalidTaskStateForAct = 42,
+
+  // The remaining actions were cancelled.
+  kActionsCancelled = 43,
+
+  // Navigating to the URL and actions targeting elements for this URL are
+  // blocked due to the potential risk of interacting with the specific site.
+  kActionsBlockedForSiteRisk = 44,
+
+  // Actions may not be performed as Safe Browsing is currently disabled in the
+  // user's settings. Having Safe Browsing enabled is required.
+  kActionsBlockedSafeBrowsingDisabled = 45,
+
+  // The user's administrator has configured the browser to not allow acting on
+  // the page.
+  kActionsBlockedByEnterprisePolicy = 46,
+
+  // Only web pages served over HTTP(S) may be acted on.
+  kActionsBlockedForScheme = 47,
+
+  // Actions may not be taken when the browser is showing an error page.
+  kActionsBlockedOnErrorPage = 48,
 
   // Please see the comment above about adding new values.
 
@@ -477,7 +507,30 @@ enum ActionResultCode {
   // Codes 1200-1299: Errors for script tool.
 
   // The document did not return a response for the script tool.
+  // Generic error for all failures.
   kScriptToolNoResponse = 1200,
+
+  // Tool was not executed due to invalid name.
+  kScriptToolInvalidName = 1201,
+
+  // Tool was not executed due to invalid input arguments.
+  kScriptToolInvalidInputArguments = 1202,
+
+  // Tool was executed but the invocation failed. For example, the script
+  // function threw an error.
+  kScriptToolInvocationFailed = 1203,
+
+  // Tool was executed with default form submission assuming the result will be
+  // provided after a same-origin navigation commit but a cross-origin
+  // navigation was committed.
+  kScriptToolCrossOriginNavigation = 1204,
+
+  // Tool was not executed due to missing required submit button in the form
+  // associated with the declarative tool.
+  kScriptToolMissingRequiredSubmitButton = 1205,
+
+  // Tool was cancelled.
+  kScriptToolCancelled = 1206,
 
   // Please see the comment above about adding new values.
 
@@ -514,6 +567,36 @@ struct ToolInvocation {
   ObservedToolTarget? observed_target;
 };
 
+struct ScriptToolResponse {
+  // The input arguments provided to the script tool action.
+  string input_arguments;
+
+  // The corresponding tool declaration.
+  blink.mojom.ScriptTool tool;
+
+  // The result of executing the action. If not provided, the action resulted in
+  // a navigation and the result will be on the next Document.
+  string? result;
+};
+
+// Represents the outcome of tool initialization.
+// This union covers three possible outcomes:
+// 1. Success with a target: `success_point` is set to a valid Point.
+// 2. Success without a target: `success_point` is explicitly set to null.
+// 3. Failure: `error_result` is populated.
+union InitializeToolResult {
+  // Populated when the tool is successfully initialized.
+  // Contains the resolved target point in Blink (physical) pixels relative
+  // to the widget's origin.
+  //
+  // NOTE: Not all tools provide a point. In those success cases, this
+  // field will be null.
+  gfx.mojom.Point? success_point;
+
+  // Populated when initialization fails.
+  ActionResult error_result;
+};
+
 struct ActionResult {
   // A code with the outcome of the tool invocation.
   ActionResultCode code;
@@ -527,7 +610,7 @@ struct ActionResult {
 
   // If the action is a script tool, provides the result of that execution. This
   // is only populated if the execution was successful.
-  string? script_tool_response;
+  ScriptToolResponse? script_tool_response;
 
   // Time at which execution of the action was complete and page
   // stabilization was started. This field may not be available if the action's

@@ -4,24 +4,26 @@
 
 #include "device/gamepad/gamepad_platform_data_fetcher_mac.h"
 
+#import <Foundation/Foundation.h>
+#include <IOKit/hid/IOHIDKeys.h>
 #include <stdint.h>
 #include <string.h>
 
 #include "base/apple/bridging.h"
 #include "base/apple/foundation_util.h"
-#include "base/containers/contains.h"
+#include "base/feature_list.h"
 #include "base/strings/sys_string_conversions.h"
 #import "base/task/sequenced_task_runner.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
+#include "device/gamepad/dualshock4_controller.h"
 #include "device/gamepad/gamepad_blocklist.h"
 #include "device/gamepad/gamepad_device_mac.h"
 #include "device/gamepad/gamepad_id_list.h"
 #include "device/gamepad/gamepad_uma.h"
 #include "device/gamepad/nintendo_controller.h"
-
-#import <Foundation/Foundation.h>
-#include <IOKit/hid/IOHIDKeys.h>
+#include "device/gamepad/public/cpp/gamepad_features.h"
+#include "device/gamepad/xbox_hid_controller.h"
 
 namespace device {
 
@@ -169,11 +171,20 @@ void GamepadPlatformDataFetcherMac::DeviceAdd(IOHIDDeviceRef device) {
   if (GamepadIsExcluded(vendor_int, product_int))
     return;
 
-  const auto& gamepad_id_list = GamepadIdList::Get();
-  DCHECK_EQ(kXInputTypeNone,
-            gamepad_id_list.GetXInputType(vendor_int, product_int));
+  // PlayStation and Xbox gamepads are handled by GameControllerDataFetcherMac.
+  if (IsSupportedByGameController(vendor_int, product_int)) {
+    VLOG(1) << "Gamepad (VID:" << vendor_int << ", PID:" << product_int
+            << ") handled by GameControllerDataFetcherMac";
+    return;
+  }
 
-  if (base::Contains(devices_, location_int)) {
+  const auto& gamepad_id_list = GamepadIdList::Get();
+  if (gamepad_id_list.GetXInputType(vendor_int, product_int) ==
+      kXInputTypeNone) {
+    VLOG(1) << "XInput gamepad claimed by GamepadPlatformDataFetcherMac";
+  }
+
+  if (devices_.contains(location_int)) {
     return;
   }
 
@@ -203,7 +214,7 @@ void GamepadPlatformDataFetcherMac::DeviceAdd(IOHIDDeviceRef device) {
 
   state->mapper = GetGamepadStandardMappingFunction(
       product_name, vendor_int, product_int, /*hid_specification_version=*/0,
-      version_int, GAMEPAD_BUS_UNKNOWN);
+      version_int, GAMEPAD_BUS_UNKNOWN, kGamepadDriverUnknown);
 
   UpdateGamepadStrings(product_name, vendor_int, product_int,
                        state->mapper != nullptr, state->data);
@@ -316,6 +327,37 @@ void GamepadPlatformDataFetcherMac::ResetVibration(
   }
   device_iter->second->ResetVibration(std::move(callback),
                                       std::move(callback_runner));
+}
+
+// static
+bool GamepadPlatformDataFetcherMac::IsSupportedByGameController(
+    uint16_t vendor_id,
+    uint16_t product_id) {
+  const auto& gamepad_id_list = GamepadIdList::Get();
+  GamepadId gamepad_id =
+      gamepad_id_list.GetGamepadId("", vendor_id, product_id);
+
+  if (base::FeatureList::IsEnabled(
+          features::kXboxUseGameControllerDataFetcherMac)) {
+    // Check for Xbox gamepads.
+    XInputType xinput_type =
+        gamepad_id_list.GetXInputType(vendor_id, product_id);
+    if (XboxHidController::IsXboxHid(gamepad_id) ||
+        xinput_type == kXInputTypeXbox360 ||
+        xinput_type == kXInputTypeXboxOne) {
+      return true;
+    }
+  }
+
+  // Check for PlayStation gamepads.
+  if (base::FeatureList::IsEnabled(
+          features::kPlayStationUseGameControllerDataFetcherMac) &&
+      (Dualshock4Controller::IsDualshock4(gamepad_id) ||
+       GamepadIdList::IsPlayStation5Gamepad(gamepad_id))) {
+    return true;
+  }
+
+  return false;
 }
 
 }  // namespace device

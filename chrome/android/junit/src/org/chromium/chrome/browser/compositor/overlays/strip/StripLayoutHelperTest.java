@@ -37,6 +37,7 @@ import static org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutU
 import static org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutUtils.PINNED_TAB_WIDTH_DP;
 import static org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutUtils.TAB_GROUP_BOTTOM_INDICATOR_WIDTH_OFFSET;
 import static org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutUtils.TAB_OVERLAP_WIDTH_DP;
+import static org.chromium.chrome.browser.tabmodel.TabGroupTitleUtils.UNSET_TAB_GROUP_TITLE;
 import static org.chromium.components.data_sharing.SharedGroupTestHelper.GROUP_MEMBER1;
 import static org.chromium.components.data_sharing.SharedGroupTestHelper.GROUP_MEMBER2;
 
@@ -75,15 +76,15 @@ import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.Robolectric;
 import org.robolectric.annotation.Config;
-import org.robolectric.annotation.LooperMode;
-import org.robolectric.annotation.LooperMode.Mode;
 
 import org.chromium.base.Callback;
 import org.chromium.base.CallbackUtils;
 import org.chromium.base.DeviceInfo;
 import org.chromium.base.MathUtils;
 import org.chromium.base.Token;
+import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
@@ -116,6 +117,7 @@ import org.chromium.chrome.browser.multiwindow.MultiInstanceManager;
 import org.chromium.chrome.browser.multiwindow.MultiWindowTestUtils;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.share.ShareDelegate;
+import org.chromium.chrome.browser.tab.MediaState;
 import org.chromium.chrome.browser.tab.MockTab;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabCreationState;
@@ -136,6 +138,7 @@ import org.chromium.chrome.browser.tabmodel.TabRemover;
 import org.chromium.chrome.browser.tabmodel.TabUngrouper;
 import org.chromium.chrome.browser.tasks.tab_management.TabDragHandlerBase;
 import org.chromium.chrome.browser.tasks.tab_management.TabGroupListBottomSheetCoordinatorFactory;
+import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.test.util.browser.tabmodel.MockTabModel;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
 import org.chromium.components.browser_ui.styles.SemanticColorUtils;
@@ -155,7 +158,6 @@ import org.chromium.components.tab_groups.TabGroupColorId;
 import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.dragdrop.DragDropGlobalState;
-import org.chromium.ui.dragdrop.DragDropGlobalState.TrackerToken;
 import org.chromium.ui.shadows.ShadowAppCompatResources;
 import org.chromium.ui.util.MotionEventUtils;
 import org.chromium.ui.widget.RectProvider;
@@ -176,8 +178,12 @@ import java.util.stream.IntStream;
         manifest = Config.NONE,
         qualifiers = "sw600dp",
         shadows = {ShadowAppCompatResources.class})
-@LooperMode(Mode.LEGACY)
-@DisableFeatures(ChromeFeatureList.DATA_SHARING)
+@DisableFeatures({
+    ChromeFeatureList.DATA_SHARING,
+    ChromeFeatureList.TAB_STRIP_CLOSE_REFACTOR_ANDROID,
+    ChromeFeatureList.TAB_STRIP_EMPTY_SPACE_CONTEXT_MENU_ANDROID,
+    ChromeFeatureList.GLIC
+})
 @EnableFeatures(ChromeFeatureList.TAB_STRIP_AUTO_SELECT_ON_CLOSE_CHANGE)
 public class StripLayoutHelperTest {
     private static final Token TAB_GROUP_ID_1 = new Token(1L, 1L);
@@ -190,6 +196,7 @@ public class StripLayoutHelperTest {
     @Mock private LayoutManagerHost mManagerHost;
     @Mock private LayoutUpdateHost mUpdateHost;
     @Mock private LayoutRenderHost mRenderHost;
+    @Mock private TintedCompositorButton mGlicBtn;
     @Mock private CompositorButton mModelSelectorBtn;
     @Mock private TabGroupModelFilter mTabGroupModelFilter;
     @Mock private TabUngrouper mTabUngrouper;
@@ -210,6 +217,7 @@ public class StripLayoutHelperTest {
     @Mock private MultiInstanceManager mMultiInstanceManager;
     @Mock private ShareDelegate mShareDelegate;
     @Mock private TabGroupListBottomSheetCoordinatorFactory mBottomSheetCoordinatorFactory;
+    @Mock private SnackbarManager mSnackbarManager;
     @Mock private Tab mTab;
     @Mock private TabCreator mTabCreator;
     @Mock private TabGroupSyncService mTabGroupSyncService;
@@ -219,7 +227,6 @@ public class StripLayoutHelperTest {
     @Mock private ServiceStatus mServiceStatus;
     @Mock private DataSharingUIDelegate mDataSharingUiDelegate;
     @Mock private Bitmap mAvatarBitmap;
-    @Mock private TintedCompositorButton mCloseButton;
     @Mock TabStripIphController mController;
     @Mock private TabStripContextMenuCoordinator mTabStripContextMenuCoordinator;
 
@@ -235,6 +242,7 @@ public class StripLayoutHelperTest {
     // TODO(crbug.com/369736293): Verify usages and remove duplicate implementations of
     // `TestTabModel` for tab model.
     private final TestTabModel mModel = spy(new TestTabModel());
+    private final TestTabRemover mTabRemover = spy(new TestTabRemover());
     private StripLayoutHelper mStripLayoutHelper;
     private boolean mIncognito;
     private static final String[] TEST_TAB_TITLES = {"Tab 1", "Tab 2", "Tab 3", "", null};
@@ -275,8 +283,12 @@ public class StripLayoutHelperTest {
         when(mTabGroupModelFilter.isTabInTabGroup(any())).thenReturn(false);
         when(mTabGroupModelFilter.getTabModel()).thenReturn(mModel);
         when(mTabGroupModelFilter.getTabUngrouper()).thenReturn(mTabUngrouper);
+        when(mTabGroupModelFilter.getTabGroupTitle(any(Token.class)))
+                .thenReturn(UNSET_TAB_GROUP_TITLE);
+        when(mTabGroupModelFilter.getTabGroupTitle(any(Tab.class)))
+                .thenReturn(UNSET_TAB_GROUP_TITLE);
 
-        mModel.setTabRemover(new TestTabRemover());
+        mModel.setTabRemover(mTabRemover);
         mContext =
                 new ContextThemeWrapper(
                         ApplicationProvider.getApplicationContext(),
@@ -728,7 +740,7 @@ public class StripLayoutHelperTest {
         final StripLayoutHelper stripLayoutHelperSpy = spy(mStripLayoutHelper);
         mModel.addTab("New tab");
         stripLayoutHelperSpy.tabCreated(
-                TIMESTAMP, mModel.getTabAt(mModel.getCount() - 1).getId(), 0, true, false, false);
+                TIMESTAMP, mModel.getTabAt(mModel.getCount() - 1).getId(), true, false, false);
 
         final ArgumentCaptor<List<Animator>> animationListCaptor =
                 ArgumentCaptor.forClass(List.class);
@@ -738,6 +750,76 @@ public class StripLayoutHelperTest {
                 "There should be one animation for the newly created tab width",
                 1,
                 animationList.size());
+    }
+
+    @Test
+    public void testPushPlaceholdersForTabs_MediaState() {
+        // Create StripLayoutHelper with startup info to create placeholders.
+        mStripLayoutHelper = createStripLayoutHelper(false, false);
+        mStripLayoutHelper.setTabModelStartupInfo(1, 0, false);
+
+        StripLayoutTab[] stripTabs = mStripLayoutHelper.getStripLayoutTabsForTesting();
+        assertEquals(1, stripTabs.length);
+        assertTrue("Tab should be a placeholder.", stripTabs[0].getIsPlaceholder());
+        assertEquals(
+                "Placeholder media state should be NONE.",
+                MediaState.NONE,
+                stripTabs[0].getMediaState());
+
+        // Add a tab with media state to the tab model and update the tab model in the strip.
+        MockTabModel tabModel = new MockTabModel(mProfile, null);
+        Tab tabWithMedia = new MockTab(0, mProfile);
+        tabWithMedia.setMediaState(MediaState.RECORDING);
+        tabModel.addTab(
+                tabWithMedia, 0, TabLaunchType.FROM_RESTORE, TabCreationState.FROZEN_ON_RESTORE);
+        tabModel.setIndex(0, TabSelectionType.FROM_NEW);
+        tabModel.setActive(true);
+        mStripLayoutHelper.setTabModel(tabModel, mTabCreator, false);
+
+        // StripLayoutTab should have updated the former placeholder's media state.
+        stripTabs = mStripLayoutHelper.getStripLayoutTabsForTesting();
+        assertEquals(1, stripTabs.length);
+        assertEquals(
+                "Media state should be propagated to the former placeholder.",
+                MediaState.RECORDING,
+                stripTabs[0].getMediaState());
+        assertFalse("Tab should no longer be a placeholder.", stripTabs[0].getIsPlaceholder());
+    }
+
+    @Test
+    public void testRebuildStripTabs_MediaState() {
+        // Initialize with 2 tabs.
+        initializeTest(false, false, 0, 2);
+        StripLayoutTab[] tabs = mStripLayoutHelper.getStripLayoutTabsForTesting();
+
+        // Update media state for tabs.
+        Tab tab0 = mModel.getTabAt(0);
+        Tab tab1 = mModel.getTabAt(1);
+        when(tab0.getMediaState()).thenReturn(MediaState.AUDIBLE);
+        when(tab1.getMediaState()).thenReturn(MediaState.RECORDING);
+        mStripLayoutHelper.onMediaStateChanged(tab0, tab0.getMediaState());
+        mStripLayoutHelper.onMediaStateChanged(tab1, tab1.getMediaState());
+
+        // Verify initial state.
+        assertEquals(MediaState.AUDIBLE, tabs[0].getMediaState());
+        assertEquals(MediaState.RECORDING, tabs[1].getMediaState());
+
+        // Force rebuild.
+        mStripLayoutHelper.setStripLayoutTabsForTesting(new StripLayoutTab[0]);
+        mStripLayoutHelper.rebuildStripTabsForTesting();
+
+        // Verify the StripLayoutTabs are new instances.
+        StripLayoutTab[] newTabs = mStripLayoutHelper.getStripLayoutTabsForTesting();
+        assertNotEquals(tabs[0], newTabs[0]);
+        assertNotEquals(tabs[1], newTabs[1]);
+
+        // Verify media state is persistent.
+        assertEquals(
+                "Media state should be preserved.", MediaState.AUDIBLE, newTabs[0].getMediaState());
+        assertEquals(
+                "Media state should be preserved.",
+                MediaState.RECORDING,
+                newTabs[1].getMediaState());
     }
 
     @Test
@@ -1816,7 +1898,7 @@ public class StripLayoutHelperTest {
 
         // Act: Create new tab in model and trigger update in tab strip.
         mModel.addTab("new tab");
-        mStripLayoutHelper.tabCreated(TIMESTAMP, 5, 3, true, false, false);
+        mStripLayoutHelper.tabCreated(TIMESTAMP, 5, true, false, false);
 
         // Assert: Animation is running.
         assertNotNull(
@@ -1836,7 +1918,7 @@ public class StripLayoutHelperTest {
         // Act: Tab was restored after undoing a tab closure.
         boolean closureCancelled = true;
         mModel.addTab("new tab");
-        mStripLayoutHelper.tabCreated(TIMESTAMP, 5, 3, false, closureCancelled, false);
+        mStripLayoutHelper.tabCreated(TIMESTAMP, 5, false, closureCancelled, false);
 
         // Assert: scroller position is not modified.
         assertEquals(1200, mStripLayoutHelper.getScrollerForTesting().getFinalX());
@@ -1864,7 +1946,7 @@ public class StripLayoutHelperTest {
         // Act: Tab was not restored after undoing a tab closure.
         boolean closureCancelled = false;
         mModel.addTab("new tab");
-        mStripLayoutHelper.tabCreated(TIMESTAMP, 5, 3, false, closureCancelled, false);
+        mStripLayoutHelper.tabCreated(TIMESTAMP, 5, false, closureCancelled, false);
 
         // Assert: scroller position is modified.
         assertNotEquals(1200, mStripLayoutHelper.getScrollerForTesting().getFinalX());
@@ -1911,7 +1993,7 @@ public class StripLayoutHelperTest {
         // Act: Tab was restored during startup.
         mModel.addTab("new tab");
         mStripLayoutHelper.tabCreated(
-                TIMESTAMP, 12, 12, /* selected= */ false, false, /* onStartup= */ true);
+                TIMESTAMP, 12, /* selected= */ false, false, /* onStartup= */ true);
 
         // Assert: We don't scroll to the newly created tab because the selected tab is not visible,
         // so we should scroll to the selected tab.
@@ -1949,6 +2031,20 @@ public class StripLayoutHelperTest {
                 expectedScrollOffset,
                 actualScrollOffset,
                 EPSILON);
+    }
+
+    @Test
+    public void testTabClosureCancelled_SelectsTab() {
+        initializeTest(/* tabIndex= */ 1);
+
+        // Fake cancelling a tab closure for a previously selected tab.
+        mModel.addTab("Closure-cancelled tab");
+        mModel.setIndex(5);
+        mStripLayoutHelper.tabClosureCancelled(TIMESTAMP, /* id= */ 5);
+
+        // Verify the closure-cancelled tab is selected.
+        StripLayoutTab[] tabs = mStripLayoutHelper.getStripLayoutTabsForTesting();
+        assertTrue("Expected the closure-cancelled tab to be selected.", tabs[5].getIsSelected());
     }
 
     @Test
@@ -2266,45 +2362,6 @@ public class StripLayoutHelperTest {
     }
 
     @Test
-    @Feature("Advanced Peripherals Support")
-    public void testCloseTabsContextMenu_PreventsHovercard() {
-        // Set up: see testOnLongPress_OnCloseButton setup.
-        initializeTest(false, false, 0);
-        StripLayoutTab[] tabs = getMockedStripLayoutTabs(150f);
-        mStripLayoutHelper.setStripLayoutTabsForTesting(tabs);
-
-        // Mock tab's view.
-        View tabView = new View(mActivity);
-        tabView.setLayoutParams(new MarginLayoutParams(150, 50));
-        when(mModel.getTabAt(1).getView()).thenReturn(tabView);
-
-        // Long press on second tab's close button.
-        StripLayoutTab tab = tabs[1];
-        when(tab.checkCloseHitTest(anyFloat(), anyFloat())).thenReturn(true);
-        when(tab.getCloseButton()).thenReturn(mCloseButton);
-        when(mCloseButton.getParentView()).thenReturn(tab);
-        when(mCloseButton.getType()).thenReturn(ButtonType.TAB_CLOSE);
-        mStripLayoutHelper.setTabAtPositionForTesting(tab);
-        mStripLayoutHelper.onLongPress(150f, 0f);
-
-        assertTrue(
-                "Expected 'close all tabs' context menu to be showing",
-                mStripLayoutHelper.isCloseButtonMenuShowingForTesting());
-
-        // Now try to hover on the tab.
-        mStripLayoutHelper.updateLastHoveredTab(tab);
-
-        verify(mTabHoverCardView, never())
-                .show(
-                        nullable(Tab.class),
-                        anyBoolean(),
-                        anyFloat(),
-                        anyFloat(),
-                        anyFloat(),
-                        anyFloat());
-    }
-
-    @Test
     @Feature("Tab Context Menu")
     @EnableFeatures(ChromeFeatureList.SUBMENUS_TAB_CONTEXT_MENU_LFF_TAB_STRIP)
     public void testBottomSheet_constructedWithoutDestroyHide() {
@@ -2443,6 +2500,52 @@ public class StripLayoutHelperTest {
     }
 
     @Test
+    public void testDyingGroupTitleReplaced() {
+        // Initialize.
+        initializeTest(false, false, 0, 2);
+        groupTabs(0, 2, TAB_GROUP_ID_1);
+        StripLayoutView[] viewsBefore = mStripLayoutHelper.getStripLayoutViewsForTesting();
+        StripLayoutGroupTitle oldGroupTitle = (StripLayoutGroupTitle) viewsBefore[0];
+
+        // Close the tabs and group.
+        List<Tab> closingTabs = new ArrayList<>();
+        closingTabs.add(mModel.getTabAt(1));
+        closingTabs.add(mModel.getTabAt(0));
+        mModel.closeTabs(TabClosureParams.closeTabs(closingTabs).build());
+        mStripLayoutHelper.multipleTabsClosed(closingTabs);
+        mStripLayoutHelper
+                .getTabGroupModelFilterObserverForTesting()
+                .didRemoveTabGroup(
+                        Tab.INVALID_TAB_ID, TAB_GROUP_ID_1, DidRemoveTabGroupReason.CLOSE);
+
+        // Finish animations, as is done in the TabModelObserver.
+        mStripLayoutHelper.finishAnimations();
+
+        assertTrue(oldGroupTitle.isDying());
+
+        // Restore tabs state for undo.
+        mModel.addTab("Tab 1");
+        mModel.addTab("Tab 2");
+        when(mTabGroupModelFilter.isTabInTabGroup(any())).thenReturn(true);
+        List<Tab> relatedTabs = new ArrayList<>();
+        relatedTabs.add(mModel.getTabAt(0));
+        relatedTabs.add(mModel.getTabAt(1));
+        when(mTabGroupModelFilter.getTabsInGroup(TAB_GROUP_ID_1)).thenReturn(relatedTabs);
+        when(mModel.getTabAt(0).getTabGroupId()).thenReturn(TAB_GROUP_ID_1);
+        when(mModel.getTabAt(1).getTabGroupId()).thenReturn(TAB_GROUP_ID_1);
+
+        // Call closure cancelled.
+        mStripLayoutHelper.tabClosureCancelled(TIMESTAMP, mModel.getTabAt(0).getId());
+
+        StripLayoutView[] viewsAfter = mStripLayoutHelper.getStripLayoutViewsForTesting();
+        assertTrue(viewsAfter[0] instanceof StripLayoutGroupTitle);
+        StripLayoutGroupTitle newGroupTitle = (StripLayoutGroupTitle) viewsAfter[0];
+
+        assertNotEquals(oldGroupTitle, newGroupTitle);
+        assertFalse(newGroupTitle.isDying());
+    }
+
+    @Test
     @Config(sdk = Build.VERSION_CODES.R)
     public void testOnLongPress_WithDragDrop_OnTab() {
         var tabs = initializeTest_ForTab();
@@ -2502,6 +2605,7 @@ public class StripLayoutHelperTest {
         initializeTest(false, false, 0);
         StripLayoutTab[] tabs = getMockedStripLayoutTabs(150f);
         mStripLayoutHelper.setStripLayoutTabsForTesting(tabs);
+        mStripLayoutHelper.setTabContextMenuCoordinatorForTesting(mTabContextMenuCoordinator);
 
         // Mock tab's view.
         View tabView = new View(mActivity);
@@ -2517,13 +2621,35 @@ public class StripLayoutHelperTest {
         mStripLayoutHelper.setTabAtPositionForTesting(tabs[1]);
         mStripLayoutHelper.onLongPress(150f, 0f);
 
-        // Verify that we show the popup menu anchored on the close button.
+        // Verify that we show the tab context menu.
         assertFalse(
                 "Should not be in reorder mode after long press on tab close button.",
                 mStripLayoutHelper.getInReorderModeForTesting());
+        verify(mTabContextMenuCoordinator).showMenu(any(), any());
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.GLIC)
+    public void testOnLongPress_OnGlicButton() {
+        // Initialize.
+        mToolbarContainerView = new View(mActivity);
+        initializeTest(/* tabIndex= */ 0);
+
+        // Mock Glic button.
+        when(mGlicBtn.isVisible()).thenReturn(true);
+        when(mGlicBtn.click(anyFloat(), anyFloat(), anyInt())).thenReturn(true);
+        when(mGlicBtn.getType()).thenReturn(ButtonType.GLIC);
+
+        // Long press on Glic button.
+        mStripLayoutHelper.onLongPress(150f, 0f);
+
+        // Verify the Glic button menu is showing.
+        assertFalse(
+                "Should not be in reorder mode after long press on Glic button.",
+                mStripLayoutHelper.getInReorderModeForTesting());
         assertTrue(
-                "Should show menu anchored on close button after long press.",
-                mStripLayoutHelper.isCloseButtonMenuShowingForTesting());
+                "Glic button menu should be showing",
+                mStripLayoutHelper.isGlicButtonMenuShowingForTesting());
     }
 
     @Test
@@ -2561,13 +2687,13 @@ public class StripLayoutHelperTest {
         mStripLayoutHelper.setTabAtPositionForTesting(null);
         mStripLayoutHelper.onLongPress(x, y);
 
-        // Verify that we do not show the popup menu anchored on the close button.
+        // Verify that we do not show the popup menu anchored on the Glic button.
         assertFalse(
                 "Should not be in reorder mode after long press on empty space on tab strip.",
                 mStripLayoutHelper.getInReorderModeForTesting());
         assertFalse(
                 "Should not show after long press on empty space on tab strip.",
-                mStripLayoutHelper.isCloseButtonMenuShowingForTesting());
+                mStripLayoutHelper.isGlicButtonMenuShowingForTesting());
 
         // Verify that we show the strip context menu.
         var rectProviderCaptor = ArgumentCaptor.forClass(RectProvider.class);
@@ -2683,11 +2809,12 @@ public class StripLayoutHelperTest {
                 0.1f);
 
         // Act: Call on close tab button handler.
+        Tab closingTab = mModel.getTabAt(2);
         mStripLayoutHelper.handleCloseButtonClick(
                 tabs[2], MotionEventUtils.MOTION_EVENT_BUTTON_NONE);
+        RobolectricUtil.runAllBackgroundAndUi();
 
         // Act: Fake the tab closure and end the animation, so the tab is removed from the model.
-        Tab closingTab = mModel.getTabAt(2);
         mStripLayoutHelper.finishAnimations();
         mStripLayoutHelper.tabClosed(closingTab);
 
@@ -3702,7 +3829,7 @@ public class StripLayoutHelperTest {
                 "Tab strip should match tab model.",
                 expectedNumTabs,
                 mStripLayoutHelper.getStripLayoutTabsForTesting().length);
-        verify(mUpdateHost, times(9)).requestUpdate();
+        verify(mUpdateHost, times(6)).requestUpdate();
         verify(mUpdateHost, times(4)).requestUpdate(any());
     }
 
@@ -3765,14 +3892,14 @@ public class StripLayoutHelperTest {
 
         // Act
         mStripLayoutHelper.handleCloseButtonClick(tabs[selectedTabIndex], motionEventButtonState);
+        RobolectricUtil.runAllBackgroundAndUi();
         mStripLayoutHelper.finishAnimations(); // end the closing animation
 
         // Assert
-        TestTabRemover testTabRemover = (TestTabRemover) mModel.getTabRemover();
-        assertNotNull(testTabRemover.mLastParamsForPrepareCloseTabs);
-        assertEquals(shouldAllowUndo, testTabRemover.mLastParamsForPrepareCloseTabs.allowUndo);
-        assertNotNull(testTabRemover.mLastParamsForForceCloseTabs);
-        assertEquals(shouldAllowUndo, testTabRemover.mLastParamsForForceCloseTabs.allowUndo);
+        assertNotNull(mTabRemover.mLastParamsForPrepareCloseTabs);
+        assertEquals(shouldAllowUndo, mTabRemover.mLastParamsForPrepareCloseTabs.allowUndo);
+        assertNotNull(mTabRemover.mLastParamsForForceCloseTabs);
+        assertEquals(shouldAllowUndo, mTabRemover.mLastParamsForForceCloseTabs.allowUndo);
     }
 
     @Test
@@ -3805,12 +3932,12 @@ public class StripLayoutHelperTest {
         mStripLayoutHelper.updateLayout(TIMESTAMP);
 
         // Act: Call on close tab button handler.
+        Tab closingTab = mModel.getTabAt(closingIndex);
         mStripLayoutHelper.handleCloseButtonClick(
                 tabs[closingIndex], MotionEventUtils.MOTION_EVENT_BUTTON_NONE);
+        RobolectricUtil.runAllBackgroundAndUi();
 
         // Act: Finish the close animations.
-        Tab closingTab = mModel.getTabAt(closingIndex);
-        mStripLayoutHelper.getRunningAnimatorForTesting().end();
         mStripLayoutHelper.tabClosed(closingTab);
 
         // Assert: Tab is closed.
@@ -3843,6 +3970,36 @@ public class StripLayoutHelperTest {
         mStripLayoutHelper.finishAnimations();
 
         verify(mTabHoverCardView).hide();
+    }
+
+    @Test
+    @DisableFeatures(ChromeFeatureList.TAB_STRIP_CLOSE_REFACTOR_ANDROID)
+    public void testHandleCloseButtonClick_RefactorDisabled() {
+        initializeTest(/* tabIndex= */ 0);
+
+        // Fake a close button click.
+        StripLayoutTab[] tabs = mStripLayoutHelper.getStripLayoutTabsForTesting();
+        mStripLayoutHelper.handleCloseButtonClick(
+                tabs[1], MotionEventUtils.MOTION_EVENT_BUTTON_NONE);
+
+        // Verify the old event flow.
+        verify(mTabRemover).prepareCloseTabs(any(), anyBoolean(), any(), any());
+        verify(mTabRemover, never()).closeTabs(any(), anyBoolean(), any());
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.TAB_STRIP_CLOSE_REFACTOR_ANDROID)
+    public void testHandleCloseButtonClick_RefactorEnabled() {
+        initializeTest(/* tabIndex= */ 0);
+
+        // Fake a close button click.
+        StripLayoutTab[] tabs = mStripLayoutHelper.getStripLayoutTabsForTesting();
+        mStripLayoutHelper.handleCloseButtonClick(
+                tabs[1], MotionEventUtils.MOTION_EVENT_BUTTON_NONE);
+
+        // Verify the new event flow.
+        verify(mTabRemover, never()).prepareCloseTabs(any(), anyBoolean(), any(), any());
+        verify(mTabRemover).closeTabs(any(), anyBoolean(), any());
     }
 
     private void verifyPendingMouseTabClosure(boolean expectedPendingMouseTabClosure) {
@@ -3993,6 +4150,7 @@ public class StripLayoutHelperTest {
     }
 
     @Test
+    @EnableFeatures(ChromeFeatureList.TAB_STRIP_EMPTY_SPACE_CONTEXT_MENU_ANDROID)
     public void testRightClickingClearsTabHoverState() {
         // Initialize hover card, then hover on a tab.
         initializeTabHoverTest();
@@ -4241,8 +4399,7 @@ public class StripLayoutHelperTest {
                 0,
                 TabLaunchType.FROM_RESTORE,
                 TabCreationState.FROZEN_ON_RESTORE);
-        mStripLayoutHelper.tabCreated(
-                TIMESTAMP, expectedRestoredTabId, Tab.INVALID_TAB_ID, false, false, true);
+        mStripLayoutHelper.tabCreated(TIMESTAMP, expectedRestoredTabId, false, false, true);
 
         // Verify that the third (active) and first tab are real.
         StripLayoutTab[] stripTabs = mStripLayoutHelper.getStripLayoutTabsForTesting();
@@ -4430,14 +4587,12 @@ public class StripLayoutHelperTest {
                 mModel.addTab(TEST_TAB_TITLES[i]);
                 when(mModel.getTabAt(i).isHidden()).thenReturn(tabIndex != i);
                 when(mModel.getTabAt(i).getView()).thenReturn(mInteractingTabView);
-                when(mModel.getTabAt(i).getRootId()).thenReturn(i);
             }
         } else {
             for (int i = 0; i < numTabs; i++) {
                 mModel.addTab("Tab " + i);
                 when(mModel.getTabAt(i).isHidden()).thenReturn(tabIndex != i);
                 when(mModel.getTabAt(i).getView()).thenReturn(mInteractingTabView);
-                when(mModel.getTabAt(i).getRootId()).thenReturn(i);
             }
         }
         mModel.setIndex(tabIndex);
@@ -4497,6 +4652,7 @@ public class StripLayoutHelperTest {
                 mUpdateHost,
                 mRenderHost,
                 incognito,
+                mGlicBtn,
                 mModelSelectorBtn,
                 mTabStripDragHandler,
                 mToolbarContainerView,
@@ -4506,8 +4662,9 @@ public class StripLayoutHelperTest {
                 () -> true,
                 mBottomSheetController,
                 mMultiInstanceManager,
-                () -> mShareDelegate,
-                mBottomSheetCoordinatorFactory);
+                ObservableSuppliers.createMonotonic(mShareDelegate),
+                mBottomSheetCoordinatorFactory,
+                mSnackbarManager);
     }
 
     private String[] getExpectedAccessibilityDescriptions(int tabIndex) {
@@ -4596,7 +4753,7 @@ public class StripLayoutHelperTest {
         StripLayoutTab theClickedTab = tabs[5];
 
         // Clean active tab environment and ensure.
-        mStripLayoutHelper.stopReorderMode();
+        mStripLayoutHelper.stopReorderMode(false);
         assertFalse(
                 "Reorder should not be in progress.",
                 mStripLayoutHelper.getInReorderModeForTesting());
@@ -4613,7 +4770,7 @@ public class StripLayoutHelperTest {
                 "Dragged Tab should match selected tab during drag action.",
                 mStripLayoutHelper.getReorderDelegateForTesting().getInteractingTabForTesting()
                         == theClickedTab);
-        mStripLayoutHelper.stopReorderMode();
+        mStripLayoutHelper.stopReorderMode(false);
         assertFalse(
                 "Reorder should not be in progress.",
                 mStripLayoutHelper.getInReorderModeForTesting());
@@ -5186,9 +5343,29 @@ public class StripLayoutHelperTest {
                                         - tabCloseButton.getTouchTargetBounds().left)
                                 / 2;
         mStripLayoutHelper.click(TIMESTAMP, viewMidX, 0, MotionEvent.BUTTON_SECONDARY, 0);
+        verify(mTabContextMenuCoordinator, times(2)).showMenu(any(), any());
+    }
+
+    @Test
+    @EnableFeatures(ChromeFeatureList.GLIC)
+    // TODO(crbug.com/483475735): Combine into testSecondaryClick after launch
+    public void testSecondaryClick_OnGlicButton() {
+        // Initialize.
+        mToolbarContainerView = new View(mActivity);
+        initializeTest(/* tabIndex= */ 0);
+
+        // Mock Glic button.
+        when(mGlicBtn.isVisible()).thenReturn(true);
+        when(mGlicBtn.click(anyFloat(), anyFloat(), anyInt())).thenReturn(true);
+        when(mGlicBtn.getType()).thenReturn(ButtonType.GLIC);
+
+        // Long press on Glic button.
+        mStripLayoutHelper.click(TIMESTAMP, 150f, 0f, MotionEvent.BUTTON_SECONDARY, 0);
+
+        // Verify the Glic button menu is showing.
         assertTrue(
-                "Should show tab menu after secondary click on tab close.",
-                mStripLayoutHelper.isCloseButtonMenuShowingForTesting());
+                "Glic button menu should be showing",
+                mStripLayoutHelper.isGlicButtonMenuShowingForTesting());
     }
 
     @Test
@@ -5371,20 +5548,22 @@ public class StripLayoutHelperTest {
         initializeTest(/* tabIndex= */ 3);
         groupTabs(0, 2, TAB_GROUP_ID_1);
         when(mTabGroupModelFilter.getTabGroupCollapsed(TAB_GROUP_ID_1)).thenReturn(true);
+        doAnswer(
+                        invocation -> {
+                            when(mTabGroupModelFilter.getTabGroupCollapsed(TAB_GROUP_ID_1))
+                                    .thenReturn(false);
+                            return null;
+                        })
+                .when(mTabGroupModelFilter)
+                .deleteTabGroupCollapsed(TAB_GROUP_ID_1);
 
         // Create a tab in the collapsed group.
         int tabId = 5;
         mModel.addTab("new tab");
         Tab tab = mModel.getTabById(tabId);
-        when(tab.getRootId()).thenReturn(0);
         when(tab.getTabGroupId()).thenReturn(TAB_GROUP_ID_1);
         mStripLayoutHelper.tabCreated(
-                TIMESTAMP,
-                tabId,
-                tabId,
-                selected,
-                /* closureCancelled */ false,
-                /* onStartup= */ false);
+                TIMESTAMP, tabId, selected, /* closureCancelled= */ false, /* onStartup= */ false);
 
         // Verify we only auto-expand if selected.
         verify(mTabGroupModelFilter, times(selected ? 1 : 0))
@@ -5570,10 +5749,11 @@ public class StripLayoutHelperTest {
 
         // Create a new tab.
         mModel.addTab("new tab");
-        mStripLayoutHelper.tabCreated(TIMESTAMP, 1, 0, true, false, false);
+        mStripLayoutHelper.tabCreated(TIMESTAMP, 1, true, false, false);
 
         // Trigger show iph.
         mStripLayoutHelper.finishAnimations();
+        mStripLayoutHelper.finishScrollForTesting();
         mStripLayoutHelper.updateLayout(TIMESTAMP);
 
         // Verify iph is displayed at the correct horizontal position.
@@ -5718,7 +5898,7 @@ public class StripLayoutHelperTest {
         mStripLayoutHelper.setLayerTitleCache(newTitleCache);
 
         // Verify the observers have been updated as expected.
-        verify(newTitleCache).getGroupTitleWidth(eq(false), eq(expectedTitle));
+        verify(newTitleCache).getTitleWidth(eq(false), eq(expectedTitle));
     }
 
     @Test
@@ -5963,23 +6143,6 @@ public class StripLayoutHelperTest {
     }
 
     @Test
-    public void testOpenContextMenu_closeButton() {
-        initializeTest(false, false, 0);
-        // Set up a view for ListMenu to use (otherwise constructing the ListMenu will fail).
-        View tabView = new View(mActivity);
-        when(mModel.getTabAt(anyInt())).thenReturn(mTab);
-        when(mTab.getView()).thenReturn(tabView);
-        StripLayoutTab parentTab = mStripLayoutHelper.getStripLayoutTabsForTesting()[0];
-        parentTab.getCloseButton().setKeyboardFocused(true);
-        assertTrue(
-                "Expected openKeyboardFocusedContextMenu to return true if tab context menu opened",
-                mStripLayoutHelper.openKeyboardFocusedContextMenu());
-        assertTrue(
-                "Expected close button context menu to be showing",
-                mStripLayoutHelper.isCloseButtonMenuShowingForTesting());
-    }
-
-    @Test
     public void testTabCreated_HorizontalAnimation() {
         // Initialize with default amount of tabs. Clear any animations.
         initializeTest(false, false, 3);
@@ -5990,7 +6153,7 @@ public class StripLayoutHelperTest {
 
         // Act: Create new tab in model and trigger update in tab strip.
         mModel.addTab("new tab");
-        mStripLayoutHelper.tabCreated(TIMESTAMP, 5, 3, true, false, false);
+        mStripLayoutHelper.tabCreated(TIMESTAMP, 5, true, false, false);
     }
 
     @Test
@@ -6006,11 +6169,12 @@ public class StripLayoutHelperTest {
         mStripLayoutHelper.updateLayout(TIMESTAMP);
 
         // Act: Call on close tab button handler.
+        Tab closingTab = mModel.getTabAt(9);
         mStripLayoutHelper.handleCloseButtonClick(
                 tabs[9], MotionEventUtils.MOTION_EVENT_BUTTON_NONE);
+        RobolectricUtil.runAllBackgroundAndUi();
 
         // Act: Fake the tab closure and end the animation, so the tab is removed from the model.
-        Tab closingTab = mModel.getTabAt(9);
         mStripLayoutHelper.finishAnimations();
         mStripLayoutHelper.tabClosed(closingTab);
 
@@ -6034,7 +6198,6 @@ public class StripLayoutHelperTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.ANDROID_TAB_HIGHLIGHTING)
     public void testMultiSelect_CtrlClick_SelectsAndActivatesTab() {
         initializeTest(false, false, 0, 5);
         // Update layout to set view draw properties
@@ -6065,7 +6228,6 @@ public class StripLayoutHelperTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.ANDROID_TAB_HIGHLIGHTING)
     public void testMultiSelect_CtrlClick_TogglesSelection() {
         initializeTest(false, false, 0, 5);
         // Update layout to set view draw properties
@@ -6103,7 +6265,6 @@ public class StripLayoutHelperTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.ANDROID_TAB_HIGHLIGHTING)
     public void testMultiSelect_ShiftClick_SelectsRange() {
         initializeTest(false, false, 1, 5); // Start with Tab 1 active (this is the anchor).
         // Update layout to set view draw properties
@@ -6139,7 +6300,6 @@ public class StripLayoutHelperTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.ANDROID_TAB_HIGHLIGHTING)
     public void testMultiSelect_ShiftClick_IsDestructive() {
         initializeTest(false, false, 2, 5);
         // Update layout to set view draw properties
@@ -6187,7 +6347,6 @@ public class StripLayoutHelperTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.ANDROID_TAB_HIGHLIGHTING)
     public void testMultiSelect_ShiftCtrlClick_IsAdditive() {
         initializeTest(false, false, 0, 5);
         // Update layout to set view draw properties
@@ -6229,7 +6388,6 @@ public class StripLayoutHelperTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.ANDROID_TAB_HIGHLIGHTING)
     public void testMultiSelect_StandardClick_ClearsSelection() {
         initializeTest(false, false, 0, 5);
         // Update layout to set view draw properties
@@ -6273,7 +6431,6 @@ public class StripLayoutHelperTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.ANDROID_TAB_HIGHLIGHTING)
     public void testMultiSelect_ShiftClick_ThroughCollapsedGroup_ExpandsGroup() {
         initializeTest(false, false, 0, 5);
         groupTabs(1, 4, TAB_GROUP_ID_1);
@@ -6297,7 +6454,6 @@ public class StripLayoutHelperTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.ANDROID_TAB_HIGHLIGHTING)
     public void testMultiSelect_CtrlClick_OnActiveTab_SelectsLeftmost() {
         initializeTest(false, false, 0, 5);
         // Update layout to set view draw properties
@@ -6337,7 +6493,6 @@ public class StripLayoutHelperTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.ANDROID_TAB_HIGHLIGHTING)
     public void testMultiSelect_CtrlClick_ResetsAnchorTab() {
         initializeTest(false, false, 1, 5);
         mStripLayoutHelper.onSizeChanged(
@@ -6377,7 +6532,6 @@ public class StripLayoutHelperTest {
     }
 
     @Test
-    @EnableFeatures({ChromeFeatureList.ANDROID_TAB_HIGHLIGHTING})
     public void testTabContextMenu_MultipleTabsSelected() {
         // Setup
         initializeTest(false, false, 0, 5);
@@ -6420,7 +6574,6 @@ public class StripLayoutHelperTest {
     }
 
     @Test
-    @EnableFeatures({ChromeFeatureList.ANDROID_TAB_HIGHLIGHTING})
     public void testTabContextMenu_MultipleTabsSelected_WithGroup() {
         // Setup
         initializeTest(false, false, 0, 5);
@@ -7043,13 +7196,13 @@ public class StripLayoutHelperTest {
     private void setupDragDropState() {
         ChromeDropDataAndroid dropData =
                 new ChromeTabDropDataAndroid.Builder().withTab(mTab).build();
-        TrackerToken dragTrackerToken =
+        Token dragToken =
                 DragDropGlobalState.store(
                         /* dragSourceInstanceId= */ 1, dropData, /* dragShadowBuilder= */ null);
-        TabDragHandlerBase.setDragTrackerTokenForTesting(dragTrackerToken);
+        TabDragHandlerBase.setDragTokenForTesting(dragToken);
     }
 
-    private final class TestTabRemover implements TabRemover {
+    private class TestTabRemover implements TabRemover {
         @Nullable TabClosureParams mLastParamsForPrepareCloseTabs;
         @Nullable TabClosureParams mLastParamsForForceCloseTabs;
 

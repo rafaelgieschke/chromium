@@ -7,7 +7,9 @@
 #include "base/base64.h"
 #include "base/check_deref.h"
 #include "base/feature_list.h"
+#include "base/functional/callback_helpers.h"
 #include "base/memory/raw_ref.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/strings/string_split.h"
 #include "base/uuid.h"
 #include "build/branding_buildflags.h"
@@ -15,15 +17,18 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/contextual_search/contextual_search_service_factory.h"
 #include "chrome/browser/contextual_search/contextual_search_web_contents_helper.h"
+#include "chrome/browser/contextual_tasks/active_task_context_provider.h"
 #include "chrome/browser/contextual_tasks/contextual_search_session_finder.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_composebox_handler.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_context_service_factory.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_internals_page_handler.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_page_handler.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_panel_controller.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_service_factory.h"
-#include "chrome/browser/contextual_tasks/contextual_tasks_side_panel_coordinator.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service_factory.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_utils.h"
+#include "chrome/browser/contextual_tasks/entry_point_eligibility_manager.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
@@ -32,11 +37,13 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/lens/lens_search_controller.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/webui/cr_components/searchbox/searchbox_handler.h"
 #include "chrome/browser/ui/webui/new_tab_page/composebox/variations/composebox_fieldtrial.h"
+#include "chrome/browser/ui/webui/sanitized_image_source.h"
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/grit/branded_strings.h"
@@ -51,8 +58,10 @@
 #include "components/contextual_tasks/public/prefs.h"
 #include "components/contextual_tasks/public/utils.h"
 #include "components/lens/lens_features.h"
+#include "components/lens/lens_overlay_invocation_source.h"
 #include "components/omnibox/browser/aim_eligibility_service.h"
 #include "components/omnibox/browser/searchbox.mojom-forward.h"
+#include "components/omnibox/common/logger.h"
 #include "components/prefs/pref_service.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/signin/public/base/consent_level.h"
@@ -67,7 +76,9 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/google_service_auth_error.h"
+#include "net/base/backoff_entry.h"
 #include "third_party/lens_server_proto/aim_communication.pb.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/webui/webui_util.h"
@@ -89,6 +100,16 @@ void AddContextMenuItemEligibilityLoadTimeData(content::WebUIDataSource* source,
   source->AddBoolean("composeboxShowPdfUpload",
                      aim_eligibility_service &&
                          aim_eligibility_service->IsPdfUploadEligible());
+  if (aim_eligibility_service &&
+      aim_eligibility_service->GetSearchboxConfig()->has_hint_text()) {
+    source->AddString(
+        "searchboxComposePlaceholder",
+        aim_eligibility_service->GetSearchboxConfig()->hint_text());
+  } else {
+    source->AddLocalizedString(
+        "searchboxComposePlaceholder",
+        IDS_CONTEXTUAL_TASKS_COMPOSEBOX_PLACEHOLDER_TEXT);
+  }
 }
 
 BrowserWindowInterface* FromWebContents(content::WebContents* web_contents) {
@@ -110,6 +131,15 @@ std::string GetEncodedHandshakeMessage() {
           contextual_tasks::kContextualTasksContextLibrary)) {
     ping->add_capabilities(lens::FeatureCapability::THREAD_CONTEXT_LIBRARY);
   }
+  if (base::FeatureList::IsEnabled(
+          contextual_tasks::kEnableNotifyZeroStateRenderedCapability)) {
+    ping->add_capabilities(lens::FeatureCapability::NOTIFY_ZERO_STATE_RENDERED);
+  }
+  if (contextual_tasks::ShouldEnableLockAndUnlockInputCapability()) {
+    ping->add_capabilities(lens::FeatureCapability::UNLOCK_INPUT);
+    ping->add_capabilities(lens::FeatureCapability::LOCK_INPUT);
+  }
+
   const size_t size = message.ByteSizeLong();
   std::vector<uint8_t> serialized_message(size);
   message.SerializeToArray(&serialized_message[0], size);
@@ -123,6 +153,45 @@ void AddDefaultZeroStateStrings(content::WebUIDataSource* source) {
                     l10n_util::GetStringUTF16(
                         IDS_AI_MODE_FRIENDLY_ZERO_STATE_TITLE_WITHOUT_NAME));
   source->AddString("friendlyZeroStateSubtitle", "");
+  source->AddString("friendlyZeroStateGaiaName", "");
+  source->AddString("friendlyZeroStateTitleBeforeName", "");
+  source->AddString("friendlyZeroStateTitleAfterName", "");
+}
+
+bool ContextualTasksUI::AreUrlsEqual(const GURL& a,
+                                     const GURL& b) {
+  if (a == b) {
+    return true;
+  }
+
+  if (a.host() != b.host()) {
+    return false;
+  }
+
+  GURL::Replacements replacements;
+  replacements.ClearQuery();
+  if (a.ReplaceComponents(replacements) != b.ReplaceComponents(replacements)) {
+    return false;
+  }
+
+  std::vector<std::pair<std::string_view, std::string_view>> a_params;
+  for (net::QueryIterator it(a); !it.IsAtEnd(); it.Advance()) {
+    a_params.emplace_back(it.GetKey(), it.GetValue());
+  }
+
+  std::vector<std::pair<std::string_view, std::string_view>> b_params;
+  for (net::QueryIterator it(b); !it.IsAtEnd(); it.Advance()) {
+    b_params.emplace_back(it.GetKey(), it.GetValue());
+  }
+
+  if (a_params.size() != b_params.size()) {
+    return false;
+  }
+
+  std::sort(a_params.begin(), a_params.end());
+  std::sort(b_params.begin(), b_params.end());
+
+  return a_params == b_params;
 }
 
 void AddZeroStateStrings(content::WebUIDataSource* source, Profile* profile) {
@@ -141,23 +210,39 @@ void AddZeroStateStrings(content::WebUIDataSource* source, Profile* profile) {
   }
 
   std::u16string gaia_name = entry->GetGAIANameToDisplay();
-  std::u16string full_string;
   if (gaia_name.empty()) {
-    full_string = l10n_util::GetStringUTF16(
-        IDS_AI_MODE_FRIENDLY_ZERO_STATE_TITLE_WITHOUT_NAME);
-  } else {
-    full_string = l10n_util::GetStringFUTF16(
-        IDS_AI_MODE_FRIENDLY_ZERO_STATE_TITLE, gaia_name, u"<br>");
+    AddDefaultZeroStateStrings(source);
+    return;
   }
+
+  std::vector<size_t> offsets;
+  const std::u16string full_string = l10n_util::GetStringFUTF16(
+      IDS_AI_MODE_FRIENDLY_ZERO_STATE_TITLE, {gaia_name}, &offsets);
   std::vector<std::u16string> parts = base::SplitStringUsingSubstr(
       full_string, u"<br>", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL);
   source->AddString("friendlyZeroStateTitle", parts.empty() ? u"" : parts[0]);
+
+  if (offsets.size() == 1 && !parts.empty() &&
+      offsets[0] + gaia_name.length() <= parts[0].length()) {
+    source->AddString("friendlyZeroStateGaiaName", gaia_name);
+    source->AddString("friendlyZeroStateTitleBeforeName",
+                      parts[0].substr(0, offsets[0]));
+    source->AddString("friendlyZeroStateTitleAfterName",
+                      parts[0].substr(offsets[0] + gaia_name.length()));
+  } else {
+    // Fallback to default behavior if name replacement fails.
+    source->AddString("friendlyZeroStateGaiaName", "");
+    source->AddString("friendlyZeroStateTitleBeforeName", "");
+    source->AddString("friendlyZeroStateTitleAfterName", "");
+  }
   source->AddString("friendlyZeroStateSubtitle",
                     parts.size() > 1 ? parts[1] : u"");
 }
 
 ContextualTasksUI::ContextualTasksUI(content::WebUI* web_ui)
-    : TopChromeWebUIController(web_ui),
+    : ui::MojoWebUIController(web_ui,
+                              /*enable_chrome_send=*/false,
+                              /*enable_chrome_histograms=*/true),
       ui_service_(contextual_tasks::ContextualTasksUiServiceFactory::
                       GetForBrowserContext(
                           web_ui->GetWebContents()->GetBrowserContext())),
@@ -165,11 +250,23 @@ ContextualTasksUI::ContextualTasksUI(content::WebUI* web_ui)
           contextual_tasks::ContextualTasksServiceFactory::GetForProfile(
               Profile::FromBrowserContext(
                   web_ui->GetWebContents()->GetBrowserContext()))) {
+  Profile* profile = Profile::FromWebUI(web_ui);
+  if (contextual_tasks::ShouldEnableCookieSync()) {
+    cookie_synchronizer_ =
+        std::make_unique<contextual_tasks::ContextualTasksCookieSynchronizer>(
+            web_ui->GetWebContents()->GetBrowserContext(),
+            IdentityManagerFactory::GetForProfile(profile));
+  }
   inner_web_contents_creation_observer_ =
       std::make_unique<InnerFrameCreationObvserver>(
           web_ui->GetWebContents(),
-          base::BindOnce(&ContextualTasksUI::OnInnerWebContentsCreated,
-                         weak_ptr_factory_.GetWeakPtr()));
+          base::BindRepeating(&ContextualTasksUI::OnInnerWebContentsCreated,
+                              weak_ptr_factory_.GetWeakPtr()),
+          base::BindRepeating(&ContextualTasksUI::ResetEmbeddedPage,
+                              weak_ptr_factory_.GetWeakPtr()));
+  // Add a means of loading images fromexternal sources.
+  content::URLDataSource::Add(profile,
+                              std::make_unique<SanitizedImageSource>(profile));
   content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
       web_ui->GetWebContents()->GetBrowserContext(),
       chrome::kChromeUIContextualTasksHost);
@@ -182,28 +279,42 @@ ContextualTasksUI::ContextualTasksUI(content::WebUI* web_ui)
       "child-src 'self' https://*.google.com;");
 
   // Add required resources for the searchbox.
-  SearchboxHandler::SetupWebUIDataSource(source, Profile::FromWebUI(web_ui),
+  SearchboxHandler::SetupWebUIDataSource(source, profile,
                                          /*enable_voice_search=*/true,
                                          /*enable_lens_search=*/false);
   // Add strings.js
   source->UseStringsJs();
 
   static constexpr webui::LocalizedString kLocalizedStrings[] = {
-      {"openInNewTab", IDS_CONTEXTUAL_TASKS_MENU_OPEN_IN_NEW_TAB},
-      {"myActivity", IDS_CONTEXTUAL_TASKS_MENU_MY_ACTIVITY},
+      {"closeTooltip", IDS_CONTEXTUAL_TASKS_SIDE_PANEL_CLOSE_TOOL_TIP},
+      {"contextTooltip", IDS_CONTEXTUAL_TASKS_SIDE_PANEL_CONTEXT_TOOL_TIP},
+      {"feedback", IDS_LENS_SEND_FEEDBACK},
       {"help", IDS_CONTEXTUAL_TASKS_MENU_HELP},
+      {"moreOptionsTooltip",
+       IDS_CONTEXTUAL_TASKS_SIDE_PANEL_MORE_OPTIONS_TOOL_TIP},
+      {"myActivity", IDS_CONTEXTUAL_TASKS_MENU_MY_ACTIVITY},
+      {"newThreadTooltip", IDS_CONTEXTUAL_TASKS_SIDE_PANEL_NEW_THREAD_TOOL_TIP},
+      {"openInNewTab", IDS_CONTEXTUAL_TASKS_MENU_OPEN_IN_NEW_TAB},
       {"sourcesMenuTitle", IDS_CONTEXTUAL_TASKS_SOURCES_MENU_TITLE},
-      {"sourcesMenuTabsHeader", IDS_CONTEXTUAL_TASKS_SOURCES_MENU_TABS_HEADER},
+      {"threadHistoryTooltip",
+       IDS_CONTEXTUAL_TASKS_SIDE_PANEL_HISTORY_TOOL_TIP},
       {"title", IDS_CONTEXTUAL_TASKS_AI_MODE_TITLE},
       /* composeDeepSearchPlaceholder and
        * composeCreateImagePlaceholder are defined by searchbox_handler.cc.
        */
-      {"composeboxPlaceholderText", IDS_NTP_COMPOSE_PLACEHOLDER_TEXT},
       {"onboardingTitle", IDS_CONTEXTUAL_TASKS_FIRST_RUN_EXPERIENCE_TITLE},
       {"onboardingBody", IDS_CONTEXTUAL_TASKS_FIRST_RUN_EXPERIENCE_DESCRIPTION},
       {"onboardingLink", IDS_CONTEXTUAL_TASKS_FIRST_RUN_EXPERIENCE_LEARN_MORE},
+      {"onboardingAcceptButton",
+       IDS_CONTEXTUAL_TASKS_FIRST_RUN_EXPERIENCE_ACCEPT_BUTTON},
       {"permissionError", IDS_NEW_TAB_VOICE_PERMISSION_ERROR},
       {"listening", IDS_NEW_TAB_VOICE_LISTENING},
+      {"oauthErrorDialogTitle", IDS_CONTEXTUAL_TASKS_OAUTH_ERROR_DIALOG_TITLE},
+      {"oauthErrorDialogBody", IDS_CONTEXTUAL_TASKS_OAUTH_ERROR_DIALOG_BODY},
+      {"oauthErrorDialogReloadButton",
+       IDS_CONTEXTUAL_TASKS_OAUTH_ERROR_DIALOG_RELOAD_BUTTON},
+      {"composeboxHintTextLensOverlay",
+       IDS_LENS_COMPOSEBOX_HINT_TEXT_SELECT_PAGE},
   };
   source->AddLocalizedStrings(kLocalizedStrings);
   source->AddLocalizedString(
@@ -252,9 +363,12 @@ ContextualTasksUI::ContextualTasksUI(content::WebUI* web_ui)
       "composeboxShowOnboardingTooltipSessionImpressionCap",
       contextual_tasks::
           GetContextualTasksShowOnboardingTooltipSessionImpressionCap());
+  source->AddInteger(
+      "composeboxShowOnboardingTooltipImpressionDelay",
+      contextual_tasks::GetContextualTasksOnboardingTooltipImpressionDelay());
   source->AddBoolean(
       "isOnboardingTooltipDismissCountBelowCap",
-      Profile::FromWebUI(web_ui)->GetPrefs()->GetInteger(
+      profile->GetPrefs()->GetInteger(
           contextual_tasks::kContextualTasksOnboardingTooltipDismissedCount) <
           contextual_tasks::GetContextualTasksOnboardingTooltipDismissedCap());
   source->AddBoolean("isLensSearchbox", true);
@@ -270,16 +384,20 @@ ContextualTasksUI::ContextualTasksUI(content::WebUI* web_ui)
   source->AddBoolean(
       "enableThumbnailSizingTweaks",
       lens::features::GetVisualSelectionUpdatesEnableThumbnailSizingTweaks());
-  source->AddString("searchboxComposePlaceholder",
-                    ntp_composebox::FeatureConfig::Get()
-                        .config.composebox()
-                        .input_placeholder_text());
-  source->AddBoolean("composeboxSmartComposeEnabled", false);
-  AddContextMenuItemEligibilityLoadTimeData(source, Profile::FromWebUI(web_ui));
+  source->AddBoolean("composeboxSmartComposeEnabled",
+                     contextual_tasks::GetEnableContextualTasksSmartCompose());
+  source->AddBoolean("enableNativeZeroStateSuggestions",
+                     contextual_tasks::GetEnableNativeZeroStateSuggestions());
+  // Contextual tasks needs finer control over when to query zps based on its
+  // current state. Most other composebox's blindly query autocomplete as soon
+  // as it is rendered.
+  source->AddBoolean("queryZpsOnLoad", false);
+
+  AddContextMenuItemEligibilityLoadTimeData(source, profile);
   source->AddBoolean("composeboxShowLensSearchChip", false);
   source->AddBoolean("composeboxShowRecentTabChip", false);
   source->AddBoolean("composeboxShowSubmit", true);
-  source->AddBoolean("composeboxContextDragAndDropEnabled", false);
+  source->AddBoolean("composeboxContextDragAndDropEnabled", true);
   source->AddBoolean(
       "steadyComposeboxShowVoiceSearch",
       contextual_tasks::GetIsExpandedComposeboxVoiceSearchEnabled());
@@ -289,11 +407,24 @@ ContextualTasksUI::ContextualTasksUI(content::WebUI* web_ui)
   source->AddBoolean("composeboxShowContextMenuTabPreviews", false);
   source->AddBoolean("composeboxContextMenuEnableMultiTabSelection", true);
   source->AddBoolean(
-      "darkMode", ThemeServiceFactory::GetForProfile(Profile::FromWebUI(web_ui))
-                      ->BrowserUsesDarkColors());
+      "darkMode",
+      ThemeServiceFactory::GetForProfile(profile)->BrowserUsesDarkColors());
   source->AddBoolean("clearAllInputsWhenSubmittingQuery", true);
   source->AddBoolean("autoSubmitVoiceSearchQuery",
                      contextual_tasks::GetAutoSubmitVoiceSearchQuery());
+  source->AddBoolean("enableGhostLoader",
+                     contextual_tasks::GetIsGhostLoaderEnabled());
+  source->AddBoolean(
+      "forceBasicModeIfOpeningThreadHistory",
+      contextual_tasks::ShouldForceBasicModeIfOpeningThreadHistory());
+  source->AddBoolean("enableBasicMode",
+                     contextual_tasks::GetIsBasicModeEnabled());
+  source->AddBoolean("enableBasicModeZOrder",
+                     contextual_tasks::ShouldEnableBasicModeZOrder());
+  source->AddBoolean(
+      "enableLockAndUnlockInputCapability",
+      contextual_tasks::ShouldEnableLockAndUnlockInputCapability());
+  source->AddBoolean("enableFileHint", contextual_tasks::GetEnableFileHint());
 
   source->AddString(
       "composeboxSource",
@@ -322,6 +453,16 @@ ContextualTasksUI::ContextualTasksUI(content::WebUI* web_ui)
       base::JoinString(contextual_tasks::GetContextualTasksSignInDomains(),
                        ","));
 
+  // Expand button experiment state.
+  source->AddBoolean(
+      "expandButtonEnabled",
+      contextual_tasks::GetExpandButtonOption() ==
+          contextual_tasks::ExpandButtonOption::kSidePanelExpandButton);
+
+  source->AddBoolean("caretAnimationEnabled",
+                     base::FeatureList::IsEnabled(
+                         contextual_tasks::kContextualTasksAnimatedCaret));
+
   // Set up chrome://contextual-tasks/internals debug UI.
   source->AddResourcePath(
       "internals",
@@ -330,8 +471,8 @@ ContextualTasksUI::ContextualTasksUI(content::WebUI* web_ui)
       "internals/",
       IDR_CONTEXTUAL_TASKS_INTERNALS_CONTEXTUAL_TASKS_INTERNALS_HTML);
 
-  Profile* profile = Profile::FromWebUI(web_ui);
   AddZeroStateStrings(source, profile);
+  contextual_tasks_service_observation_.Observe(contextual_tasks_service_);
 }
 
 ContextualTasksUI::~ContextualTasksUI() = default;
@@ -348,65 +489,38 @@ void ContextualTasksUI::CreatePageHandler(
   page_handler_ = std::make_unique<ContextualTasksPageHandler>(
       std::move(page_handler), this, ui_service_, contextual_tasks_service_);
 
-  // Request the initial OAuth token to be used by the embedded page.
-  RequestOAuthToken();
-}
-
-void ContextualTasksUI::RequestOAuthToken() {
-  token_refresh_timer_.Stop();
-
-  auto* profile = Profile::FromWebUI(web_ui());
-  auto* identity_manager = IdentityManagerFactory::GetForProfile(profile);
-  if (!identity_manager ||
-      !identity_manager->HasPrimaryAccount(signin::ConsentLevel::kSignin)) {
-    if (page_) {
-      page_->SetOAuthToken("");
-      return;
+  // Determine if the Lens overlay is showing when the page is created.
+  if (auto* browser = GetBrowser()) {
+    if (auto* controller = LensSearchController::FromTabWebContents(
+            browser->GetTabStripModel()->GetActiveWebContents())) {
+      OnLensOverlayStateChanged(controller->IsShowingUI(),
+                                controller->invocation_source());
     }
-    return;
-  }
-
-  // TODO(crbug.com/461596823): Currently just grabs the primary account, but
-  // should use the web identity when available. Additionally, the account
-  // should be grabbed once, and used until this WebUI is closed.
-  // TODO(crbug.com/462138963): Add error handling for when the account
-  // identities fail.
-  auto account =
-      identity_manager->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin);
-
-  // A previous fetcher for the same owner will be automatically cancelled.
-  oauth_token_fetcher_ = identity_manager->CreateAccessTokenFetcherForAccount(
-      account.account_id, signin::OAuthConsumerId::kContextualTasks,
-      base::BindOnce(&ContextualTasksUI::OnOAuthTokenReceived,
-                     base::Unretained(this)),
-      signin::AccessTokenFetcher::Mode::kWaitUntilRefreshTokenAvailable);
-}
-
-void ContextualTasksUI::OnOAuthTokenReceived(
-    GoogleServiceAuthError error,
-    signin::AccessTokenInfo access_token_info) {
-  oauth_token_fetcher_.reset();
-  if (!page_) {
-    return;
-  }
-  if (error.state() != GoogleServiceAuthError::NONE) {
-    page_->SetOAuthToken("");
-    return;
-  }
-  page_->SetOAuthToken(access_token_info.token);
-
-  if (!access_token_info.expiration_time.is_null()) {
-    token_refresh_timer_.Start(
-        FROM_HERE, access_token_info.expiration_time - base::Time::Now(),
-        base::BindOnce(&ContextualTasksUI::RequestOAuthToken,
-                       weak_ptr_factory_.GetWeakPtr()));
   }
 }
+
+void ContextualTasksUI::OnRefreshTokenUpdatedForAccount(
+    const CoreAccountInfo& account_info) {}
 
 void ContextualTasksUI::OnZeroStateChange(bool is_zero_state) {
   if (page_) {
     page_->OnZeroStateChange(is_zero_state);
   }
+}
+
+void ContextualTasksUI::OnTaskUpdated(
+    const contextual_tasks::ContextualTask& task,
+    contextual_tasks::ContextualTasksService::TriggerSource source) {
+  if (task_id_ && task_id_.value() == task.GetTaskId()) {
+    // Update the auto suggested tab chip if needed.
+    OnActiveTabContextStatusChanged();
+  }
+}
+
+GURL ContextualTasksUI::GetAimUrl() {
+  return contextual_tasks::ContextualTasksUiService::
+      GetAimUrlFromContextualTasksUrl(
+          web_ui()->GetWebContents()->GetLastCommittedURL());
 }
 
 const std::optional<base::Uuid>& ContextualTasksUI::GetTaskId() {
@@ -416,6 +530,10 @@ const std::optional<base::Uuid>& ContextualTasksUI::GetTaskId() {
 void ContextualTasksUI::SetTaskId(std::optional<base::Uuid> id) {
   task_id_ = id;
   PushTaskDetailsToPage();
+  // Initialize input state once task id is available.
+  if (composebox_handler_) {
+    composebox_handler_->InitializeInputStateModel();
+  }
 }
 
 const std::optional<std::string>& ContextualTasksUI::GetThreadId() {
@@ -443,6 +561,12 @@ void ContextualTasksUI::SetThreadTitle(std::optional<std::string> title) {
   }
 }
 
+void ContextualTasksUI::SetAimUrl(const GURL& url) {
+  if (page_) {
+    page_->SetAimUrl(url);
+  }
+}
+
 void ContextualTasksUI::SetIsAiPage(bool is_ai_page) {
   if (page_) {
     page_->OnAiPageStatusChanged(is_ai_page);
@@ -460,6 +584,11 @@ void ContextualTasksUI::SetIsAiPage(bool is_ai_page) {
     }
   }
   was_ai_page_ = is_ai_page;
+
+  auto* panel_controller = GetPanelController();
+  if (panel_controller) {
+    panel_controller->NotifyExpandToFullTabStateChanged();
+  }
 }
 
 const GURL& ContextualTasksUI::GetInnerFrameUrl() const {
@@ -478,17 +607,21 @@ BrowserWindowInterface* ContextualTasksUI::GetBrowser() {
   return FromWebContents(web_ui()->GetWebContents());
 }
 
+Profile* ContextualTasksUI::GetProfile() {
+  return Profile::FromWebUI(web_ui());
+}
+
 content::WebContents* ContextualTasksUI::GetWebUIWebContents() {
   return web_ui()->GetWebContents();
 }
 
 void ContextualTasksUI::CloseSidePanel() {
-  auto* coordinator = GetSidePanelCoordinator();
-  if (!coordinator) {
+  auto* controller = GetPanelController();
+  if (!controller) {
     return;
   }
 
-  coordinator->Close();
+  controller->Close();
 }
 
 void ContextualTasksUI::BindInterface(
@@ -501,7 +634,14 @@ void ContextualTasksUI::BindInterface(
 
 bool ContextualTasksUIConfig::IsWebUIEnabled(
     content::BrowserContext* browser_context) {
+  // Check if the user should have landed on the WebUI via an entry point. If
+  // not, refuse to load the WebUI to prevent a broken experience.
   return base::FeatureList::IsEnabled(contextual_tasks::kContextualTasks);
+}
+
+bool ContextualTasksUIConfig::ShouldCrashOnJavascriptErrorInDevelopmentBuild()
+    const {
+  return true;
 }
 
 std::unique_ptr<content::WebUIController>
@@ -529,7 +669,9 @@ void ContextualTasksUI::CreatePageHandler(
       std::move(pending_searchbox_handler),
       base::BindRepeating(
           &ContextualTasksUI::GetOrCreateContextualSessionHandle,
-          base::Unretained(this)));
+          base::Unretained(this)),
+      base::BindRepeating(&ContextualTasksUI::TakeInputStateModel,
+                          base::Unretained(this)));
   composebox_handler_->SetPage(std::move(pending_searchbox_page));
 }
 
@@ -547,36 +689,65 @@ ContextualTasksUI::GetOrCreateContextualSessionHandle() {
     return existing_session;
   }
 
+  auto* contextual_search_service =
+      ContextualSearchServiceFactory::GetForProfile(
+          Profile::FromWebUI(web_ui()));
+
   // Create a new session if there's no task ID yet.
   if (!task_id_) {
-    auto* service = ContextualSearchServiceFactory::GetForProfile(
-        Profile::FromWebUI(web_ui()));
-    if (service) {
-      auto session_handle = service->CreateSession(
+    if (contextual_search_service) {
+      auto session_handle = contextual_search_service->CreateSession(
           ntp_composebox::CreateQueryControllerConfigParams(),
-          contextual_search::ContextualSearchSource::kContextualTasks);
+          contextual_search::ContextualSearchSource::kContextualTasks,
+          lens::LensOverlayInvocationSource::kContextualTasksComposebox);
       // TODO(crbug.com/469875164): Determine what to do with the return value
       // of this call, or move this call to a different location.
       session_handle->CheckSearchContentSharingSettings(
           Profile::FromWebUI(web_ui())->GetPrefs());
-      helper->SetTaskSession(std::nullopt, std::move(session_handle));
+      helper->SetTaskSession(std::nullopt, std::move(session_handle),
+                             /*input_state_model=*/nullptr);
       return helper->session_handle();
     }
   }
 
-  // TODO(crbug.com/469837027): Figure out what the below is doing. It does not
-  // seem quite right.
-
   // If no valid session exists, maintains context continuity by trying to find
   // one from affiliated tabs or side panel WebContents.
-  auto* coordinator = GetSidePanelCoordinator();
-  if (!coordinator || !task_id_.has_value()) {
+  auto* controller = GetPanelController();
+  if (!controller || !task_id_.has_value()) {
     return nullptr;
   }
 
-  coordinator->UpdateContextualSearchWebContentsHelperForTask(web_contents,
-                                                              task_id_.value());
+  auto* browser_window_interface =
+      webui::GetBrowserWindowInterface(web_ui()->GetWebContents());
+  UpdateContextualSearchWebContentsHelperForTask(
+      contextual_search_service,
+      /*browser_window=*/browser_window_interface, contextual_tasks_service_,
+      controller, web_contents, task_id_.value());
   return helper->session_handle();
+}
+
+std::unique_ptr<contextual_search::InputStateModel>
+ContextualTasksUI::TakeInputStateModel() {
+  if (!task_id_.has_value()) {
+    return nullptr;
+  }
+
+  content::WebContents* web_contents = web_ui()->GetWebContents();
+  auto* helper = ContextualSearchWebContentsHelper::GetOrCreateForWebContents(
+      web_contents);
+
+  return helper->TakeInputStateModelForTask(task_id_.value());
+}
+
+void ContextualTasksUI::MoveTaskUiToNewTab() {
+  auto* browser = GetBrowser();
+  if (!task_id_.has_value()) {
+    LOG(ERROR) << "Attempted to open in new tab with no valid task ID.";
+    return;
+  }
+
+  ui_service_->MoveTaskUiToNewTab(task_id_.value(), browser,
+                                  GetInnerFrameUrl());
 }
 
 void ContextualTasksUI::PostMessageToWebview(
@@ -585,14 +756,38 @@ void ContextualTasksUI::PostMessageToWebview(
   page_handler_->PostMessageToWebview(message);
 }
 
+void ContextualTasksUI::ShowOauthErrorDialog() {
+  if (page_) {
+    page_->ShowOauthErrorDialog();
+  }
+}
+
+void ContextualTasksUI::SetCookieSynchronizerForTesting(
+    std::unique_ptr<contextual_tasks::ContextualTasksCookieSynchronizer>
+        cookie_synchronizer) {
+  cookie_synchronizer_ = std::move(cookie_synchronizer);
+}
+
 void ContextualTasksUI::OnInnerWebContentsCreated(
     content::WebContents* inner_contents) {
-  // This should only ever happen once per WebUI.
-  CHECK(!nav_observer_);
+  // This is assumed to only be called once per WebUI lifetime. Can be called
+  // multiple times if the WebUI is reloaded, but that would have reset
+  // `embedded_web_contents_`.
+  if (embedded_web_contents_) {
+    return;
+  }
+
   nav_observer_ = std::make_unique<FrameNavObserver>(
       inner_contents, ui_service_, contextual_tasks_service_, this);
-  inner_web_contents_creation_observer_.reset();
   embedded_web_contents_ = inner_contents->GetWeakPtr();
+
+  // If the cookie sync is enabled, trigger the cookie sync now that the
+  // embedded page is created. This is a fire and forget call, assuming the
+  // cookie sync will succeed eventually, and relying on OAuth tokens until
+  // then.
+  if (cookie_synchronizer_) {
+    cookie_synchronizer_->CopyCookiesToWebviewStoragePartition();
+  }
 }
 
 void ContextualTasksUI::OnContextRetrievedForActiveTab(
@@ -643,7 +838,7 @@ void ContextualTasksUI::OnSidePanelStateChanged() {
   lens::ClientToAimMessage message;
   auto* display_mode_msg = message.mutable_set_cobrowsing_display_mode();
   if (IsShownInTab()) {
-    display_mode_msg->mutable_payload()->set_display_mode(
+    display_mode_msg->mutable_params()->set_display_mode(
         lens::CobrowsingDisplayModeParams::COBROWSING_TAB);
     if (previous_web_ui_state_ != WebUIState::kShownInTab) {
       previous_web_ui_state_ = WebUIState::kShownInTab;
@@ -659,52 +854,72 @@ void ContextualTasksUI::OnSidePanelStateChanged() {
       previous_web_ui_state_ = WebUIState::kShownInSidePanel;
       OnActiveTabContextStatusChanged();
     }
-    display_mode_msg->mutable_payload()->set_display_mode(
+    display_mode_msg->mutable_params()->set_display_mode(
         lens::CobrowsingDisplayModeParams::COBROWSING_SIDEPANEL);
   }
 
   PostMessageToWebview(message);
 }
 
-void ContextualTasksUI::DisableActiveTabContextSuggestion() {
-  ui_service_->set_auto_tab_context_suggestion_enabled(false);
-}
-
-void ContextualTasksUI::OnLensOverlayStateChanged(bool is_showing) {
+void ContextualTasksUI::OnLensOverlayStateChanged(
+    bool is_showing,
+    std::optional<lens::LensOverlayInvocationSource> invocation_source) {
+  is_lens_overlay_showing_ = is_showing;
   if (page_) {
-    page_->OnLensOverlayStateChanged(is_showing);
+    bool maybe_show_overlay_hint_text =
+        is_showing && invocation_source.has_value() &&
+        invocation_source.value() ==
+            lens::LensOverlayInvocationSource::kContextualTasksComposebox;
+    page_->OnLensOverlayStateChanged(is_showing, maybe_show_overlay_hint_text);
   }
 }
 
-void ContextualTasksUI::OnActiveTabContextStatusChanged() {
+bool ContextualTasksUI::IsLensOverlayShowing() const {
+  return is_lens_overlay_showing_;
+}
+
+bool ContextualTasksUI::CanUpdateSuggestedTabContext(
+    tabs::TabInterface* tab,
+    const GURL& last_committed_url) {
   if (!GetBrowser()) {
-    return;
+    return false;
   }
 
   if (!composebox_handler_) {
-    return;
+    return false;
   }
 
-  if (!ui_service_->auto_tab_context_suggestion_enabled()) {
-    return;
-  }
-
-  tabs::TabInterface* tab = GetBrowser()->GetActiveTabInterface();
   if (!tab) {
-    composebox_handler_->UpdateSuggestedTabContext(nullptr);
-    return;
+    return false;
   }
-
-  content::WebContents* web_contents = tab->GetContents();
-  GURL last_committed_url = web_contents->GetLastCommittedURL();
 
   if (!last_committed_url.is_valid() ||
       !last_committed_url.SchemeIsHTTPOrHTTPS()) {
-    composebox_handler_->UpdateSuggestedTabContext(nullptr);
-    return;
+    return false;
   }
 
   if (!GetOrCreateContextualSessionHandle()) {
+    return false;
+  }
+
+  return true;
+}
+
+void ContextualTasksUI::OnActiveTabContextStatusChanged() {
+  if (contextual_tasks::GetIsProtectedPageErrorEnabled() && page_) {
+    page_->HideErrorPage();
+  }
+
+  tabs::TabInterface* tab =
+      GetBrowser() ? GetBrowser()->GetActiveTabInterface() : nullptr;
+  GURL last_committed_url =
+      tab ? tab->GetContents()->GetLastCommittedURL() : GURL::EmptyGURL();
+
+  if (!CanUpdateSuggestedTabContext(tab, last_committed_url)) {
+    if (composebox_handler_) {
+      // Inform the handler that the current tab cannot be added as an autochip.
+      composebox_handler_->UpdateSuggestedTabContext(nullptr);
+    }
     return;
   }
 
@@ -721,11 +936,31 @@ void ContextualTasksUI::OnActiveTabContextStatusChanged() {
                      tab->GetHandle().raw_value(), last_committed_url));
 }
 
+void ContextualTasksUI::OnPageContextEligibilityChecked(
+    bool is_page_context_eligible) {
+  if (!contextual_tasks::GetIsProtectedPageErrorEnabled() || !page_) {
+    return;
+  }
+  if (is_page_context_eligible) {
+    page_->HideErrorPage();
+  } else {
+    contextual_tasks::ShowAndRecordErrorPage(
+        page_, contextual_search::ContextualSearchSource::kContextualTasks);
+  }
+}
+
 void ContextualTasksUI::TransferNavigationToEmbeddedPage(
     content::OpenURLParams params) {
+  OMNIBOX_LOG("nav_trace") << "ContextualTasks navigation trace: "
+             "TransferNavigationToEmbeddedPage called for URL: "
+          << params.url;
   bool is_allowed_url = ui_service_->IsValidSearchResultsPage(params.url) ||
                         ui_service_->IsAiUrl(params.url);
   if (!embedded_web_contents_ || !is_allowed_url) {
+    OMNIBOX_LOG("nav_trace")
+        << "ContextualTasks navigation trace: TransferNavigationToEmbeddedPage "
+           "returning early because embedded_web_contents_="
+        << !!embedded_web_contents_ << " is_allowed_url=" << is_allowed_url;
     return;
   }
 
@@ -734,7 +969,14 @@ void ContextualTasksUI::TransferNavigationToEmbeddedPage(
   //                  partition.
   params.frame_tree_node_id =
       embedded_web_contents_->GetPrimaryMainFrame()->GetFrameTreeNodeId();
+  OMNIBOX_LOG("nav_trace") << "ContextualTasks navigation trace: "
+             "TransferNavigationToEmbeddedPage opening URL in embedded page";
   embedded_web_contents_->OpenURL(params, /*navigation_handle_callback=*/{});
+}
+
+bool ContextualTasksUI::IsActiveTabContextSuggestionShowing() const {
+  return composebox_handler_ &&
+         composebox_handler_->has_suggested_tab_context();
 }
 
 void ContextualTasksUI::PushTaskDetailsToPage() {
@@ -742,8 +984,17 @@ void ContextualTasksUI::PushTaskDetailsToPage() {
                         thread_id_.value_or(""), thread_turn_id_.value_or(""));
 }
 
-contextual_tasks::ContextualTasksSidePanelCoordinator*
-ContextualTasksUI::GetSidePanelCoordinator() {
+bool ContextualTasksUI::CanExpandToFullTab() const {
+  return was_ai_page_;
+}
+
+mojo::Remote<contextual_tasks::mojom::Page>&
+ContextualTasksUI::GetPageRemote() {
+  return page_;
+}
+
+contextual_tasks::ContextualTasksPanelController*
+ContextualTasksUI::GetPanelController() {
   if (!web_ui()->GetWebContents()) {
     return nullptr;
   }
@@ -753,14 +1004,14 @@ ContextualTasksUI::GetSidePanelCoordinator() {
     return nullptr;
   }
 
-  return contextual_tasks::ContextualTasksSidePanelCoordinator::From(browser);
+  return contextual_tasks::ContextualTasksPanelController::From(browser);
 }
 
 ContextualTasksUI::FrameNavObserver::FrameNavObserver(
     content::WebContents* web_contents,
     contextual_tasks::ContextualTasksUiService* ui_service,
     contextual_tasks::ContextualTasksService* contextual_tasks_service,
-    TaskInfoDelegate* task_info_delegate)
+    contextual_tasks::TaskInfoDelegate* task_info_delegate)
     : content::WebContentsObserver(web_contents),
       ui_service_(ui_service),
       contextual_tasks_service_(contextual_tasks_service),
@@ -768,6 +1019,8 @@ ContextualTasksUI::FrameNavObserver::FrameNavObserver(
 
 void ContextualTasksUI::FrameNavObserver::DidFinishNavigation(
     content::NavigationHandle* navigation_handle) {
+  OMNIBOX_LOG("nav_trace") << "ContextualTasks navigation trace: "
+             "FrameNavObserver::DidFinishNavigation called";
   if (!ui_service_ || !contextual_tasks_service_) {
     return;
   }
@@ -775,35 +1028,72 @@ void ContextualTasksUI::FrameNavObserver::DidFinishNavigation(
   // Ignore sub-frame and uncommitted navigations.
   if (!navigation_handle->IsInMainFrame() ||
       !navigation_handle->HasCommitted()) {
+    OMNIBOX_LOG("nav_trace") << "ContextualTasks navigation trace: "
+               "FrameNavObserver::DidFinishNavigation returning early, not "
+               "main frame or not committed";
     return;
   }
+
+  auto current_title = task_info_delegate_->GetThreadTitle();
 
   // Notify the WebUI if the new page is an AI page so it can adjust the UI
   // accordingly.
   const GURL& url = navigation_handle->GetURL();
+  OMNIBOX_LOG("nav_trace") << "ContextualTasks navigation trace: "
+             "FrameNavObserver::DidFinishNavigation URL: "
+          << url;
   bool is_ai_page = ui_service_->IsAiUrl(url);
   task_info_delegate_->SetIsAiPage(is_ai_page);
+
+  OMNIBOX_LOG("embedded_page_nav") << navigation_handle->GetURL().spec();
 
   // Set whether this navigation is to a zero state so the UI can adjust
   // accordingly.
   const bool is_zero_state = ContextualTasksUI::IsZeroState(url, ui_service_);
-  task_info_delegate_->OnZeroStateChange(is_zero_state);
+
+  // Record the HTTP response code of the inner frame contents if response
+  // headers are available.
+  if (auto* response_headers = navigation_handle->GetResponseHeaders()) {
+    contextual_tasks::RecordInnerFrameContentsHttpResponseCode(
+        response_headers->response_code(), is_zero_state);
+  }
+
+  // Check if the zero state status has changed since the last navigation.
+  const bool has_zero_state_changed =
+      is_zero_state !=
+      ContextualTasksUI::IsZeroState(last_committed_url_, ui_service_);
+
+  if (!navigation_handle->IsSameDocument() || has_zero_state_changed) {
+    task_info_delegate_->OnZeroStateChange(is_zero_state);
+  }
 
   bool is_url_changed = false;
-  if (url != last_committed_url_) {
+  if (!ContextualTasksUI::AreUrlsEqual(
+          url, last_committed_url_)) {
     last_committed_url_ = url;
     is_url_changed = true;
   }
 
   if (!is_url_changed) {
+    OMNIBOX_LOG("nav_trace") << "ContextualTasks navigation trace: "
+               "FrameNavObserver::DidFinishNavigation returning early, URL "
+               "unchanged";
     return;
   }
 
-  if (!ui_service_->IsAiUrl(url)) {
+  if (!is_ai_page) {
+    OMNIBOX_LOG("nav_trace")
+        << "ContextualTasks navigation trace: "
+           "FrameNavObserver::DidFinishNavigation returning early, not AI page";
     return;
   }
 
-  if (is_zero_state) {
+  if (is_zero_state &&
+      (!base::FeatureList::IsEnabled(
+           contextual_tasks::kEnableNotifyZeroStateRenderedCapability) ||
+       navigation_handle->IsSameDocument())) {
+    OMNIBOX_LOG("nav_trace") << "ContextualTasks navigation trace: "
+               "FrameNavObserver::DidFinishNavigation zero state logic";
     // Create a new task for zero state, since there's no thread to associate
     // this with yet.
     contextual_tasks::ContextualTask task =
@@ -814,50 +1104,80 @@ void ContextualTasksUI::FrameNavObserver::DidFinishNavigation(
     task_info_delegate_->SetThreadTurnId(std::nullopt);
     task_info_delegate_->SetThreadTitle(std::nullopt);
 
+    task_info_delegate_->PrepareForTaskChange();
     ui_service_->OnTaskChanged(task_info_delegate_->GetBrowser(),
                                task_info_delegate_->GetWebUIWebContents(),
                                new_task_id,
                                task_info_delegate_->IsShownInTab());
+    task_info_delegate_->OnTaskChanged();
     return;
   }
 
-  // If we don't yet have a title, try to pull one from the query.
-  if (!task_info_delegate_->GetThreadTitle()) {
-    std::string query_value;
-    if (net::GetValueForKeyInQuery(url, "q", &query_value)) {
-      task_info_delegate_->SetThreadTitle(query_value);
-    }
+  std::string query_value;
+  if (net::GetValueForKeyInQuery(url, "q", &query_value)) {
+    task_info_delegate_->SetThreadTitle(query_value);
   }
 
   std::string url_thread_id;
   if (!net::GetValueForKeyInQuery(url, "mtid", &url_thread_id)) {
+    OMNIBOX_LOG("nav_trace") << "ContextualTasks navigation trace: "
+               "FrameNavObserver::DidFinishNavigation returning early, no "
+               "mtid in URL";
     return;
   }
 
   auto webui_thread_id = task_info_delegate_->GetThreadId();
   bool task_changed = false;
 
-  // Avoid creating a new task if there's a task ID without a thread ID.
-  bool is_pending_task =
-      task_info_delegate_->GetTaskId().has_value() && !webui_thread_id;
+  // We need to always check if there is an existing task for the thread id.
+  std::optional<contextual_tasks::ContextualTask> existing_task =
+      contextual_tasks_service_->GetTaskFromServerId(
+          contextual_tasks::ThreadType::kAiMode, url_thread_id);
 
-  // In cases where the webui doesn't know about an existing thread ID or
-  // there's a mismatch, either create a new task or update to use an existing
-  // one (if it exists).
-  if (!is_pending_task &&
-      (!webui_thread_id || (webui_thread_id.value() != url_thread_id))) {
-    // Check if there's an existing task for the thread.
-    std::optional<contextual_tasks::ContextualTask> existing_task =
-        contextual_tasks_service_->GetTaskFromServerId(
-            contextual_tasks::ThreadType::kAiMode, url_thread_id);
-
-    if (existing_task) {
-      task_changed =
-          task_info_delegate_->GetTaskId() &&
-          existing_task.value().GetTaskId() != task_info_delegate_->GetTaskId();
+  if (existing_task) {
+    // The thread ID belongs to an existing task. We must switch to it, unless
+    // we are already on it.
+    if (!task_info_delegate_->GetTaskId() ||
+        existing_task.value().GetTaskId() != task_info_delegate_->GetTaskId()) {
+      task_changed = true;
       task_info_delegate_->SetTaskId(existing_task.value().GetTaskId());
-      task_info_delegate_->SetThreadTitle(existing_task.value().GetTitle());
-    } else {
+    }
+  } else {  // !existing_task
+    // The thread ID is new/unknown to the service.
+    // We have two sub-cases:
+    // 1. We have a "pending" task (created via query, waiting for thread ID).
+    //    -> Attach this new ID to the pending task, unless we believe this is
+    //       actually a different task (i.e. the title changed).
+    // 2. We are on a stable task (already has a thread ID) or no task.
+    //    -> This is a brand new conversation. Create a new task.
+
+    bool is_pending_task =
+        task_info_delegate_->GetTaskId().has_value() && !webui_thread_id;
+
+    // Check if the title changed while we were in a pending state.
+    // We compare `query_value` (new) vs `current_title` (old, captured before
+    // processing this navigation. If they differ, we assume the user switched
+    // threads while we were in a bad state,  so we must create a NEW task to
+    // avoid leaking context.
+    bool pending_task_title_mismatch =
+        is_pending_task && current_title.has_value() && !query_value.empty() &&
+        current_title.value() != query_value;
+
+    // We have no thread ID and no pending task, so this is a fresh start.
+    bool is_new_conversation = !webui_thread_id && !is_pending_task;
+
+    // Did we switch from one active thread to another, i.e. we had a thread ID,
+    // but the URL has a different one.
+    bool is_thread_switch =
+        webui_thread_id && webui_thread_id.value() != url_thread_id;
+
+    bool should_create_new_task =
+        pending_task_title_mismatch || is_new_conversation || is_thread_switch;
+
+    if (should_create_new_task) {
+      OMNIBOX_LOG("nav_trace") << "ContextualTasks navigation trace: "
+                 "FrameNavObserver::DidFinishNavigation "
+                 "should_create_new_task is true";
       task_changed = true;
       auto task = contextual_tasks_service_->CreateTaskFromUrl(url);
       task_info_delegate_->SetTaskId(task.GetTaskId());
@@ -866,9 +1186,9 @@ void ContextualTasksUI::FrameNavObserver::DidFinishNavigation(
   task_info_delegate_->SetThreadId(url_thread_id);
 
   std::optional<std::string> mstk;
-  mstk.emplace();
-  if (!net::GetValueForKeyInQuery(url, "mstk", &mstk.value())) {
-    mstk = std::nullopt;
+  std::string url_param_mstk;
+  if (net::GetValueForKeyInQuery(url, "mstk", &url_param_mstk)) {
+    mstk = url_param_mstk;
   }
 
   contextual_tasks_service_->UpdateThreadForTask(
@@ -877,11 +1197,18 @@ void ContextualTasksUI::FrameNavObserver::DidFinishNavigation(
       task_info_delegate_->GetThreadTitle());
   task_info_delegate_->SetThreadTurnId(mstk);
 
+  task_info_delegate_->SetAimUrl(url);
+
   if (task_changed) {
+    OMNIBOX_LOG("embedded_page_nav")
+        << "Task changed: "
+        << task_info_delegate_->GetTaskId().value().AsLowercaseString();
+    task_info_delegate_->PrepareForTaskChange();
     ui_service_->OnTaskChanged(task_info_delegate_->GetBrowser(),
                                task_info_delegate_->GetWebUIWebContents(),
                                task_info_delegate_->GetTaskId().value(),
                                task_info_delegate_->IsShownInTab());
+    task_info_delegate_->OnTaskChanged();
   }
 }
 
@@ -908,9 +1235,11 @@ bool ContextualTasksUI::IsZeroState(
 
 ContextualTasksUI::InnerFrameCreationObvserver::InnerFrameCreationObvserver(
     content::WebContents* web_contents,
-    base::OnceCallback<void(content::WebContents*)> callback)
+    base::RepeatingCallback<void(content::WebContents*)> callback,
+    base::RepeatingClosure reset_callback)
     : content::WebContentsObserver(web_contents),
-      callback_(std::move(callback)) {}
+      callback_(std::move(callback)),
+      reset_callback_(std::move(reset_callback)) {}
 
 ContextualTasksUI::InnerFrameCreationObvserver::~InnerFrameCreationObvserver() =
     default;
@@ -918,7 +1247,24 @@ ContextualTasksUI::InnerFrameCreationObvserver::~InnerFrameCreationObvserver() =
 void ContextualTasksUI::InnerFrameCreationObvserver::InnerWebContentsCreated(
     content::WebContents* inner_web_contents) {
   CHECK(callback_);
-  std::move(callback_).Run(inner_web_contents);
+  callback_.Run(inner_web_contents);
+}
+
+void ContextualTasksUI::InnerFrameCreationObvserver::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  // If the main frame navigates, reset the embedded page so that the
+  // ContextualTaskUI can listen to the a new inner WebContents if needed.
+  if (navigation_handle->IsInPrimaryMainFrame() &&
+      navigation_handle->HasCommitted() &&
+      !navigation_handle->IsSameDocument()) {
+    CHECK(reset_callback_);
+    reset_callback_.Run();
+  }
+}
+
+void ContextualTasksUI::ResetEmbeddedPage() {
+  embedded_web_contents_ = nullptr;
+  nav_observer_.reset();
 }
 
 void ContextualTasksUI::BindInterface(
@@ -947,6 +1293,20 @@ void ContextualTasksUI::CreatePageHandler(
           std::move(receiver), std::move(page));
 }
 
+void ContextualTasksUI::PrepareForTaskChange() {
+  composebox_handler_->ResetInputStateModel();
+  composebox_handler_->ResetBlocklistedSuggestions();
+  composebox_handler_->UpdateSuggestedTabContext(nullptr);
+}
+
+void ContextualTasksUI::OnTaskChanged() {
+  composebox_handler_->OnTaskChanged();
+  if (!IsShownInTab()) {
+    // Update the suggested tab chip.
+    OnActiveTabContextStatusChanged();
+  }
+}
+
 // static
 base::RefCountedMemory* ContextualTasksUI::GetFaviconResourceBytes(
     ui::ResourceScaleFactor scale_factor) {
@@ -962,5 +1322,4 @@ base::RefCountedMemory* ContextualTasksUI::GetFaviconResourceBytes(
           IDR_NTP_FAVICON, scale_factor));
 #endif
 }
-
 WEB_UI_CONTROLLER_TYPE_IMPL(ContextualTasksUI)

@@ -25,17 +25,15 @@
 #include "chrome/browser/extensions/chrome_content_verifier_delegate.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/corrupted_extension_reinstaller.h"
-#include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_management_constants.h"
 #include "chrome/browser/extensions/extension_management_test_util.h"
 #include "chrome/browser/extensions/extension_service_test_with_install.h"
-#include "chrome/browser/extensions/forced_extensions/install_stage_tracker.h"
+#include "chrome/browser/extensions/forced_extensions/install_stage_tracker_factory.h"
 #include "chrome/browser/extensions/load_error_waiter.h"
 #include "chrome/browser/extensions/shared_module_service.h"
 #include "chrome/browser/extensions/sync/extension_sync_data.h"
 #include "chrome/browser/extensions/sync/extension_sync_service.h"
-#include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/policy/extension_policy_test_base.h"
 #include "chrome/browser/policy/policy_test_utils.h"
@@ -43,7 +41,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_test_util.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/extensions/extension_test_util.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/test/base/chrome_test_utils.h"
@@ -63,6 +60,7 @@
 #include "content/public/test/no_renderer_crashes_assertion.h"
 #include "content/public/test/url_loader_interceptor.h"
 #include "extensions/browser/content_verifier/test_utils.h"
+#include "extensions/browser/crx_installer.h"
 #include "extensions/browser/disable_reason.h"
 #include "extensions/browser/extension_dialog_auto_confirm.h"
 #include "extensions/browser/extension_host.h"
@@ -71,9 +69,12 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extensions_browser_client.h"
+#include "extensions/browser/forced_extensions/install_stage_tracker.h"
 #include "extensions/browser/install_verifier.h"
+#include "extensions/browser/pending_extension_manager.h"
 #include "extensions/browser/scoped_ignore_content_verifier_for_test.h"
 #include "extensions/browser/test_extension_registry_observer.h"
+#include "extensions/browser/unpacked_installer.h"
 #include "extensions/browser/updater/extension_cache_fake.h"
 #include "extensions/browser/updater/extension_downloader_test_helper.h"
 #include "extensions/common/constants.h"
@@ -357,7 +358,7 @@ class ExtensionPolicyTest : public ExtensionPolicyTestBase {
                                const GURL& update_url) {
     // Setting the forcelist extension should install extension with ExtensionId
     // equal to id.
-    base::Value::List forcelist;
+    base::ListValue forcelist;
     forcelist.Append(update_url.is_empty()
                          ? id
                          : base::StrCat({id, ";", update_url.spec()}));
@@ -423,7 +424,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest,
   ASSERT_TRUE(
       registry->enabled_extensions().GetByID(extensions::kWebStoreAppId));
 
-  base::Value::List blocklist;
+  base::ListValue blocklist;
   blocklist.Append(extensions::kWebStoreAppId);
   PolicyMap policies;
   policies.Set(key::kExtensionInstallBlocklist, POLICY_LEVEL_MANDATORY,
@@ -443,7 +444,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest,
       kGoodCrxId, extensions::ExtensionRegistry::EVERYTHING));
   ASSERT_FALSE(registry->GetExtensionById(
       kSimpleWithIconCrxId, extensions::ExtensionRegistry::EVERYTHING));
-  base::Value::List blocklist;
+  base::ListValue blocklist;
   blocklist.Append(kGoodCrxId);
   PolicyMap policies;
   policies.Set(key::kExtensionInstallBlocklist, POLICY_LEVEL_MANDATORY,
@@ -474,7 +475,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest, ExtensionInstallRemovedPolicy) {
   EXPECT_TRUE(registry->GetInstalledExtension(kGoodCrxId));
 
   // Should uninstall good_v1.crx.
-  base::Value::Dict dict_value;
+  base::DictValue dict_value;
   dict_value.SetByDottedPath(
       std::string(kGoodCrxId) + "." +
           extensions::schema_constants::kInstallationMode,
@@ -499,7 +500,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest, ExtensionWildcardRemovedPolicy) {
   EXPECT_TRUE(registry->GetInstalledExtension(kGoodCrxId));
 
   // Should uninstall good_v1.crx.
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.SetByDottedPath(
       std::string("*") + "." + extensions::schema_constants::kInstallationMode,
       extensions::schema_constants::kRemoved);
@@ -522,7 +523,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest, ExtensionInstallBlocklistWildcard) {
   ASSERT_FALSE(registry->GetExtensionById(
       kGoodCrxId, extensions::ExtensionRegistry::EVERYTHING));
   ASSERT_TRUE(registry->enabled_extensions().GetByID(kSimpleWithIconCrxId));
-  base::Value::List blocklist;
+  base::ListValue blocklist;
   blocklist.Append("*");
   PolicyMap policies;
   policies.Set(key::kExtensionInstallBlocklist, POLICY_LEVEL_MANDATORY,
@@ -585,7 +586,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest,
 
   // Blocklist "*" but force-install the importer extension. The shared module
   // should be automatically installed too.
-  base::Value::List blocklist;
+  base::ListValue blocklist;
   blocklist.Append("*");
   PolicyMap policies;
   AddExtensionToForceList(&policies, kImporterId, update_xml_url);
@@ -632,9 +633,9 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest, ExtensionInstallAllowlist) {
       kGoodCrxId, extensions::ExtensionRegistry::EVERYTHING));
   ASSERT_FALSE(registry->GetExtensionById(
       kSimpleWithIconCrxId, extensions::ExtensionRegistry::EVERYTHING));
-  base::Value::List blocklist;
+  base::ListValue blocklist;
   blocklist.Append("*");
-  base::Value::List allowlist;
+  base::ListValue allowlist;
   allowlist.Append(kGoodCrxId);
   PolicyMap policies;
   policies.Set(key::kExtensionInstallBlocklist, POLICY_LEVEL_MANDATORY,
@@ -648,7 +649,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest, ExtensionInstallAllowlist) {
   EXPECT_FALSE(InstallExtension(kSimpleWithIconCrxName));
   EXPECT_FALSE(registry->GetExtensionById(
       kSimpleWithIconCrxId, extensions::ExtensionRegistry::EVERYTHING));
-  // "good.crx" has a allowlist exception.
+  // "good.crx" has an allowlist exception.
   const extensions::Extension* good = InstallExtension(kGoodCrxName);
   ASSERT_TRUE(good);
   EXPECT_EQ(kGoodCrxId, good->id());
@@ -1035,7 +1036,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest, ExtensionInstallForcelist) {
       .InSequence(sequence);
 
   extensions::InstallStageTracker* install_stage_tracker =
-      extensions::InstallStageTracker::Get(profile());
+      extensions::InstallStageTrackerFactory::GetForBrowserContext(profile());
   install_stage_tracker->AddObserver(&collector_observer);
   UpdateProviderPolicy(policies);
   registry_observer.WaitForExtensionWillBeInstalled();
@@ -1208,7 +1209,7 @@ class ExtensionPinningTest : public extensions::ExtensionBrowserTest {
     GURL update_url = embedded_test_server()->GetURL(update_url_suffix);
 
     PolicyMap policies;
-    base::Value::Dict dict, key_dict;
+    base::DictValue dict, key_dict;
     key_dict.Set(extensions::schema_constants::kInstallationMode,
                  extensions::schema_constants::kForceInstalled);
     key_dict.Set(extensions::schema_constants::kUpdateUrl, update_url.spec());
@@ -1246,7 +1247,8 @@ class ExtensionPinningTest : public extensions::ExtensionBrowserTest {
       base::RunLoop run_loop;
       MockedInstallationCollectorObserver collector_observer(profile());
       extensions::InstallStageTracker* install_stage_tracker =
-          extensions::InstallStageTracker::Get(profile());
+          extensions::InstallStageTrackerFactory::GetForBrowserContext(
+              profile());
       install_stage_tracker->AddObserver(&collector_observer);
 
       // We expect install failure only due to no update for the extension.
@@ -1674,7 +1676,7 @@ IN_PROC_BROWSER_TEST_F(
 // Verifies that corrupted non-webstore policy-based extension is not repaired
 // if there are no computed_hashes.json for it. Note that this behavior will
 // change in the future.
-// See https://crbug.com/958794#c22 for details.
+// See https://crbug.com/40625642#c22 for details.
 // TODO(crbug.com/40669814): Change this test so extension without hashes
 // will be also reinstalled.
 IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest,
@@ -1880,11 +1882,10 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest,
   // should be no crash.
 }
 
+// Verifies that extensions that are recommended-installed by policies are
+// installed, can be disabled but not uninstalled.
 IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest,
                        ExtensionRecommendedInstallationMode) {
-  // Verifies that extensions that are recommended-installed by policies are
-  // installed, can be disabled but not uninstalled.
-
   // Recommended-installed extensions should auto-enable on install without a
   // user prompt.
   extensions::FeatureSwitch::ScopedOverride external_prompt_override(
@@ -1910,7 +1911,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest,
       kGoodCrxId, extensions::ExtensionRegistry::EVERYTHING));
 
   // Setting the forcelist extension should install "good_v1.crx".
-  base::Value::Dict dict;
+  base::DictValue dict;
   dict.SetByDottedPath(std::string(kGoodCrxId) + "." +
                            extensions::schema_constants::kInstallationMode,
                        extensions::schema_constants::kNormalInstalled);
@@ -1948,7 +1949,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest, ExtensionAllowedTypes) {
   ASSERT_FALSE(registry->GetExtensionById(
       kHostedAppCrxId, extensions::ExtensionRegistry::EVERYTHING));
 
-  base::Value::List allowed_types;
+  base::ListValue allowed_types;
   allowed_types.Append("hosted_app");
   PolicyMap policies;
   policies.Set(key::kExtensionAllowedTypes, POLICY_LEVEL_MANDATORY,
@@ -1961,7 +1962,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest, ExtensionAllowedTypes) {
   EXPECT_FALSE(registry->GetExtensionById(
       kGoodCrxId, extensions::ExtensionRegistry::EVERYTHING));
 
-  // "hosted_app.crx" is of a allowlisted type.
+  // "hosted_app.crx" is of an allowlisted type.
   const extensions::Extension* hosted_app = InstallExtension(kHostedAppCrxName);
   ASSERT_TRUE(hosted_app);
   EXPECT_EQ(kHostedAppCrxId, hosted_app->id());
@@ -1998,7 +1999,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest, ExtensionInstallSources) {
   download_observer.WaitForFinished();
 
   // Install the policy and trigger another download.
-  base::Value::List install_sources;
+  base::ListValue install_sources;
   install_sources.Append(install_source_url.spec());
   install_sources.Append(referrer_url.spec());
   PolicyMap policies;
@@ -2234,8 +2235,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest,
           extensions::disable_reason::DISABLE_UPDATE_REQUIRED_BY_POLICY));
 }
 
-IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest, DontSyncPolicyUninstalls) {
+IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest,
+                       DontSyncPolicyUninstallsAndReinstallWhenPolicyIsLifted) {
   policy::ScopedDomainEnterpriseManagement scoped_domain;
+  extensions::ExtensionManagement* management =
+      extensions::ExtensionManagementFactory::GetForBrowserContext(profile());
 
   // 1. Install an extension.
   extensions::ExtensionRegistry* registry = extension_registry();
@@ -2264,8 +2268,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest, DontSyncPolicyUninstalls) {
   base::RunLoop().RunUntilIdle();
   observer.WaitForExtensionUninstalled();
 
-  // 4. Verify that the extension has been uninstalled.
+  // 4. Verify that the extension has been uninstalled and that the
+  // installation mode has changed.
   EXPECT_FALSE(registry->GetInstalledExtension(extension_id));
+  EXPECT_EQ(management->GetInstallationMode(extension_id, std::string()),
+            extensions::ManagedInstallationMode::kRemoved);
 
   // 5. Verify that no deletion was synced.
   // The uninstall should not be synced as a deletion.
@@ -2273,6 +2280,28 @@ IN_PROC_BROWSER_TEST_F(ExtensionPolicyTest, DontSyncPolicyUninstalls) {
     EXPECT_NE(syncer::SyncChange::ACTION_DELETE, change.change_type());
   }
   EXPECT_EQ(1u, extensions_processor.data().size());
+
+  // 6. Verify the extension is not pending install.
+  extensions::PendingExtensionManager* pending_extension_manager =
+      extensions::PendingExtensionManager::Get(profile());
+  bool is_pending = pending_extension_manager->IsIdPending(extension_id);
+  EXPECT_FALSE(is_pending);
+
+  // 6. Set policy to allow the extension back.
+  {
+    extensions::ExtensionManagementPolicyUpdater management_policy(&provider_);
+    management_policy.UnsetPerExtensionSettings(extension_id);
+  }
+  base::RunLoop().RunUntilIdle();
+
+  // 7. Verify ExtensionManagement sees the change.
+  EXPECT_EQ(management->GetInstallationMode(extension_id, std::string()),
+            extensions::ManagedInstallationMode::kAllowed);
+
+  // 8. Verify the extension is now pending install or installed.
+  is_pending = pending_extension_manager->IsIdPending(extension_id);
+  bool is_installed = registry->GetInstalledExtension(extension_id) != nullptr;
+  EXPECT_TRUE(is_pending || is_installed);
 }
 
 // Verifies that policy host block/allow settings are applied even when
@@ -2329,14 +2358,14 @@ class WebAppInstallForceListPolicyTest : public ExtensionPolicyTest {
 
     policy_app_url_ = embedded_test_server()->GetURL(test_page_);
 
-    base::Value::Dict item;
+    base::DictValue item;
     item.Set("url", policy_app_url_.spec());
     item.Set("default_launch_container", "window");
     if (fallback_app_name_.has_value()) {
       item.Set("fallback_app_name", fallback_app_name_.value());
     }
 
-    base::Value::List list;
+    base::ListValue list;
     list.Append(std::move(item));
 
     PolicyMap policies;

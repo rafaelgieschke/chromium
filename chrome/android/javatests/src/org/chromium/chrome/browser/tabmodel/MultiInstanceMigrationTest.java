@@ -108,7 +108,8 @@ public class MultiInstanceMigrationTest {
                                     selector,
                                     null,
                                     TabWindowManagerSingleton.getInstance(),
-                                    mCipherFactory);
+                                    mCipherFactory,
+                                    /* recordLegacyTabCountMetrics= */ true);
                     store.waitForMigrationToFinish();
                 });
     }
@@ -365,7 +366,7 @@ public class MultiInstanceMigrationTest {
     @Feature({"TabPersistentStore"})
     public void testNewMetataFileExists() throws Exception {
         // Set up two old metadata files.
-        int maxCount = TabWindowManager.MAX_SELECTORS;
+        int maxCount = TabWindowManager.MAX_SELECTORS_1000;
         File[] stateDirs = createOldStateDirs(maxCount, true);
         File metadataFile0 =
                 new File(stateDirs[0], TabbedModeTabPersistencePolicy.LEGACY_SAVED_STATE_FILE);

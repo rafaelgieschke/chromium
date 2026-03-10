@@ -9,7 +9,6 @@
 <translation id="101823271612280837">Imeacha kurekodi. Huwezi kutumia Dashibodi ya michezo katika hali ya kishikwambi.</translation>
 <translation id="1024364763893396229">Hifadhi <ph name="NAME" /> yako</translation>
 <translation id="1032891413405719768">Chaji ya betri ya Stylus imepungua</translation>
-<translation id="1036073649888683237">Ili udhibiti arifa, nenda kwenye Mipangilio</translation>
 <translation id="1036348656032585052">Zima</translation>
 <translation id="1037492556044956303">Imeongeza <ph name="DEVICE_NAME" /></translation>
 <translation id="1038106730571050514">Onyesha mapendekezo</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">Picha ya hivi majuzi ya <ph name="INDEX" /> kati ya <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Kunja Majukumu kwenye Google</translation>
 <translation id="2208323208084708176">Hali ya eneo-kazi iliyounganishwa</translation>
-<translation id="2210311543574621570">Utaona ubao wa kunakili unapobonyeza na kushikilia Ctrl pamoja na V. Unaweza kuzima mipangilio ya njia hii ya mkato kwa kuzima #clipboard-history-longpress flag in chrome://flags.</translation>
 <translation id="2215920961700443347">Hakuna intaneti. Unganisha kwenye intaneti kisha ujaribu tena.</translation>
 <translation id="2222841058024245321">Eneokazi la saba</translation>
 <translation id="2223384056430485343">Katika skrini iliyogawanywa</translation>
@@ -428,6 +426,7 @@ Vifaa <ph name="DEVICECOUNT" /> vimeunganishwa.</translation>
 <translation id="2478076885740497414">Sakinisha programu</translation>
 <translation id="2482878487686419369">Arifa</translation>
 <translation id="2484513351006226581">Gusa <ph name="KEYBOARD_SHORTCUT" /> ili ubadilishe mpangilio wa kibodi.</translation>
+<translation id="2485422356828889247">Ondoa</translation>
 <translation id="2486214324139475545">Onyesho la kukagua <ph name="DESK_NAME" />. Eneokazi linalotumika.</translation>
 <translation id="2486405091093637109">Ubora wa "<ph name="DISPLAY_NAME" />" umebadilishwa kuwa <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz). Bila kuthibitisha, mipangilio ya awali itarejeshwa baada ya <ph name="TIMEOUT_SECONDS" />.</translation>
 <translation id="2487915095798731898">Jiunge</translation>
@@ -2196,7 +2195,6 @@ Arifa, madirisha na vidirisha vya baadaye vitagawanywa kati ya maeneo-kazi.</tra
 <translation id="8241650983304689286">Weka kichupo kwenye mwonekano mpya wa madirisha yaliyogawanywa</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, Uthabiti wa Mtandao <ph name="SIGNAL_STRENGTH" />, Betri ya Simu <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Onyesha maudhui yote ya Hifadhi ya Google</translation>
-<translation id="8257510091797044096">Weka mipangilio ya kifaa chako</translation>
 <translation id="8261506727792406068">Futa</translation>
 <translation id="8262312463845990408">Kipengele cha kuwasha uchezaji</translation>
 <translation id="8268302343625273732">Angalia mazoezi yote kwenye Google Darasani</translation>

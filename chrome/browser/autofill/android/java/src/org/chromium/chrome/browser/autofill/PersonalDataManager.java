@@ -786,10 +786,10 @@ public class PersonalDataManager implements Destroyable {
         return profiles;
     }
 
+    @Nullable
     public AutofillProfile getProfile(String guid) {
         ThreadUtils.assertOnUiThread();
-        return new AutofillProfile(
-                PersonalDataManagerJni.get().getProfileByGUID(mPersonalDataManagerAndroid, guid));
+        return PersonalDataManagerJni.get().getProfileByGUID(mPersonalDataManagerAndroid, guid);
     }
 
     public void deleteProfile(String guid) {
@@ -1166,6 +1166,13 @@ public class PersonalDataManager implements Destroyable {
         mPrefService.setBoolean(Pref.AUTOFILL_BNPL_ENABLED, enable);
     }
 
+    /**
+     * @return Whether the user has seen the Amount Extraction AI terms.
+     */
+    public boolean isAutofillAmountExtractionAiTermsSeenPrefEnabled() {
+        return mPrefService.getBoolean(Pref.AUTOFILL_AMOUNT_EXTRACTION_AI_TERMS_SEEN);
+    }
+
     /** Gets the BNPL issuers to show in the settings page. */
     public BnplIssuerForSettings[] getBnplIssuersForSettings() {
         ThreadUtils.assertOnUiThread();
@@ -1278,6 +1285,7 @@ public class PersonalDataManager implements Destroyable {
 
         BankAccount[] getMaskedBankAccounts(long nativePersonalDataManagerAndroid);
 
+        @JniType("base::span<const autofill::Ewallet>")
         Ewallet[] getEwallets(long nativePersonalDataManagerAndroid);
 
         boolean isCardEligibleForBenefits(

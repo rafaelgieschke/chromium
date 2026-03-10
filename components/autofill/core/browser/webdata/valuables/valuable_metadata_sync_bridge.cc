@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <optional>
+#include <ranges>
+#include <string_view>
 
 #include "base/check.h"
 #include "base/containers/flat_set.h"
@@ -116,10 +118,15 @@ void ValuableMetadataSyncBridge::UploadInitialLocalData(
   }
   // Upload the remaining storage keys
   for (const EntityInstance::EntityId& storage_key : local_keys_to_upload) {
-    change_processor()->Put(
-        *storage_key,
-        CreateEntityDataFromEntityMetadata(stored_metadata[storage_key]),
-        metadata_change_list);
+    if (std::optional<sync_pb::AutofillValuableMetadataSpecifics::PassType>
+            pass_type = GetPassTypeForEntityId(storage_key)) {
+      change_processor()->Put(
+          *storage_key,
+          CreateEntityDataFromEntityMetadata(
+              stored_metadata[storage_key], *pass_type,
+              GetPossiblyTrimmedValuableMetadataSpecifics(storage_key.value())),
+          metadata_change_list);
+    }
   }
 }
 
@@ -149,6 +156,10 @@ void ValuableMetadataSyncBridge::DeleteOrphanMetadata() {
     if (!non_orphan_ids.contains(storage_key) &&
         IsOrphanValuableMetadataEntryDeletable(metadata)) {
       if (GetEntityTable()->RemoveEntityMetadata(storage_key)) {
+        // TODO(crbug.com/477839519): Only notify the server if the deleted
+        // metadata is not associated with a valuable. This is necessary because
+        // we also have `PASS_TYPE_UNSPECIFIED` here, which is treated as
+        // `ENTITY` locally but might belong to a valuable.
         change_processor()->Delete(
             *storage_key, syncer::DeletionOrigin::FromLocation(FROM_HERE),
             metadata_change_list.get());
@@ -211,7 +222,25 @@ ValuableMetadataSyncBridge::GetAllData() {
   auto batch = std::make_unique<syncer::MutableDataBatch>();
   for (const auto& [storage_key, metadata] :
        GetEntityTable()->GetSyncedMetadata()) {
-    batch->Put(*storage_key, CreateEntityDataFromEntityMetadata(metadata));
+    if (std::optional<sync_pb::AutofillValuableMetadataSpecifics::PassType>
+            pass_type = GetPassTypeForEntityId(storage_key)) {
+      batch->Put(
+          *storage_key,
+          CreateEntityDataFromEntityMetadata(
+              metadata, *pass_type,
+              GetPossiblyTrimmedValuableMetadataSpecifics(*storage_key)));
+    }
+  }
+  if (base::FeatureList::IsEnabled(syncer::kSyncLoyaltyCardMetadata)) {
+    for (const auto& [storage_key, metadata] :
+         GetValuablesTable()->GetAllValuableMetadata()) {
+      batch->Put(
+          *storage_key,
+          CreateEntityDataFromValuableMetadata(
+              metadata,
+              sync_pb::AutofillValuableMetadataSpecifics::LOYALTY_CARD,
+              GetPossiblyTrimmedValuableMetadataSpecifics(*storage_key)));
+    }
   }
   return batch;
 }
@@ -220,8 +249,7 @@ std::unique_ptr<syncer::DataBatch> ValuableMetadataSyncBridge::GetDataForCommit(
     StorageKeyList storage_keys) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   auto batch = std::make_unique<syncer::MutableDataBatch>();
-  absl::flat_hash_set<std::string> keys_set(storage_keys.begin(),
-                                            storage_keys.end());
+  absl::flat_hash_set<std::string> keys_set(std::from_range, storage_keys);
   std::unique_ptr<syncer::DataBatch> all_data = GetAllData();
   while (all_data->HasNext()) {
     syncer::KeyAndData item = all_data->Next();
@@ -263,11 +291,18 @@ void ValuableMetadataSyncBridge::ApplyDisableSyncChanges(
     std::unique_ptr<syncer::MetadataChangeList> delete_metadata_change_list) {
   std::unique_ptr<sql::Transaction> transaction =
       web_data_backend_->GetDatabase()->AcquireTransaction();
-  EntityTable* table = GetEntityTable();
+  EntityTable* entity_table = GetEntityTable();
   // When sync is disabled, the metadata should be cleared.
   for (const auto& [storage_key, metadata] :
        GetEntityTable()->GetSyncedMetadata()) {
-    table->RemoveEntityMetadata(storage_key);
+    entity_table->RemoveEntityMetadata(storage_key);
+  }
+
+  ValuablesTable* valuables_table = GetValuablesTable();
+  // When sync is disabled, the valuables metadata should be cleared.
+  for (const auto& [storage_key, metadata] :
+       valuables_table->GetAllValuableMetadata()) {
+    valuables_table->RemoveValuableMetadata(storage_key);
   }
 
   ApplyMetadataChanges(std::move(delete_metadata_change_list));
@@ -307,7 +342,6 @@ ValuableMetadataSyncBridge::MergeRemoteChanges(
 
   std::unique_ptr<sql::Transaction> transaction =
       web_data_backend_->GetDatabase()->AcquireTransaction();
-  EntityTable* table = GetEntityTable();
 
   for (const std::unique_ptr<syncer::EntityChange>& change : entity_data) {
     switch (change->type()) {
@@ -315,13 +349,37 @@ ValuableMetadataSyncBridge::MergeRemoteChanges(
       case syncer::EntityChange::ACTION_UPDATE: {
         const sync_pb::AutofillValuableMetadataSpecifics& specifics =
             change->data().specifics.autofill_valuable_metadata();
-        EntityInstance::EntityMetadata remote =
-            CreateValuableMetadataFromSpecifics(specifics);
-        if (!table->AddOrUpdateEntityMetadata(remote)) {
-          // TODO(crbug.com/436551488): Update to the correct error type.
-          return syncer::ModelError(
-              FROM_HERE, syncer::ModelError::Type::
-                             kAutofillValuableMetadataFailedToLoadDatabase);
+        switch (specifics.pass_type()) {
+          case sync_pb::AutofillValuableMetadataSpecifics::VEHICLE_REGISTRATION:
+          case sync_pb::AutofillValuableMetadataSpecifics::FLIGHT_RESERVATION:
+          case sync_pb::AutofillValuableMetadataSpecifics::PASSPORT:
+          case sync_pb::AutofillValuableMetadataSpecifics::DRIVER_LICENSE:
+          case sync_pb::AutofillValuableMetadataSpecifics::NATIONAL_ID_CARD:
+          case sync_pb::AutofillValuableMetadataSpecifics::REDRESS_NUMBER:
+          case sync_pb::AutofillValuableMetadataSpecifics::
+              KNOWN_TRAVELER_NUMBER:
+          // Treat `PASS_TYPE_UNSPECIFIED` as `EntityMetadata` for backward
+          // compatibility with entries created before the `pass_type` field was
+          // introduced.
+          case sync_pb::AutofillValuableMetadataSpecifics::
+              PASS_TYPE_UNSPECIFIED: {
+            EntityTable* table = GetEntityTable();
+
+            EntityInstance::EntityMetadata remote =
+                CreateEntityMetadataFromSpecifics(specifics);
+            if (!table->AddOrUpdateEntityMetadata(remote)) {
+              // TODO(crbug.com/436551488): Update to the correct error type.
+              return syncer::ModelError(
+                  FROM_HERE, syncer::ModelError::Type::
+                                 kAutofillValuableMetadataFailedToLoadDatabase);
+            }
+            break;
+          }
+          case sync_pb::AutofillValuableMetadataSpecifics::LOYALTY_CARD: {
+            // TODO(crbug.com/477841597): Implement server-to-client sync for
+            // `ValuableMetadata`
+            break;
+          }
         }
         break;
       }
@@ -357,6 +415,14 @@ ValuableMetadataSyncBridge::MergeRemoteChanges(
   return std::nullopt;
 }
 
+const sync_pb::AutofillValuableMetadataSpecifics&
+ValuableMetadataSyncBridge::GetPossiblyTrimmedValuableMetadataSpecifics(
+    std::string_view storage_key) {
+  return change_processor()
+      ->GetPossiblyTrimmedRemoteSpecifics(std::string(storage_key))
+      .autofill_valuable_metadata();
+}
+
 void ValuableMetadataSyncBridge::ServerEntityInstanceMetadataChanged(
     const EntityInstanceMetadataChange& change) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
@@ -371,10 +437,15 @@ void ValuableMetadataSyncBridge::ServerEntityInstanceMetadataChanged(
   switch (change.type()) {
     case EntityInstanceMetadataChange::ADD:
     case EntityInstanceMetadataChange::UPDATE:
-      change_processor()->Put(
-          *change.key(),
-          CreateEntityDataFromEntityMetadata(change.data_model()),
-          metadata_change_list.get());
+      if (std::optional<sync_pb::AutofillValuableMetadataSpecifics::PassType>
+              pass_type = GetPassTypeForEntityId(change.data_model().guid)) {
+        change_processor()->Put(
+            *change.key(),
+            CreateEntityDataFromEntityMetadata(
+                change.data_model(), *pass_type,
+                GetPossiblyTrimmedValuableMetadataSpecifics(*change.key())),
+            metadata_change_list.get());
+      }
       break;
     case EntityInstanceMetadataChange::REMOVE:
       change_processor()->Delete(
@@ -385,6 +456,40 @@ void ValuableMetadataSyncBridge::ServerEntityInstanceMetadataChanged(
       NOTREACHED();
   }
 
+  ApplyMetadataChanges(std::move(metadata_change_list));
+}
+
+void ValuableMetadataSyncBridge::ValuableMetadataChanged(
+    const ValuableMetadataChange& change) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  CHECK(base::FeatureList::IsEnabled(syncer::kSyncAutofillValuableMetadata));
+  if (!base::FeatureList::IsEnabled(syncer::kSyncLoyaltyCardMetadata) ||
+      !change_processor()->IsTrackingMetadata()) {
+    return;
+  }
+
+  std::unique_ptr<syncer::MetadataChangeList> metadata_change_list =
+      CreateMetadataChangeList();
+
+  switch (change.type()) {
+    case ValuableMetadataChange::ADD:
+    case ValuableMetadataChange::UPDATE:
+      change_processor()->Put(
+          *change.key(),
+          CreateEntityDataFromValuableMetadata(
+              change.data_model(),
+              sync_pb::AutofillValuableMetadataSpecifics::LOYALTY_CARD,
+              GetPossiblyTrimmedValuableMetadataSpecifics(*change.key())),
+          metadata_change_list.get());
+      break;
+    case ValuableMetadataChange::REMOVE:
+      change_processor()->Delete(
+          *change.key(), syncer::DeletionOrigin::FromLocation(FROM_HERE),
+          metadata_change_list.get());
+      break;
+    case ValuableMetadataChange::HIDE_IN_AUTOFILL:
+      NOTREACHED();
+  }
   ApplyMetadataChanges(std::move(metadata_change_list));
 }
 
@@ -451,9 +556,19 @@ EntityTable* ValuableMetadataSyncBridge::GetEntityTable() {
   return EntityTable::FromWebDatabase(web_data_backend_->GetDatabase());
 }
 
+std::optional<sync_pb::AutofillValuableMetadataSpecifics::PassType>
+ValuableMetadataSyncBridge::GetPassTypeForEntityId(
+    const EntityInstance::EntityId& guid) {
+  return GetEntityTable()->GetEntityType(guid).and_then(EntityTypeToPassType);
+}
+
 const EntityTable* ValuableMetadataSyncBridge::GetEntityTable() const {
   return const_cast<const EntityTable*>(
       const_cast<ValuableMetadataSyncBridge*>(this)->GetEntityTable());
+}
+
+ValuablesTable* ValuableMetadataSyncBridge::GetValuablesTable() {
+  return ValuablesTable::FromWebDatabase(web_data_backend_->GetDatabase());
 }
 
 }  // namespace autofill

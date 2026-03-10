@@ -4,11 +4,11 @@
 
 #import "base/run_loop.h"
 #import "base/test/task_environment.h"
-#import "ios/chrome/browser/intelligence/bwg/ui/bwg_consent_mutator.h"
-#import "ios/chrome/browser/intelligence/bwg/ui/bwg_consent_view_controller.h"
 #import "ios/chrome/browser/intelligence/bwg/ui/bwg_fre_wrapper_view_controller.h"
-#import "ios/chrome/browser/intelligence/bwg/ui/bwg_promo_view_controller.h"
-#import "ios/chrome/browser/intelligence/bwg/ui/bwg_promo_view_controller_delegate.h"
+#import "ios/chrome/browser/intelligence/bwg/ui/gemini_consent_mutator.h"
+#import "ios/chrome/browser/intelligence/bwg/ui/gemini_consent_view_controller.h"
+#import "ios/chrome/browser/intelligence/bwg/ui/gemini_promo_view_controller.h"
+#import "ios/chrome/browser/intelligence/bwg/ui/gemini_promo_view_controller_delegate.h"
 #import "ios/web/public/test/web_task_environment.h"
 #import "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
@@ -25,7 +25,8 @@ class GeminiFREWrapperViewControllerTest : public PlatformTest {
     BWGFREWrapperViewController* view_controller =
         [[BWGFREWrapperViewController alloc] initWithPromo:with_promo
                                           isAccountManaged:with_promo];
-    mock_mutator_ = [OCMockObject mockForProtocol:@protocol(BWGConsentMutator)];
+    mock_mutator_ =
+        [OCMockObject mockForProtocol:@protocol(GeminiConsentMutator)];
     view_controller.mutator = mock_mutator_;
     // Force view initialisation since this view controller is never added into
     // the hierarchy in this unit test.
@@ -35,21 +36,21 @@ class GeminiFREWrapperViewControllerTest : public PlatformTest {
     return view_controller;
   }
 
-  BWGPromoViewController* GetPromoViewController(
+  GeminiPromoViewController* GetPromoViewController(
       BWGFREWrapperViewController* view_controller) {
     for (UIViewController* child in view_controller.childViewControllers) {
-      if ([child isKindOfClass:[BWGPromoViewController class]]) {
-        return static_cast<BWGPromoViewController*>(child);
+      if ([child isKindOfClass:[GeminiPromoViewController class]]) {
+        return static_cast<GeminiPromoViewController*>(child);
       }
     }
     return nil;
   }
 
-  BWGConsentViewController* GetConsentViewController(
+  GeminiConsentViewController* GetConsentViewController(
       BWGFREWrapperViewController* view_controller) {
     for (UIViewController* child in view_controller.childViewControllers) {
-      if ([child isKindOfClass:[BWGConsentViewController class]]) {
-        return static_cast<BWGConsentViewController*>(child);
+      if ([child isKindOfClass:[GeminiConsentViewController class]]) {
+        return static_cast<GeminiConsentViewController*>(child);
       }
     }
     return nil;
@@ -57,8 +58,8 @@ class GeminiFREWrapperViewControllerTest : public PlatformTest {
 
  protected:
   id mock_mutator_;
-  BWGPromoViewController* promo_view_controller_ = nil;
-  BWGConsentViewController* consent_view_controller_ = nil;
+  GeminiPromoViewController* promo_view_controller_ = nil;
+  GeminiConsentViewController* consent_view_controller_ = nil;
 };
 
 // Tests first run for Gemini promo being shown.
@@ -95,8 +96,8 @@ TEST_F(GeminiFREWrapperViewControllerTest, FullAcceptFlow) {
   EXPECT_FALSE(promo_view_controller_.view.accessibilityElementsHidden);
   EXPECT_TRUE(consent_view_controller_.view.accessibilityElementsHidden);
 
-  id<BWGPromoViewControllerDelegate> delegate =
-      (id<BWGPromoViewControllerDelegate>)view_controller;
+  id<GeminiPromoViewControllerDelegate> delegate =
+      (id<GeminiPromoViewControllerDelegate>)view_controller;
 
   [delegate didAcceptPromo];
 

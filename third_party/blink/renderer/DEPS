@@ -12,7 +12,6 @@ include_rules = [
     "+base/containers/adapters.h",
     "+base/containers/buffer_iterator.h",
     "+base/containers/checked_iterators.h",
-    "+base/containers/contains.h",
     "+base/containers/cxx20_erase.h",
     "+base/containers/enum_set.h",
     "+base/containers/fixed_flat_map.h",
@@ -117,6 +116,7 @@ include_rules = [
     "+ui/accessibility/ax_constants.mojom-blink.h",
     "+ui/base/cursor/mojom/cursor_type.mojom-blink.h",
     "+ui/base/dragdrop/mojom",
+    "+ui/base/mojom/menu_source_type.mojom-blink.h",
     "+ui/events/keycodes/dom",
     "+v8",
 ]

@@ -445,7 +445,9 @@ class PA_TRIVIAL_ABI PA_GSL_POINTER raw_ptr {
     }
   }
 #else
-  PA_ALWAYS_INLINE ~raw_ptr() noexcept = default;
+  PA_ALWAYS_INLINE PA_CONSTEXPR_DTOR ~raw_ptr() noexcept {
+    // Not =default because we want MSan use-after-dtor instrumentation.
+  }
   static_assert(!kZeroOnDestruct);
 #endif  // PA_BUILDFLAG(USE_RAW_PTR_BACKUP_REF_IMPL) ||
         // PA_BUILDFLAG(USE_RAW_PTR_ASAN_UNOWNED_IMPL) ||
@@ -1224,13 +1226,17 @@ struct less<raw_ptr<T, Traits>> {
   }
 };
 
+// Override so flat_hash_set/flat_hash_map lookups do not create extra raw_ptr.
+// This also allows dangling pointers to be used for lookup.
 template <typename T, base::RawPtrTraits Traits>
 struct hash<raw_ptr<T, Traits>> {
-  typedef raw_ptr<T, Traits> argument_type;
-  typedef std::size_t result_type;
-  result_type operator()(argument_type const& ptr) const {
+  using is_transparent = void;
+
+  size_t operator()(const raw_ptr<T, Traits>& ptr) const {
     return hash<T*>()(ptr.get());
   }
+
+  size_t operator()(T* ptr) const { return hash<T*>()(ptr); }
 };
 
 // Define for cases where raw_ptr<T> holds a pointer to an array of type T.

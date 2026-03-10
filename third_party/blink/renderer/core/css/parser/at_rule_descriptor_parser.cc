@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/core/css/css_value.h"
 #include "third_party/blink/renderer/core/css/css_value_pair.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
+#include "third_party/blink/renderer/core/css/parser/css_parser_local_context.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_mode.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
 #include "third_party/blink/renderer/core/css/parser/css_variable_parser.h"
@@ -83,10 +84,10 @@ CSSValueList* ConsumeFontFaceUnicodeRange(CSSParserTokenStream& stream) {
 bool IsSupportedFontFormat(String font_format) {
   return css_parsing_utils::IsSupportedKeywordFormat(
              css_parsing_utils::FontFormatToId(font_format)) ||
-         EqualIgnoringASCIICase(font_format, "woff-variations") ||
-         EqualIgnoringASCIICase(font_format, "truetype-variations") ||
-         EqualIgnoringASCIICase(font_format, "opentype-variations") ||
-         EqualIgnoringASCIICase(font_format, "woff2-variations");
+         EqualIgnoringAsciiCase(font_format, "woff-variations") ||
+         EqualIgnoringAsciiCase(font_format, "truetype-variations") ||
+         EqualIgnoringAsciiCase(font_format, "opentype-variations") ||
+         EqualIgnoringAsciiCase(font_format, "woff2-variations");
 }
 
 CSSFontFaceSrcValue::FontTechnology ValueIDToTechnology(CSSValueID valueID) {
@@ -289,7 +290,9 @@ CSSValue* ConsumeDescriptor(StyleRule::RuleType rule_type,
     case StyleRule::kViewTransition:
       return Parser::ParseAtViewTransitionDescriptor(id, stream, context);
     case StyleRule::kFunction:
-      return Parser::ParseAtFunctionDescriptor(id, stream, context);
+    case StyleRule::kMixin:
+      return Parser::ParseAtFunctionOrMixinDescriptor(rule_type, id, stream,
+                                                      context);
     case StyleRule::kRoute:
       return Parser::ParseAtRouteDescriptor(id, stream, context);
     case StyleRule::kCharset:
@@ -312,7 +315,7 @@ CSSValue* ConsumeDescriptor(StyleRule::RuleType rule_type,
     case StyleRule::kScope:
     case StyleRule::kSupports:
     case StyleRule::kStartingStyle:
-    case StyleRule::kMixin:
+    case StyleRule::kResult:
     case StyleRule::kApplyMixin:
     case StyleRule::kContents:
     case StyleRule::kPositionTry:
@@ -324,13 +327,15 @@ CSSValue* ConsumeDescriptor(StyleRule::RuleType rule_type,
 }
 
 CSSValue* ConsumeFontMetricOverride(CSSParserTokenStream& stream,
-                                    const CSSParserContext& context) {
+                                    const CSSParserContext& context,
+                                    CSSParserLocalContext& local_context) {
   if (CSSIdentifierValue* normal =
           css_parsing_utils::ConsumeIdent<CSSValueID::kNormal>(stream)) {
     return normal;
   }
   return css_parsing_utils::ConsumePercent(
-      stream, context, CSSPrimitiveValue::ValueRange::kNonNegative);
+      stream, context, local_context,
+      CSSPrimitiveValue::ValueRange::kNonNegative);
 }
 
 }  // namespace
@@ -343,6 +348,10 @@ CSSValue* AtRuleDescriptorParser::ParseFontFaceDescriptor(
   stream.ConsumeWhitespace();
   CSSParserContext::ParserModeOverridingScope scope(context,
                                                     kCSSFontFaceRuleMode);
+  // TODO(crbug.com/475808971): Store correct property name in
+  // CSSParserLocalContext for random().
+  CSSParserLocalContext local_context =
+      CSSParserLocalContext::CreateWithoutPropertyForAtRules();
   switch (id) {
     case AtRuleDescriptorID::FontFamily:
       // In order to avoid confusion, <family-name> does not accept unquoted
@@ -368,41 +377,45 @@ CSSValue* AtRuleDescriptorParser::ParseFontFaceDescriptor(
       parsed_value = ConsumeFontDisplay(stream);
       break;
     case AtRuleDescriptorID::FontStretch: {
-      parsed_value = css_parsing_utils::ConsumeFontStretch(stream, context);
+      parsed_value =
+          css_parsing_utils::ConsumeFontStretch(stream, context, local_context);
       break;
     }
     case AtRuleDescriptorID::FontStyle: {
-      parsed_value = css_parsing_utils::ConsumeFontStyle(stream, context);
+      parsed_value =
+          css_parsing_utils::ConsumeFontStyle(stream, context, local_context);
       break;
     }
     case AtRuleDescriptorID::FontVariant:
       parsed_value = ConsumeFontVariantList(stream);
       break;
     case AtRuleDescriptorID::FontWeight: {
-      parsed_value = css_parsing_utils::ConsumeFontWeight(stream, context);
+      parsed_value =
+          css_parsing_utils::ConsumeFontWeight(stream, context, local_context);
       break;
     }
     case AtRuleDescriptorID::FontFeatureSettings:
-      parsed_value =
-          css_parsing_utils::ConsumeFontFeatureSettings(stream, context);
+      parsed_value = css_parsing_utils::ConsumeFontFeatureSettings(
+          stream, context, local_context);
       break;
     case AtRuleDescriptorID::FontVariationSettings:
       if (RuntimeEnabledFeatures::FontVariationSettingsDescriptorEnabled()) {
-        parsed_value =
-            css_parsing_utils::ConsumeFontVariationSettings(stream, context);
+        parsed_value = css_parsing_utils::ConsumeFontVariationSettings(
+            stream, context, local_context);
       }
       break;
     case AtRuleDescriptorID::AscentOverride:
     case AtRuleDescriptorID::DescentOverride:
     case AtRuleDescriptorID::LineGapOverride:
-      parsed_value = ConsumeFontMetricOverride(stream, context);
+      parsed_value = ConsumeFontMetricOverride(stream, context, local_context);
       if (parsed_value && IsUseCounterEnabledForMode(context.Mode())) {
         context.Count(WebDXFeature::kFontMetricOverrides);
       }
       break;
     case AtRuleDescriptorID::SizeAdjust:
       parsed_value = css_parsing_utils::ConsumePercent(
-          stream, context, CSSPrimitiveValue::ValueRange::kNonNegative);
+          stream, context, local_context,
+          CSSPrimitiveValue::ValueRange::kNonNegative);
       break;
     default:
       break;
@@ -510,9 +523,11 @@ CSSValue* AtRuleDescriptorParser::ParseAtViewTransitionDescriptor(
         if (stream.Peek().Id() == CSSValueID::kNone) {
           return nullptr;
         }
-        CSSCustomIdentValue* ident =
-            css_parsing_utils::ConsumeCustomIdent(stream, context);
-        if (!ident || ident->Value().StartsWith("-ua-")) {
+        CSSParserLocalContext local_context =
+            CSSParserLocalContext::CreateWithoutPropertyForAtRules();
+        CSSCustomIdentValue* ident = css_parsing_utils::ConsumeCustomIdent(
+            stream, context, local_context);
+        if (!ident || ident->Value().starts_with("-ua-")) {
           return nullptr;
         }
         types->Append(*ident);
@@ -530,11 +545,15 @@ CSSValue* AtRuleDescriptorParser::ParseAtViewTransitionDescriptor(
   return parsed_value;
 }
 
-CSSValue* AtRuleDescriptorParser::ParseAtFunctionDescriptor(
+CSSValue* AtRuleDescriptorParser::ParseAtFunctionOrMixinDescriptor(
+    StyleRule::RuleType rule_type,
     AtRuleDescriptorID id,
     CSSParserTokenStream& stream,
     const CSSParserContext& context) {
   if (id != AtRuleDescriptorID::Result && id != AtRuleDescriptorID::Variable) {
+    return nullptr;
+  }
+  if (id == AtRuleDescriptorID::Result && rule_type == StyleRule::kMixin) {
     return nullptr;
   }
 
@@ -571,7 +590,12 @@ CSSValue* AtRuleDescriptorParser::ParseAtRouteDescriptor(
       return nullptr;
   }
 
-  return css_parsing_utils::ConsumeString(stream);
+  CSSValue* value = css_parsing_utils::ConsumeString(stream);
+  stream.ConsumeWhitespace();
+  if (!stream.AtEnd()) {
+    return nullptr;
+  }
+  return value;
 }
 
 bool AtRuleDescriptorParser::ParseDescriptorValue(
@@ -595,7 +619,7 @@ bool AtRuleDescriptorParser::ParseDescriptorValue(
                              ? CSSPropertyName(variable_name)
                              : CSSPropertyName(equivalent_property_id);
   parsed_descriptors.push_back(CSSPropertyValue(name, *result));
-  context.Count(context.Mode(), equivalent_property_id);
+  context.Count(equivalent_property_id);
   return true;
 }
 

@@ -628,10 +628,10 @@ bool ExtensionDownloader::TryFetchingExtensionsFromCache(
     std::optional<base::FilePath>& cached_crx_path = cache_results[task.id];
     if (cached_crx_path) {
       const ExtensionId id = task.id;
-      // TODO(https://crbug.com/981891#c30) The finished downloading stage will
-      // be reported only once for all download requests for that extension.
-      // Change this when the tracker will care about different requests, not
-      // about extension ID in general.
+      // TODO(https://crbug.com/40635156#c30) The finished downloading stage
+      // will be reported only once for all download requests for that
+      // extension. Change this when the tracker will care about different
+      // requests, not about extension ID in general.
       delegate_->OnExtensionDownloadStageChanged(
           id, ExtensionDownloaderDelegate::Stage::FINISHED);
       auto extension_fetch_data(std::make_unique<ExtensionFetch>(
@@ -852,6 +852,7 @@ ExtensionDownloader::UpdateAvailability
 ExtensionDownloader::GetUpdateAvailability(
     const ExtensionId& extension_id,
     const std::vector<const UpdateManifestResult*>& possible_candidates,
+    bool is_corrupt_reinstall,
     UpdateManifestResult** update_result_out) const {
   const bool is_extension_pending = delegate_->IsExtensionPending(extension_id);
   std::string extension_version;
@@ -898,11 +899,13 @@ ExtensionDownloader::GetUpdateAvailability(
       }
 
       const base::Version existing_version(extension_version);
-      if (update_version.CompareTo(existing_version) <= 0) {
-        VLOG(2) << extension_id << " version is not older than '"
-                << update_version_str << "'";
+      int versions_compare = update_version.CompareTo(existing_version);
+      // The installation should be allowed when the version is upgraded, or
+      // when reinstalling the same versions of a corrupted extension.
+      if (versions_compare < 0 ||
+          (versions_compare == 0 && !is_corrupt_reinstall)) {
         bool can_rollback =
-            update_version.CompareTo(existing_version) < 0 &&
+            versions_compare < 0 &&
             (delegate_->RequestRollback(extension_id) ==
              ExtensionDownloaderDelegate::RequestRollbackResult::kAllowed);
         if (!can_rollback) {
@@ -971,8 +974,9 @@ void ExtensionDownloader::DetermineUpdates(
             << " update entries for " << extension_id;
 
     UpdateManifestResult* update_result = nullptr;
-    UpdateAvailability update_availability = GetUpdateAvailability(
-        extension_id, possible_candidates, &update_result);
+    UpdateAvailability update_availability =
+        GetUpdateAvailability(extension_id, possible_candidates,
+                              task.is_corrupt_reinstall, &update_result);
 
     switch (update_availability) {
       case UpdateAvailability::kAvailable:
@@ -1069,7 +1073,7 @@ void ExtensionDownloader::FetchUpdatedExtension(
     std::unique_ptr<ExtensionFetch> fetch_data,
     std::optional<std::string> info) {
   if (!fetch_data->url.is_valid()) {
-    // TODO(asargent): This can sometimes be invalid. See crbug.com/130881.
+    // TODO(asargent): This can sometimes be invalid. See crbug.com/40219194.
     DLOG(WARNING) << "Invalid URL: '" << fetch_data->url.possibly_invalid_spec()
                   << "' for extension " << fetch_data->id;
     delegate_->OnExtensionDownloadStageChanged(

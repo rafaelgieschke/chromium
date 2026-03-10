@@ -28,6 +28,7 @@
 #include "components/dom_distiller/core/url_constants.h"
 #include "components/dom_distiller/core/url_utils.h"
 #include "components/prefs/pref_service.h"
+#include "components/saved_tab_groups/public/features.h"
 #include "components/search/search.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/url_formatter/url_formatter.h"
@@ -113,11 +114,19 @@ bool IsValidBookmarkDropLocation(
     return true;
   }
 
-  // `dragged_node` is null if the node is from another profile or the user is
-  // dragging a url. In both cases, `dragged_from_same_profile` is expected to
-  // be false. For dragging a node within the same profile, the `dragged_node`
-  // must be not null.
-  CHECK(dragged_node);
+  // In general, `dragged_node` is null if the node is from another profile or
+  // the user is dragging a url. In both cases, `dragged_from_same_profile` is
+  // expected to be false. For dragging a node within the same profile, the
+  // `dragged_node` must be not null.
+  // However, there’s an edge case. `dragged_node` might get deleted and become
+  // null during the drag operation, and it only happens when using the
+  // `chrome.bookmarks` extension API. In this case, return false to cancel the
+  // current drag operation.
+  // See https://crbug.com/472376579
+  if (!dragged_node) {
+    return false;
+  }
+
   CHECK(!dragged_node->is_root());
   CHECK(!dragged_node->is_permanent_node());
   // Don't allow the drop if the user is attempting to drop on the node being
@@ -227,6 +236,9 @@ bool ShouldShowAppsShortcutInBookmarkBar(Profile* profile) {
 }
 
 bool ShouldShowTabGroupsInBookmarkBar(Profile* profile) {
+  if (tab_groups::IsProjectsPanelFeatureEnabled()) {
+    return false;
+  }
   return profile->GetPrefs()->GetBoolean(
       bookmarks::prefs::kShowTabGroupsInBookmarkBar);
 }

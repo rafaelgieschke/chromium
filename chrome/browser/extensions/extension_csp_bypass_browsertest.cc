@@ -51,14 +51,14 @@ class ExtensionCSPBypassTest : public ExtensionBrowserTest {
     std::string unique_name = base::StringPrintf(
         "component=%d, all_urls=%d", is_component, all_urls_permission);
     auto manifest =
-        base::Value::Dict()
+        base::DictValue()
             .Set("name", unique_name)
             .Set("version", "1")
             .Set("manifest_version", 2)
-            .Set("web_accessible_resources", base::Value::List().Append("*"));
+            .Set("web_accessible_resources", base::ListValue().Append("*"));
 
     if (all_urls_permission) {
-      manifest.Set("permissions", base::Value::List().Append("<all_urls>"));
+      manifest.Set("permissions", base::ListValue().Append("<all_urls>"));
     }
     if (is_component) {
       // LoadExtensionAsComponent requires the manifest to contain a key.
@@ -143,7 +143,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCSPBypassTest, LoadWebAccessibleScript) {
 }
 
 // Tests that an extension can add a cross-origin iframe to a page
-// whose CSP disallows iframes. Regression test for https://crbug.com/408932.
+// whose CSP disallows iframes. Regression test for https://crbug.com/41129074.
 IN_PROC_BROWSER_TEST_F(ExtensionCSPBypassTest, InjectIframe) {
   // Install an extension that can add a cross-origin iframe to a document.
   const Extension* extension =
@@ -159,7 +159,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionCSPBypassTest, InjectIframe) {
 
   // First, verify that adding an iframe to the page from the main world will
   // fail. Add the frame. Its onload event fires even if it's blocked
-  // (see https://crbug.com/365457), and reports back.
+  // (see https://crbug.com/40361841), and reports back.
   EXPECT_EQ(true, content::EvalJs(GetActiveWebContents(), "addIframe();"));
 
   // Use WasFrameWithScriptLoaded() to check whether the target frame really

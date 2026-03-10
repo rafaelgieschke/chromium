@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "base/types/optional_ref.h"
 #include "chromeos/printing/printer_configuration.h"
 #include "printing/backend/print_backend.h"
 
@@ -23,9 +24,18 @@ class LocalPrinter {
   using GetPrintersCallback =
       base::OnceCallback<void(std::vector<chromeos::Printer>)>;
   using GetCapabilityCallback = base::OnceCallback<void(
+      base::optional_ref<const chromeos::Printer>,
       const std::optional<::printing::PrinterSemanticCapsAndDefaults>&)>;
+  using GetStatusCallback =
+      base::OnceCallback<void(const chromeos::CupsPrinterStatus&)>;
 
-  virtual ~LocalPrinter() = default;
+  LocalPrinter();
+  virtual ~LocalPrinter();
+
+  // Returns the global instance of LocalPrinter. It CHECKs if it is not
+  // created. Check IsSet if it may not be initialized.
+  static LocalPrinter* Get();
+  static bool IsSet();
 
   // Gets a list of printers.
   virtual void GetPrinters(const AccountId& accountId,
@@ -36,6 +46,11 @@ class LocalPrinter {
   virtual void GetCapability(const AccountId& accountId,
                              const std::string& printer_id,
                              GetCapabilityCallback callback) = 0;
+
+  // Gets status for a printer as a CupsPrinterStatus object.
+  virtual void GetStatus(const AccountId& accountId,
+                         const std::string& printer_id,
+                         GetStatusCallback) = 0;
 };
 
 }  // namespace ash

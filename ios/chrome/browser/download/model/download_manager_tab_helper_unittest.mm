@@ -75,7 +75,7 @@ class DownloadManagerTabHelperTest : public PlatformTest {
             std::make_unique<FakeAuthenticationServiceDelegate>()));
     profile_ = std::move(builder).Build();
     web_state_->SetBrowserState(profile_.get());
-    DriveTabHelper::GetOrCreateForWebState(web_state_.get());
+    DriveTabHelper::CreateForWebState(web_state_.get());
     DownloadManagerTabHelper::CreateForWebState(web_state_.get());
     DownloadManagerTabHelper::FromWebState(web_state_.get())
         ->SetDelegate(delegate_);
@@ -115,7 +115,8 @@ class DownloadManagerTabHelperTest : public PlatformTest {
     system_identity_manager->AddIdentity(fake_identity);
     AuthenticationService* auth_service =
         AuthenticationServiceFactory::GetForProfile(profile_.get());
-    auth_service->SignIn(fake_identity, signin_metrics::AccessPoint::kUnknown);
+    auth_service->SignIn(fake_identity,
+                         signin_metrics::AccessPoint::kStartPage);
   }
 
   web::WebTaskEnvironment task_environment_;

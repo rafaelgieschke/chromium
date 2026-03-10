@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "base/functional/callback_helpers.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/sample_vector.h"
 #include "base/metrics/sparse_histogram.h"
@@ -51,13 +52,14 @@ TEST_F(HistogramBaseTest, DeserializeHistogram) {
   histogram->SerializeInfo(&pickle);
 
   PickleIterator iter(pickle);
-  HistogramBase* deserialized = DeserializeHistogramInfo(&iter);
+  HistogramBase* deserialized =
+      DeserializeHistogramInfo(&iter, base::NullCallback());
   EXPECT_EQ(histogram, deserialized);
 
   ResetStatisticsRecorder();
 
   PickleIterator iter2(pickle);
-  deserialized = DeserializeHistogramInfo(&iter2);
+  deserialized = DeserializeHistogramInfo(&iter2, base::NullCallback());
   EXPECT_TRUE(deserialized);
   EXPECT_NE(histogram, deserialized);
   EXPECT_EQ("TestHistogram", deserialized->histogram_name());
@@ -75,13 +77,14 @@ TEST_F(HistogramBaseTest, DeserializeLinearHistogram) {
   histogram->SerializeInfo(&pickle);
 
   PickleIterator iter(pickle);
-  HistogramBase* deserialized = DeserializeHistogramInfo(&iter);
+  HistogramBase* deserialized =
+      DeserializeHistogramInfo(&iter, base::NullCallback());
   EXPECT_EQ(histogram, deserialized);
 
   ResetStatisticsRecorder();
 
   PickleIterator iter2(pickle);
-  deserialized = DeserializeHistogramInfo(&iter2);
+  deserialized = DeserializeHistogramInfo(&iter2, base::NullCallback());
   EXPECT_TRUE(deserialized);
   EXPECT_NE(histogram, deserialized);
   EXPECT_EQ("TestHistogram", deserialized->histogram_name());
@@ -97,13 +100,14 @@ TEST_F(HistogramBaseTest, DeserializeBooleanHistogram) {
   histogram->SerializeInfo(&pickle);
 
   PickleIterator iter(pickle);
-  HistogramBase* deserialized = DeserializeHistogramInfo(&iter);
+  HistogramBase* deserialized =
+      DeserializeHistogramInfo(&iter, base::NullCallback());
   EXPECT_EQ(histogram, deserialized);
 
   ResetStatisticsRecorder();
 
   PickleIterator iter2(pickle);
-  deserialized = DeserializeHistogramInfo(&iter2);
+  deserialized = DeserializeHistogramInfo(&iter2, base::NullCallback());
   EXPECT_TRUE(deserialized);
   EXPECT_NE(histogram, deserialized);
   EXPECT_EQ("TestHistogram", deserialized->histogram_name());
@@ -124,13 +128,14 @@ TEST_F(HistogramBaseTest, DeserializeCustomHistogram) {
   histogram->SerializeInfo(&pickle);
 
   PickleIterator iter(pickle);
-  HistogramBase* deserialized = DeserializeHistogramInfo(&iter);
+  HistogramBase* deserialized =
+      DeserializeHistogramInfo(&iter, base::NullCallback());
   EXPECT_EQ(histogram, deserialized);
 
   ResetStatisticsRecorder();
 
   PickleIterator iter2(pickle);
-  deserialized = DeserializeHistogramInfo(&iter2);
+  deserialized = DeserializeHistogramInfo(&iter2, base::NullCallback());
   EXPECT_TRUE(deserialized);
   EXPECT_NE(histogram, deserialized);
   EXPECT_EQ("TestHistogram", deserialized->histogram_name());
@@ -146,47 +151,18 @@ TEST_F(HistogramBaseTest, DeserializeSparseHistogram) {
   histogram->SerializeInfo(&pickle);
 
   PickleIterator iter(pickle);
-  HistogramBase* deserialized = DeserializeHistogramInfo(&iter);
+  HistogramBase* deserialized =
+      DeserializeHistogramInfo(&iter, base::NullCallback());
   EXPECT_EQ(histogram, deserialized);
 
   ResetStatisticsRecorder();
 
   PickleIterator iter2(pickle);
-  deserialized = DeserializeHistogramInfo(&iter2);
+  deserialized = DeserializeHistogramInfo(&iter2, base::NullCallback());
   EXPECT_TRUE(deserialized);
   EXPECT_NE(histogram, deserialized);
   EXPECT_EQ("TestHistogram", deserialized->histogram_name());
   EXPECT_EQ(0, deserialized->flags());
-}
-
-TEST_F(HistogramBaseTest, AddKilo) {
-  HistogramBase* histogram =
-      LinearHistogram::FactoryGet("TestAddKiloHistogram", 1, 1000, 100, 0);
-
-  histogram->AddKilo(100, 1000);
-  histogram->AddKilo(200, 2000);
-  histogram->AddKilo(300, 1500);
-
-  std::unique_ptr<HistogramSamples> samples = histogram->SnapshotSamples();
-  EXPECT_EQ(1, samples->GetCount(100));
-  EXPECT_EQ(2, samples->GetCount(200));
-  EXPECT_LE(1, samples->GetCount(300));
-  EXPECT_GE(2, samples->GetCount(300));
-}
-
-TEST_F(HistogramBaseTest, AddKiB) {
-  HistogramBase* histogram =
-      LinearHistogram::FactoryGet("TestAddKiBHistogram", 1, 1000, 100, 0);
-
-  histogram->AddKiB(100, 1024);
-  histogram->AddKiB(200, 2048);
-  histogram->AddKiB(300, 1536);
-
-  std::unique_ptr<HistogramSamples> samples = histogram->SnapshotSamples();
-  EXPECT_EQ(1, samples->GetCount(100));
-  EXPECT_EQ(2, samples->GetCount(200));
-  EXPECT_LE(1, samples->GetCount(300));
-  EXPECT_GE(2, samples->GetCount(300));
 }
 
 TEST_F(HistogramBaseTest, AddTimeMillisecondsGranularityOverflow) {

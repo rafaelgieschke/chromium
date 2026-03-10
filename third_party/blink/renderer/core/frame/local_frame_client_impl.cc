@@ -49,6 +49,7 @@
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "third_party/blink/public/mojom/frame/user_activation_update_types.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/loader/fetch_later.mojom-blink.h"
+#include "third_party/blink/public/platform/cross_variant_mojo_util.h"
 #include "third_party/blink/public/platform/modules/service_worker/web_service_worker_provider.h"
 #include "third_party/blink/public/platform/modules/service_worker/web_service_worker_provider_client.h"
 #include "third_party/blink/public/platform/platform.h"
@@ -70,10 +71,12 @@
 #include "third_party/blink/public/web/web_plugin_params.h"
 #include "third_party/blink/public/web/web_view_client.h"
 #include "third_party/blink/renderer/bindings/core/v8/capture_source_location.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_microtasks_scope.h"
 #include "third_party/blink/renderer/core/core_initializer.h"
 #include "third_party/blink/renderer/core/events/current_input_event.h"
 #include "third_party/blink/renderer/core/events/message_event.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/exported/web_dev_tools_agent_impl.h"
 #include "third_party/blink/renderer/core/exported/web_plugin_container_impl.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
@@ -208,13 +211,11 @@ void LocalFrameClientImpl::DidCommitDocumentReplacementNavigation(
 }
 
 void LocalFrameClientImpl::DispatchDidClearWindowObjectInMainWorld(
-    v8::Isolate* isolate,
-    v8::MicrotaskQueue* microtask_queue) {
+    LocalDOMWindow* window) {
   if (web_frame_->Client()) {
     // Do not run microtasks while invoking the callback.
     {
-      v8::MicrotasksScope microtasks(isolate, microtask_queue,
-                                     v8::MicrotasksScope::kDoNotRunMicrotasks);
+      V8DoNotRunMicrotasksScope microtasks(window);
       web_frame_->Client()->DidClearWindowObject();
     }
     Document* document = web_frame_->GetFrame()->GetDocument();
@@ -641,7 +642,9 @@ void LocalFrameClientImpl::BeginNavigation(
     mojo::PendingRemote<mojom::blink::NavigationStateKeepAliveHandle>
         initiator_navigation_state_keep_alive_handle,
     bool is_container_initiated,
-    bool has_rel_opener) {
+    bool has_rel_opener,
+    mojo::PendingReceiver<mojom::blink::NavigationResumeDeferredCommitListener>
+        resume_defer_commit_listener) {
   if (!web_frame_->Client()) {
     return;
   }
@@ -805,6 +808,9 @@ void LocalFrameClientImpl::BeginNavigation(
 
   navigation_info->href_translate = href_translate;
   navigation_info->is_container_initiated = is_container_initiated;
+  navigation_info->resume_defer_commit_listener = CrossVariantMojoReceiver<
+      mojom::NavigationResumeDeferredCommitListenerInterfaceBase>(
+      std::move(resume_defer_commit_listener));
 
   web_frame_->Client()->BeginNavigation(std::move(navigation_info));
 }

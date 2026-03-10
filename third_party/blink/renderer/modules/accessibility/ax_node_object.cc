@@ -37,7 +37,6 @@
 #include <queue>
 
 #include "base/auto_reset.h"
-#include "base/containers/contains.h"
 #include "base/containers/fixed_flat_set.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/numerics/safe_conversions.h"
@@ -105,6 +104,7 @@
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/html_embed_element.h"
 #include "third_party/blink/renderer/core/html/html_frame_element_base.h"
+#include "third_party/blink/renderer/core/html/html_geolocation_element.h"
 #include "third_party/blink/renderer/core/html/html_hr_element.h"
 #include "third_party/blink/renderer/core/html/html_html_element.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
@@ -117,7 +117,6 @@
 #include "third_party/blink/renderer/core/html/html_meter_element.h"
 #include "third_party/blink/renderer/core/html/html_olist_element.h"
 #include "third_party/blink/renderer/core/html/html_paragraph_element.h"
-#include "third_party/blink/renderer/core/html/html_permission_element.h"
 #include "third_party/blink/renderer/core/html/html_plugin_element.h"
 #include "third_party/blink/renderer/core/html/html_progress_element.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
@@ -131,6 +130,7 @@
 #include "third_party/blink/renderer/core/html/html_table_section_element.h"
 #include "third_party/blink/renderer/core/html/html_time_element.h"
 #include "third_party/blink/renderer/core/html/html_ulist_element.h"
+#include "third_party/blink/renderer/core/html/html_user_media_element.h"
 #include "third_party/blink/renderer/core/html/media/html_audio_element.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
@@ -192,6 +192,7 @@
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_to_number.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "ui/accessibility/accessibility_features.h"
 #include "ui/accessibility/ax_common.h"
@@ -225,6 +226,12 @@ bool IsIgnoredAsInsideInactiveColumnTab(Node* node) {
 const ScrollMarkerPseudoElement* GetScrollMarker(const Node* node) {
   auto* element = DynamicTo<Element>(node);
   if (!element) {
+    return nullptr;
+  }
+  // Don't try to get scroll marker for the locked elements,
+  // as their style might not have been updated.
+  if (DisplayLockUtilities::IsDisplayLockedPreventingPaint(
+          element, /*inclusive_check=*/true)) {
     return nullptr;
   }
   return DynamicTo<ScrollMarkerPseudoElement>(
@@ -715,7 +722,7 @@ void AXNodeObject::AlterSliderOrSpinButtonValue(bool increase) {
     float step;
     if (!StepValueForRange(&step)) {
       if (IsNativeSlider() || IsNativeSpinButton()) {
-        step = StepRange().Step().ToString().ToFloat();
+        step = StringToFloat(StepRange().Step().ToString()).value_or(0);
       } else {
         return;
       }
@@ -1147,6 +1154,9 @@ AXObjectInclusion AXNodeObject::ShouldIncludeBasedOnSemantics(
           ax::mojom::blink::Role::kMathMLUnderOver,
           ax::mojom::blink::Role::kMeter,
           ax::mojom::blink::Role::kMenuBar,
+          ax::mojom::blink::Role::kMenuItem,
+          ax::mojom::blink::Role::kMenuItemCheckBox,
+          ax::mojom::blink::Role::kMenuItemRadio,
           ax::mojom::blink::Role::kMenuListOption,
           ax::mojom::blink::Role::kMenuListPopup,
           ax::mojom::blink::Role::kNavigation,
@@ -1165,7 +1175,7 @@ AXObjectInclusion AXNodeObject::ShouldIncludeBasedOnSemantics(
           ax::mojom::blink::Role::kVideo,
       });
 
-  if (base::Contains(always_included_computed_roles, RoleValue())) {
+  if (always_included_computed_roles.contains(RoleValue())) {
     return kIncludeObject;
   }
 
@@ -1220,8 +1230,7 @@ AXObjectInclusion AXNodeObject::ShouldIncludeBasedOnSemantics(
     // next layer. All nodes have a single child, meaning that this child has no
     // siblings.
     if (!IsExemptFromInlineBlockCheck(native_role_) && GetLayoutObject() &&
-        GetLayoutObject()->IsInline() &&
-        GetLayoutObject()->IsAtomicInlineLevel() &&
+        GetLayoutObject()->IsAtomicInline() &&
         node->parentNode()->childElementCount() > 1) {
       return kIncludeObject;
     }
@@ -1710,12 +1719,14 @@ ax::mojom::blink::Role AXNodeObject::DetermineTableCellRole() const {
 
   const AtomicString& scope =
       GetElement()->FastGetAttribute(html_names::kScopeAttr);
-  if (EqualIgnoringASCIICase(scope, "row") ||
-      EqualIgnoringASCIICase(scope, "rowgroup"))
+  if (EqualIgnoringAsciiCase(scope, "row") ||
+      EqualIgnoringAsciiCase(scope, "rowgroup")) {
     return ax::mojom::blink::Role::kRowHeader;
-  if (EqualIgnoringASCIICase(scope, "col") ||
-      EqualIgnoringASCIICase(scope, "colgroup"))
+  }
+  if (EqualIgnoringAsciiCase(scope, "col") ||
+      EqualIgnoringAsciiCase(scope, "colgroup")) {
     return ax::mojom::blink::Role::kColumnHeader;
+  }
 
   return DecideRoleFromSiblings(GetElement());
 }
@@ -1826,13 +1837,13 @@ ax::mojom::blink::SortDirection AXNodeObject::GetSortDirection() const {
 
   if (const AtomicString& aria_sort =
           AriaTokenAttribute(html_names::kAriaSortAttr)) {
-    if (EqualIgnoringASCIICase(aria_sort, "none")) {
+    if (EqualIgnoringAsciiCase(aria_sort, "none")) {
       return ax::mojom::blink::SortDirection::kNone;
     }
-    if (EqualIgnoringASCIICase(aria_sort, "ascending")) {
+    if (EqualIgnoringAsciiCase(aria_sort, "ascending")) {
       return ax::mojom::blink::SortDirection::kAscending;
     }
-    if (EqualIgnoringASCIICase(aria_sort, "descending")) {
+    if (EqualIgnoringAsciiCase(aria_sort, "descending")) {
       return ax::mojom::blink::SortDirection::kDescending;
     }
     // Technically, illegal values should be exposed as is, but this does
@@ -2186,8 +2197,6 @@ ax::mojom::blink::Role AXNodeObject::RoleFromLayoutObjectOrNode() const {
     return ax::mojom::blink::Role::kGenericContainer;
   }
 
-  DCHECK(GetLayoutObject());
-
   if (GetLayoutObject()->IsListMarker()) {
     Node* list_item = GetLayoutObject()->GeneratingNode();
     if (list_item && ShouldIgnoreListItem(list_item)) {
@@ -2312,16 +2321,16 @@ ax::mojom::blink::Role AXNodeObject::RoleFromLayoutObjectOrNode() const {
     }
   }
 
-  if (IsA<HTMLPermissionElement>(node)) {
+  if (IsA<HTMLUserMediaElement>(node)) {
+    return ax::mojom::blink::Role::kButton;
+  }
+
+  if (IsA<HTMLGeolocationElement>(node)) {
     return ax::mojom::blink::Role::kButton;
   }
 
   if (IsA<HTMLMenuBarElement>(node)) {
     return ax::mojom::blink::Role::kMenuBar;
-  }
-
-  if (IsA<HTMLMenuItemElement>(node)) {
-    return ax::mojom::blink::Role::kMenuItem;
   }
 
   if (IsA<HTMLMenuListElement>(node)) {
@@ -2536,6 +2545,23 @@ ax::mojom::blink::Role AXNodeObject::NativeRoleIgnoringAria() const {
     } else {
       return ax::mojom::blink::Role::kListBoxOption;
     }
+  }
+
+  if (auto* menu_item = DynamicTo<HTMLMenuItemElement>(*GetNode())) {
+    if (menu_item->IsCheckable()) {
+      DCHECK(menu_item->NearestAncestorFieldSet())
+          << "IsCheckable implies that it has a NearestAncestorFieldSet";
+      // We have to look at the parent <fieldset>'s checkable attribute to see
+      // if this menu item behaves as a radio button or a checkbox.
+      const AtomicString& checkable_type =
+          menu_item->NearestAncestorFieldSet()->FastGetAttribute(
+              html_names::kCheckableAttr);
+      if (EqualIgnoringAsciiCase(checkable_type, keywords::kSingle)) {
+        return ax::mojom::blink::Role::kMenuItemRadio;
+      }
+      return ax::mojom::blink::Role::kMenuItemCheckBox;
+    }
+    return ax::mojom::blink::Role::kMenuItem;
   }
 
   if (IsA<HTMLOptGroupElement>(GetNode())) {
@@ -2837,8 +2863,9 @@ static Element* SiblingWithAriaRole(String role, Node* node) {
       continue;
     const AtomicString& sibling_aria_role =
         blink::AXObject::AriaAttribute(*element, html_names::kRoleAttr);
-    if (EqualIgnoringASCIICase(sibling_aria_role, role))
+    if (EqualIgnoringAsciiCase(sibling_aria_role, role)) {
       return element;
+    }
   }
 
   return nullptr;
@@ -2991,7 +3018,7 @@ bool AXNodeObject::IsLineBreakingObject() const {
   if (const LayoutText* layout_text = DynamicTo<LayoutText>(layout_object)) {
     const ComputedStyle& style = layout_object->StyleRef();
     if (layout_text->HasNonCollapsedText() && style.ShouldPreserveBreaks() &&
-        layout_text->PlainText().find('\n') != kNotFound) {
+        layout_text->PlainText().contains('\n')) {
       return true;
     }
   }
@@ -3414,8 +3441,7 @@ AccessibilityExpanded AXNodeObject::IsExpanded() const {
       CommandEventType command = command_for_element->GetCommandEventType(
           html_element->command(), html_element->GetExecutionContext());
       bool is_popover_command =
-          command_for_element->IsValidBuiltinPopoverCommand(*html_element,
-                                                            command);
+          command_for_element->IsValidBuiltinPopoverCommand(command);
       if (command_for_element && is_popover_command &&
           !element->IsDescendantOrShadowDescendantOf(command_for_element)) {
         return command_for_element->popoverOpen() ? kExpandedExpanded
@@ -3526,7 +3552,9 @@ int AXNodeObject::HeadingLevel() const {
 
   if (RoleValue() == ax::mojom::blink::Role::kHeading) {
     const String& implicit_value = GetImplicitAriaLevel(RoleValue());
-    return implicit_value.empty() ? 0 : implicit_value.ToInt();
+    return implicit_value.empty()
+               ? 0
+               : StringToIntLoose(implicit_value).value_or(0);
   }
 
   // TODO(accessibility) For kDisclosureTriangle, kDisclosureTriangleGrouping,
@@ -3871,10 +3899,10 @@ AccessibilityOrientation AXNodeObject::Orientation() const {
       RoleValue() == ax::mojom::blink::Role::kTextFieldWithComboBox) {
     const AtomicString& aria_orientation =
         AriaTokenAttribute(html_names::kAriaOrientationAttr);
-    if (EqualIgnoringASCIICase(aria_orientation, "horizontal")) {
+    if (EqualIgnoringAsciiCase(aria_orientation, "horizontal")) {
       return kAccessibilityOrientationHorizontal;
     }
-    if (EqualIgnoringASCIICase(aria_orientation, "vertical")) {
+    if (EqualIgnoringAsciiCase(aria_orientation, "vertical")) {
       return kAccessibilityOrientationVertical;
     }
   }
@@ -3887,19 +3915,19 @@ AccessibilityOrientation AXNodeObject::Orientation() const {
   // If there's a valid value, use it.
   const AtomicString& aria_orientation =
       AriaTokenAttribute(html_names::kAriaOrientationAttr);
-  if (EqualIgnoringASCIICase(aria_orientation, "horizontal")) {
+  if (EqualIgnoringAsciiCase(aria_orientation, "horizontal")) {
     return kAccessibilityOrientationHorizontal;
   }
-  if (EqualIgnoringASCIICase(aria_orientation, "vertical")) {
+  if (EqualIgnoringAsciiCase(aria_orientation, "vertical")) {
     return kAccessibilityOrientationVertical;
   }
 
   // Fall back on the implicit value, should one exist.
   const String& implicit_orientation = GetImplicitAriaOrientation(RoleValue());
-  if (EqualIgnoringASCIICase(implicit_orientation, "horizontal")) {
+  if (EqualIgnoringAsciiCase(implicit_orientation, "horizontal")) {
     return kAccessibilityOrientationHorizontal;
   }
-  if (EqualIgnoringASCIICase(implicit_orientation, "vertical")) {
+  if (EqualIgnoringAsciiCase(implicit_orientation, "vertical")) {
     return kAccessibilityOrientationVertical;
   }
 
@@ -4254,8 +4282,9 @@ RGBA32 AXNodeObject::ColorValue() const {
     return AXObject::ColorValue();
 
   const AtomicString& type = input->getAttribute(kTypeAttr);
-  if (!EqualIgnoringASCIICase(type, "color"))
+  if (!EqualIgnoringAsciiCase(type, "color")) {
     return AXObject::ColorValue();
+  }
 
   // HTMLInputElement::Value always returns a string parseable by Color.
   Color color;
@@ -4305,7 +4334,7 @@ const AtomicString& AXNodeObject::ComputedFontFamily() const {
     return AXObject::ComputedFontFamily();
 
   const FontDescription& font_description = style->GetFontDescription();
-  return font_description.FirstFamily().FamilyName();
+  return font_description.Family().FamilyName();
 }
 
 String AXNodeObject::FontFamilyForSerialization() const {
@@ -4373,22 +4402,22 @@ ax::mojom::blink::AriaCurrentState AXNodeObject::GetAriaCurrentState() const {
     }
     return ax::mojom::blink::AriaCurrentState::kNone;
   }
-  if (EqualIgnoringASCIICase(attribute_value, "false")) {
+  if (EqualIgnoringAsciiCase(attribute_value, "false")) {
     return ax::mojom::blink::AriaCurrentState::kFalse;
   }
-  if (EqualIgnoringASCIICase(attribute_value, "page")) {
+  if (EqualIgnoringAsciiCase(attribute_value, "page")) {
     return ax::mojom::blink::AriaCurrentState::kPage;
   }
-  if (EqualIgnoringASCIICase(attribute_value, "step")) {
+  if (EqualIgnoringAsciiCase(attribute_value, "step")) {
     return ax::mojom::blink::AriaCurrentState::kStep;
   }
-  if (EqualIgnoringASCIICase(attribute_value, "location")) {
+  if (EqualIgnoringAsciiCase(attribute_value, "location")) {
     return ax::mojom::blink::AriaCurrentState::kLocation;
   }
-  if (EqualIgnoringASCIICase(attribute_value, "date")) {
+  if (EqualIgnoringAsciiCase(attribute_value, "date")) {
     return ax::mojom::blink::AriaCurrentState::kDate;
   }
-  if (EqualIgnoringASCIICase(attribute_value, "time")) {
+  if (EqualIgnoringAsciiCase(attribute_value, "time")) {
     return ax::mojom::blink::AriaCurrentState::kTime;
   }
 
@@ -4401,7 +4430,7 @@ ax::mojom::blink::InvalidState AXNodeObject::GetInvalidState() const {
   if (const AtomicString& attribute_value =
           AriaTokenAttribute(html_names::kAriaInvalidAttr)) {
     // aria-invalid="false".
-    if (EqualIgnoringASCIICase(attribute_value, "false")) {
+    if (EqualIgnoringAsciiCase(attribute_value, "false")) {
       return ax::mojom::blink::InvalidState::kFalse;
     }
     // In most cases, aria-invalid="spelling"| "grammar" are used on inline text
@@ -4410,8 +4439,8 @@ ax::mojom::blink::InvalidState AXNodeObject::GetInvalidState() const {
     // exposing the state twice, and to prevent superfluous "invalid"
     // announcements in some screen readers.
     // On text fields, they are simply exposed as if aria-invalid="true".
-    if (EqualIgnoringASCIICase(attribute_value, "spelling") ||
-        EqualIgnoringASCIICase(attribute_value, "grammar")) {
+    if (EqualIgnoringAsciiCase(attribute_value, "spelling") ||
+        EqualIgnoringAsciiCase(attribute_value, "grammar")) {
       return RoleValue() == ax::mojom::blink::Role::kTextField
                  ? ax::mojom::blink::InvalidState::kTrue
                  : ax::mojom::blink::InvalidState::kNone;
@@ -4584,7 +4613,7 @@ bool AXNodeObject::MaxValueForRange(float* out_value) const {
   // Fall back to implicit value from ARIA spec.
   const String& implicit_value = GetImplicitAriaValuemax(RoleValue());
   if (!implicit_value.empty()) {
-    *out_value = implicit_value.ToFloat();
+    *out_value = StringToFloat(implicit_value).value_or(0);
     return true;
   }
 
@@ -4613,7 +4642,7 @@ bool AXNodeObject::MinValueForRange(float* out_value) const {
   // Fall back to implicit value from ARIA spec.
   const String& implicit_value = GetImplicitAriaValuemin(RoleValue());
   if (!implicit_value.empty()) {
-    *out_value = implicit_value.ToFloat();
+    *out_value = StringToFloat(implicit_value).value_or(0);
     return true;
   }
 
@@ -4624,7 +4653,7 @@ bool AXNodeObject::StepValueForRange(float* out_value) const {
   if (IsNativeSlider() || IsNativeSpinButton()) {
     auto step_range =
         To<HTMLInputElement>(*GetNode()).CreateStepRange(kRejectAny);
-    auto step = step_range.Step().ToString().ToFloat();
+    auto step = StringToFloat(step_range.Step().ToString()).value_or(0);
 
     // Provide a step if ATs incrementing slider should move by step, otherwise
     // AT will move by 5%.
@@ -4634,8 +4663,8 @@ bool AXNodeObject::StepValueForRange(float* out_value) const {
     // behavior where sometimes the slider would alternate by 1 or 2 steps.
     // Therefore the final decision is to use the step if there are
     // less than stops in the slider, otherwise, move by 5%.
-    float max = step_range.Maximum().ToString().ToFloat();
-    float min = step_range.Minimum().ToString().ToFloat();
+    float max = StringToFloat(step_range.Maximum().ToString()).value_or(0);
+    float min = StringToFloat(step_range.Minimum().ToString()).value_or(0);
     int num_stops = base::saturated_cast<int>((max - min) / step);
     constexpr int kNumStopsForFivePercentRule = 40;
     if (num_stops >= kNumStopsForFivePercentRule) {
@@ -4675,9 +4704,8 @@ KURL AXNodeObject::Url() const {
   auto* html_image_element = DynamicTo<HTMLImageElement>(GetNode());
   if (IsImage() && html_image_element) {
     // Using ImageSourceURL handles both src and srcset.
-    String source_url = html_image_element->ImageSourceURL();
-    String stripped_image_source_url =
-        StripLeadingAndTrailingHTMLSpaces(source_url);
+    StringView stripped_image_source_url =
+        StripLeadingAndTrailingHtmlSpaces(html_image_element->ImageSourceURL());
     if (!stripped_image_source_url.empty())
       return GetDocument()->CompleteURL(stripped_image_source_url);
   }
@@ -5387,8 +5415,7 @@ static bool ShouldInsertSpaceBetweenObjectsIfNeeded(
   // spec: https://www.w3.org/TR/css-display-3/#the-display-properties
   CHECK(next_layout);
   CHECK(prev_layout);
-  if (next_layout->IsAtomicInlineLevel() ||
-      prev_layout->IsAtomicInlineLevel()) {
+  if (next_layout->IsAtomicInline() || prev_layout->IsAtomicInline()) {
     return true;
   }
 
@@ -5849,12 +5876,7 @@ int AXNodeObject::TextOffsetInFormattingContext(int offset) const {
                        : offset;
   }
 
-  // TODO(crbug.com/567964): LayoutObject::IsAtomicInlineLevel() also includes
-  // block-level replaced elements. We need to explicitly exclude them via
-  // LayoutObject::IsInline().
-  const bool is_atomic_inline_level =
-      layout_obj->IsInline() && layout_obj->IsAtomicInlineLevel();
-  if (!is_atomic_inline_level && !layout_obj->IsText()) {
+  if (!layout_obj->IsAtomicInline() && !layout_obj->IsText()) {
     // Not in a formatting context in which text offsets are meaningful.
     return AXObject::TextOffsetInFormattingContext(offset);
   }
@@ -6094,9 +6116,7 @@ void AXNodeObject::AddPseudoElementChildrenFromLayoutTree() {
     // All added pseudo-element descendants are included in the tree.
     if (AXObject* ax_child = AXObjectCache().GetOrCreate(child, this)) {
       DCHECK(AXObjectCacheImpl::IsRelevantPseudoElementDescendant(*child));
-      if (ax_child->IsIncludedInTree()) {
-        AddChildAndCheckIncluded(ax_child);
-      }
+      AddChildAndCheckIncluded(ax_child);
     }
     child = child->NextSibling();
   }
@@ -6177,6 +6197,14 @@ void AXNodeObject::AddChildrenImpl() {
 #define CHECK_ATTACHED()                                  \
   if (IsDetached()) {                                     \
     NOTREACHED() << "Detached adding children: " << this; \
+  }
+
+  // Don't add children if inside an inactive scroll marker tab or
+  // inside an inactive column scroll marker tab.
+  if (InsideInactiveScrollMarkerTab() ||
+      IsIgnoredAsInsideInactiveColumnTab(GetNode())) {
+    CHECK_ATTACHED();
+    return;
   }
 
   CHECK(NeedsToUpdateChildren());
@@ -6329,6 +6357,12 @@ void AXNodeObject::AddNodeChildImpl(Node* node) {
   // Should not have another parent unless owned.
   if (AXObjectCache().IsAriaOwned(ax_child))
     return;  // Do not add owned children to their natural parent.
+  if (Element* element = DynamicTo<Element>(node);
+      element && element->GetOverscrollContainer()) {
+    // Targets of toggle-overscroll actions have an overscroll container
+    // with a ::-internal-overscroll-area-parent which owns them.
+    return;
+  }
 
   AXObject* ax_cached_parent =
       ax_child ? ax_child->ParentObjectIfPresent() : nullptr;
@@ -6492,8 +6526,6 @@ bool AXNodeObject::CanHaveChildren() const {
       // model in the HTML spec.
       break;
     case ax::mojom::blink::Role::kCheckBox:
-    case ax::mojom::blink::Role::kMenuItemCheckBox:
-    case ax::mojom::blink::Role::kMenuItemRadio:
     case ax::mojom::blink::Role::kProgressIndicator:
     case ax::mojom::blink::Role::kRadioButton:
     case ax::mojom::blink::Role::kScrollBar:
@@ -6508,6 +6540,8 @@ bool AXNodeObject::CanHaveChildren() const {
       break;
     case ax::mojom::blink::Role::kComboBoxSelect:
     case ax::mojom::blink::Role::kMenuItem:
+    case ax::mojom::blink::Role::kMenuItemCheckBox:
+    case ax::mojom::blink::Role::kMenuItemRadio:
     case ax::mojom::blink::Role::kPopUpButton:
     case ax::mojom::blink::Role::kStaticText:
       // Note: these can have AXInlineTextBox children, but when adding them, we
@@ -6929,8 +6963,12 @@ String AXNodeObject::TextAlternativeFromTooltip(
   }
 
   if (name_sources) {
-    name_sources->push_back(
-        NameSource(*found_text_alternative, html_names::kPopovertargetAttr));
+    // Map NameFrom enum to corresponding HTML attribute
+    const QualifiedName& attr_name =
+        name_from == ax::mojom::blink::NameFrom::kInterestFor
+            ? html_names::kInterestforAttr
+            : html_names::kPopovertargetAttr;
+    name_sources->push_back(NameSource(*found_text_alternative, attr_name));
     name_sources->back().type = name_from;
   }
 
@@ -8335,8 +8373,7 @@ AXObject* AXNodeObject::GetFirstInlineBlockOrDeepestInlineAXChildInLayoutTree(
     if (ax_object && ax_object->IsIncludedInTree() &&
         !current_node->IsMarkerPseudoElement()) {
       if (ax_object->GetLayoutObject() &&
-          ax_object->GetLayoutObject()->IsInline() &&
-          ax_object->GetLayoutObject()->IsAtomicInlineLevel()) {
+          ax_object->GetLayoutObject()->IsAtomicInline()) {
         return ax_object;
       }
     }

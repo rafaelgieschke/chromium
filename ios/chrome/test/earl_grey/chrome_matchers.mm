@@ -7,7 +7,7 @@
 #import "base/strings/sys_string_conversions.h"
 #import "base/strings/utf_string_conversions.h"
 #import "components/url_formatter/elide_url.h"
-#import "ios/chrome/browser/browser_container/ui_bundled/edit_menu_app_interface.h"
+#import "ios/chrome/browser/browser_content/ui_bundled/edit_menu_app_interface.h"
 #import "ios/chrome/browser/settings/ui_bundled/settings_root_table_constants.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers_app_interface.h"
 #import "ios/testing/earl_grey/earl_grey_test.h"
@@ -223,6 +223,10 @@ id<GREYMatcher> OmniboxPopupRow() {
 
 id<GREYMatcher> OmniboxPopupRowWithString(NSString* string) {
   return [ChromeMatchersAppInterface omniboxPopupRowWithString:string];
+}
+
+id<GREYMatcher> OmniboxPopupRowVisibleWithString(NSString* string) {
+  return [ChromeMatchersAppInterface omniboxPopupRowVisibleWithString:string];
 }
 
 id<GREYMatcher> OmniboxPopupList() {
@@ -539,8 +543,14 @@ id<GREYMatcher> BrowsingDataButtonMatcher() {
   return [ChromeMatchersAppInterface browsingDataButtonMatcher];
 }
 
+// TODO(crbug.com/487269108): Delete the BrowsingDataConfirmButtonMatcher()
+// once the feature flag `kPasswordRemovalFromDeleteBrowsingData` is enabled.
 id<GREYMatcher> BrowsingDataConfirmButtonMatcher() {
   return [ChromeMatchersAppInterface browsingDataConfirmButtonMatcher];
+}
+
+id<GREYMatcher> BrowsingDataDoneButtonMatcher() {
+  return [ChromeMatchersAppInterface browsingDataDoneButtonMatcher];
 }
 
 id<GREYMatcher> ClearBrowsingHistoryButton() {

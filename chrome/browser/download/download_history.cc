@@ -124,8 +124,11 @@ class DownloadHistoryData : public base::SupportsUserData::Data {
   // order to save memory.
   history::DownloadRow* info() { return info_.get(); }
   void set_info(const history::DownloadRow& i) {
-    // TODO(qinmin): avoid creating a new copy each time.
-    info_ = std::make_unique<history::DownloadRow>(i);
+    if (info_) {
+      *info_ = i;
+    } else {
+      info_ = std::make_unique<history::DownloadRow>(i);
+    }
   }
   void clear_info() {
     info_.reset();
@@ -209,7 +212,7 @@ ShouldUpdateHistoryResult ShouldUpdateHistory(
   // Chrome will write the http response data to a temporary file, and later
   // rename it. If Chrome is killed before committing the history here,
   // that temporary file will still get permanently left.
-  // See http://crbug.com/664677.
+  // See http://crbug.com/40493321.
   if (previous == nullptr || previous->current_path != current.current_path) {
     return ShouldUpdateHistoryResult::UPDATE_IMMEDIATELY;
   }

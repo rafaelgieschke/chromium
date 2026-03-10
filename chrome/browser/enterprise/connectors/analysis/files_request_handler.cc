@@ -15,10 +15,12 @@
 #include "base/no_destructor.h"
 #include "base/notreached.h"
 #include "chrome/browser/enterprise/connectors/common.h"
+#include "chrome/browser/enterprise/connectors/reporting/reporting_event_router_factory.h"
 #include "chrome/browser/safe_browsing/cloud_content_scanning/deep_scanning_utils.h"
 #include "chrome/browser/safe_browsing/cloud_content_scanning/file_opening_job.h"
 #include "components/enterprise/common/proto/connectors.pb.h"
 #include "components/enterprise/connectors/core/cloud_content_scanning/binary_upload_service.h"
+#include "components/enterprise/connectors/core/cloud_content_scanning/deep_scanning_utils.h"
 #include "components/enterprise/connectors/core/reporting_constants.h"
 #include "components/file_access/scoped_file_access.h"
 #include "components/file_access/scoped_file_access_delegate.h"
@@ -27,9 +29,6 @@
 namespace enterprise_connectors {
 
 namespace {
-
-constexpr char kFileAttachCount[] = "Enterprise.OnFileAttach.FileCount";
-constexpr char kFileTransferCount[] = "Enterprise.OnFileTransfer.FileCount";
 
 // Global pointer of factory function (RepeatingCallback) used to create
 // instances of ContentAnalysisDelegate in tests.  !is_null() only in tests.
@@ -51,33 +50,35 @@ AnalysisConnector AccessPointToEnterpriseConnector(
       return enterprise_connectors::FILE_ATTACHED;
     case DeepScanAccessPoint::DOWNLOAD:
     case DeepScanAccessPoint::PRINT:
-      NOTREACHED();
   }
-  return enterprise_connectors::FILE_ATTACHED;
+  NOTREACHED();
 }
 
-std::string AccessPointToTriggerString(DeepScanAccessPoint access_point) {
-  switch (access_point) {
-    case DeepScanAccessPoint::FILE_TRANSFER:
-      return kFileTransferDataTransferEventTrigger;
-    case DeepScanAccessPoint::UPLOAD:
-    case DeepScanAccessPoint::DRAG_AND_DROP:
-    case DeepScanAccessPoint::PASTE:
-      // A file can be uploaded to a website by either a normal file picker, a
-      // dragNdrop event or using copy+paste.
-      return kFileUploadDataTransferEventTrigger;
-    case DeepScanAccessPoint::DOWNLOAD:
-    case DeepScanAccessPoint::PRINT:
-      NOTREACHED();
+// LINT.IfChange(AccessPointToUmaHistogramPrefix)
+std::string AccessPointToUmaHistogramPrefix(DeepScanAccessPoint access_point) {
+  switch (AccessPointToEnterpriseConnector(access_point)) {
+    case enterprise_connectors::FILE_TRANSFER:
+      return "Enterprise.OnFileTransfer";
+    case enterprise_connectors::FILE_ATTACHED:
+      return "Enterprise.OnFileAttach";
+    default:
   }
-  return "";
+  NOTREACHED();
+}
+// LINT.ThenChange(//tools/metrics/histograms/metadata/enterprise/histograms.xml:FileUploadEvent)
+
+std::string AccessPointToTriggerString(DeepScanAccessPoint access_point) {
+  switch (AccessPointToEnterpriseConnector(access_point)) {
+    case enterprise_connectors::FILE_TRANSFER:
+      return kFileTransferDataTransferEventTrigger;
+    case enterprise_connectors::FILE_ATTACHED:
+      return kFileUploadDataTransferEventTrigger;
+    default:
+  }
+  NOTREACHED();
 }
 
 }  // namespace
-
-FilesRequestHandler::FileInfo::FileInfo() = default;
-FilesRequestHandler::FileInfo::FileInfo(FileInfo&& other) = default;
-FilesRequestHandler::FileInfo::~FileInfo() = default;
 
 FilesRequestHandler::FilesRequestHandler(
     ContentAnalysisInfo* content_analysis_info,
@@ -188,17 +189,10 @@ bool FilesRequestHandler::UploadDataImpl() {
         base::BindOnce(&FilesRequestHandler::CreateFileOpeningJob,
                        weak_ptr_factory_.GetWeakPtr(), std::move(tasks)));
 
-    switch (AccessPointToEnterpriseConnector(access_point_)) {
-      case enterprise_connectors::FILE_ATTACHED:
-        base::UmaHistogramCustomCounts(kFileAttachCount, paths_.size(), 1, 1000,
-                                       100);
-        break;
-      case enterprise_connectors::FILE_TRANSFER:
-        base::UmaHistogramCustomCounts(kFileTransferCount, paths_.size(), 1,
-                                       1000, 100);
-        break;
-      default:
-        break;
+    if (auto prefix = AccessPointToUmaHistogramPrefix(access_point_);
+        !prefix.empty()) {
+      base::UmaHistogramCustomCounts(prefix + ".FileCount", paths_.size(), 1,
+                                     1000, 100);
     }
 
     return true;
@@ -284,10 +278,11 @@ void FilesRequestHandler::FinishRequestEarly(
   // We add the request here in case we never actually uploaded anything, so it
   // wasn't added in OnGetRequestData
   safe_browsing::WebUIContentInfoSingleton::GetInstance()
-      ->AddToDeepScanRequests(request->per_profile_request(),
-                              /*access_token*/ "", /*upload_info*/ "",
-                              /*upload_url=*/"",
-                              request->content_analysis_request());
+      ->AddToDeepScanRequests(
+          request->per_profile_request(),
+          /*access_token*/ "",
+          /*upload_info*/ ScanRequestUploadResultToString(result),
+          /*upload_url=*/"", request->content_analysis_request());
   safe_browsing::WebUIContentInfoSingleton::GetInstance()
       ->AddToDeepScanResponses(
           /*token=*/"", ScanRequestUploadResultToString(result),
@@ -328,6 +323,12 @@ void FilesRequestHandler::FileRequestCallback(
 
   DCHECK_EQ(results_.size(), paths_.size());
   if (upload_result == ScanRequestUploadResult::kTooManyRequests) {
+    if (!throttled_) {
+      if (auto prefix = AccessPointToUmaHistogramPrefix(access_point_);
+          !prefix.empty()) {
+        base::UmaHistogramBoolean(prefix + ".Throttled", true);
+      }
+    }
     throttled_ = true;
   }
 
@@ -357,13 +358,12 @@ void FilesRequestHandler::FileRequestCallback(
   }
 
   MaybeReportDeepScanningVerdict(
-      profile_, content_analysis_info_.get(), source_, destination_,
-      path.AsUTF8Unsafe(), file_info_[index].sha256,
-      file_info_[index].mime_type, AccessPointToTriggerString(access_point_),
-      content_transfer_method_,
+      ReportingEventRouterFactory::GetForBrowserContext(profile_),
+      content_analysis_info_.get(), source_, destination_, path.AsUTF8Unsafe(),
+      file_info_[index].sha256, file_info_[index].mime_type,
+      AccessPointToTriggerString(access_point_), content_transfer_method_,
       content_analysis_info_->GetContentAreaAccountEmail(),
-      file_info_[index].size, content_analysis_info_->referrer_chain(),
-      upload_result, response,
+      file_info_[index].size, upload_result, response,
       CalculateEventResult(analysis_settings, request_handler_result.complies,
                            result_is_warning));
 

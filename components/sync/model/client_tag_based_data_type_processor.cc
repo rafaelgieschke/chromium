@@ -54,25 +54,18 @@ BASE_FEATURE(kSyncClearMetadataOnUnsyncedEntitiesForFullUpdateTypes,
 
 const char kErrorSiteHistogramPrefix[] = "Sync.DataTypeErrorSite.";
 
-// These values are persisted to logs. Entries should not be renumbered and
-// numeric values should never be reused.
-//
-// LINT.IfChange(SyncMetadataConsistency)
 enum class SyncMetadataConsistency {
   // Stored metadata is consistent with the activation request.
-  kMetadataConsistent = 0,
+  kMetadataConsistent,
 
   // The following cases will result in metadata being cleared.
-  kCacheGuidMismatch = 1,
-  kDataTypeIdMismatch = 2,
+  kCacheGuidMismatch,
+  kDataTypeIdMismatch,
 
   // The following cases won't result in metadata being cleared.
-  kEmptyPersistedAuthenticatedGaiaId = 3,
-  kAuthenticatedGaiaIdMismatch = 4,
-
-  kMaxValue = kAuthenticatedGaiaIdMismatch,
+  kEmptyPersistedAuthenticatedGaiaId,
+  kAuthenticatedGaiaIdMismatch,
 };
-// LINT.ThenChange(//tools/metrics/histograms/metadata/sync/enums.xml:SyncMetadataConsistency)
 
 SyncMetadataConsistency GetSyncMetadataConsistency(
     const sync_pb::DataTypeState& data_type_state,
@@ -230,7 +223,7 @@ void ClientTagBasedDataTypeProcessor::ModelReadyToSync(
     if (IsInitialSyncAtLeastPartiallyDone(
             data_type_state.initial_sync_state())) {
       entity_tracker_ = std::make_unique<ProcessorEntityTracker>(
-          type_, data_type_state, batch->TakeAllMetadata());
+          data_type_state, batch->TakeAllMetadata());
       RecordDataTypeNumUnsyncedEntitiesOnModelReady(type_, *entity_tracker_);
     } else {
       // If initial sync isn't done, there must be no entity metadata (if there
@@ -1177,7 +1170,7 @@ std::optional<ModelError> ClientTagBasedDataTypeProcessor::OnFullUpdateReceived(
 
   if (!entity_tracker_) {
     entity_tracker_ = std::make_unique<ProcessorEntityTracker>(
-        type_, data_type_state, EntityMetadataMap());
+        data_type_state, EntityMetadataMap());
   }
 
   // All existing sync entities are either deleted (in the full update case) or
@@ -1403,11 +1396,11 @@ void ClientTagBasedDataTypeProcessor::GetAllNodesForDebugging(
 
   std::unique_ptr<DataBatch> batch = bridge_->GetAllDataForDebugging();
   if (!batch) {
-    std::move(callback).Run(base::Value::List());
+    std::move(callback).Run(base::ListValue());
     return;
   }
 
-  base::Value::List all_nodes;
+  base::ListValue all_nodes;
   std::string type_string = DataTypeToDebugString(type_);
 
   while (batch->HasNext()) {
@@ -1428,7 +1421,7 @@ void ClientTagBasedDataTypeProcessor::GetAllNodesForDebugging(
       data->client_tag_hash = entity->GetClientTagHash();
     }
 
-    base::Value::Dict node = data->ToDictionaryValue();
+    base::DictValue node = data->ToDictionaryValue();
     node.Set("dataType", type_string);
     // Copy the whole metadata message into the dictionary (if existing).
     if (entity != nullptr) {
@@ -1445,7 +1438,7 @@ void ClientTagBasedDataTypeProcessor::GetAllNodesForDebugging(
   // UNIQUE_SERVER_TAG to check if the node is root node. isChildOf in
   // sync_node_browser.js uses dataType to check if root node is parent of real
   // data node. NON_UNIQUE_NAME will be the name of node to display.
-  auto rootnode = base::Value::Dict()
+  auto rootnode = base::DictValue()
                       .Set("PARENT_ID", "r")
                       .Set("UNIQUE_SERVER_TAG", type_string)
                       .Set("IS_DIR", true)
@@ -1542,10 +1535,6 @@ void ClientTagBasedDataTypeProcessor::
   const SyncMetadataConsistency sync_metadata_consistency =
       GetSyncMetadataConsistency(entity_tracker_->data_type_state(),
                                  activation_request_, type_);
-  base::UmaHistogramEnumeration(
-      base::StrCat({"Sync.DataTypeMetadataConsistency.",
-                    DataTypeToHistogramSuffix(type_)}),
-      sync_metadata_consistency);
 
   switch (sync_metadata_consistency) {
     case SyncMetadataConsistency::kMetadataConsistent:

@@ -21,6 +21,7 @@
 #include "chrome/browser/web_applications/commands/command_metrics.h"
 #include "chrome/browser/web_applications/commands/web_app_command.h"
 #include "chrome/browser/web_applications/install_bounce_metric.h"
+#include "chrome/browser/web_applications/jobs/finalize_install_job.h"
 #include "chrome/browser/web_applications/jobs/manifest_to_web_app_install_info_job.h"
 #include "chrome/browser/web_applications/locks/app_lock.h"
 #include "chrome/browser/web_applications/locks/noop_lock.h"
@@ -39,7 +40,6 @@
 #include "chrome/browser/web_applications/web_app_utils.h"
 #include "chrome/browser/web_applications/web_contents/web_app_data_retriever.h"
 #include "chrome/browser/web_applications/web_contents/web_contents_manager.h"
-#include "chrome/common/chrome_features.h"
 #include "components/webapps/browser/features.h"
 #include "components/webapps/browser/install_result_code.h"
 #include "components/webapps/browser/installable/installable_evaluator.h"
@@ -118,7 +118,7 @@ std::optional<PlayStoreIntent> GetPlayStoreIntentFromManifest(
 }
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
-void LogInstallInfoForFallbackData(base::Value::Dict& dict,
+void LogInstallInfoForFallbackData(base::DictValue& dict,
                                    const WebAppInstallInfo& install_info) {
   dict.Set("manifest_id", install_info.manifest_id().spec());
   dict.Set("start_url", install_info.start_url().spec());
@@ -219,7 +219,7 @@ void FetchManifestAndInstallCommand::GetScreenshot(
         callback) {
   // If the screenshot for a specific index has been downloaded, run the
   // callback instantly.
-  if (base::Contains(screenshots_downloaded_, index)) {
+  if (screenshots_downloaded_.contains(index)) {
     auto screenshot_info = screenshots_downloaded_.at(index);
     std::move(callback).Run(
         std::get<SkBitmap>(screenshot_info),
@@ -456,7 +456,7 @@ void FetchManifestAndInstallCommand::OnDidPerformInstallableCheck(
   app_lock_ = std::make_unique<AppLock>();
   command_manager()->lock_manager().UpgradeAndAcquireLock(
       std::move(noop_lock_), *app_lock_,
-      {GenerateAppIdFromManifestId(opt_manifest_->id)},
+      {GenerateAppIdFromManifestId(webapps::ManifestId(opt_manifest_->id))},
       base::BindOnce(
           &FetchManifestAndInstallCommand::CheckForPlayStoreIntentOrGetIcons,
           weak_ptr_factory_.GetWeakPtr()));
@@ -609,10 +609,10 @@ void FetchManifestAndInstallCommand::OnIconsDownloadedForFallbackInfoShowDialog(
     Abort(webapps::InstallResultCode::kWebContentsDestroyed);
     return;
   }
-  base::Value::Dict* icons_downloaded =
+  base::DictValue* icons_downloaded =
       GetMutableDebugValue().EnsureDict("icons_retrieved");
   for (const auto& [url, bitmap_vector] : icons_map) {
-    base::Value::List* sizes = icons_downloaded->EnsureList(url.spec());
+    base::ListValue* sizes = icons_downloaded->EnsureList(url.spec());
     for (const SkBitmap& bitmap : bitmap_vector) {
       sizes->Append(bitmap.width());
     }
@@ -660,7 +660,7 @@ void FetchManifestAndInstallCommand::OnDialogCompleted(
 
   web_app_info_ = std::move(web_app_info);
 
-  WebAppInstallFinalizer::FinalizeOptions finalize_options(install_surface_);
+  FinalizeJobOptions finalize_options(install_surface_);
 
   finalize_options.install_state =
       proto::InstallState::INSTALLED_WITH_OS_INTEGRATION;
@@ -670,16 +670,22 @@ void FetchManifestAndInstallCommand::OnDialogCompleted(
   finalize_options.add_to_quick_launch_bar = kAddAppsToQuickLaunchBarByDefault;
 
   DCHECK(app_lock_);
-  app_lock_->install_finalizer().FinalizeInstall(
-      *web_app_info_, finalize_options,
-      base::BindOnce(
-          &FetchManifestAndInstallCommand::OnInstallFinalizedMaybeReparentTab,
-          weak_ptr_factory_.GetWeakPtr()));
+  auto* profile =
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+
+  install_job_ = std::make_unique<FinalizeInstallJob>(
+      *profile, app_lock_.get(), app_lock_.get(), *web_app_info_,
+      finalize_options);
+
+  install_job_->Start(base::BindOnce(
+      &FetchManifestAndInstallCommand::OnInstallFinalizedMaybeReparentTab,
+      weak_ptr_factory_.GetWeakPtr()));
 }
 
 void FetchManifestAndInstallCommand::OnInstallFinalizedMaybeReparentTab(
     const webapps::AppId& app_id,
     webapps::InstallResultCode code) {
+  install_job_.reset();
   if (IsWebContentsDestroyed()) {
     Abort(webapps::InstallResultCode::kWebContentsDestroyed);
     return;

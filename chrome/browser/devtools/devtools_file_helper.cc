@@ -151,7 +151,7 @@ void DevToolsFileHelper::Save(const std::string& url,
     return;
   }
 
-  const base::Value::Dict& file_map =
+  const base::DictValue& file_map =
       profile_->GetPrefs()->GetDict(prefs::kDevToolsEditedFiles);
   base::FilePath initial_path;
 
@@ -167,16 +167,11 @@ void DevToolsFileHelper::Save(const std::string& url,
     GURL gurl(url);
     std::string suggested_file_name;
     if (gurl.is_valid()) {
-      url::RawCanonOutputW<1024> unescaped_content;
       std::string escaped_content = gurl.ExtractFileName();
-      url::DecodeURLEscapeSequences(escaped_content,
-                                    url::DecodeURLMode::kUTF8OrIsomorphic,
-                                    &unescaped_content);
       // TODO(crbug.com/40839171): Due to filename encoding on Windows we can't
       // expect to always be able to convert to UTF8 and back
-      std::string unescaped_content_string =
-          base::UTF16ToUTF8(unescaped_content.view());
-      suggested_file_name = unescaped_content_string;
+      suggested_file_name = url::DecodeUrlEscapeSequences(
+          escaped_content, url::DecodeUrlMode::kUtf8OrIsomorphic);
     } else {
       suggested_file_name = url;
     }
@@ -217,7 +212,7 @@ void DevToolsFileHelper::Append(const std::string& url,
 
 void DevToolsFileHelper::SaveToFileSelected(
     const std::string& url,
-    const std::string& content,
+    std::string content,
     bool is_base64,
     SaveCallback callback,
     const ui::SelectedFileInfo& file_info) {
@@ -226,7 +221,7 @@ void DevToolsFileHelper::SaveToFileSelected(
 
   ScopedDictPrefUpdate update(profile_->GetPrefs(),
                               prefs::kDevToolsEditedFiles);
-  base::Value::Dict& files_map = update.Get();
+  base::DictValue& files_map = update.Get();
 
 #if BUILDFLAG(IS_ANDROID)
   // On Android, the selected file path can be a content URL that isn't supposed
@@ -246,10 +241,11 @@ void DevToolsFileHelper::SaveToFileSelected(
   scoped_refptr<base::SequencedTaskRunner> current_task_runner =
       base::SequencedTaskRunner::GetCurrentDefault();
   file_task_runner_->PostTask(
-      FROM_HERE, BindOnce(&WriteToFile, file_info.path(), content, is_base64)
-                     .Then(base::BindPostTask(
-                         current_task_runner,
-                         BindOnce(std::move(callback), file_system_path))));
+      FROM_HERE,
+      BindOnce(&WriteToFile, file_info.path(), std::move(content), is_base64)
+          .Then(base::BindPostTask(
+              current_task_runner,
+              BindOnce(std::move(callback), std::move(file_system_path)))));
 }
 
 void DevToolsFileHelper::AddFileSystem(
@@ -393,7 +389,7 @@ bool DevToolsFileHelper::IsUserConfirmedAutomaticFileSystem(
     const std::string& file_system_path,
     const base::Uuid& file_system_uuid) const {
   DCHECK(file_system_uuid.is_valid());
-  const base::Value::Dict& file_system_paths_value =
+  const base::DictValue& file_system_paths_value =
       profile_->GetPrefs()->GetDict(prefs::kDevToolsFileSystemPaths);
   const base::Value* value = file_system_paths_value.Find(file_system_path);
   if (value == nullptr || !value->is_string()) {
@@ -441,7 +437,7 @@ void DevToolsFileHelper::AddUserConfirmedFileSystem(const std::string& type,
 
   ScopedDictPrefUpdate update(profile_->GetPrefs(),
                               prefs::kDevToolsFileSystemPaths);
-  base::Value::Dict& file_systems_paths_value = update.Get();
+  base::DictValue& file_systems_paths_value = update.Get();
   file_systems_paths_value.Set(path.AsUTF8Unsafe(), type);
 }
 
@@ -494,7 +490,7 @@ void DevToolsFileHelper::RemoveFileSystem(const std::string& file_system_path) {
 
   ScopedDictPrefUpdate update(profile_->GetPrefs(),
                               prefs::kDevToolsFileSystemPaths);
-  base::Value::Dict& file_systems_paths_value = update.Get();
+  base::DictValue& file_systems_paths_value = update.Get();
   file_systems_paths_value.Remove(file_system_path);
 }
 
@@ -560,7 +556,7 @@ void DevToolsFileHelper::FilePathsChanged(
 }
 
 DevToolsFileHelper::PathToType DevToolsFileHelper::GetActiveFileSystemPaths() {
-  const base::Value::Dict& file_systems_paths_value =
+  const base::DictValue& file_systems_paths_value =
       profile_->GetPrefs()->GetDict(prefs::kDevToolsFileSystemPaths);
   PathToType result;
   for (auto pair : file_systems_paths_value) {

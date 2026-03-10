@@ -60,6 +60,7 @@
 #include "components/history/core/browser/top_sites.h"
 #include "components/history/core/common/pref_names.h"
 #include "components/history_clusters/core/features.h"
+#include "components/history_embeddings/content/history_embeddings_service.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/omnibox/browser/actions/omnibox_pedal_provider.h"
 #include "components/omnibox/browser/aim_eligibility_service.h"
@@ -106,7 +107,7 @@
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/sharing_hub/sharing_hub_features.h"
 #include "chrome/browser/ui/browser_commands.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"  // nogncheck crbug.com/40147906
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"  // nogncheck crbug.com/40147906
 #include "chrome/browser/ui/lens/lens_search_controller.h"
@@ -172,11 +173,19 @@ lens::LensSearchboxController* GetLensSearchboxController(
 }
 #endif  // !BUILDFLAG(IS_ANDROID)
 
-// Whether the given contextual search `feature` is enabled for the specified
-// `country` and `locale`.
-bool IsContextualSearchFeatureEnabled(const base::Feature& feature,
-                                      const std::string& country,
-                                      const std::string& locale) {
+constexpr char kEnglishLanguageCode[] = "en";
+constexpr std::string kEnglishExpansionCountryCodes[] = {"au", "ca", "gb",
+                                                         "nz", "us", "za"};
+
+// Whether the given contextual search `feature` is enabled.
+bool IsContextualSearchFeatureEnabled(
+    const base::Feature& feature,
+    AimEligibilityService* aim_eligibility_service) {
+  // If not AIM eligible, return false.
+  if (!aim_eligibility_service || !aim_eligibility_service->IsAimEligible()) {
+    return false;
+  }
+
   // If the feature is overridden (e.g. via server-side config or command-line),
   // use that state.
   auto* feature_list = base::FeatureList::GetInstance();
@@ -195,9 +204,12 @@ bool IsContextualSearchFeatureEnabled(const base::Feature& feature,
     return false;
   }
 
-  return variations_service->GetStoredPermanentCountry() == country &&
+  return std::ranges::contains(
+             kEnglishExpansionCountryCodes,
+             variations_service->GetStoredPermanentCountry()) &&
          features->application_locale_storage() &&
-         features->application_locale_storage()->Get() == locale;
+         features->application_locale_storage()->Get().starts_with(
+             kEnglishLanguageCode);
 }
 
 }  // namespace
@@ -269,8 +281,8 @@ ChromeAutocompleteProviderClient::GetHistoryClustersService() {
   return HistoryClustersServiceFactory::GetForBrowserContext(profile_);
 }
 
-history_embeddings::HistoryEmbeddingsService*
-ChromeAutocompleteProviderClient::GetHistoryEmbeddingsService() {
+history_embeddings::HistoryEmbeddingsSearch*
+ChromeAutocompleteProviderClient::GetHistoryEmbeddingsSearch() {
   return HistoryEmbeddingsServiceFactory::GetForProfile(profile_);
 }
 
@@ -646,20 +658,27 @@ bool ChromeAutocompleteProviderClient::ShouldSendContextualUrlSuggestParam()
     const {
   return IsContextualSearchFeatureEnabled(
       omnibox_feature_configs::ContextualSearch::kSendContextualUrlSuggestParam,
-      /*country=*/"us", /*locale=*/"en-US");
+      GetAimEligibilityService());
 }
 
 bool ChromeAutocompleteProviderClient::ShouldSendPageTitleSuggestParam() const {
   return IsContextualSearchFeatureEnabled(
       omnibox_feature_configs::ContextualSearch::kSendPageTitleSuggestParam,
-      /*country=*/"us", /*locale=*/"en-US");
+      GetAimEligibilityService());
 }
 
 bool ChromeAutocompleteProviderClient::IsOmniboxNextLensSearchChipEnabled()
     const {
 #if !BUILDFLAG(IS_ANDROID)
-  return omnibox::IsAimPopupEnabled(profile_) &&
-         omnibox::kShowLensSearchChip.Get();
+  return IsOmniboxNextAimPopupEnabled() && omnibox::kShowLensSearchChip.Get();
+#else
+  return false;
+#endif  // !BUILDFLAG(IS_ANDROID)
+}
+
+bool ChromeAutocompleteProviderClient::IsOmniboxNextAimPopupEnabled() const {
+#if !BUILDFLAG(IS_ANDROID)
+  return omnibox::IsAimPopupEnabled(profile_);
 #else
   return false;
 #endif  // !BUILDFLAG(IS_ANDROID)
@@ -711,8 +730,7 @@ void ChromeAutocompleteProviderClient::OpenIncognitoClearBrowsingDataDialog() {
 void ChromeAutocompleteProviderClient::CloseIncognitoWindows() {
 #if !BUILDFLAG(IS_ANDROID)
   if (profile_->IsIncognitoProfile()) {
-    BrowserList::CloseAllBrowsersWithIncognitoProfile(
-        profile_, base::DoNothing(), base::DoNothing(), true);
+    chrome::CloseAllBrowsersWithIncognitoProfile(profile_);
   }
 #endif  // !BUILDFLAG(IS_ANDROID)
 }
@@ -742,8 +760,12 @@ void ChromeAutocompleteProviderClient::OpenLensOverlay(bool show) {
   if (auto* lens_search_controller =
           GetLensSearchController(GetWebContents(web_contents_getter_))) {
     if (show) {
+      // If the Omnibox Next Lens search chip feature is enabled, do not show
+      // the contextual search box in the Lens Overlay.
+      bool should_show_csb = !IsOmniboxNextLensSearchChipEnabled();
       lens_search_controller->OpenLensOverlay(
-          lens::LensOverlayInvocationSource::kOmniboxPageAction);
+          lens::LensOverlayInvocationSource::kOmniboxPageAction,
+          should_show_csb);
     } else {
       // TODO(crbug.com/402497756): For prototyping, reusing the existing
       // omnibox entry point. However, for production, create a new invocation

@@ -9,7 +9,6 @@
 <translation id="101823271612280837">Tallennus keskeytettiin. Pelipaneelia ei voi käyttää tablettitilassa.</translation>
 <translation id="1024364763893396229">Tallenna <ph name="NAME" /></translation>
 <translation id="1032891413405719768">Näyttökynän akku on vähissä</translation>
-<translation id="1036073649888683237">Jos haluat muuttaa ilmoitusasetuksia, avaa Asetukset</translation>
 <translation id="1036348656032585052">Poista käytöstä</translation>
 <translation id="1037492556044956303"><ph name="DEVICE_NAME" /> lisätty</translation>
 <translation id="1038106730571050514">Näytä ehdotukset</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">Viimeisin kuva <ph name="INDEX" />/<ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Tiivistä Google Tasks</translation>
 <translation id="2208323208084708176">Yhtenäisen työpöydän tila</translation>
-<translation id="2210311543574621570">Näet leikepöydän, kun painat pitkään Ctrl + V. Voit laittaa tämän pikanäppäimen pois päältä poistamalla #clipboard-history-longpress-merkinnän käytöstä osoitteessa chrome://flags.</translation>
 <translation id="2215920961700443347">Ei internetyhteyttä Muodosta internetyhteys ja yritä uudelleen.</translation>
 <translation id="2222841058024245321">Työpöytä 7</translation>
 <translation id="2223384056430485343">Jaetulla näytöllä</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">Asenna sovellus</translation>
 <translation id="2482878487686419369">Ilmoitukset</translation>
 <translation id="2484513351006226581">Paina <ph name="KEYBOARD_SHORTCUT" /> vaihtaaksesi näppäimistöasettelua.</translation>
+<translation id="2485422356828889247">Poista</translation>
 <translation id="2486214324139475545">Esikatselu: <ph name="DESK_NAME" />. Aktiivinen työpöytä.</translation>
 <translation id="2486405091093637109">Näytön "<ph name="DISPLAY_NAME" />" resoluutioksi vaihdettiin <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz). Jos et vahvista, aiemmat asetukset palautetaan <ph name="TIMEOUT_SECONDS" /> kuluttua.</translation>
 <translation id="2487915095798731898">Liity</translation>
@@ -2080,7 +2079,7 @@ Sammuta laite painamalla sen virtapainiketta pitkään uudelleen.</translation>
         <ph name="IME" />
         <ph name="LOCALE" /></translation>
 <translation id="7899977217122813285">Ilmoitukset on mykistetty klo <ph name="TIME" /> asti keskittymisen aikana</translation>
-<translation id="7901010467630324625">Vain laitteet, jotka ovat kirjautuneet tilille <ph name="EMAIL" /></translation>
+<translation id="7901010467630324625">Vain laitteet, joilla on kirjauduttu tilille <ph name="EMAIL" /></translation>
 <translation id="7901190436359881020">Vaihda ikkunoita</translation>
 <translation id="7901405293566323524">Phone Hub</translation>
 <translation id="7902625623987030061">Kosketa sormenjälkitunnistinta</translation>
@@ -2195,7 +2194,6 @@ Sammuta laite painamalla sen virtapainiketta pitkään uudelleen.</translation>
 <translation id="8241650983304689286">Lisää välilehti uuteen jaettuun näkymään</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, signaalin vahvuus <ph name="SIGNAL_STRENGTH" />, puhelimen akun varaus <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Näytä kaikki Google Driven sisältö</translation>
-<translation id="8257510091797044096">Ota laite käyttöön</translation>
 <translation id="8261506727792406068">Poista</translation>
 <translation id="8262312463845990408">Käynnistä tai keskeytä toisto</translation>
 <translation id="8268302343625273732">Katso kaikki kotitehtävät Google Classroomissa</translation>

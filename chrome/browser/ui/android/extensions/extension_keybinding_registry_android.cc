@@ -4,11 +4,12 @@
 
 #include "chrome/browser/ui/android/extensions/extension_keybinding_registry_android.h"
 
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "chrome/browser/extensions/commands/command_service.h"
 #include "chrome/browser/extensions/extension_keybinding_registry.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/android/tab_model/tab_model.h"
+#include "chrome/browser/ui/android/tab_model/tab_model_list.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
 #include "third_party/jni_zero/jni_zero.h"
@@ -19,12 +20,48 @@
 #include "ui/events/platform_event.h"
 
 namespace extensions {
+namespace {
+
+class ExtensionKeybindingRegistryDelegateAndroid
+    : public ExtensionKeybindingRegistry::Delegate {
+ public:
+  explicit ExtensionKeybindingRegistryDelegateAndroid(
+      content::BrowserContext* context)
+      : context_(context) {}
+
+  ExtensionKeybindingRegistryDelegateAndroid(
+      const ExtensionKeybindingRegistryDelegateAndroid& other) = delete;
+  ExtensionKeybindingRegistryDelegateAndroid& operator=(
+      const ExtensionKeybindingRegistryDelegateAndroid& other) = delete;
+
+  ~ExtensionKeybindingRegistryDelegateAndroid() override = default;
+
+  content::WebContents* GetWebContentsForExtension() override {
+    for (const TabModel* model : TabModelList::models()) {
+      if (model->GetProfile() != context_) {
+        continue;
+      }
+      if (model->IsActiveModel()) {
+        return model->GetActiveWebContents();
+      }
+    }
+
+    return nullptr;
+  }
+
+ private:
+  const raw_ptr<content::BrowserContext> context_;
+};
+
+}  // namespace
 
 ExtensionKeybindingRegistryAndroid::ExtensionKeybindingRegistryAndroid(
     content::BrowserContext* context)
-    : ExtensionKeybindingRegistry(context,
-                                  ExtensionFilter::ALL_EXTENSIONS,
-                                  nullptr) {}
+    : ExtensionKeybindingRegistry(
+          context,
+          ExtensionFilter::ALL_EXTENSIONS,
+          std::make_unique<ExtensionKeybindingRegistryDelegateAndroid>(
+              context)) {}
 
 ExtensionKeybindingRegistryAndroid::~ExtensionKeybindingRegistryAndroid() =
     default;

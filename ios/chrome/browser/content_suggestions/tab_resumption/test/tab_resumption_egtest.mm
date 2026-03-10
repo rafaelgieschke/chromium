@@ -109,8 +109,7 @@ NSString* HostnameFromGURL(GURL URL) {
   config.features_disabled.push_back(
       visited_url_ranking::features::
           kVisitedURLRankingHistoryVisibilityScoreFilter);
-  config.features_disabled.push_back(
-      segmentation_platform::features::kSegmentationPlatformTipsEphemeralCard);
+  config.features_disabled.push_back(kIOSRemoteTabResumptionKillSwitch);
   return config;
 }
 

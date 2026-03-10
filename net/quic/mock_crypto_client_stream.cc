@@ -81,10 +81,6 @@ MockCryptoClientStream::MockCryptoClientStream(
   crypto_framer_.set_visitor(this);
   // Simulate a negotiated cipher_suite with a fake value.
   crypto_negotiated_params_->cipher_suite = 1;
-  if (!proof_verify_details_) {
-    static_cast<QuicChromiumClientSession*>(session)
-        ->set_allow_any_url_for_testing();
-  }
 }
 
 MockCryptoClientStream::~MockCryptoClientStream() = default;
@@ -365,6 +361,10 @@ CryptoHandshakeMessage MockCryptoClientStream::GetDummyCHLOMessage() {
 }
 
 void MockCryptoClientStream::SetConfigNegotiated() {
+  if (config_negotiated_) {
+    return;
+  }
+  config_negotiated_ = true;
   DCHECK(session()->version().IsIetfQuic());
   QuicTagVector cgst;
 // TODO(rtenneti): Enable the following code after BBR code is checked in.
@@ -402,6 +402,7 @@ void MockCryptoClientStream::SetConfigNegotiated() {
   QuicErrorCode error = session()->config()->ProcessTransportParameters(
       params, /*is_resumption=*/false, &error_details);
   ASSERT_EQ(QUIC_NO_ERROR, error);
+  negotiated_config_ = std::make_unique<quic::QuicConfig>(*session()->config());
   ASSERT_TRUE(session()->config()->negotiated());
   session()->OnConfigNegotiated();
 }

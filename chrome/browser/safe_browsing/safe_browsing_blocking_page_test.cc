@@ -203,7 +203,7 @@ content::RenderFrameHost* GetRenderFrameHost(Browser* browser) {
 views::BubbleDialogDelegateView* OpenPageInfo(Browser* browser) {
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
   LocationIconView* location_icon_view =
-      browser_view->toolbar()->location_bar()->location_icon_view();
+      browser_view->toolbar()->location_bar_view()->location_icon_view();
   ui::test::TestEvent event;
   location_icon_view->ShowBubble(event);
   views::BubbleDialogDelegateView* page_info =
@@ -291,7 +291,7 @@ void ExpectSecurityIndicatorDowngrade(content::WebContents* tab,
   EXPECT_EQ(security_state::DANGEROUS, helper->GetSecurityLevel());
   EXPECT_NE(security_state::MALICIOUS_CONTENT_STATUS_NONE,
             helper->GetVisibleSecurityState()->malicious_content_status);
-  // TODO(felt): Restore this check when https://crbug.com/641187 is fixed.
+  // TODO(felt): Restore this check when https://crbug.com/40085203 is fixed.
   // EXPECT_EQ(cert_status, helper->GetSecurityInfo().cert_status);
 }
 
@@ -1524,7 +1524,7 @@ class SecurityStyleTestObserver : public content::WebContentsObserver {
 
 // Test that the security indicator does not stay downgraded after
 // clicking back from a Safe Browsing interstitial. Regression test for
-// https://crbug.com/659709.
+// https://crbug.com/41283177.
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
                        SecurityStateGoBack) {
   // Navigate to a page so that there is somewhere to go back to.
@@ -1624,7 +1624,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
   WebContents* post_tab = browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(post_tab);
   // TODO(felt): Sometimes the cert status here is 0u, which is wrong.
-  // Filed https://crbug.com/641187 to investigate.
+  // Filed https://crbug.com/40085203 to investigate.
   ExpectSecurityIndicatorDowngrade(post_tab, net::CERT_STATUS_INVALID);
 }
 
@@ -1634,7 +1634,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageBrowserTest,
                        VerifyEnterpriseAllowlist) {
   GURL url = embedded_test_server()->GetURL(kEmptyPage);
   // Add test server domain into the enterprise allowlist.
-  base::Value::List allowlist;
+  base::ListValue allowlist;
   allowlist.Append(url.GetHost());
   browser()->profile()->GetPrefs()->SetList(
       prefs::kSafeBrowsingAllowlistDomains, std::move(allowlist));
@@ -2132,7 +2132,7 @@ IN_PROC_BROWSER_TEST_P(RedInterstitialUIBrowserTest,
   interstitial_page = static_cast<SafeBrowsingBlockingPage*>(
       helper->GetBlockingPageForCurrentlyCommittedNavigationForTesting());
   BaseSafeBrowsingErrorUI* temp_var = interstitial_page->sb_error_ui();
-  base::Value::Dict load_time_data;
+  base::DictValue load_time_data;
   temp_var->PopulateStringsForHtml(load_time_data);
 
   // Safe browsing blocking page should use correct heading and primary,
@@ -2193,7 +2193,7 @@ IN_PROC_BROWSER_TEST_P(RedInterstitialUIBrowserTest,
   interstitial_page = static_cast<SafeBrowsingBlockingPage*>(
       helper->GetBlockingPageForCurrentlyCommittedNavigationForTesting());
   BaseSafeBrowsingErrorUI* temp_var = interstitial_page->sb_error_ui();
-  base::Value::Dict load_time_data;
+  base::DictValue load_time_data;
   temp_var->PopulateStringsForHtml(load_time_data);
 
   // Safe browsing blocking page should use correct header and enhanced
@@ -3449,7 +3449,7 @@ IN_PROC_BROWSER_TEST_F(
   SetupUrlRealTimeVerdictInCacheManager(prerender_url, browser()->profile(),
                                         RTLookupResponse::ThreatInfo::SAFE,
                                         /*threat_type=*/std::nullopt);
-  content::FrameTreeNodeId host_id =
+  content::PrerenderHostId host_id =
       prerender_helper().AddPrerender(prerender_url);
   content::RenderFrameHost* prerender_render_frame_host =
       prerender_helper().GetPrerenderedMainFrameHost(host_id);
@@ -3721,7 +3721,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageAsyncChecksTimingTest,
 
 // Test that the security indicator gets updated on a Safe Browsing
 // interstitial triggered post commit. Regression test for
-// https://crbug.com/659713.
+// https://crbug.com/41283180.
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageAsyncChecksTimingTest,
                        SecurityStateDowngradedForPostCommitInterstitial) {
   EnableAsyncCheck();
@@ -3749,7 +3749,7 @@ IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageAsyncChecksTimingTest,
 
 // Test that the security indicator does not stay downgraded after
 // clicking back from a Safe Browsing interstitial triggered post commit.
-// Regression test for https://crbug.com/659709.
+// Regression test for https://crbug.com/41283177.
 IN_PROC_BROWSER_TEST_P(SafeBrowsingBlockingPageAsyncChecksTimingTest,
                        SecurityStateGoBackOnPostCommitInterstitial) {
   EnableAsyncCheck();

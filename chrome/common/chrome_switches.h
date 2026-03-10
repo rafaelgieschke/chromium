@@ -49,9 +49,9 @@ extern const char kAppLaunchUrlForShortcutsMenuItem[];
 extern const char kAppModeAuthCode[];
 extern const char kAppModeOAuth2Token[];
 extern const char kAppRunOnOsLoginMode[];
+extern const char kAppShim[];
 extern const char kAppsGalleryDownloadURL[];
 extern const char kAppsGalleryUpdateURL[];
-extern const char kAppsGalleryURL[];
 extern const char kAuthServerAllowlist[];
 extern const char kAutoOpenDevToolsForTabs[];
 extern const char kAutoSelectDesktopCaptureSource[];
@@ -217,6 +217,7 @@ extern const char kWebRtcRemoteEventLogProactivePruningDelta[];
 extern const char kWebRtcRemoteEventLogUploadDelayMs[];
 extern const char kWebRtcRemoteEventLogUploadNoSuppression[];
 extern const char kWebRtcIPHandlingPolicy[];
+extern const char kWhatsNewUseStaging[];
 extern const char kWindowName[];
 extern const char kWindowPosition[];
 extern const char kWindowSize[];
@@ -282,8 +283,10 @@ extern const char kPwaLauncherVersion[];
 extern const char kShowIcons[];
 extern const char kSourceAppId[];
 extern const char kSourceShortcut[];
+extern const char kStartupForegroundLaunch[];
 extern const char kUninstall[];
 extern const char kUninstallAppId[];
+extern const char kIsolated[];
 #endif  // BUILDFLAG(IS_WIN)
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW) && !defined(OFFICIAL_BUILD)
@@ -294,12 +297,11 @@ extern const char kDebugPrint[];
     BUILDFLAG(IS_WIN)
 extern const char kEnableNewAppMenuIcon[];
 extern const char kGuest[];
-extern const char kForceNtpMobilePromo[];
 #endif
 
-#if BUILDFLAG(ENABLE_GLIC) || BUILDFLAG(ENABLE_GLIC_ANDROID)
 extern const char kGlicGuestURL[];
 extern const char kGlicAlwaysOpenFre[];
+extern const char kGlicAlwaysSkipFre[];
 extern const char kGlicFreURL[];
 extern const char kGlicShortcutsLearnMoreURL[];
 extern const char kGlicOpenOnStartup[];
@@ -312,7 +314,10 @@ extern const char kGlicAdminRedirectPatterns[];
 extern const char kGlicAlwaysShowWebActuationToggle[];
 extern const char kGlicResetMultiInstanceEnabledByTier[];
 extern const char kGlicForceG1StatusForMultiInstance[];
-#endif
+extern const char kGlicGuestUrlPresetAutopush[];
+extern const char kGlicGuestUrlPresetStaging[];
+extern const char kGlicGuestUrlPresetPreprod[];
+extern const char kGlicGuestUrlPresetProd[];
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
 extern const char kListApps[];

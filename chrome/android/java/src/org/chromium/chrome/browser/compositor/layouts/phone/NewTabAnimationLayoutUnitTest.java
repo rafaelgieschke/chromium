@@ -39,16 +39,16 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.MathUtils;
 import org.chromium.base.UserDataHost;
 import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.supplier.SettableNullableObservableSupplier;
-import org.chromium.base.supplier.SettableObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Features.EnableFeatures;
+import org.chromium.cc.input.BrowserControlsState;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.browser_controls.BrowserStateBrowserControlsVisibilityDelegate;
 import org.chromium.chrome.browser.compositor.CompositorViewHolder;
@@ -66,7 +66,6 @@ import org.chromium.chrome.browser.layouts.LayoutType;
 import org.chromium.chrome.browser.layouts.scene_layer.SceneLayer;
 import org.chromium.chrome.browser.layouts.scene_layer.SceneLayerJni;
 import org.chromium.chrome.browser.ntp.NewTabPage;
-import org.chromium.chrome.browser.ntp_customization.edge_to_edge.TopInsetCoordinator;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabId;
 import org.chromium.chrome.browser.tab.TabLaunchType;
@@ -77,6 +76,8 @@ import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.toolbar.CustomTabCount;
 import org.chromium.chrome.browser.toolbar.ToolbarManager;
 import org.chromium.chrome.browser.toolbar.top.ToggleTabStackButton;
+import org.chromium.chrome.browser.ui.edge_to_edge.TopInsetProvider;
+import org.chromium.chrome.browser.ui.edge_to_edge.TransitiveTopInsetProvider;
 import org.chromium.ui.base.TestActivity;
 import org.chromium.url.GURL;
 
@@ -107,7 +108,6 @@ public class NewTabAnimationLayoutUnitTest {
     @Mock private ToolbarManager mToolbarManager;
     @Mock private CustomTabCount mCustomTabCount;
     @Mock private BrowserControlsManager mBrowserControlsManager;
-    @Mock private BrowserStateBrowserControlsVisibilityDelegate mBrowserVisibilityDelegate;
     @Mock private SceneLayer.Natives mSceneLayerJni;
     @Mock private StaticTabSceneLayer.Natives mStaticTabSceneLayerJni;
     @Mock private LayoutUpdateHost mUpdateHost;
@@ -121,24 +121,23 @@ public class NewTabAnimationLayoutUnitTest {
     @Mock private ToggleTabStackButton mTabSwitcherButton;
     @Mock private View mToolbar;
     @Mock private NewTabPage mNtp;
-    @Mock private TopInsetCoordinator mTopInsetCoordinator;
+    @Mock private TopInsetProvider mTopInsetProvider;
     private SceneLayer mSceneLayer;
 
     private final SettableNullableObservableSupplier<Tab> mCurrentTabSupplier =
             ObservableSuppliers.createNullable();
-    private final SettableObservableSupplier<CompositorViewHolder> mCompositorViewHolderSupplier =
-            ObservableSuppliers.createMonotonic();
     private final SettableNonNullObservableSupplier<Boolean> mScrimVisibilitySupplier =
             ObservableSuppliers.createNonNull(false);
-    private final SettableObservableSupplier<TopInsetCoordinator> mTopInsetCoordinatorSupplier =
-            ObservableSuppliers.createMonotonic();
+    private final TransitiveTopInsetProvider mTransitiveTopInsetProvider =
+            new TransitiveTopInsetProvider();
     private final SettableNonNullObservableSupplier<Float>
             mNtpSearchBoxTransitionPercentageSupplier = ObservableSuppliers.createNonNull(0f);
+    private final BrowserStateBrowserControlsVisibilityDelegate mBrowserVisibilityDelegate =
+            new BrowserStateBrowserControlsVisibilityDelegate(ObservableSuppliers.alwaysFalse());
     private NewTabAnimationLayout mNewTabAnimationLayout;
     private FrameLayout mContentContainer;
     private FrameLayout mAnimationHostView;
     private UserDataHost mUserDataHost;
-    private int mToken;
 
     @Before
     public void setUp() {
@@ -182,14 +181,10 @@ public class NewTabAnimationLayoutUnitTest {
         when(mNtp.getLastTouchPosition()).thenReturn(sPoint);
         when(mBrowserControlsManager.getBrowserVisibilityDelegate())
                 .thenReturn(mBrowserVisibilityDelegate);
-        mToken = 0;
-        when(mBrowserVisibilityDelegate.showControlsPersistent())
-                .thenAnswer(invocation -> mToken++);
         when(mToolbarManager.getCustomTabCount()).thenReturn(mCustomTabCount);
         when(mToolbarManager.getNtpSearchBoxTransitionPercentageSupplier())
                 .thenReturn(mNtpSearchBoxTransitionPercentageSupplier);
-        mCompositorViewHolderSupplier.set(mCompositorViewHolder);
-        mTopInsetCoordinatorSupplier.set(mTopInsetCoordinator);
+        mTransitiveTopInsetProvider.set(mTopInsetProvider);
         mScrimVisibilitySupplier.set(false);
         doAnswer(
                         invocation -> {
@@ -198,6 +193,17 @@ public class NewTabAnimationLayoutUnitTest {
                         })
                 .when(mUpdateHost)
                 .createLayoutTab(anyInt(), anyBoolean());
+        // Mock TopInsetProvider to trigger observer callback when addObserver is called
+        doAnswer(
+                        invocation -> {
+                            TopInsetProvider.Observer observer =
+                                    (TopInsetProvider.Observer) invocation.getArgument(0);
+                            // Trigger the callback immediately with systemTopInset=100
+                            observer.onToEdgeChange(100, true, LayoutType.BROWSING);
+                            return null;
+                        })
+                .when(mTopInsetProvider)
+                .addObserver(any(TopInsetProvider.Observer.class));
 
         mActivityScenarioRule.getScenario().onActivity(this::onActivity);
     }
@@ -214,12 +220,12 @@ public class NewTabAnimationLayoutUnitTest {
                                 mRenderHost,
                                 mLayoutStateProvider,
                                 mContentContainer,
-                                mCompositorViewHolderSupplier,
+                                mCompositorViewHolder,
                                 mAnimationHostView,
                                 mToolbarManager,
                                 mBrowserControlsManager,
                                 mScrimVisibilitySupplier,
-                                mTopInsetCoordinatorSupplier));
+                                mTransitiveTopInsetProvider));
         mNewTabAnimationLayout.setTabModelSelector(mTabModelSelector);
         mNewTabAnimationLayout.setTabContentManager(mTabContentManager);
         when(mAnimationHostView.findViewById(R.id.tab_switcher_button))
@@ -351,7 +357,7 @@ public class NewTabAnimationLayoutUnitTest {
         assertTrue(mNewTabAnimationLayout.isRunningAnimations());
         verify(mAnimationHostView, times(1)).addView(any(NewForegroundTabAnimationHostView.class));
 
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         assertFalse(mNewTabAnimationLayout.isRunningAnimations());
         verify(mAnimationHostView, times(1))
@@ -365,7 +371,6 @@ public class NewTabAnimationLayoutUnitTest {
         when(mNewTab.isNativePage()).thenReturn(true);
         when(mNewTab.getNativePage()).thenReturn(mNtp);
         when(mNtp.supportsEdgeToEdgeOnTop()).thenReturn(true);
-        when(mTopInsetCoordinator.getSystemTopInset()).thenReturn(100);
         when(mBrowserControlsManager.getContentOffset()).thenReturn(50);
 
         mNewTabAnimationLayout.onTabCreated(
@@ -384,7 +389,7 @@ public class NewTabAnimationLayoutUnitTest {
         assertEquals(
                 "Top padding should be applied.",
                 150,
-                layoutTab.get(LayoutTab.CONTENT_OFFSET),
+                layoutTab.get(LayoutTab.CONTENT_OFFSET_Y),
                 MathUtils.EPSILON);
     }
 
@@ -409,15 +414,15 @@ public class NewTabAnimationLayoutUnitTest {
         assertEquals(CURRENT_TAB_ID, layoutTabs[0].getId());
         verify(mNewTabAnimationLayout, times(1)).forceAnimationToFinish();
         assertTrue(mNewTabAnimationLayout.isStartingToHide());
-        verify(mBrowserVisibilityDelegate, times(1)).showControlsPersistent();
+        assertThat(mBrowserVisibilityDelegate.get()).isEqualTo(BrowserControlsState.SHOWN);
         verify(mAnimationHostView, times(1)).addView(any(NewBackgroundTabAnimationHostView.class));
 
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
         verify(mAnimationHostView, times(1))
                 .removeView(any(NewBackgroundTabAnimationHostView.class));
         verify(mTabModelSelector, never()).selectModel(false);
-        verify(mBrowserVisibilityDelegate, times(1)).releasePersistentShowingToken(0);
+        assertThat(mBrowserVisibilityDelegate.get()).isEqualTo(BrowserControlsState.BOTH);
     }
 
     @Test
@@ -463,9 +468,9 @@ public class NewTabAnimationLayoutUnitTest {
                 /* originX= */ 0f,
                 /* originY= */ 0f);
 
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
-        verify(mBrowserVisibilityDelegate, never()).showControlsPersistent();
+        assertThat(mBrowserVisibilityDelegate.get()).isEqualTo(BrowserControlsState.BOTH);
     }
 
     @Test
@@ -480,7 +485,7 @@ public class NewTabAnimationLayoutUnitTest {
                 /* originX= */ 0f,
                 /* originY= */ 0f);
 
-        verify(mBrowserVisibilityDelegate, times(1)).showControlsPersistent();
+        assertThat(mBrowserVisibilityDelegate.get()).isEqualTo(BrowserControlsState.SHOWN);
 
         // Halt animation with second animation
         mNewTabAnimationLayout.onTabCreated(
@@ -493,12 +498,11 @@ public class NewTabAnimationLayoutUnitTest {
                 /* originX= */ 0f,
                 /* originY= */ 0f);
 
-        verify(mBrowserVisibilityDelegate, times(1)).releasePersistentShowingToken(0);
-        verify(mBrowserVisibilityDelegate, times(2)).showControlsPersistent();
+        assertThat(mBrowserVisibilityDelegate.get()).isEqualTo(BrowserControlsState.SHOWN);
 
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
 
-        verify(mBrowserVisibilityDelegate, times(1)).releasePersistentShowingToken(1);
+        assertThat(mBrowserVisibilityDelegate.get()).isEqualTo(BrowserControlsState.BOTH);
     }
 
     private void setNtp() {

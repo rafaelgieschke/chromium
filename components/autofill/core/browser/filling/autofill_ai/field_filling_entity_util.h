@@ -13,6 +13,7 @@
 #include "base/containers/span.h"
 #include "components/autofill/core/browser/data_model/autofill_ai/entity_instance.h"
 #include "components/autofill/core/browser/field_types.h"
+#include "components/autofill/core/browser/filling/field_filling_util.h"
 #include "components/autofill/core/common/mojom/autofill_types.mojom-forward.h"
 #include "components/autofill/core/common/unique_ids.h"
 
@@ -24,6 +25,7 @@ class AutofillField;
 struct AutofillFieldWithAttributeType;
 class EntityInstance;
 class FormStructure;
+class Section;
 
 // Returns the entities from EntityDataManager::GetEntityInstances() for which
 // filling is enabled.
@@ -38,7 +40,7 @@ base::flat_set<FieldGlobalId> GetFieldsFillableByAutofillAi(
     const AutofillClient& client);
 
 // Returns the value from `entity` to fill into `field`.
-std::u16string GetFillValueForEntity(
+FillingValueAndType GetFillingValueAndTypeForEntity(
     const EntityInstance& entity,
     base::span<const AutofillFieldWithAttributeType> fields_and_types,
     const AutofillField& field,
@@ -46,17 +48,12 @@ std::u16string GetFillValueForEntity(
     const std::string& app_locale,
     AddressNormalizer* address_normalizer);
 
-// Returns whether the suggestion's main text should be obfuscated.
-bool ShouldFieldBeObfuscated(const EntityInstance& entity,
-                             const AutofillFieldWithAttributeType& f,
-                             const std::string& app_locale);
-
-// Returns whether the user should re-auth before filling a form with Autofill
-// AI data.
-bool ShouldReauthBeforeFilling(
-    const EntityInstance& entity,
-    base::span<const AutofillFieldWithAttributeType> fields,
-    const std::string& app_locale);
+// Returns whether filling `form`'s `section` with `entity` would fill sensitive
+// attributes.
+bool WillFillSensitiveAttributes(const EntityInstance& entity,
+                                 const FormStructure& form,
+                                 const Section& section,
+                                 std::string_view app_locale);
 
 }  // namespace autofill
 

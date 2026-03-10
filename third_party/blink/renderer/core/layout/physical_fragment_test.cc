@@ -7,6 +7,7 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/layout/physical_box_fragment.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
+#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
 namespace blink {
 
@@ -17,6 +18,111 @@ class PhysicalFragmentTest : public RenderingTest {
         *GetDocument().GetLayoutView(), PhysicalFragment::DumpAll, target);
   }
 };
+
+class StickyFragmentPropagationTest : public RenderingTest {
+ public:
+  struct ExpectedStickyAxes {
+    PhysicalAxes consumed = kPhysicalAxesNone;
+    PhysicalAxes pending = kPhysicalAxesNone;
+  };
+
+  wtf_size_t CountStickyDescendants(const char* scroller_id) {
+    return GetLayoutBoxByElementId(scroller_id)
+        ->GetPhysicalFragment(0)
+        ->StickyDescendants()
+        .size();
+  }
+
+  void ExpectStickyDescendant(const char* scroller_id,
+                              const char* sticky_id,
+                              ExpectedStickyAxes expected) {
+    const auto* fragment =
+        GetLayoutBoxByElementId(scroller_id)->GetPhysicalFragment(0);
+    const auto* sticky_obj = GetLayoutObjectByElementId(sticky_id);
+
+    for (const auto& item : fragment->StickyDescendants()) {
+      if (item.GetIfConsumed() == sticky_obj ||
+          item.GetIfPending() == sticky_obj) {
+        EXPECT_EQ(expected.consumed, item.ConsumedAxes()) << sticky_id;
+        EXPECT_EQ(expected.pending, item.PendingAxes()) << sticky_id;
+        return;
+      }
+    }
+    ADD_FAILURE() << sticky_id << " not found in " << scroller_id;
+  }
+
+  void BuildDOM() {
+    SetBodyInnerHTML(R"HTML(
+      <style>
+        #outer { overflow: scroll; width: 100px; height: 100px; }
+        #inner { overflow-y: scroll; overflow-x: clip; width: 100px; height: 100px; }
+        #sticky-y { position: sticky; top: 0; height: 10px; }
+        #sticky-x { position: sticky; left: 0; width: 10px; }
+        #sticky-both { position: sticky; top: 0; left: 0; width: 10px; height: 10px; }
+        .spacer { width: 200px; height: 200px; }
+      </style>
+      <div id="outer">
+        <div id="inner">
+          <div id="sticky-y"></div>
+          <div id="sticky-x"></div>
+          <div id="sticky-both"></div>
+          <div class="spacer"></div>
+        </div>
+        <div class="spacer"></div>
+      </div>
+    )HTML");
+  }
+};
+
+TEST_F(StickyFragmentPropagationTest, StickyAxisEnabled) {
+  ScopedSingleAxisScrollContainersForTest feature(true);
+  BuildDOM();
+
+  EXPECT_EQ(3u, CountStickyDescendants("inner"));
+
+  ExpectStickyDescendant(
+      "inner", "sticky-y",
+      {.consumed = kPhysicalAxesVertical, .pending = kPhysicalAxesNone});
+
+  ExpectStickyDescendant(
+      "inner", "sticky-x",
+      {.consumed = kPhysicalAxesNone, .pending = kPhysicalAxesHorizontal});
+
+  ExpectStickyDescendant(
+      "inner", "sticky-both",
+      {.consumed = kPhysicalAxesVertical, .pending = kPhysicalAxesHorizontal});
+
+  EXPECT_EQ(2u, CountStickyDescendants("outer"));
+
+  ExpectStickyDescendant(
+      "outer", "sticky-x",
+      {.consumed = kPhysicalAxesHorizontal, .pending = kPhysicalAxesNone});
+
+  ExpectStickyDescendant(
+      "outer", "sticky-both",
+      {.consumed = kPhysicalAxesHorizontal, .pending = kPhysicalAxesNone});
+}
+
+TEST_F(StickyFragmentPropagationTest, StickyAxisDisabled) {
+  ScopedSingleAxisScrollContainersForTest feature(false);
+  BuildDOM();
+
+  EXPECT_EQ(3u, CountStickyDescendants("inner"));
+
+  ExpectStickyDescendant(
+      "inner", "sticky-y",
+      {.consumed = kPhysicalAxesBoth, .pending = kPhysicalAxesNone});
+
+  ExpectStickyDescendant(
+      "inner", "sticky-x",
+      {.consumed = kPhysicalAxesBoth, .pending = kPhysicalAxesNone});
+
+  ExpectStickyDescendant(
+      "inner", "sticky-both",
+      {.consumed = kPhysicalAxesBoth, .pending = kPhysicalAxesNone});
+
+  EXPECT_EQ(0u, CountStickyDescendants("outer"));
+}
 
 TEST_F(PhysicalFragmentTest, DumpFragmentTreeBasic) {
   SetBodyInnerHTML(R"HTML(
@@ -99,7 +205,7 @@ TEST_F(PhysicalFragmentTest, DumpFragmentTreeWithGrid) {
 
 TEST_F(PhysicalFragmentTest, DumpFragmentTreeWithTargetInsideColumn) {
   SetBodyInnerHTML(R"HTML(
-    <div id="multicol" style="columns:3;">
+    <div id="multicol" style="columns:3; gap:10px; width:320px;">
       <div id="child" style="height:150px;"></div>
     </div>
   )HTML");
@@ -116,13 +222,13 @@ TEST_F(PhysicalFragmentTest, DumpFragmentTreeWithTargetInsideColumn) {
   Box (out-of-flow-positioned block-flow)(self paint) offset:unplaced size:800x600 LayoutView #document
     Box (block-flow-root block-flow)(self paint) offset:0,0 size:800x66 LayoutBlockFlow HTML
       Box (block-flow) offset:8,8 size:784x50 LayoutBlockFlow BODY
-        Box (block-flow-root block-flow) offset:0,0 size:784x50 LayoutBlockFlow (multicol) DIV id='multicol'
-          Box (column block-flow) offset:0,0 size:260.65625x50 sequence:0 (seen all children) consumed:50px
-            Box (block-flow) offset:0,0 size:260.65625x50 LayoutBlockFlow DIV id='child' sequence:0 (seen all children) consumed:50px
-          Box (column block-flow)(resumed) offset:261.65625,0 size:260.65625x50 sequence:1 (seen all children) consumed:100px
-*           Box (block-flow)(resumed) offset:0,0 size:260.65625x50 LayoutBlockFlow DIV id='child' sequence:1 (seen all children) consumed:100px
-          Box (column block-flow)(resumed) offset:523.3125,0 size:260.65625x50
-            Box (block-flow)(resumed) offset:0,0 size:260.65625x50 LayoutBlockFlow DIV id='child'
+        Box (block-flow-root block-flow) offset:0,0 size:320x50 LayoutBlockFlow (multicol) DIV id='multicol'
+          Box (column block-flow) offset:0,0 size:100x50 sequence:0 (seen all children) consumed:50px
+            Box (block-flow) offset:0,0 size:100x50 LayoutBlockFlow DIV id='child' sequence:0 (seen all children) consumed:50px
+          Box (column block-flow)(resumed) offset:110,0 size:100x50 sequence:1 (seen all children) consumed:100px
+*           Box (block-flow)(resumed) offset:0,0 size:100x50 LayoutBlockFlow DIV id='child' sequence:1 (seen all children) consumed:100px
+          Box (column block-flow)(resumed) offset:220,0 size:100x50
+            Box (block-flow)(resumed) offset:0,0 size:100x50 LayoutBlockFlow DIV id='child'
 )DUMP";
   EXPECT_EQ(expectation, dump);
 }

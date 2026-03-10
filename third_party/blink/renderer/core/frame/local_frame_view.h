@@ -39,13 +39,14 @@
 #include "third_party/blink/public/mojom/frame/lifecycle.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/frame/viewport_intersection_state.mojom-blink.h"
 #include "third_party/blink/public/mojom/scroll/scroll_into_view_params.mojom-blink-forward.h"
+#include "third_party/blink/renderer/core/ad_tracker/overlay_interstitial_ad_detector.h"
+#include "third_party/blink/renderer/core/ad_tracker/sticky_ad_detector.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document_lifecycle.h"
+#include "third_party/blink/renderer/core/dom/document_resize_options.h"
 #include "third_party/blink/renderer/core/frame/frame_view.h"
 #include "third_party/blink/renderer/core/frame/layout_subtree_root_list.h"
 #include "third_party/blink/renderer/core/frame/local_frame_ukm_aggregator.h"
-#include "third_party/blink/renderer/core/frame/overlay_interstitial_ad_detector.h"
-#include "third_party/blink/renderer/core/frame/sticky_ad_detector.h"
 #include "third_party/blink/renderer/core/layout/hit_test_request.h"
 #include "third_party/blink/renderer/core/paint/layout_object_counter.h"
 #include "third_party/blink/renderer/core/view_transition/view_transition_request_forward.h"
@@ -96,6 +97,8 @@ class Element;
 class FragmentAnchor;
 class Frame;
 class FrameViewAutoSizeInfo;
+class GraphicsContext;
+class HTMLCanvasElement;
 class HTMLVideoElement;
 class HitTestLocation;
 class HitTestResult;
@@ -281,7 +284,7 @@ class CORE_EXPORT LocalFrameView final
 
   // If this is set to false, the layout size will need to be explicitly set by
   // the owner.  E.g. WebViewImpl sets its mainFrame's layout size manually
-  void SetLayoutSizeFixedToFrameSize(bool);
+  void SetLayoutSizeFixedToFrameSize(bool, DocumentResizeOptions = {});
   bool LayoutSizeFixedToFrameSize() const {
     return layout_size_fixed_to_frame_size_;
   }
@@ -299,7 +302,7 @@ class CORE_EXPORT LocalFrameView final
    public:
     LocalFrameView* view_ = nullptr;
     bool is_fixed_to_frame_size_ = false;
-    int height_ = 0;
+    gfx::Size saved_layout_size_;
   };
 
   std::optional<NaturalSizingInfo> GetNaturalDimensions() const override;
@@ -452,10 +455,15 @@ class CORE_EXPORT LocalFrameView final
   friend class InvalidationDisallowedScope;
 
   // This for doing work that needs to run synchronously at the end of lifecycle
-  // updates, but needs to happen outside of the lifecycle code. It's OK to
-  // schedule another animation frame here, but the layout tree should not be
-  // invalidated.
+  // updates.
   void RunPostLifecycleSteps();
+  // Called just before the impl commit. This runs post-lifecycle steps
+  // immediately if they are required to happen before the commit (e.g.
+  // canvas.onpaint).
+  void WillBeginImplCommit();
+  // Called after the main frame is complete. If post-lifecycle steps have not
+  // run yet, they will execute here.
+  void DidBeginMainFrame();
   bool InvalidationDisallowed() const;
 
   void ScheduleVisualUpdateForVisualOverflowIfNeeded();
@@ -732,9 +740,13 @@ class CORE_EXPORT LocalFrameView final
 
   String MainThreadScrollingReasonsAsText();
 
+  // Maps |rect| from the local root into the remote root frame. The
+  // |apply_viewport_clip| flag controls whether we intersect with the remote
+  // viewport before applying transforms.
   bool MapToVisualRectInRemoteRootFrame(PhysicalRect& rect,
                                         bool apply_overflow_clip = true,
-                                        bool apply_viewport_transform = false);
+                                        bool apply_viewport_transform = false,
+                                        bool apply_viewport_clip = true);
 
   void MapLocalToRemoteMainFrame(TransformState&,
                                  bool apply_remote_main_frame_scroll_offset);
@@ -815,6 +827,9 @@ class CORE_EXPORT LocalFrameView final
   // mostly filling the viewport.
   void NotifyVideoIsDominantVisibleStatus(HTMLVideoElement* element,
                                           bool is_dominant);
+
+  void DidPaintCanvasChild(HTMLCanvasElement& canvas, Element& child);
+  void RequestCanvasOnpaint(HTMLCanvasElement&);
 
   bool HasDominantVideoElement() const;
 
@@ -972,8 +987,7 @@ class CORE_EXPORT LocalFrameView final
                            const gfx::Vector2d& paint_offset) const;
 
   // EmbeddedContentView implementation
-  void Paint(GraphicsContext&,
-             PaintFlags,
+  void Paint(const PaintInfo&,
              const CullRect&,
              const gfx::Vector2d&) const final;
 
@@ -1044,7 +1058,7 @@ class CORE_EXPORT LocalFrameView final
 
   AXObjectCache* ExistingAXObjectCache() const;
 
-  void SetLayoutSizeInternal(const gfx::Size&);
+  void SetLayoutSizeInternal(const gfx::Size&, DocumentResizeOptions = {});
 
   void CollectDraggableRegions(LayoutObject&,
                                Vector<DraggableRegionValue>&) const;
@@ -1056,6 +1070,11 @@ class CORE_EXPORT LocalFrameView final
   void ForAllNonThrottledLocalFrameViews(
       base::FunctionRef<void(LocalFrameView&)>,
       TraversalOrder = kPreOrder);
+  // Same as above, but the callback returns a boolean. If the callback returns
+  // false, the iteration will not continue into the subtree of the current
+  // frame. This only supports PreOrder traversal.
+  void ForAllNonThrottledLocalFrameViews(
+      base::FunctionRef<bool(LocalFrameView&)>);
   void ForAllThrottledLocalFrameViews(base::FunctionRef<void(LocalFrameView&)>);
 
   void ForAllRemoteFrameViews(base::FunctionRef<void(RemoteFrameView&)>);
@@ -1124,6 +1143,8 @@ class CORE_EXPORT LocalFrameView final
 
   void EnqueueScrollSnapChangingFromImplIfNecessary();
 
+  void RunCanvasOnpaintSteps();
+
   typedef HeapHashSet<Member<LayoutEmbeddedContent>> EmbeddedContentSet;
   EmbeddedContentSet part_update_set_;
 
@@ -1173,7 +1194,7 @@ class CORE_EXPORT LocalFrameView final
 
   Member<PaginationState> pagination_state_;
   gfx::Size layout_size_;
-  std::optional<int> layout_height_for_natural_size_;
+  std::optional<gfx::Size> layout_size_for_natural_size_;
   bool layout_size_fixed_to_frame_size_;
 
   bool needs_update_geometries_;
@@ -1189,7 +1210,7 @@ class CORE_EXPORT LocalFrameView final
   // TODO(bokan): This is unneeded when root-layer-scrolls is turned on.
   // crbug.com/417782.
   gfx::Size layout_overflow_size_;
-  std::optional<float> natural_height_;
+  std::optional<gfx::Size> natural_size_;
 
   bool root_layer_did_scroll_;
 
@@ -1294,6 +1315,18 @@ class CORE_EXPORT LocalFrameView final
   Member<TapFriendlinessChecker> tap_friendliness_checker_;
 
   HeapHashSet<WeakMember<LifecycleNotificationObserver>> lifecycle_observers_;
+
+  // Map of canvas elements which need onpaint. The value is a set of children
+  // of the <canvas> which painted during the current paint lifecycle update.
+  // The set of children may be empty if the onpaint event has been requested
+  // with `requestPaint`. This map is cleared at the end of the lifecycle
+  // update.
+  HeapHashMap<Member<HTMLCanvasElement>, HeapLinkedHashSet<Member<Element>>>
+      canvas_elements_needing_onpaint_;
+  // True if we have canvas work, performed in the post-lifecycle steps, that
+  // needs to happen prior to the impl commit. Cleared in DidBeginMainFrame.
+  bool needs_post_lifecycle_steps_before_impl_commit_ = false;
+  bool did_run_post_lifecycle_steps_before_impl_commit_ = false;
 
   HeapHashSet<WeakMember<HTMLVideoElement>> fullscreen_video_elements_;
 

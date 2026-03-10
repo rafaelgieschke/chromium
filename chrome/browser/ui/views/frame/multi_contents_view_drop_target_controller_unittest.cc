@@ -84,6 +84,7 @@ class MockTabDragController : public TabDragTarget::DragController {
               (int drag_idx),
               (override));
   MOCK_METHOD(const DragSessionData&, GetSessionData, (), (const, override));
+  MOCK_METHOD(const TabDragContext*, GetAttachedContext, (), (const, override));
 };
 
 class MockTabSlotView : public TabSlotView {
@@ -186,9 +187,10 @@ class MultiContentsViewDropTargetControllerTest : public ChromeViewsTestBase {
     ASSERT_EQ(0,
               prefs()->GetInteger(prefs::kSplitViewDragAndDropNudgeShownCount));
 
-    // Show the nudge the first kSideBySideDropTargetNudgeShownLimit times.
+    // Show the nudge the first kNudgeShownLimit times.
     for (int expected_count = 1;
-         expected_count <= features::kSideBySideDropTargetNudgeShownLimit.Get();
+         expected_count <=
+         MultiContentsViewDropTargetController::kNudgeShownLimit;
          ++expected_count) {
       DragURLTo(kDragPointForStartDropTargetShow);
       FastForward(MultiContentsViewDropTargetController::
@@ -215,9 +217,9 @@ class MultiContentsViewDropTargetControllerTest : public ChromeViewsTestBase {
     EXPECT_TRUE(drop_target_view().GetVisible());
     EXPECT_EQ(drop_target_view().state().value(),
               MultiContentsDropTargetView::DropTargetState::kFull);
-    EXPECT_EQ(features::kSideBySideDropTargetNudgeShownLimit.Get(),
+    EXPECT_EQ(MultiContentsViewDropTargetController::kNudgeShownLimit,
               user_action_tester.GetActionCount(kNudgeShownUserActionName));
-    EXPECT_EQ(features::kSideBySideDropTargetNudgeShownLimit.Get(),
+    EXPECT_EQ(MultiContentsViewDropTargetController::kNudgeShownLimit,
               prefs()->GetInteger(prefs::kSplitViewDragAndDropNudgeShownCount));
 
     reset_nudge();
@@ -277,6 +279,36 @@ TEST_F(MultiContentsViewDropTargetControllerTest,
   EXPECT_FALSE(drop_target_view().GetVisible());
 }
 
+// Tests that the drop target is hidden when dragging a group.
+TEST_F(MultiContentsViewDropTargetControllerTest,
+       OnTabDragUpdated_HidesTargetWhenDraggingGroup) {
+  MockTabDragController mock_tab_drag_controller;
+  DragSessionData session_data;
+  MockTabSlotView tab1;
+  MockTabDragContext tab_drag_context;
+  session_data.tab_drag_data_ = {
+      TabDragData(&tab_drag_context, &tab1),
+  };
+  session_data.tab_drag_data_[0].attached_view = &tab1;
+  session_data.dragging_groups.insert(tab_groups::TabGroupId::GenerateNew());
+  EXPECT_CALL(tab1, GetTabSlotViewType)
+      .WillRepeatedly(testing::Return(TabSlotView::ViewType::kTab));
+
+  // Simulate showing the drop target first.
+  DragTabTo(kDragPointForStartDropTargetShow);
+  FastForward(
+      MultiContentsViewDropTargetController::kShowDropTargetForTabDelay);
+  EXPECT_TRUE(drop_target_view().GetVisible());
+
+  // Dragging the group tabs should immediately hide it.
+  EXPECT_CALL(mock_tab_drag_controller, GetSessionData)
+      .WillRepeatedly(testing::ReturnRef(session_data));
+  controller().OnTabDragUpdated(mock_tab_drag_controller,
+                                kDragPointForStartDropTargetShow);
+  FastForward(kHideDropTargetDelay + kHideDropTargetAnimation);
+  EXPECT_FALSE(drop_target_view().GetVisible());
+}
+
 // Tests that the drag updated event is handled correctly for a single tab.
 TEST_F(MultiContentsViewDropTargetControllerTest,
        OnTabDragUpdated_ShowsAndHidesTargetWhenDraggingSingleTab) {
@@ -317,7 +349,7 @@ TEST_F(MultiContentsViewDropTargetControllerTest, OnTabDragExited) {
   EXPECT_TRUE(drop_target_view().GetVisible());
 
   // Exiting the drag should hide it.
-  controller().OnTabDragExited();
+  controller().OnTabDragExited(gfx::Point());
   FastForward(kHideDropTargetDelay + kHideDropTargetAnimation);
   EXPECT_FALSE(drop_target_view().GetVisible());
 }
@@ -443,9 +475,9 @@ TEST_F(MultiContentsViewDropTargetControllerTest, NudgeUsedLimit) {
   ASSERT_EQ(0, user_action_tester.GetActionCount(kNudgeUsedUserActionName));
   ASSERT_EQ(0, prefs()->GetInteger(prefs::kSplitViewDragAndDropNudgeUsedCount));
 
-  // The first kSideBySideDropTargetNudgeUsedLimit drags should show the nudge.
+  // The first kNudgeUsedLimit drags should show the nudge.
   for (int expected_count = 1;
-       expected_count <= features::kSideBySideDropTargetNudgeUsedLimit.Get();
+       expected_count <= MultiContentsViewDropTargetController::kNudgeUsedLimit;
        ++expected_count) {
     DragURLTo(kDragPointForStartDropTargetShow);
     FastForward(MultiContentsViewDropTargetController::
@@ -487,9 +519,9 @@ TEST_F(MultiContentsViewDropTargetControllerTest, NudgeUsedLimit) {
   DropLink();
   FastForward(kHideDropTargetDelay + kHideDropTargetAnimation);
   EXPECT_FALSE(drop_target_view().GetVisible());
-  EXPECT_EQ(features::kSideBySideDropTargetNudgeUsedLimit.Get(),
+  EXPECT_EQ(MultiContentsViewDropTargetController::kNudgeUsedLimit,
             user_action_tester.GetActionCount(kNudgeUsedUserActionName));
-  EXPECT_EQ(features::kSideBySideDropTargetNudgeUsedLimit.Get(),
+  EXPECT_EQ(MultiContentsViewDropTargetController::kNudgeUsedLimit,
             prefs()->GetInteger(prefs::kSplitViewDragAndDropNudgeUsedCount));
 }
 
@@ -653,8 +685,6 @@ TEST_F(MultiContentsViewDropTargetControllerTest, DragDelegateMethods) {
 
 TEST_F(MultiContentsViewDropTargetControllerTest,
        ShowsFullDropTargetWhenAnimationsDisabled) {
-  ASSERT_TRUE(
-      base::FeatureList::IsEnabled(features::kSideBySideDropTargetNudge));
   auto animation_mode_reset = gfx::AnimationTestApi::SetRichAnimationRenderMode(
       gfx::Animation::RichAnimationRenderMode::FORCE_DISABLED);
   ASSERT_FALSE(drop_target_view().ShouldShowAnimation());

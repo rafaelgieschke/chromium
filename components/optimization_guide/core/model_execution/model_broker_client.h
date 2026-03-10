@@ -18,12 +18,12 @@
 #include "components/optimization_guide/core/model_execution/safety_config.h"
 #include "components/optimization_guide/core/optimization_guide_logger.h"
 #include "components/optimization_guide/proto/model_quality_metadata.pb.h"
-#include "components/optimization_guide/public/mojom/model_broker.mojom-shared.h"
 #include "components/optimization_guide/public/mojom/model_broker.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "mojo/public/cpp/bindings/remote_set.h"
+#include "services/on_device_model/public/mojom/download_observer.mojom.h"
 #include "services/on_device_model/public/mojom/on_device_model.mojom.h"
 #include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
 
@@ -141,6 +141,9 @@ class ModelBrokerClient final {
   // Get or create the subscriber for the given key.
   ModelSubscriber& GetSubscriber(mojom::OnDeviceFeature feature);
 
+  // Request that the model assets for this feature be made available.
+  void RequestAssetsFor(mojom::OnDeviceFeature feature);
+
   // Whether the subscriber for this key already exists.
   bool HasSubscriber(mojom::OnDeviceFeature feature);
 
@@ -148,6 +151,10 @@ class ModelBrokerClient final {
   void CreateSession(mojom::OnDeviceFeature feature,
                      const SessionConfigParams& config_params,
                      CreateSessionCallback callback);
+
+  // Add DownloadProgressObserver.
+  void AddModelDownloadProgressObserver(
+      mojo::PendingRemote<on_device_model::mojom::DownloadObserver> observer);
 
  private:
   mojo::Remote<mojom::ModelBroker> remote_;

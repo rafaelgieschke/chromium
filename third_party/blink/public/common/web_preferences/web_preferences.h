@@ -42,6 +42,11 @@ BLINK_COMMON_EXPORT extern const char kCommonScript[];
 // browser/profiles/profile.cc, and
 // content/public/common/common_param_traits_macros.h
 struct BLINK_COMMON_EXPORT WebPreferences {
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
+  static constexpr float kDefaultMinimumPageScaleFactor = 0.25f;
+  static constexpr bool kShrinksViewportContentsToFit = true;
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
+
   ScriptFontFamilyMap standard_font_family_map;
   // The value for Osaka font should be "Osaka", not "Osaka-Mono".
   ScriptFontFamilyMap fixed_font_family_map;
@@ -104,10 +109,6 @@ struct BLINK_COMMON_EXPORT WebPreferences {
   // mixed content, and disables embedder notifications that such content was
   // requested (thereby preventing user override).
   bool strict_mixed_content_checking = false;
-  // Strict powerful feature restrictions block insecure usage of powerful
-  // features (like device orientation) that we haven't yet disabled for the web
-  // at large.
-  bool strict_powerful_feature_restrictions = false;
   // TODO(jww): Remove when WebView no longer needs this exception.
   bool allow_geolocation_on_insecure_origins = false;
   // Disallow user opt-in for blockable mixed content.
@@ -164,8 +165,11 @@ struct BLINK_COMMON_EXPORT WebPreferences {
   // If true - Blink will clamp the minimum scale factor to the content width,
   // preventing zoom beyond the visible content. This is really only needed if
   // `viewport_enabled` is on.
-  bool shrinks_viewport_contents_to_fit =
-      BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS);
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
+  bool shrinks_viewport_contents_to_fit = kShrinksViewportContentsToFit;
+#else
+  bool shrinks_viewport_contents_to_fit = false;
+#endif
 
   blink::mojom::ViewportStyle viewport_style =
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
@@ -290,6 +294,8 @@ struct BLINK_COMMON_EXPORT WebPreferences {
 
   // Long press on links selects text instead of triggering context menu.
   bool long_press_link_select_text = false;
+  // Support WebView font scaling behavior that differs from Chrome.
+  bool scale_all_fonts_if_no_meta_text_scale_tag = false;
 #endif  // BUILDFLAG(IS_ANDROID)
 
 // TODO(crbug.com/1284805): Remove IS_ANDROID once WebView supports WebAuthn.
@@ -308,7 +314,7 @@ struct BLINK_COMMON_EXPORT WebPreferences {
   // scale limits. These are set directly on the WebView so there's no analogue
   // in WebSettings.
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
-  float default_minimum_page_scale_factor = 0.25f;
+  float default_minimum_page_scale_factor = kDefaultMinimumPageScaleFactor;
   float default_maximum_page_scale_factor = 5.f;
 #elif BUILDFLAG(IS_MAC)
   float default_minimum_page_scale_factor = 1.f;
@@ -451,7 +457,9 @@ struct BLINK_COMMON_EXPORT WebPreferences {
   // WebView and by `kWebPayments` feature flag everywhere.
   bool payment_request_enabled = false;
 
-  bool ai_prompt_api_enabled = false;
+  // Enables the origin trial Built-in AI APIs, for use within DevTools and
+  // devtools extension panels.
+  bool ai_ot_apis_enabled = false;
 
 #if BUILDFLAG(IS_MAC)
   bool should_disable_external_popups = false;

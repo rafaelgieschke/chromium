@@ -1,6 +1,7 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="pl">
+<translation id="1035560095760914532">Umieść ikonę Chrome u dołu ekranu, aby mieć łatwy dostęp do przeglądarki</translation>
 <translation id="1076643793026027628">Chrome automatycznie otwiera linki incognito z YouTube w trybie incognito.</translation>
 <translation id="1081114897601629648">Nie udało się zaimportować tych haseł do Menedżera haseł Google, ponieważ nie spełniają wymagań.</translation>
 <translation id="1086486568852410168">Szukaj za pomocą Obiektywu Google</translation>
@@ -86,6 +87,10 @@ Odczekaj kilka minut, zanim się wylogujesz. Jeśli wylogujesz się teraz, te da
 <translation id="2767464022270041271">Brak zapisanych haseł. Menedżer haseł Google może sprawdzać Twoje hasła, gdy je zapiszesz.</translation>
 <translation id="2788811701191021538">Otwiera stronę ustawień form płatności w Chrome.</translation>
 <translation id="2876628302275096482">Dowiedz się więcej o tym, <ph name="BEGIN_LINK" />jak Chrome dba o prywatność Twoich danych<ph name="END_LINK" />.</translation>
+<translation id="288992067439702510">Osiągnięto limit <ph name="LIMIT" /> zakładek w Google Chrome, więc niektóre z Twoich zakładek nie zostały jeszcze zapisane na Twoim koncie Google.
+
+Dopóki nie usuniesz niektórych zakładek, nie będzie można zapisywać nowych na Twoim koncie. Jeśli wylogujesz się teraz, niezapisane zakładki zostaną usunięte.</translation>
+<translation id="2901621928549457170">Błyskawicznie otwieraj Chrome na iPadzie</translation>
 <translation id="2922914028977213693">Kliknij tutaj, aby w pełni wykorzystać możliwości Chrome na iPadzie.</translation>
 <translation id="292371311537977079">Ustawienia Chrome</translation>
 <translation id="2923827943290349720">Blokuj karty incognito po zamknięciu Chrome</translation>
@@ -170,6 +175,8 @@ Odczekaj kilka minut, zanim się wylogujesz. Jeśli wylogujesz się teraz, te da
 <translation id="5119391094379141756">Wybierz Chrome.</translation>
 <translation id="5123188916260706415">Wyszukaj głosowo w Chrome</translation>
 <translation id="5162467219239570114">Przeglądarka Chrome jest nieaktualna. Jeśli w <ph name="BEGIN_LINK" />App Store<ph name="END_LINK" /> nie ma dostępnej aktualizacji, Twoje urządzenie może już nie obsługiwać nowych wersji Chrome.</translation>
+<translation id="5172049865623113551">Błyskawicznie otwieraj Chrome na iPhonie</translation>
+<translation id="5179095426828744632">Szybszy dostęp do Chrome z Docka</translation>
 <translation id="5184329579814168207">Otwórz w Chrome</translation>
 <translation id="5190139289262548459">Twoja organizacja (<ph name="DOMAIN" />) zarządza kontem, na które się logujesz, i korzystaniem z Chrome.</translation>
 <translation id="5209238444239954363">Chrome nie udało się sprawdzić dostępności aktualizacji. Spróbuj ponownie później.</translation>
@@ -308,7 +315,6 @@ W <ph name="BEGIN_LINK" />usługach Google<ph name="END_LINK" /> znajdziesz wi�
 <translation id="787226752901403048">Zaloguj się w Chrome, aby udostępniać grupy kart i do nich dołączać oraz wspólnie pracować nad pomysłami</translation>
 <translation id="7897703007638178753">Zobacz ostatnie karty w Chrome</translation>
 <translation id="7948283758957877064">Nowości w Chrome</translation>
-<translation id="7996707498590516621">Utwórz obraz za pomocą Gemini w Chrome</translation>
 <translation id="8000174216052461231">Wskazówka dotycząca Chrome: korzystaj z najlepszych zabezpieczeń Chrome</translation>
 <translation id="8006014511203279255">Używaj Chrome zawsze wtedy, gdy klikasz linki w wiadomościach lub w innych aplikacjach.</translation>
 <translation id="8014670471808569312">Chrome zaproponuje zapisanie hasła.</translation>
@@ -320,6 +326,7 @@ W <ph name="BEGIN_LINK" />usługach Google<ph name="END_LINK" /> znajdziesz wi�
 <translation id="8136856065410661948">Będziemy z tego korzystać, aby tworzyć wydarzenia z Chrome i Obiektywu Google w kalendarzu Apple.</translation>
 <translation id="8154120522323162874">Aby w pełni wykorzystywać możliwości Chrome, kontynuuj konfigurowanie przeglądarki.</translation>
 <translation id="8160472928944011082">Nie udało się zaktualizować Chrome</translation>
+<translation id="8213550501565480896">Ustaw Chrome jako domyślną przeglądarkę</translation>
 <translation id="8245080522851805544">Chroń swoją prywatność podczas przeglądania dzięki uwierzytelnianiu urządzenia przy zamykaniu Chrome</translation>
 <translation id="8248887045858762645">Wskazówka dotycząca Chrome</translation>
 <translation id="8265730590513812063">Otwórz menu Chrome</translation>
@@ -351,6 +358,7 @@ Dane zostały zaszyfrowane za pomocą hasła wielowyrazowego <ph name="TIME" />.
 <translation id="8788269841521769222">Nie musisz go zapamiętywać. Menedżer haseł Google zapisze je na koncie <ph name="EMAIL" /></translation>
 <translation id="8796490717897731471"><ph name="EMAIL" />. Przeglądarka Chrome jest zarządzana.</translation>
 <translation id="880967149107462122">Otwórz ustawienia Chrome</translation>
+<translation id="8840947648682778034">Motyw Chrome na iPhone'a i iPada</translation>
 <translation id="8842132678697187091">Tutaj możesz otworzyć Obiektyw Google</translation>
 <translation id="8850736900032787670">Aby otrzymywać spersonalizowane treści na podstawie swoich zainteresowań, zaloguj się w Chrome.</translation>
 <translation id="8855781063981781621">Aby wyłączyć tryb blokady w Chrome, wyłącz go na iPadzie.</translation>

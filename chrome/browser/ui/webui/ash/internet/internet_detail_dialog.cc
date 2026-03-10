@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/webui/ash/internet/internet_detail_dialog.h"
 
 #include "ash/constants/ash_features.h"
+#include "ash/constants/url_constants.h"
 #include "ash/public/cpp/connectivity_services.h"
 #include "ash/public/cpp/network_config_service.h"
 #include "base/json/json_writer.h"
@@ -12,7 +13,6 @@
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/ash/cellular_setup/cellular_setup_localized_strings_provider.h"
-#include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/internet_detail_dialog_resources.h"
@@ -91,7 +91,7 @@ class PortalNetworkMessageHandler : public content::WebUIMessageHandler {
   }
 
  private:
-  void ShowPortalSignin(const base::Value::List& args) {
+  void ShowPortalSignin(const base::ListValue& args) {
     if (args.size() < 1 || !args[0].is_string()) {
       NOTREACHED() << "Invalid args for: ShowPortalSignin";
     }
@@ -133,7 +133,7 @@ void InternetDetailDialog::ShowDialog(const std::string& network_id,
 }
 
 InternetDetailDialog::InternetDetailDialog(const NetworkState& network)
-    : SystemWebDialogDelegate(GURL(chrome::kChromeUIInternetDetailDialogURL),
+    : SystemWebDialogDelegate(GURL(ash::kChromeUIInternetDetailDialogURL),
                               /* title= */ std::u16string()),
       network_id_(network.guid()),
       network_type_(network_util::TranslateShillTypeToONC(network.type())),
@@ -155,7 +155,7 @@ void InternetDetailDialog::GetDialogSize(gfx::Size* size) const {
 }
 
 std::string InternetDetailDialog::GetDialogArgs() const {
-  base::Value::Dict args;
+  base::DictValue args;
   args.Set("type", network_type_);
   args.Set("guid", network_id_);
   args.Set("name", network_name_);
@@ -169,7 +169,7 @@ InternetDetailDialogUI::InternetDetailDialogUI(content::WebUI* web_ui)
   web_ui->AddMessageHandler(std::make_unique<PortalNetworkMessageHandler>());
 
   content::WebUIDataSource* source = content::WebUIDataSource::CreateAndAdd(
-      Profile::FromWebUI(web_ui), chrome::kChromeUIInternetDetailDialogHost);
+      Profile::FromWebUI(web_ui), ash::kChromeUIInternetDetailDialogHost);
   source->AddBoolean("showTechnologyBadge",
                      !features::IsSeparateNetworkIconsEnabled());
   source->AddBoolean("apnRevamp", features::IsApnRevampEnabled());

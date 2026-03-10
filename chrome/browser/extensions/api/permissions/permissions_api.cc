@@ -13,6 +13,7 @@
 #include "base/notimplemented.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/extensions/api/permissions/permissions_api_helpers.h"
+#include "chrome/browser/extensions/chrome_extension_function_details.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
@@ -33,10 +34,6 @@
 #include "extensions/common/permissions/permissions_info.h"
 #include "extensions/common/url_pattern.h"
 #include "extensions/common/url_pattern_set.h"
-
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-#include "chrome/browser/extensions/chrome_extension_function_details.h"
-#endif
 
 namespace extensions {
 
@@ -161,8 +158,9 @@ ExtensionFunction::ResponseAction PermissionsContainsFunction::Run() {
               ->AllowFileAccess(extension()->id()),
           &error);
 
-  if (!unpack_result)
+  if (!unpack_result) {
     return RespondNow(Error(std::move(error)));
+  }
 
   const PermissionSet& active_permissions =
       extension()->permissions_data()->active_permissions();
@@ -220,8 +218,9 @@ ExtensionFunction::ResponseAction PermissionsRemoveFunction::Run() {
               ->AllowFileAccess(extension_->id()),
           &error);
 
-  if (!unpack_result)
+  if (!unpack_result) {
     return RespondNow(Error(std::move(error)));
+  }
 
   // We can't remove any permissions that weren't specified in the manifest.
   if (!unpack_result->unlisted_apis.empty() ||
@@ -261,7 +260,8 @@ ExtensionFunction::ResponseAction PermissionsRemoveFunction::Run() {
 
   PermissionsUpdater(browser_context())
       .RevokeOptionalPermissions(
-          *extension(), *permissions_to_revoke, PermissionsUpdater::REMOVE_SOFT,
+          *extension(), *permissions_to_revoke,
+          PermissionsUpdater::RemoveType::kSoft,
           base::BindOnce(
               &PermissionsRemoveFunction::Respond, this,
               ArgumentList(api::permissions::Remove::Results::Create(true))));
@@ -319,18 +319,11 @@ ExtensionFunction::ResponseAction PermissionsRequestFunction::Run() {
     return RespondNow(Error(kUserGestureRequiredError));
   }
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
   gfx::NativeWindow native_window =
       ChromeExtensionFunctionDetails(this).GetNativeWindowForUI();
   if (!native_window && g_dialog_action == DialogAction::kDefault) {
     return RespondNow(Error("Could not find an active window."));
   }
-#else
-  // TODO(crbug.com/419057482): Once we have a cross-platform interface for
-  // browser windows that works on desktop Android, check for an active window.
-  NOTIMPLEMENTED() << "Skipping active window check";
-  gfx::NativeWindow native_window = nullptr;
-#endif
 
   std::optional<api::permissions::Request::Params> params =
       api::permissions::Request::Params::Create(args());
@@ -346,8 +339,9 @@ ExtensionFunction::ResponseAction PermissionsRequestFunction::Run() {
               ->AllowFileAccess(extension_->id()),
           &error);
 
-  if (!unpack_result)
+  if (!unpack_result) {
     return RespondNow(Error(std::move(error)));
+  }
 
   // Don't allow the extension to request any permissions that weren't specified
   // in the manifest.
@@ -520,8 +514,9 @@ void PermissionsRequestFunction::OnInstallPromptDone(
   }
 
   // Grant{Runtime|Optional}Permissions calls above can finish synchronously.
-  if (!did_respond())
+  if (!did_respond()) {
     RespondIfRequestsFinished();
+  }
 }
 
 void PermissionsRequestFunction::OnRuntimePermissionsGranted() {
@@ -535,8 +530,9 @@ void PermissionsRequestFunction::OnOptionalPermissionsGranted() {
 }
 
 void PermissionsRequestFunction::RespondIfRequestsFinished() {
-  if (requesting_withheld_permissions_ || requesting_optional_permissions_)
+  if (requesting_withheld_permissions_ || requesting_optional_permissions_) {
     return;
+  }
 
   Respond(ArgumentList(api::permissions::Request::Results::Create(true)));
 }

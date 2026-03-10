@@ -19,10 +19,12 @@
 #import "components/plus_addresses/core/common/features.h"
 #import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/autofill/model/personal_data_manager_factory.h"
+#import "ios/chrome/browser/settings/ui_bundled/autofill/cells/autofill_profile_item.h"
 #import "ios/chrome/browser/settings/ui_bundled/settings_root_table_view_controller.h"
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
 #import "ios/chrome/browser/shared/model/browser/test/test_browser.h"
 #import "ios/chrome/browser/shared/model/profile/test/test_profile_ios.h"
+#import "ios/chrome/browser/shared/ui/table_view/cells/table_view_detail_icon_item.h"
 #import "ios/chrome/browser/shared/ui/table_view/legacy_chrome_table_view_controller_test.h"
 #import "ios/chrome/browser/signin/model/authentication_service.h"
 #import "ios/chrome/browser/signin/model/authentication_service_factory.h"
@@ -37,6 +39,7 @@
 #import "testing/gtest/include/gtest/gtest.h"
 #import "testing/gtest_mac.h"
 #import "third_party/ocmock/gtest_support.h"
+#import "ui/base/l10n/l10n_util_mac.h"
 
 namespace {
 
@@ -85,10 +88,13 @@ class AutofillProfileTableViewControllerTest
     AuthenticationService* auth_service =
         AuthenticationServiceFactory::GetForProfile(profile_.get());
     auth_service->SignIn(account_manager_service->GetDefaultIdentity(),
-                         signin_metrics::AccessPoint::kUnknown);
+                         signin_metrics::AccessPoint::kStartPage);
   }
 
-  void AddProfile(const std::string& name, const std::string& address) {
+  // Helper method to add an autofill::AutofillProfile to the
+  // PersonalDataManager. The profile is constructed based on the `data` map,
+  // which maps autofill::FieldType keys to their string values.
+  void AddProfile(const std::map<autofill::FieldType, std::string>& data) {
     autofill::PersonalDataManager* personal_data_manager =
         autofill::PersonalDataManagerFactory::GetForProfile(profile_.get());
     personal_data_manager->SetSyncServiceForTest(nullptr);
@@ -96,9 +102,10 @@ class AutofillProfileTableViewControllerTest
 
     autofill::AutofillProfile autofill_profile(
         autofill::i18n_model_definition::kLegacyHierarchyCountryCode);
-    autofill_profile.SetRawInfo(autofill::NAME_FULL, base::ASCIIToUTF16(name));
-    autofill_profile.SetRawInfo(autofill::ADDRESS_HOME_LINE1,
-                                base::ASCIIToUTF16(address));
+    for (const auto& pair : data) {
+      autofill_profile.SetInfo(pair.first, base::ASCIIToUTF16(pair.second),
+                               l10n_util::GetLocaleOverride());
+    }
     personal_data_manager->address_data_manager().AddProfile(autofill_profile);
     std::move(waiter).Wait();  // Wait for completion of the async operation.
   }
@@ -133,7 +140,8 @@ TEST_F(AutofillProfileTableViewControllerTest, TestInitialization) {
 
 // Adding a single address results in an address section.
 TEST_F(AutofillProfileTableViewControllerTest, TestOneProfile) {
-  AddProfile("John Doe", "1 Main Street");
+  AddProfile({{autofill::NAME_FULL, "John Doe"},
+              {autofill::ADDRESS_HOME_LINE1, "1 Main Street"}});
   CreateController();
   CheckController();
 
@@ -166,6 +174,78 @@ TEST_F(AutofillProfileTableViewControllerTest, TestPlusAddressSection) {
   // Check the footer of the sections.
   CheckSectionFooterWithId(IDS_AUTOFILL_ENABLE_PROFILES_TOGGLE_SUBLABEL, 0);
   CheckSectionFooterWithId(IDS_PLUS_ADDRESS_SETTINGS_SUBLABEL, 1);
+}
+
+// Checks if city is set as the default `detailText` when the
+// `ADDRESS_HOME_LINE1` is empty.
+TEST_F(AutofillProfileTableViewControllerTest,
+       TestDetailTextFallbackValueCity) {
+  AddProfile({
+      {autofill::ADDRESS_HOME_CITY, "Montreal"},
+  });
+
+  CreateController();
+  CheckController();
+
+  AutofillProfileItem* item = base::apple::ObjCCastStrict<AutofillProfileItem>(
+      GetTableViewItem(/*section=*/1, /*item=*/0));
+
+  EXPECT_NSEQ(@"Montreal", item.detailText);
+}
+
+// Checks if city is set as the default `detailText` when the state and zip code
+// are not empty.
+TEST_F(AutofillProfileTableViewControllerTest,
+       TestDetailTextFallbackValuePriorityCheck) {
+  AddProfile({
+      {autofill::ADDRESS_HOME_CITY, "Montreal"},
+      {autofill::ADDRESS_HOME_STATE, "Quebec"},
+      {autofill::ADDRESS_HOME_ZIP, "A1B 2C3"},
+  });
+
+  CreateController();
+  CheckController();
+
+  AutofillProfileItem* item = base::apple::ObjCCastStrict<AutofillProfileItem>(
+      GetTableViewItem(/*section=*/1, /*item=*/0));
+
+  EXPECT_NSEQ(@"Montreal", item.detailText);
+}
+
+// Checks if country is set as the default `detailText` when the user adds an
+// empty address.
+TEST_F(AutofillProfileTableViewControllerTest,
+       TestDetailTextFallbackValueForEmptyAddress) {
+  AddProfile({
+      {autofill::ADDRESS_HOME_COUNTRY, "Canada"},
+  });
+
+  CreateController();
+  CheckController();
+
+  AutofillProfileItem* item = base::apple::ObjCCastStrict<AutofillProfileItem>(
+      GetTableViewItem(/*section=*/1, /*item=*/0));
+
+  EXPECT_NSEQ(@"Canada", item.detailText);
+}
+
+// Checks that the enhanced autofill menu item is visible when the feature is
+// enabled.
+TEST_F(AutofillProfileTableViewControllerTest,
+       TestEnhancedAutofillMenuPresent) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      autofill::features::kAutofillAiWithDataSchema);
+
+  CreateController();
+  CheckController();
+
+  TableViewDetailIconItem* item =
+      base::apple::ObjCCastStrict<TableViewDetailIconItem>(
+          GetTableViewItem(/*section=*/1, /*item=*/0));
+
+  NSString* text = l10n_util::GetNSString(IDS_SETTINGS_AUTOFILL_AI_PAGE_TITLE);
+  EXPECT_NSEQ(text, item.text);
 }
 
 }  // namespace

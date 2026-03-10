@@ -23,6 +23,10 @@ class PrefService;
 class SharingMessageBridge;
 class TemplateURLService;
 
+namespace accessibility_annotator {
+class AccessibilityAnnotatorBackend;
+}  // namespace accessibility_annotator
+
 namespace autofill {
 class AddressDataManager;
 class AutofillWebDataService;
@@ -37,9 +41,9 @@ namespace collaboration {
 class CollaborationService;
 }  // namespace collaboration
 
-namespace commerce {
-class ProductSpecificationsService;
-}  // namespace commerce
+namespace contextual_tasks {
+class ContextualTasksService;
+}  // namespace contextual_tasks
 
 namespace consent_auditor {
 class ConsentAuditor;
@@ -84,8 +88,12 @@ namespace signin {
 class IdentityManager;
 }  // namespace signin
 
+namespace skills {
+class SkillsService;
+}  // namespace skills
+
 namespace supervised_user {
-class SupervisedUserSettingsService;
+class FamilyLinkSettingsService;
 }  // namespace supervised_user
 
 namespace sync_bookmarks {
@@ -135,6 +143,9 @@ class CommonControllerBuilder {
 
   // Setters to inject dependencies. Each of these setters must be invoked
   // before invoking `Build()`. In some cases it is allowed to inject nullptr.
+  void SetAccessibilityAnnotatorBackend(
+      accessibility_annotator::AccessibilityAnnotatorBackend*
+          accessibility_annotator_backend);
   void SetAccountSettingService(
       autofill::AccountSettingService* account_setting_service);
   void SetAddressDataManagerGetter(
@@ -154,6 +165,8 @@ class CommonControllerBuilder {
   void SetConsentAuditor(consent_auditor::ConsentAuditor* consent_auditor);
   void SetCollaborationService(
       collaboration::CollaborationService* collaboration_service);
+  void SetContextualTasksService(
+      contextual_tasks::ContextualTasksService* contextual_tasks_service);
   void SetPersonalCollaborationDataService(
       data_sharing::personal_collaboration_data::
           PersonalCollaborationDataService*
@@ -168,6 +181,7 @@ class CommonControllerBuilder {
   void SetIdentityManager(signin::IdentityManager* identity_manager);
   void SetDataTypeStoreService(
       syncer::DataTypeStoreService* data_type_store_service);
+  void SetSkillsService(skills::SkillsService* skills_service);
 
 #if !BUILDFLAG(IS_ANDROID)
   void SetPasskeyModel(webauthn::PasskeyModel* passkey_model);
@@ -189,8 +203,6 @@ class CommonControllerBuilder {
   void SetPrefService(PrefService* pref_service);
   void SetPrefServiceSyncable(
       sync_preferences::PrefServiceSyncable* pref_service_syncable);
-  void SetProductSpecificationsService(
-      commerce::ProductSpecificationsService* product_specifications_service);
   void SetDualReadingListModel(
       reading_list::DualReadingListModel* dual_reading_list_model);
   void SetSendTabToSelfSyncService(send_tab_to_self::SendTabToSelfSyncService*
@@ -200,9 +212,8 @@ class CommonControllerBuilder {
   void SetSharingMessageBridge(SharingMessageBridge* sharing_message_bridge);
 
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
-  void SetSupervisedUserSettingsService(
-      supervised_user::SupervisedUserSettingsService*
-          supervised_user_settings_service);
+  void SetFamilyLinkSettingsService(
+      supervised_user::FamilyLinkSettingsService* family_link_settings_service);
 #endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 
   void SetTabGroupSyncService(
@@ -257,6 +268,8 @@ class CommonControllerBuilder {
 
   // For all above, nullopt indicates the corresponding setter wasn't invoked.
   // nullptr indicates the setter was invoked with nullptr.
+  SafeOptional<raw_ptr<accessibility_annotator::AccessibilityAnnotatorBackend>>
+      accessibility_annotator_backend_;
   SafeOptional<raw_ptr<autofill::AccountSettingService>>
       account_setting_service_;
   base::RepeatingCallback<autofill::AddressDataManager*()>
@@ -299,16 +312,16 @@ class CommonControllerBuilder {
   SafeOptional<raw_ptr<sync_bookmarks::BookmarkSyncService>>
       account_bookmark_sync_service_;
   SafeOptional<raw_ptr<bookmarks::BookmarkModel>> bookmark_model_;
-  SafeOptional<raw_ptr<supervised_user::SupervisedUserSettingsService>>
-      supervised_user_settings_service_;
+  SafeOptional<raw_ptr<supervised_user::FamilyLinkSettingsService>>
+      family_link_settings_service_;
   SafeOptional<raw_ptr<plus_addresses::PlusAddressSettingService>>
       plus_address_setting_service_;
   SafeOptional<scoped_refptr<plus_addresses::PlusAddressWebDataService>>
       plus_address_webdata_service_;
-  SafeOptional<raw_ptr<commerce::ProductSpecificationsService>>
-      product_specifications_service_;
   SafeOptional<raw_ptr<collaboration::CollaborationService>>
       collaboration_service_;
+  SafeOptional<raw_ptr<contextual_tasks::ContextualTasksService>>
+      contextual_tasks_service_;
   SafeOptional<raw_ptr<data_sharing::personal_collaboration_data::
                            PersonalCollaborationDataService>>
       personal_collaboration_data_service_;
@@ -317,6 +330,7 @@ class CommonControllerBuilder {
   SafeOptional<raw_ptr<tab_groups::TabGroupSyncService>>
       tab_group_sync_service_;
   SafeOptional<raw_ptr<TemplateURLService>> template_url_service_;
+  SafeOptional<raw_ptr<skills::SkillsService>> skills_service_;
 };
 
 }  // namespace browser_sync

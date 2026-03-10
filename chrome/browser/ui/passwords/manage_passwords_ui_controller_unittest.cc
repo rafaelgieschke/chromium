@@ -28,10 +28,7 @@
 #include "chrome/browser/password_manager/password_change_delegate.h"
 #include "chrome/browser/password_manager/password_change_delegate_mock.h"
 #include "chrome/browser/password_manager/password_change_service_factory.h"
-#include "chrome/browser/ui/hats/hats_service_factory.h"
-#include "chrome/browser/ui/hats/mock_hats_service.h"
 #include "chrome/browser/ui/hats/mock_trust_safety_sentiment_service.h"
-#include "chrome/browser/ui/hats/survey_config.h"
 #include "chrome/browser/ui/hats/trust_safety_sentiment_service_factory.h"
 #include "chrome/browser/ui/passwords/credential_leak_dialog_controller.h"
 #include "chrome/browser/ui/passwords/credential_manager_dialog_controller.h"
@@ -178,7 +175,7 @@ class TestManagePasswordsUIController : public ManagePasswordsUIController {
 
   bool opened_automatic_bubble() const { return opened_automatic_bubble_; }
 
-  MOCK_METHOD(AccountChooserPrompt*,
+  MOCK_METHOD(std::unique_ptr<AccountChooserPrompt>,
               CreateAccountChooser,
               (CredentialManagerDialogController*),
               (override));
@@ -308,19 +305,6 @@ password_manager::PasswordForm CreatePasswordForm(
   password_form.signon_realm = GURL(url).GetWithEmptyPath().spec();
   password_form.username_value = username;
   password_form.password_value = password;
-  return password_form;
-}
-
-password_manager::PasswordForm CreateSignUpForm(
-    const std::string& url,
-    const std::u16string& username,
-    const std::u16string& password) {
-  PasswordForm password_form = CreatePasswordForm(url, username, password);
-
-  // HasNewPasswordElement() && HasUsernameElement()
-  password_form.new_password_element_renderer_id = autofill::FieldRendererId(1);
-  password_form.username_element_renderer_id = autofill::FieldRendererId(2);
-
   return password_form;
 }
 
@@ -558,11 +542,6 @@ TEST_P(ManagePasswordsUIControllerTest, BackupPasswordSaved) {
               profile(),
               base::BindRepeating(&BuildMockTrustSafetySentimentService)));
   EXPECT_CALL(*mock_sentiment_service_, SavedPassword());
-  MockHatsService* mock_hats_service = static_cast<MockHatsService*>(
-      HatsServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          profile(), base::BindRepeating(&BuildMockHatsService)));
-  EXPECT_CALL(*mock_hats_service, CanShowAnySurvey)
-      .WillRepeatedly(Return(true));
   const std::u16string backup_password = u"backup";
   PasswordForm submitted_form;
   submitted_form.username_value = kExampleUsername;
@@ -578,10 +557,6 @@ TEST_P(ManagePasswordsUIControllerTest, BackupPasswordSaved) {
 
   EXPECT_CALL(*test_form_manager, Save());
   controller()->OnUpdatePasswordSubmitted(std::move(test_form_manager));
-
-  EXPECT_CALL(*mock_hats_service, LaunchDelayedSurveyForWebContents(
-                                      kHatsSurveyTriggerPasswordChangeDelayed,
-                                      _, _, _, _, _, _, _, _, _));
   controller()->SavePassword(submitted_form.username_value,
                              submitted_form.password_value);
   // Advance the clock to trigger the delayed survey task and wait until it
@@ -851,10 +826,12 @@ TEST_P(ManagePasswordsUIControllerTest, ChooseCredentialLocal) {
   local_credentials.emplace_back(new PasswordForm(test_local_form()));
   url::Origin origin = url::Origin::Create(GURL(kExampleUrl));
   CredentialManagerDialogController* dialog_controller = nullptr;
+  auto prompt = std::make_unique<CredentialManagementDialogPromptMock>();
+  auto* prompt_ptr = prompt.get();
   EXPECT_CALL(*controller(), CreateAccountChooser(_))
       .WillOnce(
-          DoAll(SaveArg<0>(&dialog_controller), Return(&dialog_prompt())));
-  EXPECT_CALL(dialog_prompt(), ShowAccountChooser());
+          DoAll(SaveArg<0>(&dialog_controller), Return(std::move(prompt))));
+  EXPECT_CALL(*prompt_ptr, ShowAccountChooser());
   EXPECT_CALL(*controller(), OnUpdateBubbleAndIconVisibility());
   EXPECT_CALL(*controller(), HasBrowserWindow()).WillOnce(Return(true));
   base::MockCallback<ManagePasswordsState::CredentialsCallback> choose_callback;
@@ -869,7 +846,7 @@ TEST_P(ManagePasswordsUIControllerTest, ChooseCredentialLocal) {
               ElementsAre(Pointee(test_local_form())));
   ExpectIconStateIs(password_manager::ui::INACTIVE_STATE);
 
-  EXPECT_CALL(dialog_prompt(), ControllerGone());
+  EXPECT_CALL(*prompt_ptr, ControllerGone());
   EXPECT_CALL(choose_callback, Run(Pointee(test_local_form())));
   EXPECT_CALL(*controller(), OnUpdateBubbleAndIconVisibility());
   dialog_controller->OnChooseCredentials(
@@ -883,10 +860,12 @@ TEST_P(ManagePasswordsUIControllerTest, ChooseCredentialLocalButFederated) {
   local_credentials.emplace_back(new PasswordForm(test_federated_form()));
   url::Origin origin = url::Origin::Create(GURL(kExampleUrl));
   CredentialManagerDialogController* dialog_controller = nullptr;
+  auto prompt = std::make_unique<CredentialManagementDialogPromptMock>();
+  auto* prompt_ptr = prompt.get();
   EXPECT_CALL(*controller(), CreateAccountChooser(_))
       .WillOnce(
-          DoAll(SaveArg<0>(&dialog_controller), Return(&dialog_prompt())));
-  EXPECT_CALL(dialog_prompt(), ShowAccountChooser());
+          DoAll(SaveArg<0>(&dialog_controller), Return(std::move(prompt))));
+  EXPECT_CALL(*prompt_ptr, ShowAccountChooser());
   EXPECT_CALL(*controller(), OnUpdateBubbleAndIconVisibility());
   EXPECT_CALL(*controller(), HasBrowserWindow()).WillOnce(Return(true));
   base::MockCallback<ManagePasswordsState::CredentialsCallback> choose_callback;
@@ -901,7 +880,7 @@ TEST_P(ManagePasswordsUIControllerTest, ChooseCredentialLocalButFederated) {
               ElementsAre(Pointee(test_federated_form())));
   ExpectIconStateIs(password_manager::ui::INACTIVE_STATE);
 
-  EXPECT_CALL(dialog_prompt(), ControllerGone());
+  EXPECT_CALL(*prompt_ptr, ControllerGone());
   EXPECT_CALL(choose_callback, Run(Pointee(test_federated_form())));
   EXPECT_CALL(*controller(), OnUpdateBubbleAndIconVisibility());
   dialog_controller->OnChooseCredentials(
@@ -915,10 +894,12 @@ TEST_P(ManagePasswordsUIControllerTest, ChooseCredentialCancel) {
   local_credentials.emplace_back(new PasswordForm(test_local_form()));
   url::Origin origin = url::Origin::Create(GURL(kExampleUrl));
   CredentialManagerDialogController* dialog_controller = nullptr;
+  auto prompt = std::make_unique<CredentialManagementDialogPromptMock>();
+  auto* prompt_ptr = prompt.get();
   EXPECT_CALL(*controller(), CreateAccountChooser(_))
       .WillOnce(
-          DoAll(SaveArg<0>(&dialog_controller), Return(&dialog_prompt())));
-  EXPECT_CALL(dialog_prompt(), ShowAccountChooser());
+          DoAll(SaveArg<0>(&dialog_controller), Return(std::move(prompt))));
+  EXPECT_CALL(*prompt_ptr, ShowAccountChooser());
   EXPECT_CALL(*controller(), OnUpdateBubbleAndIconVisibility());
   EXPECT_CALL(*controller(), HasBrowserWindow()).WillOnce(Return(true));
   base::MockCallback<ManagePasswordsState::CredentialsCallback> choose_callback;
@@ -928,7 +909,7 @@ TEST_P(ManagePasswordsUIControllerTest, ChooseCredentialCancel) {
             controller()->GetState());
   EXPECT_EQ(origin, controller()->GetOrigin());
 
-  EXPECT_CALL(dialog_prompt(), ControllerGone()).Times(0);
+  EXPECT_CALL(*prompt_ptr, ControllerGone()).Times(0);
   EXPECT_CALL(choose_callback, Run(nullptr));
   EXPECT_CALL(*controller(), OnUpdateBubbleAndIconVisibility());
   dialog_controller->OnCloseDialog();
@@ -955,10 +936,12 @@ TEST_P(ManagePasswordsUIControllerTest, ChooseCredentialPSL) {
   local_credentials.emplace_back(new PasswordForm(test_local_form()));
   url::Origin origin = url::Origin::Create(GURL(kExampleUrl));
   CredentialManagerDialogController* dialog_controller = nullptr;
+  auto prompt = std::make_unique<CredentialManagementDialogPromptMock>();
+  auto* prompt_ptr = prompt.get();
   EXPECT_CALL(*controller(), CreateAccountChooser(_))
       .WillOnce(
-          DoAll(SaveArg<0>(&dialog_controller), Return(&dialog_prompt())));
-  EXPECT_CALL(dialog_prompt(), ShowAccountChooser());
+          DoAll(SaveArg<0>(&dialog_controller), Return(std::move(prompt))));
+  EXPECT_CALL(*prompt_ptr, ShowAccountChooser());
   EXPECT_CALL(*controller(), OnUpdateBubbleAndIconVisibility());
   EXPECT_CALL(*controller(), HasBrowserWindow()).WillOnce(Return(true));
   base::MockCallback<ManagePasswordsState::CredentialsCallback> choose_callback;
@@ -972,7 +955,7 @@ TEST_P(ManagePasswordsUIControllerTest, ChooseCredentialPSL) {
               ElementsAre(Pointee(test_local_form())));
   ExpectIconStateIs(password_manager::ui::INACTIVE_STATE);
 
-  EXPECT_CALL(dialog_prompt(), ControllerGone());
+  EXPECT_CALL(*prompt_ptr, ControllerGone());
   EXPECT_CALL(choose_callback, Run(Pointee(test_local_form())));
   EXPECT_CALL(*controller(), OnUpdateBubbleAndIconVisibility());
   dialog_controller->OnChooseCredentials(
@@ -2211,10 +2194,12 @@ TEST_P(ManagePasswordsUIControllerTest,
       std::make_unique<PasswordForm>(test_local_form()));
   url::Origin origin = url::Origin::Create(GURL(kExampleUrl));
   CredentialManagerDialogController* dialog_controller = nullptr;
+  auto prompt = std::make_unique<CredentialManagementDialogPromptMock>();
+  auto* prompt_ptr = prompt.get();
   EXPECT_CALL(*controller(), CreateAccountChooser(_))
       .WillOnce(
-          DoAll(SaveArg<0>(&dialog_controller), Return(&dialog_prompt())));
-  EXPECT_CALL(dialog_prompt(), ShowAccountChooser());
+          DoAll(SaveArg<0>(&dialog_controller), Return(std::move(prompt))));
+  EXPECT_CALL(*prompt_ptr, ShowAccountChooser());
   EXPECT_CALL(*controller(), HasBrowserWindow()).WillOnce(Return(true));
   base::MockCallback<ManagePasswordsState::CredentialsCallback> choose_callback;
   EXPECT_TRUE(controller()->OnChooseCredentials(std::move(local_credentials),
@@ -2270,10 +2255,12 @@ TEST_P(ManagePasswordsUIControllerTest,
       std::make_unique<PasswordForm>(test_local_form()));
   url::Origin origin = url::Origin::Create(GURL(kExampleUrl));
   CredentialManagerDialogController* dialog_controller = nullptr;
+  auto prompt = std::make_unique<CredentialManagementDialogPromptMock>();
+  auto* prompt_ptr = prompt.get();
   EXPECT_CALL(*controller(), CreateAccountChooser(_))
       .WillOnce(
-          DoAll(SaveArg<0>(&dialog_controller), Return(&dialog_prompt())));
-  EXPECT_CALL(dialog_prompt(), ShowAccountChooser());
+          DoAll(SaveArg<0>(&dialog_controller), Return(std::move(prompt))));
+  EXPECT_CALL(*prompt_ptr, ShowAccountChooser());
   EXPECT_CALL(*controller(), HasBrowserWindow()).WillOnce(Return(true));
   base::MockCallback<ManagePasswordsState::CredentialsCallback> choose_callback;
   EXPECT_TRUE(controller()->OnChooseCredentials(std::move(local_credentials),
@@ -2546,44 +2533,6 @@ TEST_P(ManagePasswordsUIControllerTest, AutomatedPasswordChangeOffered) {
   histogram_tester.ExpectUniqueSample(
       "PasswordManager.PasswordChange.UserHasPasswordSavedOnAPCLaunch", true,
       1);
-}
-
-TEST_P(ManagePasswordsUIControllerTest,
-       AutomatedPasswordChangeNotOfferedForSignUpForm) {
-  PasswordChangeServiceFactory::GetInstance()->SetTestingFactory(
-      profile(),
-      base::BindLambdaForTesting([](content::BrowserContext* context)
-                                     -> std::unique_ptr<KeyedService> {
-        return std::make_unique<MockPasswordChangeService>();
-      }));
-
-  std::vector<PasswordForm> matches = {test_local_form()};
-  auto test_form_manager =
-      CreateFormManagerWithBestMatches(matches, &submitted_form());
-  EXPECT_CALL(*controller(), OnUpdateBubbleAndIconVisibility());
-  controller()->OnUpdatePasswordSubmitted(std::move(test_form_manager));
-
-  // Automated password change is not offered.
-  auto* password_change_service = static_cast<MockPasswordChangeService*>(
-      PasswordChangeServiceFactory::GetForProfile(profile()));
-  EXPECT_CALL(*password_change_service, GetPasswordChangeDelegate).Times(0);
-  EXPECT_CALL(*password_change_service, OfferPasswordChangeUi).Times(0);
-
-  // The old leak detection dialog is displayed.
-  auto dialog_prompt = std::make_unique<PasswordLeakDialogMock>();
-  CredentialLeakDialogController* dialog_controller = nullptr;
-  EXPECT_CALL(*dialog_prompt, ShowCredentialLeakPrompt);
-  EXPECT_CALL(*controller(), CreateCredentialLeakPrompt)
-      .WillOnce(DoAll(SaveArg<0>(&dialog_controller),
-                      Return(std::move(dialog_prompt))));
-
-  controller()->OnCredentialLeak(password_manager::LeakedPasswordDetails(
-      password_manager::CreateLeakType(
-          password_manager::IsSaved(true), password_manager::IsReused(false),
-          password_manager::IsSyncing(false),
-          password_manager::HasChangePasswordUrl(true)),
-      CreateSignUpForm(kExampleUrl, kExampleUsername, kExamplePassword),
-      /*in_account_store=*/false));
 }
 
 INSTANTIATE_FEATURE_OVERRIDE_TEST_SUITE(ManagePasswordsUIControllerTest);

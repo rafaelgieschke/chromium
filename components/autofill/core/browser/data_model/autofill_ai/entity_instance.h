@@ -19,6 +19,7 @@
 #include "base/types/pass_key.h"
 #include "base/types/strong_alias.h"
 #include "base/uuid.h"
+#include "components/autofill/core/browser/autofill_format_string.h"
 #include "components/autofill/core/browser/data_model/addresses/autofill_structured_address_component.h"
 #include "components/autofill/core/browser/data_model/addresses/contact_info.h"
 #include "components/autofill/core/browser/data_model/autofill_ai/country_info.h"
@@ -27,6 +28,10 @@
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/common/dense_set.h"
 #include "components/autofill/core/common/is_required.h"
+
+namespace sync_pb {
+class AutofillValuableSpecifics;
+}
 
 namespace autofill {
 
@@ -45,6 +50,7 @@ struct AutofillFormatString;
 class EntityInstance;
 class EntityInstanceTestApi;
 class EntityTable;
+class WalletPassAccessManagerImpl;
 
 // An attribute instance is a typed string value with additional metadata.
 // It is associated with an EntityInstance. Attributes are used in order to fill
@@ -148,10 +154,34 @@ class AttributeInstance final {
   // candidate).
   void FinalizeInfo();
 
+  // Returns whether the stored value is a mask of the full value, e.g., it
+  // contains the last four digits of the full value.
+  bool masked() const { return masked_; }
+
+  // Marks the attribute as masked.
+  //
+  // Since this does not perform any validation on the attribute value itself,
+  // it must only be called by code that is certain that the attribute value
+  // is indeed masked. The reason for not having a validation step is that
+  // masking happens purely on the server and the masking algorithm is not
+  // exposed to the client.
+  class MarkAsMaskedPasskey {
+   private:
+    MarkAsMaskedPasskey() = default;
+    friend class EntityTable;
+    friend class WalletPassAccessManagerImpl;
+    friend class FakeWalletPassAccessManager;
+    friend std::optional<EntityInstance> CreateEntityInstanceFromSpecifics(
+        const sync_pb::AutofillValuableSpecifics&);
+  };
+  void mark_as_masked(MarkAsMaskedPasskey) { masked_ = true; }
+
   friend bool operator==(const AttributeInstance& lhs,
                          const AttributeInstance& rhs) = default;
 
  private:
+  friend class AttributeInstanceTestApi;
+
   using StateInfo = base::StrongAlias<class StateInfoTag, std::u16string>;
   using InfoStructure =
       std::variant<CountryInfo, DateInfo, NameInfo, StateInfo, std::u16string>;
@@ -160,6 +190,7 @@ class AttributeInstance final {
 
   AttributeType type_;
   InfoStructure info_;
+  bool masked_ = false;
 };
 
 struct AttributeInstance::CompareByType {
@@ -205,7 +236,7 @@ class EntityInstance final {
   struct EntityMetadata {
     EntityInstance::EntityId guid;
     base::Time date_modified;
-    size_t use_count;
+    int64_t use_count = 0;
     base::Time use_date;
 
     friend bool operator==(const EntityMetadata&,
@@ -228,7 +259,9 @@ class EntityInstance final {
     // copy. Changes happening locally or on the Wallet server are synced among
     // all local storages sharing this entity.
     kServerWallet = 1,
-    kMaxValue = kServerWallet,
+    // The entity provided by Accessibility Annotator.
+    kAccessibilityAnnotator = 2,
+    kMaxValue = kAccessibilityAnnotator,
   };
 
   // `attributes` must be non-empty and their type must be identical to `type`.
@@ -238,7 +271,7 @@ class EntityInstance final {
                  EntityId guid,
                  std::string nickname,
                  base::Time date_modified,
-                 size_t use_count,
+                 int64_t use_count,
                  base::Time use_date,
                  RecordType record_type,
                  AreAttributesReadOnly are_attributes_read_only,
@@ -295,31 +328,31 @@ class EntityInstance final {
   }
 
   // Globally unique identifier of this entity.
-  const EntityId& guid() const LIFETIME_BOUND { return guid_; }
+  const EntityId& guid() const LIFETIME_BOUND { return metadata_.guid; }
 
   // The nickname assigned to this instance by the user.
   const std::string& nickname() const LIFETIME_BOUND { return nickname_; }
 
   // The latest time the instance, including any of its attributes, was edited.
-  base::Time date_modified() const { return entity_metadata_.date_modified; }
+  base::Time date_modified() const { return metadata_.date_modified; }
 
   // Updates the last time an entity was used to fill a form and
   // increases the entity use count.
   void RecordEntityUsed(base::Time date);
 
   // Returns the last time an entity was used to fill a form.
-  base::Time use_date() const { return entity_metadata_.use_date; }
+  base::Time use_date() const { return metadata_.use_date; }
 
   // Returns how many times an entity was used to fill a form.
-  size_t use_count() const { return entity_metadata_.use_count; }
+  int64_t use_count() const { return metadata_.use_count; }
 
   // Returns the metadata for this instance.
-  const EntityMetadata& metadata() const { return entity_metadata_; }
+  const EntityMetadata& metadata() const { return metadata_; }
 
   // Sets the metadata for this instance.
   void set_metadata(EntityMetadata metadata) {
-    CHECK_EQ(guid_, metadata.guid);
-    entity_metadata_ = std::move(metadata);
+    CHECK_EQ(guid(), metadata.guid);
+    metadata_ = std::move(metadata);
   }
 
   // Returns true if the attributes of this entity instance cannot be edited by
@@ -376,8 +409,37 @@ class EntityInstance final {
 
   // Returns true if all attributes of `this` are present in `other` with the
   // same values or if `this` is a proper subset of `other`.
+  // When a masked attribute is compared to an unmasked one, only their suffixes
+  // are compared.
   bool IsSubsetOf(const EntityInstance& other) const;
 
+  // Returns whether any of the attributes are masked. This can only happen
+  // if `record_type()` is `kServerWallet`.
+  //
+  // Note that there can be entities with `record_type()` `kServerWallet` for
+  // which `IsMaskedServerEntity() == IsUnmaskedServerEntity() == false`.
+  // Examples include vehicle information, flight reservation entities,
+  // passport entities without a saved number, etc.
+  bool IsMaskedServerEntity() const;
+
+  // Returns whether `this` has `record_type() == kServerWallet` and any of
+  // its obfuscated attributes is not `masked()`.
+  // That is, `this` is an `EntityInstance` returned unmasked from a Wallet
+  // server; it is strictly transient and must never be persisted to disk.
+  bool IsUnmaskedServerEntity() const;
+
+  // Returns a copy of `this` with a new `id`.
+  EntityInstance CopyWithNewEntityId(EntityId id) const;
+
+  // Returns a copy of `this` with the given `record_type`.
+  EntityInstance CopyWithNewRecordType(RecordType record_type) const;
+
+  // Returns a copy of `this` where the attribute for `attribute.type()` is
+  // replaced by `attribute`.
+  EntityInstance CopyWithUpdatedAttribute(AttributeInstance attribute) const;
+
+  // Note that since operator== is defaulted, contrary to `IsSubsetOf()`,
+  // masked and unmasked attributes are considered distinct.
   friend bool operator==(const EntityInstance&,
                          const EntityInstance&) = default;
 
@@ -387,15 +449,15 @@ class EntityInstance final {
   EntityType type_;
   base::flat_set<AttributeInstance, AttributeInstance::CompareByType>
       attributes_;
-  EntityId guid_;
   std::string nickname_;
-  EntityMetadata entity_metadata_;
+  EntityMetadata metadata_;
   RecordType record_type_;
   AreAttributesReadOnly are_attributes_read_only_;
   std::string frecency_override_;
 };
 
 std::ostream& operator<<(std::ostream& os, const AttributeInstance& a);
+std::ostream& operator<<(std::ostream& os, const EntityInstance::RecordType& t);
 std::ostream& operator<<(std::ostream& os, const EntityInstance& e);
 
 struct EntityInstance::CompareByGuid {
@@ -413,6 +475,19 @@ struct EntityInstance::CompareByGuid {
     return lhs.guid() < rhs.guid();
   }
 };
+
+// Returns whether this (entity type, record type) combination supports
+// restricting local storage of obfuscated attributes to "masks" (e.g., the last
+// x digits/characters).
+//
+// If this is `true`, the full entity information can be stored on a server and
+// can be retrieved by the client only on demand. It is not persisted locally on
+// disk. However, note that even if this is `true` users may not be eligible for
+// creating masked server entities depending on their sync settings or their
+// locale. See `MayPerformAutofillAiAction`
+//   for the relevant permission checks.
+bool IsMaskedStorageSupported(EntityType type,
+                              EntityInstance::RecordType record_type);
 
 }  // namespace autofill
 

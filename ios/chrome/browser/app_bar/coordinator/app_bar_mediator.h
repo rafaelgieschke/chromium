@@ -8,20 +8,46 @@
 #import <Foundation/Foundation.h>
 
 #import "ios/chrome/browser/app_bar/ui/app_bar_mutator.h"
-#import "ios/chrome/browser/tab_switcher/tab_grid/base_grid/coordinator/tab_grid_observing.h"
 
 @protocol AppBarConsumer;
+@class BrowserActionFactory;
+@class IncognitoState;
+class PrefService;
+@protocol SceneCommands;
+@protocol TabGridCommands;
+@class TabGridState;
+@protocol TabGroupsCommands;
+class UrlLoadingBrowserAgent;
 class WebStateList;
 
-// Mediator for the app bar coordinator.
-@interface AppBarMediator : NSObject <AppBarMutator, TabGridObserving>
+// Mediator for the App Bar coordinator.
+@interface AppBarMediator : NSObject <AppBarMutator>
+
+// Handler for the scene commands.
+@property(nonatomic, weak) id<SceneCommands> sceneHandler;
+
+// Handler for the scene commands.
+@property(nonatomic, weak) id<TabGridCommands> tabGridHandler;
+
+// The regular Tab Groups command handler.
+@property(nonatomic, weak) id<TabGroupsCommands> regularTabGroupsCommands;
 
 // The consumer of this mediator.
 @property(nonatomic, weak) id<AppBarConsumer> consumer;
 
+// The regular actions factory.
+@property(nonatomic, strong) BrowserActionFactory* regularActionFactory;
+
+// The incognito actions factory.
+@property(nonatomic, strong) BrowserActionFactory* incognitoActionFactory;
+
 // Initializes the mediator with the two web state lists.
 - (instancetype)initWithRegularWebStateList:(WebStateList*)regularWebStateList
                       incognitoWebStateList:(WebStateList*)incognitoWebStateList
+                                prefService:(PrefService*)prefService
+                                  URLLoader:(UrlLoadingBrowserAgent*)URLLoader
+                               tabGridState:(TabGridState*)tabGridState
+                             incognitoState:(IncognitoState*)incognitoState
     NS_DESIGNATED_INITIALIZER;
 
 - (instancetype)init NS_UNAVAILABLE;

@@ -6,11 +6,9 @@
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
-#include "base/memory/memory_pressure_listener.h"
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -42,7 +40,6 @@
 #include "chrome/test/base/chrome_test_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "components/memory_pressure/fake_memory_pressure_monitor.h"
 #include "components/performance_manager/public/features.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -112,7 +109,7 @@ class ExpectStateTransitionObserver : public LifecycleUnitObserver {
     } else {
       LOG(ERROR) << "transition to state "
                  << static_cast<int>(lifecycle_unit_->GetState());
-      EXPECT_TRUE(base::Contains(allowed_states_, lifecycle_unit_->GetState()));
+      EXPECT_TRUE(allowed_states_.contains(lifecycle_unit_->GetState()));
     }
   }
 
@@ -245,9 +242,6 @@ class TabManagerTest : public InProcessBrowserTest,
         /*minimum_time_in_background_to_discard*/ base::TimeDelta());
   }
 
-  memory_pressure::test::FakeMemoryPressureMonitor
-      fake_memory_pressure_monitor_;
-
   base::SimpleTestClock test_clock_;
   base::SimpleTestTickClock test_tick_clock_;
   ScopedSetClocksForTesting scoped_set_clocks_for_testing_;
@@ -373,7 +367,7 @@ IN_PROC_BROWSER_TEST_P(TabManagerTest, TabManagerBasics) {
   EXPECT_FALSE(IsTabDiscarded(GetWebContentsAt(2)));
 
   // Navigate the third tab back twice.  We used to crash here due to
-  // crbug.com/121373.
+  // crbug.com/40183760.
   EXPECT_TRUE(chrome::CanGoBack(browser()));
   EXPECT_FALSE(chrome::CanGoForward(browser()));
   chrome::GoBack(browser(), WindowOpenDisposition::CURRENT_TAB);

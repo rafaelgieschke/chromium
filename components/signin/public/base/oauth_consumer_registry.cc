@@ -6,6 +6,8 @@
 
 #include "base/feature_list.h"
 #include "base/notreached.h"
+#include "components/contextual_tasks/public/features.h"
+#include "components/wallet/core/common/wallet_features.h"
 #include "google_apis/gaia/gaia_constants.h"
 
 namespace {
@@ -98,6 +100,7 @@ constexpr char kExtensionsIdentityAPIName[] = "extensions_identity_api";
 constexpr char kMantaName[] = "manta";
 constexpr char kChromeMemexName[] = "chrome_memex";
 constexpr char kDevtoolsAidaName[] = "devtools_aida_client";
+constexpr char kDevtoolsAiCodeName[] = "devtools_aicode_client";
 constexpr char kChromeOsBabelOrcaName[] = "chromeos_babel_orca";
 constexpr char kChromeOsBocaSchoolToolsAuthName[] =
     "chromeos_boca_school_tools_auth";
@@ -117,6 +120,9 @@ constexpr char kAshScannerKeyedServiceName[] = "ash_scanner_keyed_service";
 constexpr char kAshAutotestPrivateApiName[] = "ash_autotest_private_api";
 constexpr char kSyncDeviceStatisticsMetricsName[] =
     "sync_device_statistics_metrics";
+constexpr char kPrivateAiServiceName[] = "private_ai_service";
+constexpr char kWalletPassesName[] = "wallet_passes";
+constexpr char kAimEligibilityServiceName[] = "aim_eligibility_service";
 
 }  // namespace
 
@@ -490,12 +496,13 @@ OAuthConsumer OAuthConsumerRegistry::GetOAuthConsumerFromId(
           /*name=*/kYouTubeMusicName,
           /*scopes=*/{GaiaConstants::kYouTubeMusicOAuth2Scope});
     case OAuthConsumerId::kContextualTasks:
-      // TODO(crbug.com/461578148): Remove kChromeSyncOAuth2Scope once a scope
-      // is created specifically for the search results page.
       return OAuthConsumer(
           /*name=*/kContextualTasksName,
-          /*scopes=*/{GaiaConstants::kChromeSyncOAuth2Scope,
-                      GaiaConstants::kClearCutOAuth2Scope});
+          /*scopes=*/{contextual_tasks::ShouldUseSearchResultsScope()
+                          ? GaiaConstants::kSearchResultsOAuth2Scope
+                          : GaiaConstants::kChromeSyncOAuth2Scope,
+                      GaiaConstants::kClearCutOAuth2Scope,
+                      GaiaConstants::kLensOAuth2Scope});
     case OAuthConsumerId::kEnterprisePlusAddress:
       return GetOAuthConsumerForEnterprisePlusAddress();
     case OAuthConsumerId::kGlicUserStatus:
@@ -530,6 +537,25 @@ OAuthConsumer OAuthConsumerRegistry::GetOAuthConsumerFromId(
       return OAuthConsumer(
           /*name=*/kSyncDeviceStatisticsMetricsName,
           /*scopes=*/{GaiaConstants::kChromeSyncOAuth2Scope});
+    case OAuthConsumerId::kPrivateAiService:
+      return OAuthConsumer(
+          /*name=*/kPrivateAiServiceName,
+          /*scopes=*/{GaiaConstants::kPrivateAiAuthScope});
+    case OAuthConsumerId::kWalletPasses: {
+      CHECK(base::FeatureList::IsEnabled(
+          wallet::features::kWalletApiPrivatePassesEnabled));
+      return signin::OAuthConsumer(
+          /*name=*/kWalletPassesName,
+          /*scopes=*/{GaiaConstants::kWalletPassesOAuth2Scope});
+    }
+    case OAuthConsumerId::kAimEligibilityService:
+      return OAuthConsumer(
+          /*name=*/kAimEligibilityServiceName,
+          /*scopes=*/{GaiaConstants::kSearchResultsOAuth2Scope});
+    case OAuthConsumerId::kDevtoolsAiCode:
+      return OAuthConsumer(
+          /*name=*/kDevtoolsAiCodeName,
+          /*scopes=*/{GaiaConstants::kAiCodeOAuth2Scope});
   }
 }
 

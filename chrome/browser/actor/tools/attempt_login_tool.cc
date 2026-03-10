@@ -18,17 +18,22 @@
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
 #include "chrome/browser/password_manager/actor_login/actor_login_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
-#include "chrome/common/actor.mojom-data-view.h"
+#include "chrome/common/actor.mojom-shared.h"
 #include "chrome/common/actor/action_result.h"
-#include "chrome/common/actor_webui.mojom-data-view.h"
 #include "chrome/common/actor_webui.mojom.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/password_manager/core/browser/actor_login/actor_login_types.h"
 #include "components/password_manager/core/browser/features/password_features.h"
+#include "components/password_manager/core/browser/password_manager_util.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
+
+// TODO(crbug.com/482430429): Reconsider the use of BrowserWindowInterface on
+// Android.
+#if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#endif
 
 namespace actor {
 
@@ -60,6 +65,7 @@ mojom::ActionResultCode LoginResultToActorResult(
     case actor_login::LoginStatusResult::kSuccessUsernameAndPasswordFilled:
     case actor_login::LoginStatusResult::kSuccessUsernameFilled:
     case actor_login::LoginStatusResult::kSuccessPasswordFilled:
+    case actor_login::LoginStatusResult::kSuccessFederated:
       return mojom::ActionResultCode::kOk;
     case actor_login::LoginStatusResult::kErrorNoSigninForm:
       return mojom::ActionResultCode::kLoginNotLoginPage;
@@ -71,15 +77,36 @@ mojom::ActionResultCode LoginResultToActorResult(
       return mojom::ActionResultCode::kLoginDeviceReauthRequired;
     case actor_login::LoginStatusResult::kErrorDeviceReauthFailed:
       return mojom::ActionResultCode::kLoginDeviceReauthFailed;
+    case actor_login::LoginStatusResult::kErrorFederatedContinuation:
+      // TODO(crbug.com/481685277): handle the continuation case.
+    case actor_login::LoginStatusResult::kErrorFederatedAccountNotLoggedIn:
+    case actor_login::LoginStatusResult::kErrorFederatedAccountIsSignUp:
+    case actor_login::LoginStatusResult::kErrorFederatedAccountNotAvailable:
+    case actor_login::LoginStatusResult::kErrorFederatedIdpReturnedError:
+    case actor_login::LoginStatusResult::kErrorFederatedIdpNetworkError:
+    case actor_login::LoginStatusResult::kErrorFederatedTokenRequestAborted:
+    case actor_login::LoginStatusResult::kErrorFederatedFrameNotActive:
+    case actor_login::LoginStatusResult::
+        kErrorFederatedExpectedAccountNotPresent:
+    case actor_login::LoginStatusResult::kErrorFederatedTimeout:
+      // TODO(crbug.com/477507796): Handle federated login errors.
+      return mojom::ActionResultCode::kLoginFillingNotAllowed;
   }
 }
 
 }  // namespace
 
-AttemptLoginTool::AttemptLoginTool(TaskId task_id,
-                                   ToolDelegate& tool_delegate,
-                                   tabs::TabInterface& tab)
-    : Tool(task_id, tool_delegate), tab_handle_(tab.GetHandle()) {}
+AttemptLoginTool::AttemptLoginTool(
+    TaskId task_id,
+    ToolDelegate& tool_delegate,
+    tabs::TabInterface& tab,
+    std::optional<PageTarget> password_button,
+    std::optional<PageTarget> sign_in_with_google_button)
+    : Tool(task_id, tool_delegate),
+      tab_handle_(tab.GetHandle()),
+      password_button_(password_button),
+      sign_in_with_google_button_(sign_in_with_google_button),
+      attempt_login_tool_start_time_(base::TimeTicks::Now()) {}
 
 AttemptLoginTool::~AttemptLoginTool() {
   // Uploading the quality log on the destruction of the tool.
@@ -96,8 +123,7 @@ AttemptLoginTool::~AttemptLoginTool() {
   OptimizationGuideKeyedService* opt_guide_service =
       OptimizationGuideKeyedServiceFactory::GetForProfile(profile);
   if (opt_guide_service &&
-      base::FeatureList::IsEnabled(
-          password_manager::features::kActorLoginQualityLogs)) {
+      password_manager_util::ShouldUploadActorLoginMqls()) {
     // TODO(crbug.com/459393643): Add a check for filtering out logs of
     // enterprise users.
     quality_logger_.UploadFinalLog(
@@ -142,6 +168,7 @@ void AttemptLoginTool::Invoke(ToolCallback callback) {
     GetActorLoginService().AttemptLogin(
         tab, user_selected_credential_and_pemission->credential,
         should_store_permission, quality_logger_.AsWeakPtr(),
+        attempt_login_tool_start_time_,
         base::BindOnce(&AttemptLoginTool::OnAttemptLogin,
                        weak_ptr_factory_.GetWeakPtr(),
                        user_selected_credential_and_pemission->credential,
@@ -244,8 +271,15 @@ void AttemptLoginTool::FetchIcons() {
 
   base::flat_set<GURL> unique_sites;
   for (const auto& cred : credentials_) {
-    if (!cred.source_site_or_app.empty()) {
+    if (cred.source_site_or_app.empty()) {
+      continue;
+    }
+    if (cred.type == actor_login::CredentialType::kPassword) {
       unique_sites.insert(GURL(cred.source_site_or_app));
+    } else if (cred.federation_detail &&
+               !cred.federation_detail->brand_icon.IsEmpty()) {
+      fetched_icons_[base::UTF16ToUTF8(cred.source_site_or_app)] =
+          cred.federation_detail->brand_icon;
     }
   }
 
@@ -376,7 +410,7 @@ void AttemptLoginTool::OnCredentialCachingDone(
       webui::mojom::UserGrantedPermissionDuration::kAlwaysAllow;
   GetActorLoginService().AttemptLogin(
       tab, selected_credential, should_store_permission,
-      quality_logger_.AsWeakPtr(),
+      quality_logger_.AsWeakPtr(), attempt_login_tool_start_time_,
       base::BindOnce(&AttemptLoginTool::OnAttemptLogin,
                      weak_ptr_factory_.GetWeakPtr(), selected_credential,
                      should_store_permission));
@@ -440,6 +474,9 @@ void AttemptLoginTool::ObserveTabToAwaitFocus() {
       &AttemptLoginTool::OnWillDetach, base::Unretained(this)));
   tab_did_activate_subscription_ = tab->RegisterDidActivate(base::BindRepeating(
       &AttemptLoginTool::HandleTabActivatedChange, base::Unretained(this)));
+// TODO(crbug.com/482430429): Reconsider the use of BrowserWindowInterface on
+// Android.
+#if !BUILDFLAG(IS_ANDROID)
   BrowserWindowInterface* browser_window = tab->GetBrowserWindowInterface();
   // TODO(mcnee): Should we update the window subscription if the tab is moved?
   // The tab would probably be focused first which would cause us to stop
@@ -448,6 +485,7 @@ void AttemptLoginTool::ObserveTabToAwaitFocus() {
       browser_window->RegisterDidBecomeActive(
           base::BindRepeating(&AttemptLoginTool::HandleWindowActivatedChange,
                               base::Unretained(this)));
+#endif
 }
 
 void AttemptLoginTool::StopObservingTab() {
@@ -463,15 +501,23 @@ void AttemptLoginTool::MaybeRetryCredentialNeedingFocus() {
 
   tabs::TabInterface* tab = tab_handle_.Get();
   CHECK(tab);
-  BrowserWindowInterface* browser_window = tab->GetBrowserWindowInterface();
 
   // Note that this is more specific than the conditions checked in
   // `ActorLoginDelegateImpl::IsTaskInFocus`, but for simplicity we check for
   // the specific tab being activated, since the task nudge will take the user
   // there anyway.
-  if (!browser_window->IsActive() || !tab->IsActivated()) {
+  if (!tab->IsActivated()) {
     return;
   }
+
+  // TODO(crbug.com/482430429): Reconsider the use of BrowserWindowInterface on
+  // Android.
+#if !BUILDFLAG(IS_ANDROID)
+  BrowserWindowInterface* browser_window = tab->GetBrowserWindowInterface();
+  if (!browser_window->IsActive()) {
+    return;
+  }
+#endif
 
   StopObservingTab();
   tool_delegate().UninterruptFromTool();
@@ -479,6 +525,7 @@ void AttemptLoginTool::MaybeRetryCredentialNeedingFocus() {
   GetActorLoginService().AttemptLogin(
       tab, credential_awaiting_task_focus_->first,
       credential_awaiting_task_focus_->second, quality_logger_.AsWeakPtr(),
+      attempt_login_tool_start_time_,
       base::BindOnce(&AttemptLoginTool::OnAttemptLogin,
                      weak_ptr_factory_.GetWeakPtr(),
                      credential_awaiting_task_focus_->first,

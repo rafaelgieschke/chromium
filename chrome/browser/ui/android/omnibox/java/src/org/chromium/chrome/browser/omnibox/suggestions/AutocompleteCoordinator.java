@@ -20,18 +20,20 @@ import androidx.core.view.ViewCompat;
 import org.chromium.base.Callback;
 import org.chromium.base.ObserverList;
 import org.chromium.base.ResettersForTesting;
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.build.annotations.Initializer;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.lifecycle.ActivityLifecycleDispatcher;
 import org.chromium.chrome.browser.omnibox.DeferredIMEWindowInsetApplicationCallback;
+import org.chromium.chrome.browser.omnibox.FuseboxSessionState;
 import org.chromium.chrome.browser.omnibox.LocationBarDataProvider;
 import org.chromium.chrome.browser.omnibox.R;
 import org.chromium.chrome.browser.omnibox.UrlBarEditingTextStateProvider;
 import org.chromium.chrome.browser.omnibox.fusebox.FuseboxCoordinator;
 import org.chromium.chrome.browser.omnibox.suggestions.AutocompleteController.OnSuggestionsReceivedListener;
 import org.chromium.chrome.browser.omnibox.suggestions.SuggestionListViewBinder.SuggestionListViewHolder;
+import org.chromium.chrome.browser.omnibox.suggestions.action.OmniboxActionDelegateImpl;
 import org.chromium.chrome.browser.omnibox.suggestions.base.BaseSuggestionViewBinder;
 import org.chromium.chrome.browser.omnibox.suggestions.basic.BasicSuggestionProcessor.BookmarkState;
 import org.chromium.chrome.browser.omnibox.voice.VoiceRecognitionHandler;
@@ -39,9 +41,9 @@ import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.share.ShareDelegate;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.ui.theme.BrandedColorScheme;
+import org.chromium.components.omnibox.AutocompleteInput;
 import org.chromium.components.omnibox.AutocompleteMatch;
 import org.chromium.components.omnibox.OmniboxFeatures;
-import org.chromium.components.omnibox.action.OmniboxActionDelegate;
 import org.chromium.ui.AsyncViewProvider;
 import org.chromium.ui.AsyncViewStub;
 import org.chromium.ui.ViewProvider;
@@ -61,7 +63,7 @@ import java.util.function.Supplier;
 @NullMarked
 public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
     private final ViewGroup mParent;
-    private final ObservableSupplier<Profile> mProfileSupplier;
+    private final MonotonicObservableSupplier<Profile> mProfileSupplier;
     private final Callback<Profile> mProfileChangeCallback;
     private final AutocompleteMediator mMediator;
     private final Supplier<@Nullable ModalDialogManager> mModalDialogManagerSupplier;
@@ -90,10 +92,10 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
             Supplier<@Nullable Tab> activityTabSupplier,
             @Nullable Supplier<ShareDelegate> shareDelegateSupplier,
             LocationBarDataProvider locationBarDataProvider,
-            ObservableSupplier<Profile> profileObservableSupplier,
+            MonotonicObservableSupplier<Profile> profileObservableSupplier,
             Callback<String> bringTabGroupToForegroundCallback,
             BookmarkState bookmarkState,
-            OmniboxActionDelegate omniboxActionDelegate,
+            OmniboxActionDelegateImpl omniboxActionDelegate,
             @Nullable OmniboxSuggestionsDropdownScrollListener scrollListener,
             ActivityLifecycleDispatcher lifecycleDispatcher,
             boolean forcePhoneStyleOmnibox,
@@ -168,7 +170,7 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
 
         mProfileSupplier = profileObservableSupplier;
         mProfileChangeCallback = this::setAutocompleteProfile;
-        mProfileSupplier.addObserver(mProfileChangeCallback);
+        mProfileSupplier.addSyncObserverAndPostIfNonNull(mProfileChangeCallback);
         mAdapter = new OmniboxSuggestionsDropdownAdapter(listItems);
 
         if (!OmniboxFeatures.sAsyncViewInflation.isEnabled()) {
@@ -251,12 +253,32 @@ public class AutocompleteCoordinator implements OmniboxSuggestionsVisualState {
         };
     }
 
-    public void onUrlFocusChange(boolean hasFocus) {
-        mMediator.onOmniboxSessionStateChange(hasFocus);
+    /**
+     * Starts a new / resumes existing omnibox session.
+     *
+     * @param session The session state for this session. A new session may be applied without going
+     *     through the endInput() (valid -> valid). This is the case for tab switching.
+     */
+    public void beginInput(FuseboxSessionState session) {
+        mMediator.beginInput(session);
     }
 
-    public void onUrlAnimationFinished(boolean hasFocus) {
-        mMediator.onUrlAnimationFinished(hasFocus);
+    /** Ends the current omnibox session. */
+    public void endInput() {
+        mMediator.endInput();
+    }
+
+    /**
+     * Serve Java-cached ZPS before session can be started with Autocomplete support.
+     *
+     * @param input The input to serve ZPS for.
+     */
+    public void serveCachedZeroSuggest(AutocompleteInput input) {
+        mMediator.serveCachedZeroSuggest(input);
+    }
+
+    public void onUrlAnimationFinished() {
+        mMediator.onUrlAnimationFinished();
     }
 
     /**

@@ -9,6 +9,7 @@
 #include "base/compiler_specific.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/test_future.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
@@ -29,6 +30,7 @@
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/omnibox/omnibox_controller.h"
 #include "chrome/browser/ui/omnibox/omnibox_edit_model.h"
+#include "chrome/browser/ui/omnibox/omnibox_next_features.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/page_info/chrome_page_info_delegate.h"
 #include "chrome/browser/ui/search/ntp_test_utils.h"
@@ -112,11 +114,10 @@ void ShowSettings(Browser* browser) {
 
 BrowserNavigatorTest::BrowserNavigatorTest() {
   scoped_feature_list_.InitWithFeatures(
-      {
-          features::kFileSystemAccessPersistentPermissions,
-          content_settings::features::kTrackingProtection3pcd,
-      },
-      {});
+      /*enabled_features*/ {features::kFileSystemAccessPersistentPermissions,
+                            omnibox::kWebUIOmniboxPopup,
+                            omnibox::internal::kWebUIOmniboxAimPopup},
+      /*disabled_features*/ {});
 }
 
 void BrowserNavigatorTest::SetUpOnMainThread() {
@@ -293,13 +294,13 @@ Browser* BrowserNavigatorTest::NavigateHelper(const GURL& url,
     EXPECT_FALSE(expected_contents);
     expected_contents = browser->tab_strip_model()->GetActiveWebContents();
   }
-  std::optional<content::CreateAndLoadWebContentsObserver> new_tab_observer;
+  std::optional<ui_test_utils::AllBrowserTabAddedWaiter> new_tab_observer;
   std::optional<content::LoadStopObserver> load_stop_observer;
   if (wait_for_navigation) {
     if (expected_contents) {
       load_stop_observer.emplace(expected_contents);
     } else {
-      new_tab_observer.emplace();
+      new_tab_observer.emplace(1);
     }
   }
 
@@ -775,6 +776,52 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, Disposition_NewWindow) {
       params.browser->GetBrowserForMigrationOnly()->tab_strip_model()->count());
 }
 
+// This test verifies that navigating with WindowOpenDisposition = NEW_WINDOW
+// preserves the opener when `source_contents` is provided.
+IN_PROC_BROWSER_TEST_F(
+    BrowserNavigatorTest,
+    Disposition_NewWindow_OpenerPreserved_ViaSourceContents) {
+  NavigateParams params(MakeNavigateParams());
+  params.disposition = WindowOpenDisposition::NEW_WINDOW;
+  params.source_contents = browser()->tab_strip_model()->GetActiveWebContents();
+  Navigate(&params);
+
+  // Navigate() should have opened a new toplevel window.
+  EXPECT_NE(browser(), params.browser);
+  EXPECT_EQ(2u, chrome::GetTotalBrowserCount());
+
+  // Verify the opener is set on the new tab.
+  TabStripModel* new_tab_strip =
+      params.browser->GetBrowserForMigrationOnly()->tab_strip_model();
+  EXPECT_EQ(1, new_tab_strip->count());
+  EXPECT_EQ(browser()->tab_strip_model()->GetTabAtIndex(0),
+            new_tab_strip->GetOpenerOfTabAt(0));
+}
+
+// This test verifies that navigating with WindowOpenDisposition = NEW_WINDOW
+// preserves the opener when `opener` (RenderFrameHost) is provided.
+IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
+                       Disposition_NewWindow_OpenerPreserved_ViaOpener) {
+  NavigateParams params(MakeNavigateParams());
+  params.disposition = WindowOpenDisposition::NEW_WINDOW;
+  params.opener = browser()
+                      ->tab_strip_model()
+                      ->GetActiveWebContents()
+                      ->GetPrimaryMainFrame();
+  Navigate(&params);
+
+  // Navigate() should have opened a new toplevel window.
+  EXPECT_NE(browser(), params.browser);
+  EXPECT_EQ(2u, chrome::GetTotalBrowserCount());
+
+  // Verify the opener is set on the new tab.
+  TabStripModel* new_tab_strip =
+      params.browser->GetBrowserForMigrationOnly()->tab_strip_model();
+  EXPECT_EQ(1, new_tab_strip->count());
+  EXPECT_EQ(browser()->tab_strip_model()->GetTabAtIndex(0),
+            new_tab_strip->GetOpenerOfTabAt(0));
+}
+
 // This test verifies that a source tab to the left of the target tab can
 // be switched away from and closed. It verifies that if we close the
 // earlier tab, that we don't use a stale index, and select the wrong tab.
@@ -852,7 +899,8 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, SaveAfterFocusTabSwitchTest) {
                  WindowOpenDisposition::NEW_FOREGROUND_TAB, true);
 
   LocationBar* location_bar = browser()->window()->GetLocationBar();
-  location_bar->FocusLocation(true);
+  location_bar->FocusLocation(/*is_user_initiated=*/true,
+                              /*clear_focus_if_failed=*/false);
 
   NavigateHelper(first_url, browser(), WindowOpenDisposition::SWITCH_TO_TAB,
                  false);
@@ -1482,7 +1530,15 @@ IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
 }
 
 // This test makes sure a crashed singleton tab reloads from a new navigation.
-IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest, NavigateToCrashedSingletonTab) {
+#if BUILDFLAG(IS_WIN)
+// TODO(crbug.com/477008551): Investigate this Windows timeout.
+#define MAYBE_NavigateToCrashedSingletonTab \
+  DISABLED_NavigateToCrashedSingletonTab
+#else
+#define MAYBE_NavigateToCrashedSingletonTab NavigateToCrashedSingletonTab
+#endif
+IN_PROC_BROWSER_TEST_F(BrowserNavigatorTest,
+                       MAYBE_NavigateToCrashedSingletonTab) {
   const GURL singleton_url(GetContentSettingsURL());
   WebContents* web_contents = chrome::AddSelectedTabWithURL(
       browser(), singleton_url, ui::PAGE_TRANSITION_LINK);

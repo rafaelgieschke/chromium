@@ -28,7 +28,6 @@
 #include "chrome/browser/extensions/extension_install_prompt_show_params.h"
 #include "chrome/browser/extensions/extension_management.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/external_install_manager.h"
 #include "chrome/browser/extensions/webstore_data_fetcher.h"
 #include "chrome/browser/profiles/profile.h"
@@ -45,6 +44,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/pref_names.h"
+#include "extensions/browser/ui_util.h"
 #include "extensions/browser/uninstall_reason.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
@@ -231,8 +231,7 @@ void ExternalInstallBubbleAlert::ExecuteMenuItem(Browser* browser) {
 std::u16string ExternalInstallBubbleAlert::GetBubbleViewTitle() {
   return l10n_util::GetStringFUTF16(
       IDS_EXTENSION_EXTERNAL_INSTALL_ALERT_BUBBLE_TITLE,
-      extensions::util::GetFixupExtensionNameForUIDisplay(
-          prompt_->extension()->name()));
+      ui_util::GetFixupExtensionNameForUIDisplay(prompt_->extension()->name()));
 }
 
 std::vector<std::u16string>
@@ -315,10 +314,10 @@ ExternalInstallErrorDesktop::ExternalInstallErrorDesktop(
 
     PrefService* prefs = profile->GetPrefs();
 
-    const base::Value::List& initial_list =
+    const base::ListValue& initial_list =
         prefs->GetList(pref_names::kInitialInstallList);
 
-    if (base::Contains(initial_list, extension_id_)) {
+    if (initial_list.contains(extension_id_)) {
       prompt_->SetInitialExtensionsProviderName(base::UTF8ToUTF16(
           prefs->GetString(pref_names::kInitialInstallProviderName)));
     }

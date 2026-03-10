@@ -10,13 +10,13 @@
 #include "build/build_config.h"
 #include "components/enterprise/common/proto/upload_request_response.pb.h"
 #include "components/safe_browsing/buildflags.h"
-#include "components/safe_browsing/core/browser/db/hit_report.h"
 #include "components/safe_browsing/core/browser/download_check_result.h"
 #include "components/safe_browsing/core/common/proto/csd.pb.h"
 #include "components/safe_browsing/core/common/proto/realtimeapi.pb.h"
 #include "components/safe_browsing/core/common/proto/safebrowsingv5.pb.h"
 #include "components/safe_browsing/core/common/proto/webui.pb.h"
 #include "components/sync/protocol/user_event_specifics.pb.h"
+#include "url/gurl.h"
 
 namespace safe_browsing {
 namespace internal {
@@ -28,7 +28,7 @@ class WebUIInfoSingletonEventObserver;
 
 namespace safe_browsing::web_ui {
 
-#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION) && !BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
 struct DeepScanDebugData {
   DeepScanDebugData();
   DeepScanDebugData(const DeepScanDebugData&);
@@ -45,7 +45,9 @@ struct DeepScanDebugData {
   std::string response_status;
   std::optional<enterprise_connectors::ContentAnalysisResponse> response;
 };
+#endif  //  BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
 
+#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION) && !BUILDFLAG(IS_ANDROID)
 // Local override of a download TailoredVerdict.
 struct TailoredVerdictOverrideData {
   // Identifies the SafeBrowsingUIHandler it was set from, it is derived from
@@ -65,7 +67,8 @@ struct TailoredVerdictOverrideData {
   std::optional<ClientDownloadResponse::TailoredVerdict> override_value;
   SourceId source = 0u;
 };
-#endif
+#endif  //  BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION) &&
+        //  !BUILDFLAG(IS_ANDROID)
 
 // The struct to combine a PhishGuard request and the token associated
 // with it. The token is not part of the request proto because it is sent in the
@@ -108,23 +111,23 @@ struct ClientPhishingRequestAndToken {
 std::string UserReadableTimeFromMillisSinceEpoch(int64_t time_in_milliseconds);
 void AddStoreInfo(
     const DatabaseManagerInfo::DatabaseInfo::StoreInfo& store_info,
-    base::Value::List& database_info_list);
+    base::ListValue& database_info_list);
 
 void AddDatabaseInfo(const DatabaseManagerInfo::DatabaseInfo& database_info,
-                     base::Value::List& database_info_list);
+                     base::ListValue& database_info_list);
 
 void AddUpdateInfo(const DatabaseManagerInfo::UpdateInfo& update_info,
-                   base::Value::List& database_info_list);
+                   base::ListValue& database_info_list);
 
 void ParseFullHashInfo(
     const FullHashCacheInfo::FullHashCache::CachedHashPrefixInfo::FullHashInfo&
         full_hash_info,
-    base::Value::Dict& full_hash_info_dict);
+    base::DictValue& full_hash_info_dict);
 
 void ParseFullHashCache(const FullHashCacheInfo::FullHashCache& full_hash_cache,
-                        base::Value::List& full_hash_cache_list);
+                        base::ListValue& full_hash_cache_list);
 void ParseFullHashCacheInfo(const FullHashCacheInfo& full_hash_cache_info_proto,
-                            base::Value::List& full_hash_cache_info);
+                            base::ListValue& full_hash_cache_info);
 
 std::string AddFullHashCacheInfo(
     const FullHashCacheInfo& full_hash_cache_info_proto);
@@ -140,16 +143,14 @@ std::string SerializeClientPhishingResponse(const ClientPhishingResponse& cpr);
 std::string SerializeCSBRR(const ClientSafeBrowsingReportRequest& report);
 std::string SerializeDownloadUrlChecked(const std::vector<GURL>& urls,
                                         DownloadCheckResult result);
-std::string SerializeHitReport(const HitReport& hit_report);
 std::string SerializeJson(base::ValueView value);
-base::Value::Dict SerializePGEvent(const sync_pb::UserEventSpecifics& event);
-base::Value::Dict SerializeSecurityEvent(
-    const sync_pb::GaiaPasswordReuse& event);
+base::DictValue SerializePGEvent(const sync_pb::UserEventSpecifics& event);
+base::DictValue SerializeSecurityEvent(const sync_pb::GaiaPasswordReuse& event);
 #if BUILDFLAG(IS_ANDROID)
 // This serializes the internal::ReferringAppInfo struct (not to be confused
 // with the protobuf message ReferringAppInfo), which contains intermediate
 // information obtained from Java.
-base::Value::Dict SerializeReferringAppInfo(
+base::DictValue SerializeReferringAppInfo(
     const internal::ReferringAppInfo& info);
 #endif
 std::string SerializePGPing(
@@ -160,14 +161,14 @@ std::string SerializeURTLookupResponse(const RTLookupResponse& response);
 std::string SerializeHPRTLookupPing(const HPRTLookupRequest& ping);
 std::string SerializeHPRTLookupResponse(
     const V5::SearchHashesResponse& response);
-base::Value::Dict SerializeLogMessage(base::Time timestamp,
-                                      const std::string& message);
-base::Value::Dict SerializeReportingEvent(const base::Value::Dict& event);
-base::Value::Dict SerializeUploadEventsRequest(
+base::DictValue SerializeLogMessage(base::Time timestamp,
+                                    const std::string& message);
+base::DictValue SerializeReportingEvent(const base::DictValue& event);
+base::DictValue SerializeUploadEventsRequest(
     const ::chrome::cros::reporting::proto::UploadEventsRequest&
         upload_events_request,
-    const base::Value::Dict& result);
-#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION) && !BUILDFLAG(IS_ANDROID)
+    const base::DictValue& result);
+#if BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
 std::string SerializeContentAnalysisRequest(
     bool per_profile_request,
     const std::string& access_token_truncated,
@@ -176,10 +177,9 @@ std::string SerializeContentAnalysisRequest(
     const enterprise_connectors::ContentAnalysisRequest& request);
 std::string SerializeContentAnalysisResponse(
     const enterprise_connectors::ContentAnalysisResponse& response);
-base::Value::Dict SerializeDeepScanDebugData(const std::string& token,
-                                             const DeepScanDebugData& data);
-#endif  // BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION) &&
-        // !BUILDFLAG(IS_ANDROID)
+base::DictValue SerializeDeepScanDebugData(const std::string& token,
+                                           const DeepScanDebugData& data);
+#endif  // BUILDFLAG(SAFE_BROWSING_DOWNLOAD_PROTECTION)
 
 }  // namespace safe_browsing::web_ui
 

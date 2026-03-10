@@ -88,7 +88,8 @@ class CORE_EXPORT FrameLoader final {
             std::unique_ptr<PolicyContainer> policy_container,
             const StorageKey& storage_key,
             ukm::SourceId document_ukm_source_id,
-            const KURL& creator_base_url);
+            const KURL& creator_base_url,
+            std::unique_ptr<base::UnguessableToken> sandbox_origin_token);
 
   ResourceRequest ResourceRequestForReload(
       WebFrameLoadType,
@@ -187,7 +188,9 @@ class CORE_EXPORT FrameLoader final {
   // receive the next document commit, or false otherwise.
   bool DetachDocument();
 
-  bool ShouldClose(bool is_reload = false);
+  bool ShouldClose(bool is_reload,
+                   base::TimeTicks& out_before_unload_dialog_opened_time,
+                   base::TimeTicks& out_before_unload_dialog_closed_time);
 
   // Dispatches the Unload event for the current document and fills in this
   // document's info in OldDocumentInfoForCommit if

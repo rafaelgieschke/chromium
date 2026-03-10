@@ -185,13 +185,11 @@ static PositionType CanonicalPosition(const PositionType& position) {
     return next.IsNotNull() ? next : prev;
 
   Node* const next_node = next.AnchorNode();
-  Node* next_editing_root = RootEditableElementOf(next);
   Node* const prev_node = prev.AnchorNode();
-  Node* prev_editing_root = RootEditableElementOf(prev);
   const bool prev_is_in_same_editable_element =
-      prev_node && prev_editing_root == editing_root;
+      prev_node && RootEditableElementOf(prev) == editing_root;
   const bool next_is_in_same_editable_element =
-      next_node && next_editing_root == editing_root;
+      next_node && RootEditableElementOf(next) == editing_root;
   if (prev_is_in_same_editable_element && !next_is_in_same_editable_element)
     return prev;
 
@@ -201,11 +199,6 @@ static PositionType CanonicalPosition(const PositionType& position) {
   if (!next_is_in_same_editable_element && !prev_is_in_same_editable_element) {
     // `prev/next_editing_root` is a child node of `editing_root`.
     if (editing_root) {
-      if (editing_root->contains(next_editing_root)) {
-        return next;
-      } else if (editing_root->contains(prev_editing_root)) {
-        return prev;
-      }
       // If `prev/next_editing_root` is not in the same block as `editing_root`,
       // but the `position` is editable and visually equivalent position,
       // directly return the `position`.
@@ -246,9 +239,20 @@ AdjustBackwardPositionToAvoidCrossingEditingBoundariesTemplate(
 
   ContainerNode* highest_root = HighestEditableRoot(anchor);
 
-  // Return empty position if |pos| is not somewhere inside the editable
-  // region containing this position
+  // Return first position in the anchor's text node if |pos| is not somewhere
+  // inside the editable region containing this position.
   if (highest_root && !highest_root->contains(pos.AnchorNode())) {
+    if (RuntimeEnabledFeatures::
+            ClampWordBoundaryToContentEditableScopeEnabled()) {
+      const Node* first_editable = anchor.ComputeContainerNode();
+      if (first_editable->IsTextNode()) {
+        PositionTemplate<Strategy> first_position =
+            PositionTemplate<Strategy>::FirstPositionInNode(*first_editable);
+        if (anchor != first_position) {
+          return PositionWithAffinityTemplate<Strategy>(first_position);
+        }
+      }
+    }
     return PositionWithAffinityTemplate<Strategy>();
   }
 
@@ -621,8 +625,7 @@ bool EndsOfNodeAreVisuallyDistinctPositions(const Node* node) {
     return true;
 
   // There is a VisiblePosition inside an empty inline-block container.
-  return layout_object->IsAtomicInlineLevel() &&
-         CanHaveChildrenForEditing(node) &&
+  return layout_object->IsAtomicInline() && CanHaveChildrenForEditing(node) &&
          !To<LayoutBox>(layout_object)->StitchedSize().IsEmpty() &&
          !HasRenderedNonAnonymousDescendantsWithHeight(layout_object);
 }
@@ -1270,7 +1273,7 @@ static VisiblePositionTemplate<Strategy> NextPositionOfAlgorithm(
     const PositionWithAffinityTemplate<Strategy>& position,
     EditingBoundaryCrossingRule rule) {
   const VisiblePositionTemplate<Strategy> next = CreateVisiblePosition(
-      NextVisuallyDistinctCandidate(position.GetPosition()),
+      NextVisuallyDistinctCandidate(position.GetPosition(), rule),
       position.Affinity());
 
   switch (rule) {
@@ -1343,7 +1346,7 @@ static VisiblePositionTemplate<Strategy> PreviousPositionOfAlgorithm(
     const PositionTemplate<Strategy>& position,
     EditingBoundaryCrossingRule rule) {
   const PositionTemplate<Strategy> prev_position =
-      PreviousVisuallyDistinctCandidate(position);
+      PreviousVisuallyDistinctCandidate(position, rule);
 
   // return null visible position if there is no previous visible position
   if (prev_position.AtStartOfTree())

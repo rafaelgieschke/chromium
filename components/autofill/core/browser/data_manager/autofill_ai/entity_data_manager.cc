@@ -6,9 +6,9 @@
 
 #include <memory>
 
-#include "base/containers/contains.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/uuid.h"
+#include "components/accessibility_annotator/core/accessibility_annotation_service.h"
 #include "components/autofill/core/browser/data_manager/autofill_ai/entity_instance_cleaner.h"
 #include "components/autofill/core/browser/data_model/autofill_ai/entity_instance.h"
 #include "components/autofill/core/browser/integrators/autofill_ai/metrics/autofill_ai_metrics.h"
@@ -24,30 +24,21 @@
 
 namespace autofill {
 
-namespace {
-
-// Returns true if any of the features that use wallet public passes are
-// enabled.
-bool WalletPublicPassesEnabled() {
-  return base::FeatureList::IsEnabled(syncer::kSyncWalletFlightReservations) ||
-         base::FeatureList::IsEnabled(syncer::kSyncWalletVehicleRegistrations);
-}
-
-}  // namespace
-
 EntityDataManager::EntityDataManager(
     PrefService* pref_service,
     const signin::IdentityManager* identity_manager,
     syncer::SyncService* sync_service,
     scoped_refptr<AutofillWebDataService> webdata_service,
     history::HistoryService* history_service,
-    strike_database::StrikeDatabaseBase* strike_database)
+    strike_database::StrikeDatabaseBase* strike_database,
+    accessibility_annotator::AccessibilityAnnotationService*
+        accessibility_annotator_service,
+    GeoIpCountryCode variation_country_code)
     : webdata_service_(std::move(webdata_service)),
-      entity_instance_cleaner_(this, sync_service, pref_service) {
+      entity_instance_cleaner_(this, sync_service, pref_service),
+      variation_country_code_(std::move(variation_country_code)) {
   CHECK(webdata_service_);
-  if (WalletPublicPassesEnabled()) {
-    webdata_service_observation_.Observe(webdata_service_.get());
-  }
+  webdata_service_observation_.Observe(webdata_service_.get());
   LoadEntities();
   if (history_service) {
     history_service_observation_.Observe(history_service);
@@ -57,6 +48,8 @@ EntityDataManager::EntityDataManager(
         std::make_unique<AutofillAiSaveStrikeDatabaseByHost>(strike_database);
   }
 
+  const bool user_is_opted_in =
+      GetAutofillAiOptInStatus(pref_service, identity_manager);
   // Initial Autofill AI users have their opt-in pref stored keyed by their
   // gaia-id and not syncable. On the other hand, the new Autofill AI opt-in
   // pref (`prefs::kAutofillAiSyncedOptInStatus`) is a regular syncable pref.
@@ -70,14 +63,11 @@ EntityDataManager::EntityDataManager(
     CHECK(synced_pref);
     if (HasSetLocalAutofillAiOptInStatus(pref_service, identity_manager)) {
       if (!synced_pref->HasUserSetting()) {
-        const bool pref_migration_value =
-            GetAutofillAiOptInStatusFromNonSyncingPref(pref_service,
-                                                       identity_manager);
         pref_service->SetBoolean(prefs::kAutofillAiSyncedOptInStatus,
-                                 pref_migration_value);
+                                 user_is_opted_in);
         base::UmaHistogramEnumeration(
             "Autofill.Ai.OptIn.PrefMigration",
-            pref_migration_value
+            user_is_opted_in
                 ? AutofillAiPrefMigrationStatus::kPrefMigratedEnabled
                 : AutofillAiPrefMigrationStatus::kPrefMigratedDisabled);
       } else {
@@ -93,17 +83,27 @@ EntityDataManager::EntityDataManager(
   }
 
   // This assumes that `EntityDataManager` is created once on profile creation.
-  base::UmaHistogramEnumeration(
-      "Autofill.Ai.OptIn.Status.Startup",
-      GetAutofillAiOptInStatus(pref_service, identity_manager)
-          ? AutofillAiOptInStatus::kOptedIn
-          : AutofillAiOptInStatus::kOptedOut);
+  base::UmaHistogramEnumeration("Autofill.Ai.OptIn.Status.Startup",
+                                user_is_opted_in
+                                    ? AutofillAiOptInStatus::kOptedIn
+                                    : AutofillAiOptInStatus::kOptedOut);
+
+  if (base::FeatureList::IsEnabled(
+          features::kAutofillUseAccessibilityAnnotator) &&
+      accessibility_annotator_service) {
+    accessibility_annotator_observation_.Observe(
+        accessibility_annotator_service);
+  }
 }
 
 EntityDataManager::~EntityDataManager() {
   if (pending_query_) {
     webdata_service_->CancelRequest(pending_query_);
   }
+}
+
+void EntityDataManager::Shutdown() {
+  history_service_observation_.Reset();
 }
 
 void EntityDataManager::LoadEntities() {
@@ -130,7 +130,7 @@ void EntityDataManager::LoadEntities() {
           self->NotifyEntityInstancesChanged();
         }
       },
-      weak_ptr_factory_.GetWeakPtr()));
+      GetWeakPtr()));
 }
 
 void EntityDataManager::AddOrUpdateEntityInstance(EntityInstance entity) {
@@ -149,7 +149,7 @@ void EntityDataManager::AddOrUpdateEntityInstance(EntityInstance entity) {
             }
             self->NotifyEntityInstancesChanged();
           },
-          weak_ptr_factory_.GetWeakPtr()));
+          GetWeakPtr()));
 }
 
 void EntityDataManager::RemoveEntityInstance(EntityInstance::EntityId guid) {
@@ -169,7 +169,7 @@ void EntityDataManager::RemoveEntityInstance(EntityInstance::EntityId guid) {
             self->entities_.erase(eic.key());
             self->NotifyEntityInstancesChanged();
           },
-          weak_ptr_factory_.GetWeakPtr()));
+          GetWeakPtr()));
 }
 
 void EntityDataManager::RemoveEntityInstancesModifiedBetween(
@@ -204,9 +204,8 @@ bool EntityDataManager::HasPendingQueries() const {
 }
 
 void EntityDataManager::OnAutofillChangedBySync(syncer::DataType data_type) {
-  if ((data_type == syncer::AUTOFILL_VALUABLE && WalletPublicPassesEnabled()) ||
-      (data_type == syncer::AUTOFILL_VALUABLE_METADATA &&
-       base::FeatureList::IsEnabled(syncer::kSyncAutofillValuableMetadata))) {
+  if (data_type == syncer::AUTOFILL_VALUABLE ||
+      data_type == syncer::AUTOFILL_VALUABLE_METADATA) {
     LoadEntities();
   }
 }
@@ -217,6 +216,14 @@ void EntityDataManager::OnHistoryDeletions(
   if (save_strike_db_by_host_) {
     save_strike_db_by_host_->ClearStrikesWithHistory(deletion_info);
   }
+}
+
+void EntityDataManager::OnEntityDataChanged(
+    accessibility_annotator::EntityDataProvider& provider,
+    accessibility_annotator::EntityTypeEnumSet entity_types) {
+  DCHECK(base::FeatureList::IsEnabled(
+      features::kAutofillUseAccessibilityAnnotator));
+  // TODO(crbug.com/483403739): Implement.
 }
 
 void EntityDataManager::RecordEntityUsed(const EntityInstance::EntityId& guid,
@@ -233,6 +240,10 @@ void EntityDataManager::NotifyEntityInstancesChanged() {
   for (Observer& observer : observers_) {
     observer.OnEntityInstancesChanged();
   }
+}
+
+const GeoIpCountryCode& EntityDataManager::GetVariationCountryCode() const {
+  return variation_country_code_;
 }
 
 }  // namespace autofill

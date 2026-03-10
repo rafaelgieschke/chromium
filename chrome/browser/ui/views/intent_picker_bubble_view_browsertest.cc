@@ -75,14 +75,10 @@ std::string GetLinkCapturingTestName(
 class IntentPickerBrowserTest : public web_app::WebAppNavigationBrowserTest {
  public:
   IntentPickerBrowserTest() {
-    if (IsMigrationEnabled()) {
-      scoped_feature_list_.InitAndEnableFeatureWithParameters(
-          features::kPageActionsMigration,
-          {{features::kPageActionsMigrationIntentPicker.name, "true"}});
-    } else {
-      scoped_feature_list_.InitWithFeatures(
-          {}, {::features::kPageActionsMigration});
-    }
+    scoped_feature_list_.InitAndEnableFeatureWithParameters(
+        features::kPageActionsMigration,
+        {{features::kPageActionsMigrationIntentPicker.name,
+          IsMigrationEnabled() ? "true" : "false"}});
   }
 
   template <typename Action>
@@ -165,13 +161,10 @@ class IntentPickerIconBrowserTest
         apps::test::GetFeaturesToEnableLinkCapturingUX(LinkCapturingVersion());
 
     features_to_enable.push_back({blink::features::kPaintHolding, {}});
-    if (IsMigrationEnabled()) {
-      features_to_enable.push_back(
-          {::features::kPageActionsMigration,
-           {{::features::kPageActionsMigrationIntentPicker.name, "true"}}});
-    }
     features_to_enable.push_back(
-        {features::kPwaNavigationCapturingWithScopeExtensions, {}});
+        {::features::kPageActionsMigration,
+         {{::features::kPageActionsMigrationIntentPicker.name,
+           IsMigrationEnabled() ? "true" : "false"}}});
 
     feature_list_.InitWithFeaturesAndParameters(features_to_enable, {});
   }
@@ -459,11 +452,10 @@ class IntentPickerIconBrowserBubbleTest
     std::vector<base::test::FeatureRefAndParams> features_to_enable =
         apps::test::GetFeaturesToEnableLinkCapturingUX(LinkCapturingVersion());
 
-    if (IsMigrationEnabled()) {
-      features_to_enable.push_back(
-          {::features::kPageActionsMigration,
-           {{::features::kPageActionsMigrationIntentPicker.name, "true"}}});
-    }
+    features_to_enable.push_back(
+        {::features::kPageActionsMigration,
+         {{::features::kPageActionsMigrationIntentPicker.name,
+           IsMigrationEnabled() ? "true" : "false"}}});
 
     feature_list_.InitWithFeaturesAndParameters(
         features_to_enable, {blink::features::kPaintHolding});
@@ -651,7 +643,7 @@ IN_PROC_BROWSER_TEST_P(IntentPickerIconPrerenderingBrowserTest,
   // intent picker.
   const GURL prerender_url = https_server().GetURL(
       GetAppUrlHost(), std::string(GetAppScopePath()) + "index1.html");
-  content::FrameTreeNodeId host_id =
+  content::PrerenderHostId host_id =
       prerender_test_helper().AddPrerender(prerender_url);
   content::test::PrerenderHostObserver host_observer(*GetWebContents(),
                                                      host_id);

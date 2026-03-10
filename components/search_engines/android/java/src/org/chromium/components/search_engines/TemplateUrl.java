@@ -1,6 +1,7 @@
 // Copyright 2018 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
+
 package org.chromium.components.search_engines;
 
 import android.graphics.Bitmap;
@@ -47,12 +48,25 @@ public class TemplateUrl {
         return TemplateUrlJni.get().getPrepopulatedId(mTemplateUrlPtr);
     }
 
-    /** @return Whether a search engine is prepopulated or created by policy. */
+    /**
+     * @return Whether a search engine is prepopulated or created by policy. See {@link
+     *     #getIsPrepopulatedOrProgramProvided} for a variant that does not include policies.
+     */
     public boolean getIsPrepopulated() {
         return TemplateUrlJni.get().isPrepopulatedOrDefaultProviderByPolicy(mTemplateUrlPtr);
     }
 
-    /** @return The keyword of the search engine. */
+    /**
+     * @return Whether a search engine is prepopulated but not created by policies. See {@link
+     *     #getIsPrepopulated} for a variant that includes policies.
+     */
+    public boolean getIsPrepopulatedOrProgramProvided() {
+        return TemplateUrlJni.get().isPrepopulatedOrProgramProvided(mTemplateUrlPtr);
+    }
+
+    /**
+     * @return The keyword of the search engine.
+     */
     public String getKeyword() {
         return TemplateUrlJni.get().getKeyword(mTemplateUrlPtr);
     }
@@ -81,6 +95,13 @@ public class TemplateUrl {
      */
     public String getURL() {
         return TemplateUrlJni.get().getURL(mTemplateUrlPtr);
+    }
+
+    /**
+     * @return The starter pack id of the search engine.
+     */
+    public @StarterPackId int getStarterPackId() {
+        return TemplateUrlJni.get().getStarterPackId(mTemplateUrlPtr);
     }
 
     /**
@@ -127,11 +148,16 @@ public class TemplateUrl {
 
         String getKeyword(long templateUrlPtr);
 
+        boolean isPrepopulatedOrProgramProvided(long templateUrlPtr);
+
         boolean isPrepopulatedOrDefaultProviderByPolicy(long templateUrlPtr);
 
         long getLastVisitedTime(long templateUrlPtr);
 
         int getPrepopulatedId(long templateUrlPtr);
+
+        @StarterPackId
+        int getStarterPackId(long templateUrlPtr);
 
         String getURL(long templateUrlPtr);
 

@@ -281,9 +281,9 @@ void GotManifest(std::optional<std::string> manifest_id,
   };
 
   auto manifest = Page::WebAppManifest::Create();
-  if (input_manifest->has_background_color) {
+  if (input_manifest->background_color.has_value()) {
     manifest.SetBackgroundColor(color_utils::SkColorToRgbaString(
-        static_cast<SkColor>(input_manifest->background_color)));
+        static_cast<SkColor>(input_manifest->background_color.value())));
   }
   if (input_manifest->description) {
     manifest.SetDescription(
@@ -437,9 +437,9 @@ void GotManifest(std::optional<std::string> manifest_id,
     manifest.SetShortcuts(std::move(shortcuts));
   }
   manifest.SetStartUrl(input_manifest->start_url.possibly_invalid_spec());
-  if (input_manifest->has_theme_color) {
+  if (input_manifest->theme_color.has_value()) {
     manifest.SetThemeColor(color_utils::SkColorToRgbaString(
-        static_cast<SkColor>(input_manifest->theme_color)));
+        static_cast<SkColor>(input_manifest->theme_color.value())));
   }
 
   std::unique_ptr<Page::AppManifestParsedProperties> parsed;
@@ -1990,6 +1990,10 @@ Page::BackForwardCacheNotRestoredReason NotRestoredReasonToProtocol(
     case Reason::kSharedWorkerWithNoActiveClient:
       return Page::BackForwardCacheNotRestoredReasonEnum::
           SharedWorkerWithNoActiveClient;
+    case Reason::kWebLocksContention:
+      return Page::BackForwardCacheNotRestoredReasonEnum::WebLocksContention;
+    case Reason::kForwardCacheDisabled:
+      return Page::BackForwardCacheNotRestoredReasonEnum::ForwardCacheDisabled;
   }
 }
 
@@ -2238,6 +2242,7 @@ Page::BackForwardCacheNotRestoredReasonType MapNotRestoredReasonToType(
   switch (reason) {
     case Reason::kNotPrimaryMainFrame:
     case Reason::kBackForwardCacheDisabled:
+    case Reason::kForwardCacheDisabled:
     case Reason::kRelatedActiveContentsExist:
     case Reason::kHTTPStatusNotOK:
     case Reason::kSchemeNotHTTPOrHTTPS:
@@ -2293,6 +2298,7 @@ Page::BackForwardCacheNotRestoredReasonType MapNotRestoredReasonToType(
     case Reason::kUnloadHandlerExistsInMainFrame:
     case Reason::kUnloadHandlerExistsInSubFrame:
     case Reason::kCacheControlNoStoreDeviceBoundSessionTerminated:
+    case Reason::kWebLocksContention:
       return Page::BackForwardCacheNotRestoredReasonTypeEnum::PageSupportNeeded;
     case Reason::kNetworkRequestDatapipeDrainedAsBytesConsumer:
     case Reason::kUnknown:

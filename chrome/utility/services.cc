@@ -47,6 +47,8 @@
 #if BUILDFLAG(IS_MAC)
 #include "chrome/services/mac_notifications/mac_notification_provider_impl.h"
 #include "chrome/services/system_signals/mac/mac_system_signals_service.h"
+#include "services/proxy_resolver/public/mojom/proxy_resolver.mojom.h"
+#include "services/proxy_resolver_mac/mac_system_proxy_resolver_impl.h"
 #endif  // BUILDFLAG(IS_MAC)
 
 #if BUILDFLAG(IS_LINUX)
@@ -56,8 +58,8 @@
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/common/importer/profile_import.mojom.h"
 #include "chrome/utility/importer/profile_import_impl.h"
-#include "components/legion/oak_session_service/oak_session_service.h"  // nogncheck
 #include "components/mirroring/service/mirroring_service.h"
+#include "components/private_ai/oak_session_service/oak_session_service.h"  // nogncheck
 #include "services/proxy_resolver/proxy_resolver_factory_impl.h"  // nogncheck
 #include "services/proxy_resolver/public/mojom/proxy_resolver.mojom.h"
 #include "services/screen_ai/public/mojom/screen_ai_factory.mojom.h"  // nogncheck
@@ -197,6 +199,13 @@ auto RunMacNotificationService(
   return std::make_unique<mac_notifications::MacNotificationProviderImpl>(
       std::move(receiver));
 }
+
+auto RunMacSystemProxyResolver(
+    mojo::PendingReceiver<proxy_resolver::mojom::SystemProxyResolver>
+        receiver) {
+  return std::make_unique<proxy_resolver_mac::MacSystemProxyResolverImpl>(
+      std::move(receiver));
+}
 #endif  // BUILDFLAG(IS_MAC)
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
@@ -218,8 +227,8 @@ auto RunSystemSignalsService(
 
 #if !BUILDFLAG(IS_ANDROID)
 auto RunOakSessionService(
-    mojo::PendingReceiver<legion::mojom::OakSession> receiver) {
-  return std::make_unique<legion::OakSessionService>(std::move(receiver));
+    mojo::PendingReceiver<private_ai::mojom::OakSession> receiver) {
+  return std::make_unique<private_ai::OakSessionService>(std::move(receiver));
 }
 
 auto RunProxyResolver(
@@ -529,4 +538,7 @@ void RegisterIOThreadServices(mojo::ServiceFactory& services) {
 #if BUILDFLAG(IS_WIN)
   services.Add(RunWindowsSystemProxyResolver);
 #endif  // BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_MAC)
+  services.Add(RunMacSystemProxyResolver);
+#endif  // BUILDFLAG(IS_MAC)
 }

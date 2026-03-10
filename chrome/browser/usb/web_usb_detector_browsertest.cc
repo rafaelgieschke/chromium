@@ -36,7 +36,7 @@
 
 // These tests are disabled because WebUsbDetector::Initialize is a noop on
 // Windows due to jank and hangs caused by enumerating devices.
-// https://crbug.com/656702
+// https://crbug.com/41281414
 #if !BUILDFLAG(IS_WIN)
 namespace {
 
@@ -62,7 +62,7 @@ class WebUsbDetectorTest : public InProcessBrowserTest {
 
   void SetUpOnMainThread() override {
     InProcessBrowserTest::SetUpOnMainThread();
-    BrowserList::SetLastActive(browser());
+    ui_test_utils::DeprecatedFakeActivateBrowser(browser());
     display_service_ = std::make_unique<NotificationDisplayServiceTester>(
         /*profile=*/nullptr);
 

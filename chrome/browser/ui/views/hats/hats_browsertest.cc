@@ -25,7 +25,6 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/hats/hats_next_web_dialog.h"
 #include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/scoped_browser_locale.h"
@@ -160,7 +159,7 @@ IN_PROC_BROWSER_TEST_F(HatsNextWebDialogBrowserTest, SurveyLoaded) {
 
   // Check that no record of a survey being shown is present.
   {
-    const base::Value::Dict& pref_data =
+    const base::DictValue& pref_data =
         browser()->profile()->GetPrefs()->GetDict(prefs::kHatsSurveyMetadata);
     std::optional<base::Time> last_survey_started_time =
         base::ValueToTime(pref_data.FindByDottedPath(kLastSurveyStartedTime));
@@ -184,7 +183,7 @@ IN_PROC_BROWSER_TEST_F(HatsNextWebDialogBrowserTest, SurveyLoaded) {
 
   // Check that a record of the survey being shown has been recorded.
   {
-    const base::Value::Dict& pref_data =
+    const base::DictValue& pref_data =
         browser()->profile()->GetPrefs()->GetDict(prefs::kHatsSurveyMetadata);
     std::optional<base::Time> last_survey_started_time =
         base::ValueToTime(pref_data.FindByDottedPath(kLastSurveyStartedTime));
@@ -218,7 +217,7 @@ IN_PROC_BROWSER_TEST_F(HatsNextWebDialogBrowserTest,
 
   // Check that no record of a survey being shown is present.
   {
-    const base::Value::Dict& pref_data =
+    const base::DictValue& pref_data =
         browser()->profile()->GetPrefs()->GetDict(prefs::kHatsSurveyMetadata);
     std::optional<base::Time> last_survey_started_time =
         base::ValueToTime(pref_data.FindByDottedPath(kLastSurveyStartedTime));
@@ -242,7 +241,7 @@ IN_PROC_BROWSER_TEST_F(HatsNextWebDialogBrowserTest,
 
   // Check that a record of the survey being shown has been recorded.
   {
-    const base::Value::Dict& pref_data =
+    const base::DictValue& pref_data =
         browser()->profile()->GetPrefs()->GetDict(prefs::kHatsSurveyMetadata);
     std::optional<base::Time> last_survey_started_time =
         base::ValueToTime(pref_data.FindByDottedPath(kLastSurveyStartedTime));

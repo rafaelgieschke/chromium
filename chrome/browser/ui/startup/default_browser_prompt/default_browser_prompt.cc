@@ -93,18 +93,18 @@ void MigrateDefaultBrowserLastDeclinedPref(PrefService* profile_prefs) {
   }
 
   const PrefService::Preference* old_last_declined_time_pref =
-      profile_prefs->FindPreference(prefs::kDefaultBrowserLastDeclined);
+      profile_prefs->FindPreference(prefs::kDefaultBrowserInfobarLastDeclined);
   const PrefService::Preference* last_declined_time_pref =
-      local_state->FindPreference(prefs::kDefaultBrowserLastDeclinedTime);
+      local_state->FindPreference(prefs::kDefaultBrowserInfobarLastDeclinedTime);
 
   if (old_last_declined_time_pref->IsDefaultValue()) {
     return;
   }
 
   base::Time old_last_declined_time = base::Time::FromInternalValue(
-      profile_prefs->GetInt64(prefs::kDefaultBrowserLastDeclined));
+      profile_prefs->GetInt64(prefs::kDefaultBrowserInfobarLastDeclined));
   base::Time last_declined_time =
-      local_state->GetTime(prefs::kDefaultBrowserLastDeclinedTime);
+      local_state->GetTime(prefs::kDefaultBrowserInfobarLastDeclinedTime);
 
   // Migrate if the local pref has never been set before, or if the local pref's
   // value was migrated from a different profile and the current profile's pref
@@ -113,10 +113,10 @@ void MigrateDefaultBrowserLastDeclinedPref(PrefService* profile_prefs) {
   // sync from the moment the new pref is introduced.
   if (last_declined_time_pref->IsDefaultValue() ||
       old_last_declined_time > last_declined_time) {
-    local_state->SetTime(prefs::kDefaultBrowserLastDeclinedTime,
+    local_state->SetTime(prefs::kDefaultBrowserInfobarLastDeclinedTime,
                          old_last_declined_time);
-    if (local_state->GetInteger(prefs::kDefaultBrowserDeclinedCount) == 0) {
-      local_state->SetInteger(prefs::kDefaultBrowserDeclinedCount, 1);
+    if (local_state->GetInteger(prefs::kDefaultBrowserInfobarDeclinedCount) == 0) {
+      local_state->SetInteger(prefs::kDefaultBrowserInfobarDeclinedCount, 1);
     }
   }
 }
@@ -132,9 +132,7 @@ void ShowDefaultBrowserPrompt(Profile* profile,
     return;
   }
 
-  default_browser::DefaultBrowserManager* default_browser_manager =
-      g_browser_process->GetFeatures()->default_browser_manager();
-
-  default_browser_manager->GetDefaultBrowserState(base::BindOnce(
-      &OnCheckIsDefaultBrowserFinished, profile, std::move(done_callback)));
+  default_browser::DefaultBrowserManager::From(g_browser_process)
+      ->GetDefaultBrowserState(base::BindOnce(
+          &OnCheckIsDefaultBrowserFinished, profile, std::move(done_callback)));
 }

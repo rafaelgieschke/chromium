@@ -256,11 +256,6 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
     return r.strict_mixed_content_checking;
   }
 
-  static bool strict_powerful_feature_restrictions(
-      const blink::web_pref::WebPreferences& r) {
-    return r.strict_powerful_feature_restrictions;
-  }
-
   static bool allow_geolocation_on_insecure_origins(
       const blink::web_pref::WebPreferences& r) {
     return r.allow_geolocation_on_insecure_origins;
@@ -661,6 +656,11 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
     return r.long_press_link_select_text;
   }
 
+  static bool scale_all_fonts_if_no_meta_text_scale_tag(
+      const blink::web_pref::WebPreferences& r) {
+    return r.scale_all_fonts_if_no_meta_text_scale_tag;
+  }
+
   static bool should_screenshot_on_mainframe_same_doc_navigation(
       const blink::web_pref::WebPreferences& r) {
     return r.should_screenshot_on_mainframe_same_doc_navigation;
@@ -830,8 +830,8 @@ struct BLINK_COMMON_EXPORT StructTraits<blink::mojom::WebPreferencesDataView,
     return r.payment_request_enabled;
   }
 
-  static bool ai_prompt_api_enabled(const blink::web_pref::WebPreferences& r) {
-    return r.ai_prompt_api_enabled;
+  static bool ai_ot_apis_enabled(const blink::web_pref::WebPreferences& r) {
+    return r.ai_ot_apis_enabled;
   }
 
 #if BUILDFLAG(IS_MAC)

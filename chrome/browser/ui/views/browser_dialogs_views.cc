@@ -9,8 +9,8 @@
 #include "chrome/browser/media/webrtc/select_audio_output_picker.h"
 #include "chrome/browser/task_manager/task_manager_metrics_recorder.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/dialogs/browser_dialogs.h"
 #include "chrome/browser/ui/views/bookmarks/bookmark_editor_view.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/select_audio_output/select_audio_output_views.h"
@@ -36,7 +36,7 @@ void BookmarkEditor::Show(gfx::NativeWindow parent_window,
   editor.release();  // BookmarkEditorView is self-deleting
 }
 
-void ChromeDevicePermissionsPrompt::ShowDialog() {
+void ChromeUsbDevicePermissionsPrompt::ShowDialog() {
   ShowDialogViews();
 }
 
@@ -47,7 +47,6 @@ std::unique_ptr<SelectAudioOutputPicker> SelectAudioOutputPicker::Create(
 
 namespace chrome {
 
-#if !BUILDFLAG(IS_MAC)
 task_manager::TaskManagerTableModel* ShowTaskManager(
     Browser* browser,
     task_manager::StartAction start_action) {
@@ -57,7 +56,6 @@ task_manager::TaskManagerTableModel* ShowTaskManager(
 void HideTaskManager() {
   task_manager::TaskManagerView::Hide();
 }
-#endif
 
 views::Widget* ShowBrowserModal(Browser* browser,
                                 std::unique_ptr<ui::DialogModel> dialog_model) {

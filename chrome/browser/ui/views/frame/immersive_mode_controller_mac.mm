@@ -13,6 +13,7 @@
 #include "base/auto_reset.h"
 #include "base/check.h"
 #include "base/feature_list.h"
+#include "chrome/browser/glic/widget/glic_widget.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/find_bar/find_bar.h"
@@ -23,7 +24,6 @@
 #include "chrome/browser/ui/views/frame/top_container_view.h"
 #include "chrome/browser/ui/views/infobars/infobar_container_view.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_presenter_base.h"
-#include "chrome/common/chrome_features.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/remote_cocoa/app_shim/features.h"
 #include "ui/gfx/geometry/insets.h"
@@ -34,10 +34,6 @@
 #include "ui/views/cocoa/native_widget_mac_ns_window_host.h"
 #include "ui/views/focus/focus_search.h"
 #include "ui/views/widget/native_widget.h"
-
-#if BUILDFLAG(ENABLE_GLIC)
-#include "chrome/browser/glic/widget/glic_widget.h"
-#endif
 
 namespace {
 
@@ -82,9 +78,9 @@ ImmersiveModeControllerMac::RevealedLock::~RevealedLock() {
 
 ImmersiveModeControllerMac::ImmersiveModeControllerMac(
     BrowserWindowInterface* browser,
-    bool separate_tab_strip)
+    bool tab_strip_in_overlay_widget)
     : ImmersiveModeController(browser),
-      separate_tab_strip_(separate_tab_strip) {}
+      tab_strip_in_overlay_widget_(tab_strip_in_overlay_widget) {}
 
 ImmersiveModeControllerMac::~ImmersiveModeControllerMac() {
   CHECK(!views::WidgetObserver::IsInObserverList());
@@ -105,7 +101,10 @@ void ImmersiveModeControllerMac::SetEnabled(bool enabled) {
   }
   enabled_ = enabled;
   if (enabled) {
-    if (separate_tab_strip_) {
+    // Vertical tab strip should stay visible and will not be reparented to the
+    // tab overlay.
+    if (tab_strip_in_overlay_widget_ &&
+        !browser_view_->ShouldDrawVerticalTabStrip()) {
       tab_widget_height_ = browser_view_->tab_strip_view()->height();
       tab_widget_height_ += static_cast<BrowserFrameViewMac*>(
                                 browser_view_->browser_widget()->GetFrameView())
@@ -192,7 +191,7 @@ void ImmersiveModeControllerMac::SetEnabled(bool enabled) {
     // when transitioning to full screen. Call it now.
     OnViewBoundsChanged(browser_view_->top_container());
   } else {
-    if (separate_tab_strip_) {
+    if (tab_strip_in_overlay_widget_) {
       browser_view_->tab_overlay_widget()->Hide();
       browser_view_->tab_strip_view()->SetBorder(nullptr);
     }
@@ -261,16 +260,6 @@ void ImmersiveModeControllerMac::BrowserDidClose(
 
 bool ImmersiveModeControllerMac::IsEnabled() const {
   return enabled_;
-}
-
-bool ImmersiveModeControllerMac::ShouldHideTopViews() const {
-  // Always return false to ensure the top UI is pre-rendered and ready for
-  // display. We don't have full control over the visibility of the top UI. For
-  // instance, in auto-hide mode, the top UI is revealed when the user hovers
-  // over the screen's upper border. Notifications about this visibility change
-  // arrive only after the UI is already displayed, so it's crucial to have the
-  // top UI fully rendered by then.
-  return false;
 }
 
 bool ImmersiveModeControllerMac::IsRevealed() const {
@@ -343,6 +332,11 @@ void ImmersiveModeControllerMac::OnContentFullscreenChanged(
   }
 }
 
+void ImmersiveModeControllerMac::OnVerticalTabStripModeChanged() {
+  SetTabStripInOverlayWidget(
+      browser_view_->UsesImmersiveFullscreenTabbedMode());
+}
+
 void ImmersiveModeControllerMac::OnDidChangeFocus(views::View* focused_before,
                                                   views::View* focused_now) {
   if (browser_view_->top_container()->Contains(focused_now) ||
@@ -363,7 +357,13 @@ void ImmersiveModeControllerMac::OnViewBoundsChanged(
     return;
   }
   overlay_height_ = bounds.height();
-  if (separate_tab_strip_) {
+  // TODO(b/475222200): Currently tab strips are duplicated when switching to
+  // vertical tabs while in immersive leaves behind the horizontal tab, and
+  // OnViewBoundsChanged does not get called.
+  // tab_overlay_widget size should only be set if we aren't drawing the
+  // vertical tabstrip.
+  if (tab_strip_in_overlay_widget_ &&
+      !browser_view_->ShouldDrawVerticalTabStrip()) {
     gfx::Size new_size(bounds.width(), tab_widget_height_);
     browser_view_->tab_overlay_widget()->SetSize(new_size);
     browser_view_->tab_overlay_view()->SetSize(new_size);
@@ -385,6 +385,36 @@ void ImmersiveModeControllerMac::LockDestroyed() {
 
 void ImmersiveModeControllerMac::SetTabNativeWidgetID(uint64_t widget_id) {
   tab_native_widget_id_ = widget_id;
+}
+
+void ImmersiveModeControllerMac::SetTabStripInOverlayWidget(
+    bool tab_strip_in_overlay_widget) {
+  if (tab_strip_in_overlay_widget_ == tab_strip_in_overlay_widget) {
+    return;
+  }
+  tab_strip_in_overlay_widget_ = tab_strip_in_overlay_widget;
+
+  if (enabled_) {
+    // If immersive mode is already enabled, we must toggle it to re-trigger the
+    // reparenting and native overlay creation logic with the new tab mode.
+    SetEnabled(false);
+
+    // If we are moving away from a separate tab strip, we must explicitly clear
+    // the native widget ID. The remote Cocoa layer uses this ID to decide
+    // whether to create a tabbed immersive controller (which reserves space
+    // for a top tab strip). Clearing it ensures a single-overlay controller
+    // is used instead, preventing an empty space artifact above the toolbar.
+    if (!tab_strip_in_overlay_widget_) {
+      SetTabNativeWidgetID(0);
+    }
+    SetEnabled(true);
+  } else {
+    // If immersive mode is not enabled, we just need to update the internal
+    // state of whether the tab strip is in a separate overlay widget.
+    if (!tab_strip_in_overlay_widget_) {
+      SetTabNativeWidgetID(0);
+    }
+  }
 }
 
 void ImmersiveModeControllerMac::MoveChildren(views::Widget* from_widget,
@@ -443,9 +473,7 @@ bool ImmersiveModeControllerMac::ShouldMoveChild(views::Widget* child) {
       child->GetNativeWindowProperty(views::kWidgetIdentifierKey);
   if (widget_identifier ==
           constrained_window::kConstrainedWindowWidgetIdentifier
-#if BUILDFLAG(ENABLE_GLIC)
       || widget_identifier == glic::kGlicWidgetIdentifier
-#endif
   ) {
     return true;
   }

@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/check_deref.h"
-#include "base/containers/contains.h"
 #include "base/containers/extend.h"
 #include "base/containers/map_util.h"
 #include "base/containers/to_vector.h"
@@ -22,6 +21,7 @@
 #include "base/i18n/case_conversion.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
@@ -30,6 +30,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_browser_util.h"
+#include "components/autofill/core/browser/autofill_trigger_source.h"
 #include "components/autofill/core/browser/data_manager/addresses/address_data_manager.h"
 #include "components/autofill/core/browser/data_manager/personal_data_manager.h"
 #include "components/autofill/core/browser/data_model/addresses/autofill_normalization_utils.h"
@@ -52,6 +53,7 @@
 #include "components/autofill/core/browser/suggestions/suggestion_generator.h"
 #include "components/autofill/core/browser/suggestions/suggestion_type.h"
 #include "components/autofill/core/browser/suggestions/suggestion_util.h"
+#include "components/autofill/core/common/aliases.h"
 #include "components/autofill/core/common/autofill_clock.h"
 #include "components/autofill/core/common/autofill_constants.h"
 #include "components/autofill/core/common/autofill_debug_features.h"
@@ -60,6 +62,7 @@
 #include "components/autofill/core/common/autofill_internals/logging_scope.h"
 #include "components/autofill/core/common/autofill_util.h"
 #include "components/autofill/core/common/form_field_data.h"
+#include "components/autofill/core/common/mojom/autofill_types.mojom-shared.h"
 #include "components/feature_engagement/public/feature_constants.h"
 #include "components/grit/components_scaled_resources.h"
 #include "components/strings/grit/components_strings.h"
@@ -175,11 +178,10 @@ std::u16string GetFormattedPhoneNumber(const AutofillProfile& profile,
 std::u16string GetFullSuggestionText(const Suggestion& suggestion) {
   std::vector<Suggestion::Text> all_text_parts;
   all_text_parts.push_back(suggestion.main_text);
-  all_text_parts.insert(all_text_parts.end(), suggestion.minor_texts.begin(),
-                        suggestion.minor_texts.end());
+  base::Extend(all_text_parts, suggestion.minor_texts);
 
   for (const std::vector<Suggestion::Text>& label : suggestion.labels) {
-    all_text_parts.insert(all_text_parts.end(), label.begin(), label.end());
+    base::Extend(all_text_parts, label);
   }
 
   return base::CollapseWhitespace(
@@ -221,21 +223,6 @@ std::u16string GetProfileSuggestionMainText(
   return profile.GetInfo(trigger_field_type, app_locale);
 }
 
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-// Returns the minimum number of fields that should be returned by
-// `AutofillProfile::CreateInferredLabels()`, based on the type of the
-// triggering field.
-int GetNumberOfMinimalFieldsToShow(FieldType trigger_field_type) {
-  if (GroupTypeOfFieldType(trigger_field_type) == FieldTypeGroup::kPhone) {
-    // Phone fields are a special case. For them we want both the
-    // `FULL_NAME` and `ADDRESS_HOME_LINE1` to be present.
-    return 2;
-  } else {
-    return 1;
-  }
-}
-#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-
 // Returns for each profile in `profiles` a differentiating label string to be
 // used as a secondary text in the corresponding suggestion bubble.
 // `field_types` the types of the fields that will be filled by the suggestion.
@@ -245,25 +232,11 @@ std::vector<std::u16string> GetProfileSuggestionLabels(
     FieldType trigger_field_type,
     const std::string& app_locale) {
   // Generate disambiguating labels based on the list of matches.
-  std::vector<std::u16string> differentiating_labels;
   std::vector<const AutofillProfile*> profile_ptrs = base::ToVector(
       profiles, [](const AutofillProfile& profile) { return &profile; });
-#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-  if (base::FeatureList::IsEnabled(features::kAutofillImprovedLabels)) {
-    differentiating_labels = AutofillProfile::CreateInferredLabels(
-        profile_ptrs, /*suggested_fields=*/std::nullopt, trigger_field_type,
-        {trigger_field_type},
-        GetNumberOfMinimalFieldsToShow(trigger_field_type), app_locale,
-        /*use_improved_labels_order=*/true);
-  } else
-#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-  {
-    differentiating_labels = AutofillProfile::CreateInferredLabels(
-        profile_ptrs, field_types, /*triggering_field_type=*/std::nullopt,
-        {trigger_field_type},
-        /*minimal_fields_shown=*/1, app_locale);
-  }
-  return differentiating_labels;
+  return AutofillProfile::CreateInferredLabels(
+      profile_ptrs, field_types, {trigger_field_type},
+      /*minimal_fields_shown=*/1, app_locale);
 }
 
 // For each profile in `profiles`, returns a vector of `Suggestion::labels` to
@@ -359,6 +332,8 @@ std::vector<ProfileWithText> DeduplicatedProfilesForSuggestions(
     const std::vector<ProfileWithText>& matched_profiles,
     const FieldTypeSet& field_types,
     const AutofillProfileComparator& comparator) {
+  SCOPED_UMA_HISTOGRAM_TIMER(
+      "Autofill.Timing.DeduplicatedProfilesForSuggestions");
   std::vector<ProfileWithText> unique_matched_profiles;
   // Limit number of unique profiles as having too many makes the
   // browser hang due to drawing calculations (and is also not
@@ -504,7 +479,9 @@ std::vector<AutofillProfile> GetProfilesToSuggest(
   // Similarly, prefix matching is disabled for <select> fields. Select fields
   // are only used as trigger fields during actor flows, in which the initial
   // value is likely irrelevant.
-  if (!trigger_field.is_autofilled() &&
+  // TODO(crbug.com/393114125): Change to use `AutofillField::field_modifiers_`
+  // after launching `kAutofillFixIsAutofilled`.
+  if (!trigger_field.is_autofilled_according_to_renderer() &&
       trigger_field.form_control_type() != FormControlType::kSelectOne) {
     profiles_to_suggest = GetPrefixMatchedProfiles(
         profiles_to_suggest, trigger_field_type, normalized_field_contents);
@@ -536,7 +513,10 @@ std::vector<AutofillProfile> GetProfilesToSuggest(
   // filtering logic after it, this case is fine since for field-by-field
   // filling suggestions, deduplication is rather trivial and the problem
   // explained above wouldn't apply.
-  if (trigger_field.is_autofilled() && profiles_to_suggest.size() > 1 &&
+  // TODO(crbug.com/393114125): Change to use `AutofillField::field_modifiers_`
+  // after launching `kAutofillFixIsAutofilled`.
+  if (trigger_field.is_autofilled_according_to_renderer() &&
+      profiles_to_suggest.size() > 1 &&
       base::FeatureList::IsEnabled(
           features::kAutofillImproveAddressFieldSwapping)) {
     std::erase_if(profiles_to_suggest, [&](const ProfileWithText& profile) {
@@ -544,7 +524,10 @@ std::vector<AutofillProfile> GetProfilesToSuggest(
     });
     CHECK(!profiles_to_suggest.empty());
   }
-  if (trigger_field.is_autofilled() && profiles_to_suggest.size() > 1) {
+  // TODO(crbug.com/393114125): Change to use `AutofillField::field_modifiers_`
+  // after launching `kAutofillFixIsAutofilled`.
+  if (trigger_field.is_autofilled_according_to_renderer() &&
+      profiles_to_suggest.size() > 1) {
     // This is just a simulation of the logic behind the feature flag in order
     // to understand the reason behind the CHECK failure. Profiles are copied so
     // that the ones used for suggestions are not modified and the branch
@@ -626,22 +609,11 @@ std::vector<Suggestion> CreateSuggestionsFromProfiles(
       profiles, field_types, trigger_field_type, app_locale);
   FieldTypeGroup trigger_field_type_group =
       GroupTypeOfFieldType(trigger_field_type);
-  // If `features::kAutofillImprovedLabels` is enabled, name fields should have
-  // `NAME_FULL` as main text, unless in field by field filling mode.
-  FieldType main_text_field_type =
-      GroupTypeOfFieldType(trigger_field_type) == FieldTypeGroup::kName &&
-              !IsAlternativeNameType(trigger_field_type) &&
-              suggestion_type != SuggestionType::kAddressFieldByFieldFilling &&
-              base::FeatureList::IsEnabled(features::kAutofillImprovedLabels) &&
-              !features::kAutofillImprovedLabelsParamWithoutMainTextChangesParam
-                   .Get()
-          ? NAME_FULL
-          : trigger_field_type;
   for (size_t i = 0; i < profiles.size(); ++i) {
     const AutofillProfile& profile = profiles[i];
     // Compute the main text to be displayed in the suggestion bubble.
     std::u16string main_text = GetProfileSuggestionMainText(
-        profile, app_locale, trigger_field, main_text_field_type);
+        profile, app_locale, trigger_field, trigger_field_type);
     if (trigger_field_type_group == FieldTypeGroup::kPhone) {
       main_text = GetFormattedPhoneNumber(
           profile, app_locale,
@@ -701,7 +673,7 @@ std::vector<Suggestion> CreateSuggestionsFromProfiles(
     // IPH should only be shown for non-H/W profiles.
     if (profile.record_type() == AutofillProfile::RecordType::kAccount &&
         profile.initial_creator_id() !=
-            AutofillProfile::kInitialCreatorOrModifierChrome) {
+            AutofillProfile::kInitialCreatorChrome) {
       suggestion.iph_metadata = Suggestion::IPHMetadata(
           &feature_engagement::
               kIPHAutofillExternalAccountProfileSuggestionFeature);
@@ -722,7 +694,9 @@ SuggestionType GetSuggestionType(FormFieldData trigger_field) {
   // If the user triggers suggestions on an autofilled field, field-by-field
   // filling suggestions should be shown so that the user could easily correct
   // values to something present in different stored addresses.
-  return trigger_field.is_autofilled()
+  // TODO(crbug.com/393114125): Change to use `AutofillField::field_modifiers_`
+  // after launching `kAutofillFixIsAutofilled`.
+  return trigger_field.is_autofilled_according_to_renderer()
              ? SuggestionType::kAddressFieldByFieldFilling
              : SuggestionType::kAddressEntry;
 }
@@ -894,7 +868,10 @@ std::vector<Suggestion> GetSuggestionsOnTypingForProfile(
   std::vector<Suggestion> suggestions;
   AddressSuggestionGenerator address_suggestion_generator(
       /*plus_address_email_override=*/std::nullopt,
-      /*log_manager=*/nullptr);
+      /*log_manager=*/nullptr,
+      // AddressOnTyping suggestions do not depend on the trigger source.
+      /*trigger_source=*/
+      mojom::AutofillSuggestionTriggerSource::kUnspecified);
 
   auto on_suggestions_generated =
       [&suggestions](
@@ -974,9 +951,11 @@ bool ContainsProfileSuggestionWithRecordType(
 
 AddressSuggestionGenerator::AddressSuggestionGenerator(
     const std::optional<std::string>& plus_address_email_override,
-    LogManager* log_manager)
+    LogManager* log_manager,
+    AutofillSuggestionTriggerSource trigger_source)
     : plus_address_email_override_(plus_address_email_override),
-      log_manager_(log_manager) {}
+      log_manager_(log_manager),
+      trigger_source_(trigger_source) {}
 
 AddressSuggestionGenerator::~AddressSuggestionGenerator() = default;
 
@@ -1113,7 +1092,7 @@ AddressSuggestionGenerator::MaybeFetchRegularAddressSuggestionData(
     return {};
   }
   if (SuppressSuggestionsForAutocompleteUnrecognizedField(
-          *trigger_autofill_field)) {
+          *trigger_autofill_field, GetAcUnrecognizedBehavior(client))) {
     return {};
   }
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
@@ -1152,7 +1131,8 @@ AddressSuggestionGenerator::MaybeFetchRegularAddressSuggestionData(
       skip_reasons = FormFiller::GetFieldFillingSkipReasons(
           form.fields(), *form_structure, *trigger_autofill_field,
           FormFiller::RefillOptions::NotRefill(), FillingProduct::kAddress,
-          client);
+          TriggerSourceFromSuggestionTriggerSource(trigger_source_), client,
+          /*blocked_fields=*/{});
     }
     FieldTypeSet field_types;
     for (size_t i = 0; i < form_structure->field_count(); ++i) {
@@ -1215,7 +1195,11 @@ std::vector<Suggestion> AddressSuggestionGenerator::GenerateAddressSuggestions(
     return {};
   }
   base::Extend(suggestions,
-               GetAddressFooterSuggestions(trigger_field.is_autofilled()));
+               // TODO(crbug.com/393114125): Change to use
+               // `AutofillField::field_modifiers_` after launching
+               // `kAutofillFixIsAutofilled`.
+               GetAddressFooterSuggestions(
+                   trigger_field.is_autofilled_according_to_renderer()));
   return suggestions;
 }
 

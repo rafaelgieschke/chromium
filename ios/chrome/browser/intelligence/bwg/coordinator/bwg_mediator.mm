@@ -16,17 +16,18 @@
 #import "ios/chrome/browser/feature_engagement/model/tracker_factory.h"
 #import "ios/chrome/browser/intelligence/bwg/coordinator/bwg_mediator_delegate.h"
 #import "ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h"
-#import "ios/chrome/browser/intelligence/bwg/model/bwg_browser_agent.h"
 #import "ios/chrome/browser/intelligence/bwg/model/bwg_service.h"
 #import "ios/chrome/browser/intelligence/bwg/model/bwg_tab_helper.h"
+#import "ios/chrome/browser/intelligence/bwg/model/gemini_browser_agent.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/intelligence/proto_wrappers/page_context_wrapper.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/open_new_tab_command.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/public/provider/chrome/browser/bwg/bwg_api.h"
 #import "ios/web/public/web_state.h"
 #import "url/gurl.h"
@@ -45,11 +46,11 @@
   // Pref service to check if user flows were previously triggered.
   raw_ptr<PrefService> _prefService;
 
-  // The profile-scoped BWG service.
-  raw_ptr<BwgService> _BWGService;
-
   // The browser-scoped BWG browser agent.
-  raw_ptr<BwgBrowserAgent> _BWGBrowserAgent;
+  raw_ptr<GeminiBrowserAgent> _geminiBrowserAgent;
+
+  // The profile-scoped Gemini service.
+  raw_ptr<BwgService> _geminiService;
 
   // Start time for the preparation of the presentation of BWG overlay.
   base::TimeTicks _BWGOverlayPreparationStartTime;
@@ -59,22 +60,27 @@
 
   // The feature engagement tracker.
   raw_ptr<feature_engagement::Tracker> _tracker;
+
+  // The entry point BWG was started from.
+  gemini::EntryPoint _entryPoint;
 }
 
 - (instancetype)initWithPrefService:(PrefService*)prefService
                        webStateList:(WebStateList*)webStateList
                  baseViewController:(UIViewController*)baseViewController
-                         BWGService:(BwgService*)BWGService
-                    BWGBrowserAgent:(BwgBrowserAgent*)BWGBrowserAgent
+                         entryPoint:(gemini::EntryPoint)entryPoint
+                      geminiService:(BwgService*)geminiService
+                 geminiBrowserAgent:(GeminiBrowserAgent*)geminiBrowserAgent
                             tracker:(feature_engagement::Tracker*)tracker {
   self = [super init];
   if (self) {
     _prefService = prefService;
     _webStateList = webStateList;
     _baseViewController = baseViewController;
-    _BWGService = BWGService;
-    _BWGBrowserAgent = BWGBrowserAgent;
+    _geminiService = geminiService;
+    _geminiBrowserAgent = geminiBrowserAgent;
     _tracker = tracker;
+    _entryPoint = entryPoint;
   }
   return self;
 }
@@ -108,10 +114,10 @@
   [self prepareBWGOverlay];
 }
 
-#pragma mark - BWGConsentMutator
+#pragma mark - GeminiConsentMutator
 
-// Did consent to BWG.
-- (void)didConsentBWG {
+// Did consent to Gemini.
+- (void)didConsentGemini {
   _prefService->SetBoolean(prefs::kIOSBwgConsent, YES);
   if (IsGeminiNavigationPromoEnabled()) {
     _tracker->NotifyEvent(feature_engagement::events::kIOSGeminiConsentGiven);
@@ -123,12 +129,12 @@
 }
 
 // Did dismisses the Consent UI.
-- (void)didRefuseBWGConsent {
+- (void)didRefuseGeminiConsent {
   [_delegate dismissBWGFlow];
 }
 
-// Did close BWG Promo UI.
-- (void)didCloseBWGPromo {
+// Did close Gemini Promo UI.
+- (void)didCloseGeminiPromo {
   [_delegate dismissBWGFlow];
 }
 
@@ -136,7 +142,12 @@
 - (void)openNewTabWithURL:(const GURL&)URL {
   [self FREWillBeBackgrounded];
   OpenNewTabCommand* command = [OpenNewTabCommand commandWithURLFromChrome:URL];
-  [self.applicationHandler openURLInNewTab:command];
+  [self.sceneHandler openURLInNewTab:command];
+}
+
+// Promo was shown.
+- (void)didShowGeminiPromo {
+  // No-op.
 }
 
 #pragma mark - Private
@@ -150,65 +161,34 @@
   // Configure the callback to be executed once the page context is ready.
   __weak __typeof(self) weakSelf = self;
   web::WebState* activeWebState = _webStateList->GetActiveWebState();
-  base::OnceCallback<void(PageContextWrapperCallbackResponse)>
-      page_context_completion_callback;
-  if (IsGeminiImmediateOverlayEnabled()) {
-    // Present the overlay immediately without page context.
-    [self openPendingBWGOverlay];
 
-    page_context_completion_callback =
-        base::BindOnce(^void(PageContextWrapperCallbackResponse response) {
-          [weakSelf updateBWGOverlayForWebState:activeWebState
-                     pageContextWrapperResponse:std::move(response)];
-        });
-  } else {
-    page_context_completion_callback =
-        base::BindOnce(^void(PageContextWrapperCallbackResponse response) {
-          [weakSelf openBWGOverlayForPage:std::move(response)];
-        });
-  }
+  // Present the overlay immediately without page context.
+  [self openPendingBWGOverlay];
+
+  base::RepeatingCallback<void(PageContextWrapperCallbackResponse)>
+      page_context_completion_callback = base::BindRepeating(
+          ^void(PageContextWrapperCallbackResponse response) {
+            [weakSelf updateBWGOverlayForWebState:activeWebState
+                       pageContextWrapperResponse:std::move(response)];
+          });
 
   BwgTabHelper* BWGTabHelper = [self activeWebStateBWGTabHelper];
   if (!BWGTabHelper) {
     return;
   }
 
-  BWGTabHelper->GeneratePageContext(std::move(page_context_completion_callback),
-                                    /*full_page_context=*/true);
-}
-
-// Opens the BWG overlay with a given PageContextWrapperCallbackResponse.
-- (void)openBWGOverlayForPage:
-    (PageContextWrapperCallbackResponse)pageContextWrapperResponse {
-
-  web::WebState* activeWebState = _webStateList->GetActiveWebState();
-
-  // The active web state may no longer be eligible for Gemini by the time this
-  // is called. If this is the case, the overlay should not be presented.
-  if (!activeWebState ||
-      !_BWGService->IsBwgAvailableForWebState(activeWebState)) {
-    return;
-  }
-
-  _BWGBrowserAgent->PresentBwgOverlay(self.baseViewController,
-                                      std::move(pageContextWrapperResponse));
-
-  base::UmaHistogramLongTimes100(
-      _didPresentBWGFRE ? kStartupTimeWithFREHistogram
-                        : kStartupTimeNoFREHistogram,
-      base::TimeTicks::Now() - _BWGOverlayPreparationStartTime);
+  BWGTabHelper->SetupPageContextGeneration(
+      std::move(page_context_completion_callback));
 }
 
 // Opens the BWG overlay in a pending state, since full page context is not yet
 // ready.
 - (void)openPendingBWGOverlay {
-
   web::WebState* activeWebState = _webStateList->GetActiveWebState();
 
   // The active web state may no longer be eligible for Gemini by the time this
   // is called. If this is the case, the overlay should not be presented.
-  if (!activeWebState ||
-      !_BWGService->IsBwgAvailableForWebState(activeWebState)) {
+  if (!activeWebState || ![self isGeminiEligible]) {
     return;
   }
 
@@ -219,8 +199,9 @@
   partialPageContext->set_url(activeWebState->GetVisibleURL().spec());
   partialPageContext->set_title(base::UTF16ToUTF8(activeWebState->GetTitle()));
 
-  _BWGBrowserAgent->PresentPendingBwgOverlay(self.baseViewController,
-                                             std::move(partialPageContext));
+  _geminiBrowserAgent->PresentFloatyWithPendingContext(
+      self.baseViewController, std::move(partialPageContext),
+      [[GeminiStartupState alloc] initWithEntryPoint:_entryPoint]);
 
   base::UmaHistogramLongTimes100(
       _didPresentBWGFRE ? kStartupTimeWithFREHistogram
@@ -232,10 +213,13 @@
 - (void)updateBWGOverlayForWebState:(web::WebState*)webState
          pageContextWrapperResponse:
              (PageContextWrapperCallbackResponse)response {
+  if (!webState) {
+    return;
+  }
 
   // The original web state may no longer be eligible for Gemini by the time
   // this is called. If this is the case, the overlay should not update.
-  if (!webState || !_BWGService->IsBwgAvailableForWebState(webState)) {
+  if (![self isGeminiEligible]) {
     return;
   }
 
@@ -246,7 +230,7 @@
     return;
   }
 
-  _BWGBrowserAgent->UpdateBwgOverlayPageContext(std::move(response));
+  _geminiBrowserAgent->UpdateFloatyPageContext(std::move(response));
 }
 
 // Notifies the currently active WebState's BWG tab helper that the FRE will be
@@ -287,6 +271,12 @@
       base::BindOnce(^(NSArray<NSString*>* suggestions){
           // No-op.
       }));
+}
+
+- (BOOL)isGeminiEligible {
+  BwgTabHelper* tabHelper = [self activeWebStateBWGTabHelper];
+  return tabHelper && tabHelper->IsGeminiAvailableForWebState() &&
+         _geminiService && _geminiService->IsProfileEligibleForGemini();
 }
 
 @end

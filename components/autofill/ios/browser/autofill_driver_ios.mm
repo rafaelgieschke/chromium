@@ -4,6 +4,7 @@
 
 #import "components/autofill/ios/browser/autofill_driver_ios.h"
 
+#include <algorithm>
 #import <concepts>
 #import <functional>
 #import <optional>
@@ -12,7 +13,6 @@
 #import <variant>
 
 #import "base/check_deref.h"
-#import "base/containers/contains.h"
 #import "base/containers/to_vector.h"
 #import "base/feature_list.h"
 #import "base/functional/bind.h"
@@ -48,6 +48,7 @@
 #import "ios/web/public/js_messaging/web_frames_manager.h"
 #import "ios/web/public/web_state.h"
 #import "services/network/public/cpp/shared_url_loader_factory.h"
+#import "third_party/abseil-cpp/absl/container/flat_hash_map.h"
 #import "url/origin.h"
 
 namespace autofill {
@@ -253,12 +254,10 @@ base::flat_set<FieldGlobalId> AutofillDriverIOS::ApplyFormAction(
     const FillId& fill_id,
     bool supports_refill,
     const url::Origin& triggered_origin,
-    const base::flat_map<FieldGlobalId, FieldType>& field_type_map,
+    const absl::flat_hash_map<FieldGlobalId, FieldType>& field_type_map,
     const Section& section_for_clear_form_on_ios) {
   switch (action_type) {
     case mojom::FormActionType::kUndo:
-      // TODO(crbug.com/40266549) Add Undo support on iOS.
-      return {};
     case mojom::FormActionType::kFill: {
       auto callback = [&section_for_clear_form_on_ios](
                           AutofillDriver& driver,
@@ -270,7 +269,8 @@ base::flat_set<FieldGlobalId> AutofillDriverIOS::ApplyFormAction(
         if (frame) {
           [cast(&driver)->bridge_ fillData:fields
                                    section:section_for_clear_form_on_ios
-                                   inFrame:frame];
+                                   inFrame:frame
+                            withActionType:action_type];
         }
       };
 
@@ -351,8 +351,9 @@ void AutofillDriverIOS::ExtractFormWithField(
                 }
                 auto it =
                     std::ranges::find_if(*forms, [&](const FormData& form) {
-                      return base::Contains(form.fields(), field_renderer_id,
-                                            &FormFieldData::renderer_id);
+                      return std::ranges::contains(form.fields(),
+                                                   field_renderer_id,
+                                                   &FormFieldData::renderer_id);
                     });
                 std::move(renderer_form_handler)
                     .Run(it == forms->end() ? std::nullopt
@@ -361,8 +362,7 @@ void AutofillDriverIOS::ExtractFormWithField(
               field_renderer_id, std::move(renderer_form_handler));
 
           auto& source = static_cast<AutofillDriverIOS&>(request_target);
-          [source.bridge_ fetchFormsFiltered:NO
-                                    withName:std::u16string()
+          [source.bridge_ fetchFormsFiltered:std::nullopt
                                      inFrame:source.web_frame()
                            completionHandler:std::move(completion_handler)];
         },
@@ -431,8 +431,7 @@ void AutofillDriverIOS::ScanForms(bool immediately) {
                 : document_scan_batcher_.PushRequest(base::BindOnce(
                       callback, bridge_, web_frame()->AsWeakPtr()));
   } else {
-    [bridge_ fetchFormsFiltered:NO
-                       withName:std::u16string()
+    [bridge_ fetchFormsFiltered:std::nullopt
                         inFrame:web_frame()
               completionHandler:base::BindOnce(callback, bridge_,
                                                web_frame()->AsWeakPtr())];
@@ -451,8 +450,7 @@ void AutofillDriverIOS::FetchFormsFilteredByName(
     document_filtered_scan_batcher_.PushRequest(std::move(completion),
                                                 form_name);
   } else {
-    [bridge_ fetchFormsFiltered:YES
-                       withName:form_name
+    [bridge_ fetchFormsFiltered:form_name
                         inFrame:web_frame()
               completionHandler:std::move(completion)];
   }
@@ -882,6 +880,11 @@ void AutofillDriverIOS::DispatchEmailVerifiedEvent(
     FieldGlobalId field_id,
     const std::string& presentation_token) {
   // TODO(crbug.com/380367784): Implement email verification on iOS.
+  NOTIMPLEMENTED();
+}
+
+void AutofillDriverIOS::ScrollFieldIntoView(FieldGlobalId field_id) {
+  // TODO(crbug.com/481379667): Implement scrolling logic on iOS.
   NOTIMPLEMENTED();
 }
 

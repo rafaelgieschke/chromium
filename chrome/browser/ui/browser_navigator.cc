@@ -74,6 +74,7 @@
 #if BUILDFLAG(IS_CHROMEOS)
 #include "ash/multi_user/multi_user_window_manager.h"
 #include "ash/shell.h"
+#include "chrome/browser/ash/boca/on_task/on_task_locked_controller.h"
 #include "chrome/browser/ui/ash/system_web_apps/system_web_app_ui_utils.h"
 #include "components/account_id/account_id.h"
 #endif
@@ -549,7 +550,8 @@ base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
     bool should_block_navigation =
         platform_util::IsBrowserLockedFullscreen(source_browser);
 #if BUILDFLAG(IS_CHROMEOS)
-    if (source_browser->IsLockedForOnTask()) {
+    if (ash::boca::OnTaskLockedController::From(source_browser)
+            ->is_locked_for_on_task()) {
       should_block_navigation = false;
     }
 #endif  // BUILDFLAG(IS_CHROMEOS)
@@ -642,8 +644,6 @@ base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
         params->source_contents, contents_to_navigate_or_insert);
   }
 
-  // TODO(crbug.com/364657540): Revisit integration with web_application system
-  // later if needed.
   int singleton_index = -1;
 
   std::unique_ptr<web_app::NavigationCapturingProcess> app_navigation =
@@ -774,6 +774,12 @@ base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
     tab_to_insert = std::make_unique<tabs::TabModel>(
         std::move(params->contents_to_insert),
         params->browser->GetBrowserForMigrationOnly()->tab_strip_model());
+    if (params->source_contents &&
+        ((params->tabstrip_add_types & AddTabTypes::ADD_INHERIT_OPENER) ||
+         params->user_gesture)) {
+      tab_to_insert->set_opener(
+          tabs::TabInterface::MaybeGetFromContents(params->source_contents));
+    }
   }
 
   // If no target WebContents was specified (and we didn't seek and find a
@@ -785,6 +791,12 @@ base::WeakPtr<content::NavigationHandle> Navigate(NavigateParams* params) {
       tab_to_insert = std::make_unique<tabs::TabModel>(
           CreateTargetContents(*params, params->url),
           params->browser->GetBrowserForMigrationOnly()->tab_strip_model());
+      if (params->source_contents &&
+          ((params->tabstrip_add_types & AddTabTypes::ADD_INHERIT_OPENER) ||
+           params->user_gesture)) {
+        tab_to_insert->set_opener(
+            tabs::TabInterface::MaybeGetFromContents(params->source_contents));
+      }
       contents_to_navigate_or_insert = tab_to_insert->GetContents();
 
       apps::SetAppIdForWebContents(params->browser->GetProfile(),

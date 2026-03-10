@@ -318,7 +318,7 @@ IN_PROC_BROWSER_TEST_F(ContentFaviconDriverTest,
   prerender_helper().WaitForRequest(prerender_url, 1);
   EXPECT_EQ(prerender_helper().GetRequestCount(icon_url), 0);
 
-  content::FrameTreeNodeId host_id =
+  content::PrerenderHostId host_id =
       prerender_helper().GetHostForUrl(prerender_url);
   auto* prerendered = prerender_helper().GetPrerenderedMainFrameHost(host_id);
   EXPECT_CALL(observer, DidUpdateFaviconURL(prerendered, testing::_));
@@ -413,7 +413,7 @@ class FaviconUpdateOnlyInitialEntryTabStripObserver
 // Tests that ContentFaviconDriver can handle being sent updated favicon URLs
 // if there is no committed navigation, so it will use the initial
 // NavigationEntry. This occurs when script is injected in the initial empty
-// document of a newly created window. See crbug.com/520759 for more details.
+// document of a newly created window. See crbug.com/40431380 for more details.
 IN_PROC_BROWSER_TEST_F(ContentFaviconDriverTest,
                        FaviconUpdateOnlyInitialEntry) {
   const char kNoContentPath[] = "/nocontent";

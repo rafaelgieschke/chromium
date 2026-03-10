@@ -32,11 +32,14 @@ class MultiContentsViewDropTargetController final
       public MultiContentsDropTargetView::DragDelegate {
  public:
   static constexpr base::TimeDelta kShowDropTargetForTabDelay =
-      base::Milliseconds(500);
+      base::Milliseconds(1000);
   static constexpr base::TimeDelta kShowDropTargetForLinkDelay =
       base::Milliseconds(500);
   static constexpr base::TimeDelta kShowDropTargetForLinkAfterHideDelay =
       base::Milliseconds(3000);
+  static constexpr double kNudgeShowRatio = 0.4;
+  static constexpr int kNudgeShownLimit = 6;
+  static constexpr int kNudgeUsedLimit = 1;
 
   // Delegate for handling the drop callback.
   class DropDelegate {
@@ -66,7 +69,7 @@ class MultiContentsViewDropTargetController final
   TabDragContext* OnTabDragUpdated(TabDragTarget::DragController& controller,
                                    const gfx::Point& point_in_screen) override;
   void OnTabDragEntered() override;
-  void OnTabDragExited() override;
+  void OnTabDragExited(const gfx::Point& point_in_screen) override;
   void OnTabDragEnded() override;
   bool CanDropTab() override;
   void HandleTabDrop(TabDragTarget::DragController& controller) override;

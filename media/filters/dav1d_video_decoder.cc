@@ -106,7 +106,7 @@ static void ReleaseDecoderBuffer(const uint8_t* buffer, void* opaque) {
 }
 
 static void LogDav1dMessage(void* cookie, const char* format, va_list ap) {
-  auto log = base::StringPrintV(format, ap);
+  auto log = UNSAFE_TODO(base::StringPrintV(format, ap));
   if (log.empty())
     return;
 
@@ -285,7 +285,8 @@ void Dav1dVideoDecoder::Initialize(const VideoDecoderConfig& config,
   }
 
   if (!frame_pool_) {
-    frame_pool_ = base::MakeRefCounted<FrameBufferPool>();
+    frame_pool_ =
+        base::MakeRefCounted<FrameBufferPool>(/*zero_initialize_memory=*/true);
   }
 
   // Clear any previously initialized decoder.

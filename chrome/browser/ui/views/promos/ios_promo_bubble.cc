@@ -12,11 +12,10 @@
 #include "base/memory/raw_ptr.h"
 #include "base/not_fatal_until.h"
 #include "build/branding_buildflags.h"
-#include "chrome/app/vector_icons/vector_icons.h"
+#include "chrome/browser/desktop_to_mobile_promos/promos_pref_names.h"
+#include "chrome/browser/desktop_to_mobile_promos/promos_utils.h"
 #include "chrome/browser/feature_engagement/tracker_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/promos/promos_pref_names.h"
-#include "chrome/browser/promos/promos_utils.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/chrome_typography.h"
@@ -190,7 +189,7 @@ IOSPromoConstants::IOSPromoTypeConfigs SetUpEnhancedBrowsingBubble(
       config.accept_button_text_id =
           IDS_IOS_DESKTOP_PROMO_BUBBLE_BUTTON_ACCEPT_REMINDER;
       config.promo_image =
-          ui::ImageModel::FromVectorIcon(kEnhancedBrowsingOnIosIcon);
+          ui::ImageModel::FromResourceId(IDR_ENHANCED_BROWSING_ON_IOS);
       break;
     case BubbleType::kReminderConfirmation: {
       SetUpBaseReminderConfirmationConfig(config);
@@ -238,6 +237,86 @@ IOSPromoConstants::IOSPromoTypeConfigs SetUpLensBubble(BubbleType bubble_type) {
   }
   return config;
 }
+
+// Creates and returns IOSPromoTypeConfigs for the Tab Groups bubble.
+IOSPromoConstants::IOSPromoTypeConfigs SetUpTabGroupsBubble(
+    BubbleType bubble_type) {
+  IOSPromoConstants::IOSPromoTypeConfigs config;
+  config.with_header = false;
+  config.decline_button_text_id = IDS_IOS_DESKTOP_PROMO_BUBBLE_BUTTON_DECLINE;
+  switch (bubble_type) {
+    case BubbleType::kQRCode:
+      config.promo_title_id = IDS_IOS_DESKTOP_TAB_GROUPS_PROMO_BUBBLE_TITLE_QR;
+      config.promo_description_id =
+          IDS_IOS_DESKTOP_TAB_GROUPS_PROMO_BUBBLE_DESCRIPTION_QR;
+      config.accept_button_text_id =
+          IDS_IOS_DESKTOP_PROMO_BUBBLE_BUTTON_ACCEPT_QR;
+      config.promo_image =
+          CreateQrCodeImage(IOSPromoConstants::kIOSPromoTabGroupsQRCodeURL);
+      config.qr_code_url = IOSPromoConstants::kIOSPromoTabGroupsQRCodeURL;
+      break;
+    case BubbleType::kReminder:
+      config.promo_title_id =
+          IDS_IOS_DESKTOP_TAB_GROUPS_PROMO_BUBBLE_TITLE_REMINDER;
+      config.promo_description_id =
+          IDS_IOS_DESKTOP_TAB_GROUPS_PROMO_BUBBLE_DESCRIPTION_REMINDER;
+      config.accept_button_text_id =
+          IDS_IOS_DESKTOP_PROMO_BUBBLE_BUTTON_ACCEPT_REMINDER;
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+      config.promo_image =
+          ui::ImageModel::FromResourceId(IDR_TAB_GROUPS_ON_IOS_ICON);
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+      break;
+    case BubbleType::kReminderConfirmation: {
+      SetUpBaseReminderConfirmationConfig(config);
+      config.promo_description_id =
+          IDS_IOS_DESKTOP_TAB_GROUPS_REMINDER_CONFIRMATION;
+      break;
+    }
+  }
+  return config;
+}
+
+// Creates and returns IOSPromoTypeConfigs for the Price Tracking bubble.
+IOSPromoConstants::IOSPromoTypeConfigs SetUpPriceTrackingBubble(
+    BubbleType bubble_type) {
+  IOSPromoConstants::IOSPromoTypeConfigs config;
+  config.with_header = false;
+  config.decline_button_text_id = IDS_IOS_DESKTOP_PROMO_BUBBLE_BUTTON_DECLINE;
+  switch (bubble_type) {
+    case BubbleType::kQRCode:
+      config.promo_title_id =
+          IDS_IOS_DESKTOP_PRICE_TRACKING_PROMO_BUBBLE_TITLE_QR;
+      config.promo_description_id =
+          IDS_IOS_DESKTOP_PRICE_TRACKING_DESCRIPTION_QR;
+      config.accept_button_text_id =
+          IDS_IOS_DESKTOP_PROMO_BUBBLE_BUTTON_ACCEPT_QR;
+      config.promo_image =
+          CreateQrCodeImage(IOSPromoConstants::kIOSPromoPriceTrackingQRCodeURL);
+      config.qr_code_url = IOSPromoConstants::kIOSPromoPriceTrackingQRCodeURL;
+      break;
+    case BubbleType::kReminder:
+      config.promo_title_id =
+          IDS_IOS_DESKTOP_PRICE_TRACKING_PROMO_BUBBLE_TITLE_REMINDER;
+      config.promo_description_id =
+          IDS_IOS_DESKTOP_PRICE_TRACKING_PROMO_BUBBLE_DESCRIPTION_REMINDER;
+      config.accept_button_text_id =
+          IDS_IOS_DESKTOP_PROMO_BUBBLE_BUTTON_ACCEPT_REMINDER;
+#if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+      config.promo_image =
+          ui::ImageModel::FromResourceId(IDR_PRICE_TRACKING_ON_IOS_ICON);
+#endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+      break;
+    case BubbleType::kReminderConfirmation: {
+      SetUpBaseReminderConfirmationConfig(config);
+      config.promo_description_id =
+          IDS_IOS_DESKTOP_PRICE_TRACKING_REMINDER_CONFIRMATION;
+      break;
+    }
+  }
+  return config;
+}
+
 }  // namespace
 
 DEFINE_ELEMENT_IDENTIFIER_VALUE(kIOSPromoBubbleElementId);
@@ -327,6 +406,10 @@ IOSPromoConstants::IOSPromoTypeConfigs IOSPromoBubble::SetUpBubble(
       return SetUpEnhancedBrowsingBubble(bubble_type);
     case PromoType::kLens:
       return SetUpLensBubble(bubble_type);
+    case PromoType::kTabGroups:
+      return SetUpTabGroupsBubble(bubble_type);
+    case PromoType::kPriceTracking:
+      return SetUpPriceTrackingBubble(bubble_type);
   }
 }
 
@@ -425,6 +508,12 @@ std::unique_ptr<views::View> IOSPromoBubble::CreateImageAndBodyTextView(
             .SetCornerRadius(
                 views::LayoutProvider::Get()->GetCornerRadiusMetric(
                     views::Emphasis::kHigh));
+
+    if (bubble_type == BubbleType::kQRCode) {
+      image_view_builder.SetAccessibleName(
+          l10n_util::GetStringUTF16(IDS_IOS_DESKTOP_PROMO_QR_CODE_ALT_TEXT));
+    }
+
     auto image_container_builder =
         views::Builder<views::View>()
             .SetLayoutManager(std::make_unique<views::FillLayout>())
@@ -447,7 +536,7 @@ std::unique_ptr<views::View> IOSPromoBubble::CreateImageAndBodyTextView(
           .SetID(IOSPromoConstants::kDescriptionLabelID)
           .SetText(
               l10n_util::GetStringUTF16(ios_promo_config.promo_description_id))
-          .SetTextContext(views::style::CONTEXT_BUBBLE_FOOTER)
+          .SetTextContext(views::style::CONTEXT_DIALOG_BODY_TEXT)
           .SetTextStyle(views::style::STYLE_SECONDARY)
           .SetEnabledColor(kColorDesktopToIOSPromoFooterSubtitleLabel)
           .SetMultiLine(true)
@@ -514,7 +603,7 @@ void IOSPromoBubble::ShowPromoBubble(Anchor anchor,
   }
 
   auto promo_bubble = std::make_unique<views::BubbleDialogModelHost>(
-      dialog_model_builder.Build(), anchor.view, anchor.arrow);
+      dialog_model_builder.Build(), anchor.anchor_base, anchor.arrow);
 
   if (ios_promo_config.with_header) {
     promo_bubble->SetFootnoteView(CreateContentView(

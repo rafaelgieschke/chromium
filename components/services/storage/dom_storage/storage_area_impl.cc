@@ -356,7 +356,7 @@ void StorageAreaImpl::Delete(
       // caching behavior.
       for (const auto& observer : observers_)
         observer->KeyDeleted(key, std::nullopt, source);
-      std::move(callback).Run(true);
+      std::move(callback).Run();
       return;
     }
     if (client_old_value && client_old_value.value().size() == found->second) {
@@ -392,7 +392,7 @@ void StorageAreaImpl::Delete(
       // caching behavior.
       for (const auto& observer : observers_)
         observer->KeyDeleted(key, std::nullopt, source);
-      std::move(callback).Run(true);
+      std::move(callback).Run();
       return;
     }
     old_value.swap(found->second);
@@ -405,7 +405,7 @@ void StorageAreaImpl::Delete(
 
   for (auto& observer : observers_)
     observer->KeyDeleted(key, old_value, source);
-  std::move(callback).Run(true);
+  std::move(callback).Run();
 }
 
 void StorageAreaImpl::DeleteAll(
@@ -435,7 +435,7 @@ void StorageAreaImpl::DeleteAll(
   if (already_empty) {
     for (const auto& observer : observers_)
       observer->AllDeleted(/*was_nonempty=*/false, source);
-    std::move(callback).Run(true);
+    std::move(callback).Run();
     return;
   }
 
@@ -453,29 +453,7 @@ void StorageAreaImpl::DeleteAll(
   memory_used_ = 0;
   for (const auto& observer : observers_)
     observer->AllDeleted(/*was_nonempty=*/true, source);
-  std::move(callback).Run(/*success=*/true);
-}
-
-void StorageAreaImpl::Get(const std::vector<uint8_t>& key,
-                          GetCallback callback) {
-  // TODO(ssid): Remove this method since it is not supported in only keys mode,
-  // crbug.com/764127.
-  if (cache_mode_ == CacheMode::KEYS_ONLY_WHEN_POSSIBLE) {
-    NOTREACHED();
-  }
-  if (!IsMapLoaded() || IsMapUpgradeNeeded()) {
-    LoadMap(base::BindOnce(&StorageAreaImpl::Get,
-                           weak_ptr_factory_.GetWeakPtr(), key,
-                           std::move(callback)));
-    return;
-  }
-
-  auto found = keys_values_map_.find(key);
-  if (found == keys_values_map_.end()) {
-    std::move(callback).Run(false, std::vector<uint8_t>());
-    return;
-  }
-  std::move(callback).Run(true, found->second);
+  std::move(callback).Run();
 }
 
 void StorageAreaImpl::GetAll(

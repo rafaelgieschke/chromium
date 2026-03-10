@@ -8,7 +8,6 @@ import type {HistoryEntry, HistoryItemElement, HistoryListElement} from 'chrome:
 import {BrowserServiceImpl} from 'chrome://history/history.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {assertEquals, assertFalse, assertNotEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
-import {flushTasks} from 'chrome://webui-test/polymer_test_util.js';
 import {eventToPromise, isVisible, microtasksFinished} from 'chrome://webui-test/test_util.js';
 
 import {TestBrowserService} from './test_browser_service.js';
@@ -53,16 +52,16 @@ suite('<history-item> unit test', function() {
     assertEquals(1, selectionCount);
 
     // Non-interactive text should trigger selection.
-    item.$['time-accessed'].click();
+    item.$.timeAccessed.click();
     assertEquals(2, selectionCount);
 
     // Menu button should not trigger selection.
-    item.$['menu-button'].click();
+    item.$.menuButton.click();
     assertEquals(2, selectionCount);
   });
 
   test('title changes with item', async function() {
-    const time = item.$['time-accessed'];
+    const time = item.$.timeAccessed;
     assertEquals('', time.title);
 
     time.dispatchEvent(new CustomEvent('mouseover'));
@@ -137,7 +136,7 @@ suite('<history-item> integration test', function() {
     assertTrue(items[2]!.hasTimeGap);
 
     element.removeItemsByIndexForTesting([3]);
-    await flushTasks();
+    await microtasksFinished();
 
     // Checks time gap separator is removed.
     assertEquals(4, element.$.infiniteList.items.length);
@@ -196,21 +195,5 @@ suite('<history-item> integration test', function() {
         items[5]!.shadowRoot.querySelector<HTMLElement>('#bookmark-star')));
   });
 
-  // TODO(b/441040053): Clean up once kBrowsingHistoryActorIntegrationM1 is
-  // launched.
-  test('actor-initiated visit annotation disabled', async function() {
-    loadTimeData.overrideValues(
-        {enableBrowsingHistoryActorIntegrationM1: false});
 
-    const newResults = [...TEST_HISTORY_RESULTS];
-    // Actor initiated history visit.
-    newResults[0]!.isActorVisit = true;
-    element.addNewResults(newResults, false, true);
-    await microtasksFinished();
-
-    const items = element.shadowRoot.querySelectorAll('history-item');
-    assertEquals(TEST_HISTORY_RESULTS.length, items.length);
-    assertFalse(isVisible(
-        items[0]!.shadowRoot.querySelector<HTMLElement>('#actor-icon')));
-  });
 });

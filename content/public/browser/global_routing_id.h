@@ -10,9 +10,9 @@
 
 #include "base/hash/hash.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/child_process_id.h"
+#include "content/public/common/child_process_id.h"
 #include "content/public/common/content_constants.h"
-#include "ipc/constants.mojom.h"
+#include "ipc/constants.mojom-forward.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
 

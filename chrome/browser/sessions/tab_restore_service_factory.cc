@@ -6,9 +6,12 @@
 
 #include <utility>
 
+#include "chrome/browser/glic/public/glic_keyed_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/chrome_tab_restore_service_client.h"
+#include "chrome/common/buildflags.h"
 #include "components/sessions/core/tab_restore_service_impl.h"
+
 
 namespace {
 
@@ -66,7 +69,9 @@ TabRestoreServiceFactory::TabRestoreServiceFactory()
               // TODO(crbug.com/41488885): Check if this service is needed for
               // Ash Internals.
               .WithAshInternals(ProfileSelection::kOriginalOnly)
-              .Build()) {}
+              .Build()) {
+  DependsOn(glic::GlicKeyedServiceFactory::GetInstance());
+}
 
 TabRestoreServiceFactory::~TabRestoreServiceFactory() = default;
 

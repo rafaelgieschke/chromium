@@ -7,10 +7,13 @@
 
 #include "base/containers/flat_set.h"
 #include "base/containers/span.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/observer_list_types.h"
 #include "base/scoped_observation.h"
 #include "base/types/optional_ref.h"
+#include "components/accessibility_annotator/core/accessibility_annotation_service.h"
+#include "components/autofill/core/browser/country_type.h"
 #include "components/autofill/core/browser/data_manager/autofill_ai/entity_instance_cleaner.h"
 #include "components/autofill/core/browser/data_model/autofill_ai/entity_instance.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
@@ -48,9 +51,11 @@ class AutofillAiSaveStrikeDatabaseByHost;
 // their own EntityDataManager instance, they use the same underlying database.
 // Therefore, it is the responsibility of the callers to ensure that no data
 // from an incognito session is persisted unintentionally.
-class EntityDataManager : public KeyedService,
-                          public AutofillWebDataServiceObserverOnUISequence,
-                          history::HistoryServiceObserver {
+class EntityDataManager
+    : public KeyedService,
+      public AutofillWebDataServiceObserverOnUISequence,
+      history::HistoryServiceObserver,
+      accessibility_annotator::EntityDataProvider::Observer {
  public:
   // Autofill AI enabled pref migration status.
   //
@@ -85,10 +90,16 @@ class EntityDataManager : public KeyedService,
       syncer::SyncService* sync_service,
       scoped_refptr<AutofillWebDataService> profile_database,
       history::HistoryService* history_service,
-      strike_database::StrikeDatabaseBase* strike_database);
+      strike_database::StrikeDatabaseBase* strike_database,
+      accessibility_annotator::AccessibilityAnnotationService*
+          accessibility_annotator_service,
+      GeoIpCountryCode variation_country_code);
   EntityDataManager(const EntityDataManager&) = delete;
   EntityDataManager& operator=(const EntityDataManager&) = delete;
   ~EntityDataManager() override;
+
+  // KeyedService:
+  void Shutdown() override;
 
   // Adds an entity if it doesn't exist in the database yet; otherwise updates
   // it.
@@ -129,6 +140,11 @@ class EntityDataManager : public KeyedService,
   void OnHistoryDeletions(history::HistoryService*,
                           const history::DeletionInfo& deletion_info) override;
 
+  // accessibility_annotator::EntityDataProvider::Observer:
+  void OnEntityDataChanged(
+      accessibility_annotator::EntityDataProvider& provider,
+      accessibility_annotator::EntityTypeEnumSet entity_types) override;
+
   // Records the date an entity was used and also increments the number of times
   // it was used.
   void RecordEntityUsed(const EntityInstance::EntityId& guid,
@@ -141,6 +157,12 @@ class EntityDataManager : public KeyedService,
 
   void RemoveObserver(Observer* observer) {
     observers_.RemoveObserver(observer);
+  }
+
+  const GeoIpCountryCode& GetVariationCountryCode() const;
+
+  base::WeakPtr<EntityDataManager> GetWeakPtr() {
+    return weak_ptr_factory_.GetWeakPtr();
   }
 
  private:
@@ -171,11 +193,19 @@ class EntityDataManager : public KeyedService,
   base::ScopedObservation<history::HistoryService, HistoryServiceObserver>
       history_service_observation_{this};
 
+  // AccessibilityAnnotatorService outlives the EntityDataManager.
+  base::ScopedObservation<
+      accessibility_annotator::AccessibilityAnnotationService,
+      accessibility_annotator::EntityDataProvider::Observer>
+      accessibility_annotator_observation_{this};
+
   std::unique_ptr<AutofillAiSaveStrikeDatabaseByHost> save_strike_db_by_host_;
 
   base::ObserverList<Observer> observers_;
 
   EntityInstanceCleaner entity_instance_cleaner_;
+
+  GeoIpCountryCode variation_country_code_;
 
   base::WeakPtrFactory<EntityDataManager> weak_ptr_factory_{this};
 };

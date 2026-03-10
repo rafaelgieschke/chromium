@@ -7,7 +7,6 @@
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
-#include "chrome/browser/ui/tabs/tab_renderer_data.h"
 #include "chrome/browser/ui/tabs/tab_strip_api/converters/tab_converters.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "components/browser_apis/tab_strip/types/node_id.h"
@@ -23,20 +22,17 @@ mojom::OnTabsCreatedEventPtr ToEvent(
     const tabs_api::TabStripModelAdapter* adapter) {
   auto event = mojom::OnTabsCreatedEvent::New();
 
-    auto tab_created = tabs_api::mojom::TabCreatedContainer::New();
-    tab_created->position = tabs_api::Position(
-        position.index,
-        NodeId::FromTabCollectionHandle(position.parent_handle));
-    auto renderer_data =
-        adapter->GetTabRendererData(adapter->GetIndexForHandle(handle).value());
-    const ui::ColorProvider& provider = adapter->GetColorProvider();
-    auto mojo_tab = tabs_api::converters::BuildMojoTab(
-        handle, renderer_data, provider, adapter->GetTabStates(handle));
+  auto tab_created = tabs_api::mojom::TabCreatedContainer::New();
+  tab_created->position = tabs_api::Position(
+      position.index, adapter->GetPathForCollection(position.parent_handle));
+  const ui::ColorProvider& provider = adapter->GetColorProvider();
+  auto mojo_tab = tabs_api::converters::BuildMojoTab(
+      handle.Get(), provider, adapter->GetTabStates(handle));
 
-    tab_created->tab = std::move(mojo_tab);
-    event->tabs.emplace_back(std::move(tab_created));
+  tab_created->tab = std::move(mojo_tab);
+  event->tabs.emplace_back(std::move(tab_created));
 
-    return event;
+  return event;
 }
 
 mojom::OnCollectionCreatedEventPtr ToEvent(
@@ -46,7 +42,7 @@ mojom::OnCollectionCreatedEventPtr ToEvent(
     bool insert_from_detached) {
   auto event = mojom::OnCollectionCreatedEvent::New();
   event->position = tabs_api::Position(
-      position.index, NodeId::FromTabCollectionHandle(position.parent_handle));
+      position.index, adapter->GetPathForCollection(position.parent_handle));
 
   if (!insert_from_detached) {
     event->collection = tabs_api::mojom::Container::New();
@@ -80,7 +76,8 @@ mojom::OnTabsClosedEventPtr ToEvent(
 mojom::OnNodeMovedEventPtr ToEvent(
     const tabs::TabCollection::Position& to_position,
     const tabs::TabCollection::Position& from_position,
-    const tabs::TabCollection::NodeHandle node_handle) {
+    const tabs::TabCollection::NodeHandle node_handle,
+    const tabs_api::TabStripModelAdapter* adapter) {
   enum NodeId::Type node_type;
   std::string handle;
   if (auto* tab_handle = std::get_if<tabs::TabHandle>(&node_handle)) {
@@ -96,10 +93,10 @@ mojom::OnNodeMovedEventPtr ToEvent(
 
   auto from = tabs_api::Position(
       from_position.index,
-      NodeId::FromTabCollectionHandle(from_position.parent_handle));
+      adapter->GetPathForCollection(from_position.parent_handle));
   auto to = tabs_api::Position(
       to_position.index,
-      NodeId::FromTabCollectionHandle(to_position.parent_handle));
+      adapter->GetPathForCollection(to_position.parent_handle));
 
   auto event = mojom::OnNodeMovedEvent::New();
   event->id = id;
@@ -117,10 +114,10 @@ mojom::OnDataChangedEventPtr ToEvent(
   auto tabs = adapter->GetTabs();
   if (index < tabs.size()) {
     auto& handle = tabs.at(index);
-    auto renderer_data = adapter->GetTabRendererData(index);
     const ui::ColorProvider& color_provider = adapter->GetColorProvider();
+
     auto mojo_tab = tabs_api::converters::BuildMojoTab(
-        handle, renderer_data, color_provider, adapter->GetTabStates(handle));
+        handle.Get(), color_provider, adapter->GetTabStates(handle));
     event->data = mojom::Data::NewTab(std::move(mojo_tab));
   }
 
@@ -166,12 +163,10 @@ std::vector<Event> ToEvent(const TabStripSelectionChange& selection,
       continue;
     }
     auto event = mojom::OnDataChangedEvent::New();
-    auto renderer_data = adapter->GetTabRendererData(
-        adapter->GetIndexForHandle(affected_tab).value());
     const ui::ColorProvider& color_provider = adapter->GetColorProvider();
-    auto mojo_tab = tabs_api::converters::BuildMojoTab(
-        affected_tab, renderer_data, color_provider,
-        adapter->GetTabStates(affected_tab));
+    auto mojo_tab =
+        tabs_api::converters::BuildMojoTab(affected_tab.Get(), color_provider,
+                                           adapter->GetTabStates(affected_tab));
     event->data = mojom::Data::NewTab(std::move(mojo_tab));
     events.push_back(std::move(event));
   }

@@ -105,7 +105,6 @@
 #include "third_party/blink/renderer/platform/geometry/stroke_data.h"
 #include "third_party/blink/renderer/platform/graphics/bitmap_image.h"
 #include "third_party/blink/renderer/platform/graphics/blend_mode.h"
-#include "third_party/blink/renderer/platform/graphics/canvas_high_entropy_op_type.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
@@ -456,18 +455,6 @@ void Canvas2DRecorderContext::beginLayerImpl(ScriptState* script_state,
     return;
   }
 
-  // Make sure we have a recorder and paint canvas.
-  if (!GetOrCreatePaintCanvas()) {
-    return;
-  }
-
-  MemoryManagedPaintRecorder* recorder = Recorder();
-  if (!recorder) {
-    return;
-  }
-
-  ValidateStateStack();
-
   sk_sp<PaintFilter> filter;
   if (options != nullptr) {
     CHECK(exception_state != nullptr);
@@ -495,6 +482,20 @@ void Canvas2DRecorderContext::beginLayerImpl(ScriptState* script_state,
           kInterpolationSpaceSRGB);
     }
   }
+
+  // Create the `PaintCanvas` AFTER parsing the filter. It's possible for
+  // filters to reset the canvas, using a custom object property getter for
+  // instance.
+  if (!GetOrCreatePaintCanvas()) {
+    return;
+  }
+
+  MemoryManagedPaintRecorder* recorder = Recorder();
+  if (!recorder) {
+    return;
+  }
+
+  ValidateStateStack();
 
   if (layer_count_ == 0) {
     recorder->BeginSideRecording();
@@ -1004,7 +1005,7 @@ ColorParseResult Canvas2DRecorderContext::ParseColorOrCurrentColor(
                : kDefaultTextLinkColors;
     // TODO(40946458): Don't use default length resolver here!
     const ResolveColorValueContext context{
-        .conversion_data = CSSToLengthConversionData(/*element=*/nullptr),
+        .length_resolver = CSSToLengthConversionData(/*element=*/nullptr),
         .text_link_colors = text_link_colors,
         .used_color_scheme = color_scheme_,
         .color_provider = GetColorProvider(),
@@ -1615,9 +1616,6 @@ void Canvas2DRecorderContext::DrawPathInternal(
     return;
   }
 
-  HighEntropyCanvasOpType high_entropy_path_op_types =
-      path.HighEntropyPathOpTypes();
-
   if (path.IsArc()) {
     const auto& arc = path.arc();
     const SkRect oval =
@@ -1630,13 +1628,11 @@ void Canvas2DRecorderContext::DrawPathInternal(
     const bool closed = arc.closed;
     Draw<OverdrawOp::kNone>(
         /*draw_func=*/
-        [oval, start_degrees, sweep_degrees, closed,
-         high_entropy_path_op_types](MemoryManagedPaintCanvas* c,
-                                     const cc::PaintFlags* flags) {
+        [oval, start_degrees, sweep_degrees, closed](
+            MemoryManagedPaintCanvas* c, const cc::PaintFlags* flags) {
           cc::PaintFlags arc_paint_flags(*flags);
           arc_paint_flags.setArcClosed(closed);
           c->drawArc(oval, start_degrees, sweep_degrees, arc_paint_flags);
-          c->AddHighEntropyCanvasOpTypes(high_entropy_path_op_types);
         },
         NoOverdraw, bounds, paint_type,
         GetState().HasPattern(paint_type)
@@ -1651,10 +1647,9 @@ void Canvas2DRecorderContext::DrawPathInternal(
 
   Draw<OverdrawOp::kNone>(
       /*draw_func=*/
-      [sk_path, use_paint_cache, high_entropy_path_op_types](
-          MemoryManagedPaintCanvas* c, const cc::PaintFlags* flags) {
+      [sk_path, use_paint_cache](MemoryManagedPaintCanvas* c,
+                                 const cc::PaintFlags* flags) {
         c->drawPath(sk_path, *flags, use_paint_cache);
-        c->AddHighEntropyCanvasOpTypes(high_entropy_path_op_types);
       },
       NoOverdraw, bounds, paint_type,
       GetState().HasPattern(paint_type)
@@ -2375,8 +2370,8 @@ CanvasGradient* Canvas2DRecorderContext::createRadialGradient(
   if (r0 < 0 || r1 < 0) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kIndexSizeError,
-        String::Format("The %s provided is less than 0.",
-                       r0 < 0 ? "r0" : "r1"));
+        UNSAFE_TODO(String::Format("The %s provided is less than 0.",
+                                   r0 < 0 ? "r0" : "r1")));
     return nullptr;
   }
 
@@ -2459,14 +2454,15 @@ CanvasPattern* Canvas2DRecorderContext::createPattern(
     case kZeroSizeCanvasSourceImageStatus:
       exception_state.ThrowDOMException(
           DOMExceptionCode::kInvalidStateError,
-          String::Format("The canvas %s is 0.",
-                         image_source
-                                 ->ElementSize(default_object_size,
-                                               RespectImageOrientationInternal(
-                                                   image_source))
-                                 .width()
-                             ? "height"
-                             : "width"));
+          UNSAFE_TODO(String::Format(
+              "The canvas %s is 0.",
+              image_source
+                      ->ElementSize(
+                          default_object_size,
+                          RespectImageOrientationInternal(image_source))
+                      .width()
+                  ? "height"
+                  : "width")));
       return nullptr;
     case kZeroSizeImageSourceStatus:
       return nullptr;
@@ -2495,20 +2491,8 @@ CanvasPattern* Canvas2DRecorderContext::createPattern(
   }
 
   bool origin_clean = !WouldTaintCanvasOrigin(image_source);
-
-  HighEntropyCanvasOpType source_high_entropy_canvas_op_types =
-      HighEntropyCanvasOpType::kNone;
-  if ((image_source->IsCanvasElement() || image_source->IsOffscreenCanvas()) &&
-      image_for_rendering->IsStaticBitmapImage()) {
-    source_high_entropy_canvas_op_types =
-        static_cast<StaticBitmapImage*>(image_for_rendering.get())
-            ->HighEntropyCanvasOpTypes();
-  }
-
-  auto* pattern = MakeGarbageCollected<CanvasPattern>(
-      std::move(image_for_rendering), repeat_mode, origin_clean,
-      source_high_entropy_canvas_op_types);
-  return pattern;
+  return MakeGarbageCollected<CanvasPattern>(std::move(image_for_rendering),
+                                             repeat_mode, origin_clean);
 }
 
 namespace {

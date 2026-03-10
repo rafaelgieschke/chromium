@@ -42,7 +42,7 @@ lucicfg.config(
         "builders/gn_args_locations.json",
         "builder-owners/*.txt",
         "cq-builders.md",
-        "cq-tests.md",
+        "cq-usage/cq-tests.md",
         "cq-usage/default.cfg",
         "cq-usage/full.cfg",
         "cq-usage/mega_cq_bots.txt",
@@ -166,7 +166,6 @@ chromium_luci.configure_project(
     is_main = settings.is_main,
     platforms = settings.platforms,
     experiments = [
-        "builder_config.targets_spec_directory_relative_to_source_dir",
         "targets.generate_pyl_entry_default_off",
         "targets.module_name_without_slash",
         "targets.module_scheme_generator",
@@ -187,7 +186,7 @@ chromium_luci.configure_builder_config(
     standalone_trybot_excluded_builder_groups = standalone_trybot_excluded_builder_groups,
     standalone_trybot_excluded_builders = standalone_trybot_excluded_builders,
     cq_groups_to_generate_test_coverage_files = {
-        "cq": "cq-tests.md",
+        "cq": "cq-usage/cq-tests.md",
     },
 )
 
@@ -204,8 +203,8 @@ chromium_luci.configure_builders(
             default = os.LINUX_JAMMY,
             overrides = json.decode(io.read_file("//lib/linux-default.json")),
         ),
-        os.MAC_DEFAULT: os.MAC_15,
-        os.MAC_BETA: "Mac-15|Mac-26",
+        os.MAC_DEFAULT: "Mac-15|Mac-26",
+        os.MAC_BETA: "Mac-26",
         os.WINDOWS_DEFAULT: os.WINDOWS_10,
     },
     exempted_from_description_builders = exempted_from_description_builders,
@@ -278,6 +277,7 @@ chromium_luci.configure_targets(
             "skylab-rdb-gtest": True,
             "skylab-rdb-native": True,
             "skylab-rdb-tast": True,
+            "tfc-cq-tast": True,
             "vaapi_unittest_args": True,
             "win-arm64": True,
             "win10": True,
@@ -322,7 +322,6 @@ chromium_luci.configure_targets(
             "mac_retina_amd_555x_gpu_stable": targets.IGNORE_UNUSED,
             "mac_retina_amd_gpu_experimental": targets.IGNORE_UNUSED,
             "mac_retina_amd_gpu_stable": targets.IGNORE_UNUSED,
-            "win10_amd_rx_5500_xt_stable": targets.IGNORE_UNUSED,
             "win10_intel_uhd_630_experimental": targets.IGNORE_UNUSED,
             "win10_intel_uhd_630_stable": targets.IGNORE_UNUSED,
             "win10_intel_uhd_770_stable": targets.IGNORE_UNUSED,
@@ -330,6 +329,8 @@ chromium_luci.configure_targets(
             "win10_nvidia_gtx_1660_stable": targets.IGNORE_UNUSED,
             "win11_amd_780m_experimental": targets.IGNORE_UNUSED,
             "win11_amd_890m_experimental": targets.IGNORE_UNUSED,
+            "win11_amd_rx_5500_xt_experimental": targets.IGNORE_UNUSED,
+            "win11_amd_rx_5500_xt_stable": targets.IGNORE_UNUSED,
             "win11_amd_rx_7600_stable": targets.IGNORE_UNUSED,
             "win11_nvidia_rtx_4070_super_experimental": targets.IGNORE_UNUSED,
             "win11_nvidia_rtx_4070_super_stable": targets.IGNORE_UNUSED,
@@ -342,6 +343,8 @@ chromium_luci.configure_targets(
             # following mixins need to always be generated in mixins.pyl because
             # they are used by the angle pyl files
             "chromium-tester-service-account": targets.IGNORE_UNUSED,
+            "gpu_linux_gce_stable": targets.IGNORE_UNUSED,
+            "gpu_win_gce_stable": targets.IGNORE_UNUSED,
             "gpu-swarming-pool": targets.IGNORE_UNUSED,
             "limited_capacity_bot": targets.IGNORE_UNUSED,
             "linux-jammy": targets.IGNORE_UNUSED,
@@ -363,8 +366,8 @@ chromium_luci.configure_targets(
             "CROS_GPU_BRYA_RELEASE_LKGM": True,
             "CROS_GPU_CORSOLA_RELEASE_LKGM": True,
             "CROS_GPU_SKYRIM_RELEASE_LKGM": True,
+            "CROS_LKGM": True,
             "CROS_JACUZZI_RELEASE_LKGM": True,
-            "CROS_RELEASE_LKGM": True,
             "INTEL_UHD_630_OR_770": True,
             "IPHONE_13": True,
             "NVIDIA_GEFORCE_GTX_1660": True,
@@ -394,7 +397,7 @@ luci.realm(
         ),
         # Allow everyone to view Turbo CI workflows
         luci.binding(
-            roles = "role/turboci.graph.reader",
+            roles = "role/turboci.nodeReaderExternal",
             groups = "all",
         ),
         # Other roles are inherited from @root which grants them to group:all.
@@ -432,7 +435,7 @@ luci.realm(
         ),
         # Allow everyone to view Turbo CI workflows
         luci.binding(
-            roles = "role/turboci.graph.reader",
+            roles = "role/turboci.nodeReaderExternal",
             groups = "all",
         ),
     ],

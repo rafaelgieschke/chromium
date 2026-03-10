@@ -178,6 +178,7 @@ class InvalidIfDefinedMacroNamesTest(unittest.TestCase):
             '#if !defined(TARGET_IPHONE_SIMULATOR)',
             '#elif defined(TARGET_IPHONE_SIMULATOR)',
             '#ifdef TARGET_IPHONE_SIMULATOR',
+            '#elifdef TARGET_IPHONE_SIMULATOR',
             ' # ifdef TARGET_IPHONE_SIMULATOR',
             '# if defined(VALID) || defined(TARGET_IPHONE_SIMULATOR)',
             '# else  // defined(TARGET_IPHONE_SIMULATOR)',
@@ -1627,6 +1628,65 @@ class AndroidDebuggableBuildTest(unittest.TestCase):
         self.assertIn('UsedExplicitBuildType.java:2', msgs[0].items)
 
 
+class AndroidToastUsageTest(unittest.TestCase):
+
+    def testCheckAndroidToastUsage(self):
+        mock_input_api = MockInputApi()
+        mock_output_api = MockOutputApi()
+
+        mock_input_api.files = [
+            MockAffectedFile('RandomStuff.java', ['random stuff']),
+            MockAffectedFile('CorrectUsage.java', [
+                'import org.chromium.ui.widget.Toast;',
+                'Toast.makeText(context, "ok", Toast.LENGTH_SHORT).show();',
+            ]),
+            MockAffectedFile('UsedAndroidToastImport.java', [
+                'import android.widget.Toast;',
+            ]),
+            MockAffectedFile('UsedAndroidToastImportLine2.java', [
+                'some random stuff',
+                'import android.widget.Toast;',
+            ]),
+            MockAffectedFile('chromecast/AllowedImport.java', [
+                'import android.widget.Toast;',
+            ]),
+            MockAffectedFile('remoting/AllowedImport.java', [
+                'import android.widget.Toast;',
+            ]),
+        ]
+
+        msgs = PRESUBMIT._CheckAndroidToastUsage(mock_input_api,
+                                                 mock_output_api)
+        self.assertEqual(
+            1, len(msgs),
+            'Expected %d items, found %d: %s' % (1, len(msgs), msgs))
+        self.assertEqual(
+            2, len(msgs[0].items), 'Expected %d items, found %d: %s' %
+            (2, len(msgs[0].items), msgs[0].items))
+        self.assertIn('UsedAndroidToastImport.java:1', msgs[0].items)
+        self.assertIn('UsedAndroidToastImportLine2.java:2', msgs[0].items)
+
+    def testCheckAndroidToastUsageNoViolations(self):
+        mock_input_api = MockInputApi()
+        mock_output_api = MockOutputApi()
+
+        mock_input_api.files = [
+            MockAffectedFile('RandomStuff.java', ['random stuff']),
+            MockAffectedFile('CorrectUsage.java', [
+                'import org.chromium.ui.widget.Toast;',
+                'Toast.makeText(context, "ok", Toast.LENGTH_SHORT).show();',
+            ]),
+            MockAffectedFile('AnotherCorrectUsage.java', [
+                'import org.chromium.ui.widget.Toast;',
+                'Toast.makeText(context, "ok2", Toast.LENGTH_LONG).show();',
+            ]),
+        ]
+
+        msgs = PRESUBMIT._CheckAndroidToastUsage(mock_input_api,
+                                                 mock_output_api)
+        self.assertEqual(0, len(msgs))
+
+
 class LogUsageTest(unittest.TestCase):
 
     def testCheckAndroidCrLogUsage(self):
@@ -1635,23 +1695,8 @@ class LogUsageTest(unittest.TestCase):
 
         mock_input_api.files = [
             MockAffectedFile('RandomStuff.java', ['random stuff']),
-            MockAffectedFile('HasAndroidLog.java', [
-                'import android.util.Log;',
-                'some random stuff',
-                'Log.d("TAG", "foo");',
-            ]),
-            MockAffectedFile('HasExplicitUtilLog.java', [
-                'some random stuff',
-                'android.util.Log.d("TAG", "foo");',
-            ]),
             MockAffectedFile('IsInBasePackage.java', [
                 'package org.chromium.base;',
-                'private static final String TAG = "cr_Foo";',
-                'Log.d(TAG, "foo");',
-            ]),
-            MockAffectedFile('IsInBasePackageButImportsLog.java', [
-                'package org.chromium.base;',
-                'import android.util.Log;',
                 'private static final String TAG = "cr_Foo";',
                 'Log.d(TAG, "foo");',
             ]),
@@ -1732,8 +1777,8 @@ class LogUsageTest(unittest.TestCase):
                                                  mock_output_api)
 
         self.assertEqual(
-            5, len(msgs),
-            'Expected %d items, found %d: %s' % (5, len(msgs), msgs))
+            4, len(msgs),
+            'Expected %d items, found %d: %s' % (4, len(msgs), msgs))
 
         # Declaration format
         nb = len(msgs[0].items)
@@ -1757,23 +1802,13 @@ class LogUsageTest(unittest.TestCase):
         self.assertIn('HasInlineTag.java:4', msgs[2].items)
         self.assertIn('HasInlineTagWithSpace.java:4', msgs[2].items)
 
-        # Util Log usage
+        # Tag must not contain
         nb = len(msgs[3].items)
         self.assertEqual(
-            5, nb, 'Expected %d items, found %d: %s' % (3, nb, msgs[3].items))
-        self.assertIn('HasAndroidLog.java:1', msgs[3].items)
-        self.assertIn('HasAndroidLog.java:3', msgs[3].items)
-        self.assertIn('HasExplicitUtilLog.java:2', msgs[3].items)
-        self.assertIn('IsInBasePackageButImportsLog.java:2', msgs[3].items)
-        self.assertIn('IsInBasePackageButImportsLog.java:4', msgs[3].items)
-
-        # Tag must not contain
-        nb = len(msgs[4].items)
-        self.assertEqual(
-            3, nb, 'Expected %d items, found %d: %s' % (2, nb, msgs[4].items))
-        self.assertIn('HasDottedTag.java', msgs[4].items)
-        self.assertIn('HasDottedTagPublic.java', msgs[4].items)
-        self.assertIn('HasOldTag.java', msgs[4].items)
+            3, nb, 'Expected %d items, found %d: %s' % (2, nb, msgs[3].items))
+        self.assertIn('HasDottedTag.java', msgs[3].items)
+        self.assertIn('HasDottedTagPublic.java', msgs[3].items)
+        self.assertIn('HasOldTag.java', msgs[3].items)
 
 
 class GoogleAnswerUrlFormatTest(unittest.TestCase):
@@ -3094,6 +3129,23 @@ class BannedTypeCheckTest(unittest.TestCase):
         self.assertEqual(results[8].locations[0].start_line, 2)
         self.assertEqual(results[8].locations[0].end_line, 2)
 
+    def testBannedMemoryPressureListener(self):
+        input_api = MockInputApi()
+        input_api.files = [
+            MockFile('some/cpp/problematic/file.cc',
+                     ['MemoryPressureListener* listener;']),
+            MockFile('base/memory/memory_pressure_listener.cc',
+                     ['void MemoryPressureListener::NotifyMemoryPressure() {']),
+        ]
+
+        results = PRESUBMIT.CheckNoBannedPatterns(input_api, MockOutputApi())
+
+        self.assertEqual(1, len(results))
+        self.assertIn('some/cpp/problematic/file.cc', results[0].message)
+        self.assertTrue(
+            all('base/memory/memory_pressure_listener.cc' not in r.message
+                for r in results))
+
     def testBannedCppRandomFunctions(self):
         banned_rngs = [
             'absl::BitGen',
@@ -3238,6 +3290,55 @@ class BannedTypeCheckTest(unittest.TestCase):
         self.assertTrue(
             all('some/excluded/path/bad_extension_id.mojom' not in r.message
                 for r in results))
+
+    def testJniTypesWarning(self):
+        input_api = MockInputApi()
+        input_api.files = [
+            MockFile("base/positives.cc", [
+                "jboolean b;",
+                "jint i;",
+                "jlong l;",
+                "jfloat f;",
+                "jdouble d;",
+                "jbyte b;",
+                "jchar c;",
+                "jshort s;",
+            ]),
+            MockFile("base/negatives.cc", [
+                "jint JNI_OnLoad(JavaVM* vm, void* reserved);",
+                "int ajint = 1;"
+                "int jinta = 2;"
+            ]),
+        ]
+
+        results = PRESUBMIT.CheckNoBannedPatterns(input_api, MockOutputApi())
+
+        self.assertEqual(8, len(results))
+        self.assertIn("base/positives.cc", results[0].message)
+        self.assertNotIn("base/negatives.cc", results[0].message)
+        self.assertIn("Use bool instead of jboolean", results[0].message)
+        self.assertIn("base/positives.cc", results[1].message)
+        self.assertNotIn("base/negatives.cc", results[1].message)
+        self.assertIn("Use int32_t instead of jint", results[1].message)
+        self.assertIn("base/positives.cc", results[2].message)
+        self.assertNotIn("base/negatives.cc", results[2].message)
+        self.assertIn("Use int64_t instead of jlong", results[2].message)
+        self.assertIn("base/positives.cc", results[3].message)
+        self.assertNotIn("base/negatives.cc", results[3].message)
+        self.assertIn("Use float instead of jfloat", results[3].message)
+        self.assertIn("base/positives.cc", results[4].message)
+        self.assertNotIn("base/negatives.cc", results[4].message)
+        self.assertIn("Use double instead of jdouble", results[4].message)
+        self.assertIn("base/positives.cc", results[5].message)
+        self.assertNotIn("base/negatives.cc", results[5].message)
+        self.assertIn("Use int8_t instead of jbyte", results[5].message)
+        self.assertIn("base/positives.cc", results[6].message)
+        self.assertNotIn("base/negatives.cc", results[6].message)
+        self.assertIn("Use uint16_t instead of jchar", results[6].message)
+        self.assertIn("base/positives.cc", results[7].message)
+        self.assertNotIn("base/negatives.cc", results[7].message)
+        self.assertIn("Use int16_t instead of jshort", results[7].message)
+
 
 
 class NoProductionCodeUsingTestOnlyFunctionsTest(unittest.TestCase):
@@ -5025,6 +5126,11 @@ class CheckRawPtrUsageTest(unittest.TestCase):
             # Renderer code is generally allowed (except specifically
             # disallowed directories).
             MockAffectedFile('test30/renderer/foo.cc', ['raw_ptr<int>']),
+            # `functional.h` carries shared plumbing and is a special
+            # inclusion (against the rest of `platform/wtf/`).
+            MockAffectedFile(
+                'test31/third_party/blink/renderer/platform/wtf/functional.cc',
+                ['raw_ptr<int>']),
         ]
         mock_output_api = MockOutputApi()
         errors = PRESUBMIT.CheckRawPtrUsage(mock_input_api, mock_output_api)
@@ -5044,14 +5150,37 @@ class CheckRawPtrUsageTest(unittest.TestCase):
             MockAffectedFile(
                 'test4/third_party/blink/renderer/platform/fonts/foo.h',
                 ['raw_ptr<int>']),
+            # As above, but with `raw_ref`.
+            MockAffectedFile('test5/third_party/blink/renderer/core/foo.h',
+                             ['raw_ref<int>']),
+            MockAffectedFile(
+                'test6/third_party/blink/renderer/platform/heap/foo.cc',
+                ['raw_ref<int>']),
+            MockAffectedFile(
+                'test7/third_party/blink/renderer/platform/wtf/foo.cc',
+                ['raw_ref<int>']),
+            MockAffectedFile(
+                'test8/third_party/blink/renderer/platform/fonts/foo.h',
+                ['raw_ref<int>']),
+            # As above, but with `raw_span`.
+            MockAffectedFile('test9/third_party/blink/renderer/core/foo.h',
+                             ['raw_span<int>']),
+            MockAffectedFile(
+                'test10/third_party/blink/renderer/platform/heap/foo.cc',
+                ['raw_span<int>']),
+            MockAffectedFile(
+                'test11/third_party/blink/renderer/platform/wtf/foo.cc',
+                ['raw_span<int>']),
+            MockAffectedFile(
+                'test12/third_party/blink/renderer/platform/fonts/foo.h',
+                ['raw_span<int>']),
         ]
         mock_output_api = MockOutputApi()
         errors = PRESUBMIT.CheckRawPtrUsage(mock_input_api, mock_output_api)
         self.assertEqual(len(mock_input_api.files), len(errors))
         for error in errors:
-            self.assertIn(
-                'raw_ptr<T> should not be used in this renderer code',
-                error.message)
+            self.assertIn('` should not be used in this renderer code',
+                          error.message)
 
 
 class CheckAdvancedMemorySafetyChecksUsageTest(unittest.TestCase):
@@ -5169,6 +5298,7 @@ class CheckAndroidTestAnnotations(unittest.TestCase):
         errors = PRESUBMIT.CheckAndroidTestAnnotations(mock_input,
                                                        MockOutputApi())
         self.assertEqual(2, len(errors))
+        self.assertEqual('error', errors[0].type)
         self.assertEqual(2, len(errors[0].items))
         self.assertIn('OneTest.java', errors[0].items[0])
         self.assertIn('TwoTest.java', errors[0].items[1])
@@ -5264,6 +5394,17 @@ class CheckAndroidTestAnnotations(unittest.TestCase):
         self.assertEqual(1, len(errors))
         self.assertEqual(1, len(errors[0].items))
         self.assertIn('OneTest.java', errors[0].items[0])
+
+    def testIgnoreModifiedFiles(self):
+        """Examples of when modified files without @Batch or @DoNotBatch are ignored."""
+        mock_input = MockInputApi()
+        mock_input.files = [
+            MockFile('path/OneTest.java', ['public class OneTest'], action='M'),
+            MockFile('path/TwoTest.java', ['public class TwoTest'], action='M'),
+        ]
+        errors = PRESUBMIT.CheckAndroidTestAnnotations(mock_input,
+                                                       MockOutputApi())
+        self.assertEqual(0, len(errors))
 
 
 class CheckAndroidNullAwayAnnotatedClasses(unittest.TestCase):
@@ -5806,7 +5947,7 @@ class CheckInlineConstexprDefinitionsInHeadersTest(unittest.TestCase):
 class CheckDeprecatedSyncConsentFunctionsTest(unittest.TestCase):
     """Test the presubmit for deprecated ConsentLevel::kSync functions."""
 
-    def testCppMobilePlatformPath(self):
+    def testCppPath(self):
         input_api = MockInputApi()
         input_api.files = [
             MockFile('chrome/browser/android/file.cc', ['OtherFunction']),
@@ -5821,11 +5962,14 @@ class CheckDeprecatedSyncConsentFunctionsTest(unittest.TestCase):
                      ['IsSyncFeatureActive']),
             MockFile('components/foo/ios_delegate.cc',
                      ['IsSyncFeatureActive']),
+            MockFile('chrome/browser/file.cc', ['HasSyncConsent']),
+            MockFile('bios/file.cc', ['HasSyncConsent']),
+            MockFile('components/kiosk/file.cc', ['HasSyncConsent']),
         ]
 
         results = PRESUBMIT.CheckNoBannedPatterns(input_api, MockOutputApi())
 
-        self.assertEqual(7, len(results))
+        self.assertEqual(10, len(results))
         self.assertTrue(
             all('chrome/browser/android/file.cc' not in r.message
                 for r in results))
@@ -5836,18 +5980,9 @@ class CheckDeprecatedSyncConsentFunctionsTest(unittest.TestCase):
         self.assertIn('components/foo/delegate_ios.cc', results[4].message)
         self.assertIn('components/foo/android_delegate.cc', results[5].message)
         self.assertIn('components/foo/ios_delegate.cc', results[6].message)
-
-    def testCppNonMobilePlatformPath(self):
-        input_api = MockInputApi()
-        input_api.files = [
-            MockFile('chrome/browser/file.cc', ['HasSyncConsent']),
-            MockFile('bios/file.cc', ['HasSyncConsent']),
-            MockFile('components/kiosk/file.cc', ['HasSyncConsent']),
-        ]
-
-        results = PRESUBMIT.CheckNoBannedPatterns(input_api, MockOutputApi())
-
-        self.assertEqual(0, len(results))
+        self.assertIn('chrome/browser/file.cc', results[7].message)
+        self.assertIn('bios/file.cc', results[8].message)
+        self.assertIn('components/kiosk/file.cc', results[9].message)
 
     def testJavaPath(self):
         input_api = MockInputApi()
@@ -5963,6 +6098,306 @@ class CheckBaseFeatureMacroTest(unittest.TestCase):
 
         self.assertEqual(len(expected_warnings), len(warnings))
         self.assertCountEqual(expected_warnings, warnings)
+
+
+class CheckNoMojomDataViewIncludesTest(unittest.TestCase):
+
+    def testPositive(self):
+        input_api = MockInputApi()
+        input_api.files = [
+            MockAffectedFile('foo.cc', ['#include "foo.mojom-data-view.h"']),
+        ]
+        results = PRESUBMIT.CheckNoMojomDataViewIncludes(
+            input_api, MockOutputApi())
+        self.assertEqual(1, len(results))
+        self.assertEqual(
+            'Do not #include <...>.mojom-data-view.h; #include <...>.mojom-shared.h instead.',
+            results[0].message)
+
+    def testNegative(self):
+        input_api = MockInputApi()
+        input_api.files = [
+            MockAffectedFile('foo.cc', ['#include "foo.mojom-shared.h"']),
+        ]
+        results = PRESUBMIT.CheckNoMojomDataViewIncludes(
+            input_api, MockOutputApi())
+        self.assertEqual(0, len(results))
+
+    def testTraitsExcluded(self):
+        input_api = MockInputApi()
+        input_api.files = [
+            MockAffectedFile('foo_traits.cc',
+                             ['#include "foo.mojom-data-view.h"']),
+        ]
+        results = PRESUBMIT.CheckNoMojomDataViewIncludes(
+            input_api, MockOutputApi())
+        self.assertEqual(0, len(results))
+
+    def testSpecificFileExcluded(self):
+        input_api = MockInputApi()
+        input_api.files = [
+            MockAffectedFile('services/network/url_loader.cc',
+                             ['#include "foo.mojom-data-view.h"']),
+        ]
+        results = PRESUBMIT.CheckNoMojomDataViewIncludes(
+            input_api, MockOutputApi())
+        self.assertEqual(0, len(results))
+
+
+class TestFileNamesTest(unittest.TestCase):
+
+    def testInvalidTestNames(self):
+        input_api = MockInputApi()
+        input_api.files = [
+            MockFile('path/to/foo_unittests.cc', []),
+            MockFile('path/to/bar_browsertests.cc', []),
+            MockFile('path/to/baz_unittest.cc', []),
+            MockFile('path/to/qux_browsertest.cc', []),
+            MockFile('third_party/blink/renderer/core/foo_unittests.cc', []),
+        ]
+        results = PRESUBMIT.CheckTestFileNamesOnUpload(input_api,
+                                                       MockOutputApi())
+        self.assertEqual(1, len(results))
+        self.assertEqual(3, len(results[0].items))
+        self.assertIn(
+            'path/to/foo_unittests.cc (should be path/to/foo_unittest.cc)',
+            results[0].items)
+        self.assertIn(
+            'path/to/bar_browsertests.cc (should be path/to/bar_browsertest.cc)',
+            results[0].items)
+        self.assertIn(
+            'third_party/blink/renderer/core/foo_unittests.cc (should be third_party/blink/renderer/core/foo_unittest.cc)',
+            results[0].items)
+
+    def testNoInvalidTestNames(self):
+        input_api = MockInputApi()
+        input_api.files = [
+            MockFile('path/to/baz_unittest.cc', []),
+            MockFile('path/to/qux_browsertest.cc', []),
+            MockFile('path/to/run_all_unittests.cc', []),
+            MockFile('third_party/foo/bar_unittests.cc', []),
+        ]
+        results = PRESUBMIT.CheckTestFileNamesOnUpload(input_api,
+                                                       MockOutputApi())
+        self.assertEqual(0, len(results))
+
+
+class TestCheckSettingsChanges(unittest.TestCase):
+
+    def setUp(self):
+        self.mock_input = MockInputApi()
+        self.mock_output = MockOutputApi()
+        self.mock_input.os_path.join = lambda *args: "/".join(args)
+        self.mock_input.PresubmitLocalPath = lambda: "root"
+
+    def testHeuristicAndRegistryDetection(self):
+        # No provider.
+        content_a = [
+            'public class MyFeature extends GenericSettingsBaseFragment {}'
+        ]
+        # Has a provider, but not registered.
+        content_b = [
+            'public class MyScreen extends PreferenceFragmentCompat {',
+            '    public static final SearchIndexProvider SEARCH_INDEX_DATA_PROVIDER = ',
+            '        new BaseSearchIndexProvider() {};', '}'
+        ]
+
+        registry_content = ['OldSettings.SEARCH_INDEX_DATA_PROVIDER,']
+
+        self.mock_input.files = [
+            MockFile('path/MyFeature.java', content_a, action='A'),
+            MockFile('path/MyScreen.java', content_b, action='A'),
+            MockFile(
+                'root/java/src/org/chromium/chrome/browser/settings/search/SearchIndexProviderRegistry.java',
+                registry_content)
+        ]
+
+        results = PRESUBMIT.CheckSettingsChanges(self.mock_input,
+                                                 self.mock_output)
+
+        # MyFeature should have 2 warnings: Missing Field and Not Registered
+        # MyScreen should have 1 warning: Not Registered
+        # Total results: 3
+        self.assertEqual(len(results), 1)
+        self.assertEqual(len(results[0].items), 3)
+        self.assertEqual(self.mock_output.more_cc,
+                         ['jinsukkim@chromium.org', 'adelm@google.com'])
+        errors = results[0].items
+        self.assertTrue(any("MyFeature.java" in e and "Missing SEARCH_INDEX_DATA_PROVIDER" in e for e in errors))
+        self.assertTrue(any("MyScreen.java" in e and "Fragment not found in SearchIndexProviderRegistry" in e for e in errors))
+
+    def testParityLogicMismatch(self):
+        java_content = [
+            'public class MySettings extends ChromeBaseSettingsFragment {',
+            '    public void init() {',
+            '        mPref.setSummary("Dynamic Summary");',  # Trigger 1
+            '        mOther.setVisible(false);',  # Trigger 2
+            '        getArguments().getInt("node_id");',  # Trigger 3
+            '    }',
+            '    public static final SearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =',
+            '        new BaseSearchIndexProvider() {',
+            '            // Missing updateDynamicPreferences and getExtras',
+            '        };',
+            '}'
+        ]
+        mock_file = MockFile('MySettings.java', java_content, action='A')
+
+        mock_file._changed_contents = [(3, java_content[2]),
+                                       (4, java_content[3]),
+                                       (5, java_content[4])]
+
+        self.mock_input.files = [
+            mock_file,
+            MockFile(
+                'root/java/src/org/chromium/chrome/browser/settings/search/SearchIndexProviderRegistry.java',
+                ['MySettings.SEARCH_INDEX_DATA_PROVIDER,'])
+        ]
+
+        results = PRESUBMIT.CheckSettingsChanges(self.mock_input,
+                                                 self.mock_output)
+
+        # Should produce a Parity Mismatch warning containing all 3 failed triggers
+        self.assertEqual(len(results), 1)
+        self.assertEqual(len(results[0].items), 3)
+        self.assertEqual(self.mock_output.more_cc,
+                         ['jinsukkim@chromium.org', 'adelm@google.com'])
+        self.assertIn("Potential Settings Search Indexing Issues", results[0].message)
+        actual_errors = "\n".join(results[0].items)
+        self.assertIn("updateEntrySummaryForKey", actual_errors)
+        self.assertIn("removeEntryForKey()", actual_errors)
+        self.assertIn("getExtras()", actual_errors)
+
+    def testParityLogicSuccess(self):
+        java_content = [
+            'public class MySettings extends ChromeBaseSettingsFragment {',
+            '    public void update() { mPref.setSummary("hi"); }',
+            '    public static final SearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =',
+            '        new BaseSearchIndexProvider() {',
+            '            @Override',
+            '            public void updateDynamicPreferences(Context c, SettingsIndexData d) {',
+            '                d.updateEntrySummaryForKey(F, "key", "summary");',  # Satisfies summary
+            '            }',
+            '        };',
+            '}'
+        ]
+        mock_file = MockFile('MySettings.java', java_content, action='A')
+        mock_file._changed_contents = [(2, java_content[1])]
+        self.mock_input.files = [
+            mock_file,
+            MockFile(
+                'root/java/src/org/chromium/chrome/browser/settings/search/SearchIndexProviderRegistry.java',
+                ['MySettings.SEARCH_INDEX_DATA_PROVIDER,'])
+        ]
+
+        results = PRESUBMIT.CheckSettingsChanges(self.mock_input,
+                                                 self.mock_output)
+
+        self.assertEqual(len(results), 0)
+
+    def testAbstractAndNonSettingsIgnored(self):
+        self.mock_input.files = [
+            MockFile('AbstractBase.java', [
+                'public abstract class AbstractBase extends ChromeBaseSettingsFragment {}'
+            ]),
+            MockFile('NormalClass.java',
+                     ['public class NormalClass { void test() {} }'])
+        ]
+
+        results = PRESUBMIT.CheckSettingsChanges(self.mock_input,
+                                                 self.mock_output)
+
+        self.assertEqual(len(results), 0)
+        # Non-settings file shouldn't trigger a CC
+        self.assertEqual(len(self.mock_output.more_cc), 0)
+
+
+class CheckNoMainLayoutSwitcherTest(unittest.TestCase):
+
+    def testPositive(self):
+        mock_input_api = MockInputApi()
+        mock_input_api.files = [
+            MockAffectedFile('some/other/File.java', ['something']),
+        ]
+        results = PRESUBMIT.CheckNoMainLayoutSwitcher(mock_input_api,
+                                                      MockOutputApi())
+        self.assertEqual(0, len(results))
+
+    def testNoDiffs(self):
+        mock_input_api = MockInputApi()
+        mock_input_api.no_diffs = True
+        mock_input_api.files = [
+            MockAffectedFile(
+                'chrome/android/java/src/org/chromium/chrome/browser/app/MainLayoutSwitcher.java',
+                ['something']),
+        ]
+        results = PRESUBMIT.CheckNoMainLayoutSwitcher(mock_input_api,
+                                                      MockOutputApi())
+        self.assertEqual(0, len(results))
+
+    def testNegative(self):
+        mock_input_api = MockInputApi()
+        mock_input_api.files = [
+            MockAffectedFile(
+                'chrome/android/java/src/org/chromium/chrome/browser/app/MainLayoutSwitcher.java',
+                ['something']),
+        ]
+        results = PRESUBMIT.CheckNoMainLayoutSwitcher(mock_input_api,
+                                                      MockOutputApi())
+        self.assertEqual(1, len(results))
+        self.assertEqual('error', results[0].type)
+
+    def testNegativeWithWindowsPath(self):
+        # Simulate Windows path with backslashes
+        windows_path = 'chrome\\android\\java\\src\\org\\chromium\\chrome\\browser\\app\\MainLayoutSwitcher.java'
+
+        mock_input_api = MockInputApi()
+        mock_input_api.files = [
+            MockAffectedFile(windows_path, ['something']),
+        ]
+        results = PRESUBMIT.CheckNoMainLayoutSwitcher(mock_input_api,
+                                                      MockOutputApi())
+        self.assertEqual(1, len(results))
+        self.assertEqual('error', results[0].type)
+
+    def testBypassTagTrue(self):
+        mock_input_api = MockInputApi()
+        mock_input_api.files = [
+            MockAffectedFile(
+                'chrome/android/java/src/org/chromium/chrome/browser/app/MainLayoutSwitcher.java',
+                ['something']),
+        ]
+        mock_input_api.change.footers = {
+            'Allow-MainLayoutSwitcher-Changes': ['true']
+        }
+        results = PRESUBMIT.CheckNoMainLayoutSwitcher(mock_input_api,
+                                                      MockOutputApi())
+        self.assertEqual(0, len(results))
+
+    def testBypassTagFalse(self):
+        mock_input_api = MockInputApi()
+        mock_input_api.files = [
+            MockAffectedFile(
+                'chrome/android/java/src/org/chromium/chrome/browser/app/MainLayoutSwitcher.java',
+                ['something']),
+        ]
+        mock_input_api.change.footers = {
+            'Allow-MainLayoutSwitcher-Changes': ['false']
+        }
+        results = PRESUBMIT.CheckNoMainLayoutSwitcher(mock_input_api,
+                                                      MockOutputApi())
+        self.assertEqual(1, len(results))
+
+    def testDelete(self):
+        mock_input_api = MockInputApi()
+        mock_input_api.files = [
+            MockAffectedFile(
+                'chrome/android/java/src/org/chromium/chrome/browser/app/MainLayoutSwitcher.java',
+                ['something'],
+                action='D'),
+        ]
+        results = PRESUBMIT.CheckNoMainLayoutSwitcher(mock_input_api,
+                                                      MockOutputApi())
+        self.assertEqual(0, len(results))
 
 
 if __name__ == '__main__':

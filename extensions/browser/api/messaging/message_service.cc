@@ -12,7 +12,6 @@
 #include <utility>
 #include <variant>
 
-#include "base/containers/contains.h"
 #include "base/containers/span.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -54,7 +53,9 @@
 #include "extensions/browser/pref_names.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/process_manager_factory.h"
+#include "extensions/browser/service_worker/worker_id.h"
 #include "extensions/common/api/messaging/messaging_endpoint.h"
+#include "extensions/common/api/messaging/messaging_util.h"
 #include "extensions/common/api/messaging/port_context.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_id.h"
@@ -62,6 +63,7 @@
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/manifest_handlers/externally_connectable.h"
 #include "extensions/common/manifest_handlers/incognito_info.h"
+#include "extensions/common/manifest_handlers/message_serialization_info.h"
 #include "extensions/common/mojom/message_port.mojom-shared.h"
 #include "extensions/common/permissions/permissions_data.h"
 #include "ipc/constants.mojom.h"
@@ -83,6 +85,9 @@ namespace {
 
 const char kReceivingEndDoesntExistError[] =
     "Could not establish connection. Receiving end does not exist.";
+const char kReceivingEndIncompatibleMessageSerializationFormat[] =
+    "Could not establish connection. Receiving end uses different message "
+    "serialization format.";
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
     BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
 const char kMissingPermissionError[] =
@@ -162,7 +167,7 @@ constexpr const char* kDefaultSWExtendedLifetimeList[] = {
 std::vector<url::Origin> GetServiceWorkerExtendedLifetimeOrigins(
     content::BrowserContext* browser_context) {
   std::vector<url::Origin> origins;
-  const base::Value::List& extended_lifetime_urls =
+  const base::ListValue& extended_lifetime_urls =
       ExtensionPrefs::Get(browser_context)
           ->pref_service()
           ->GetList(
@@ -225,7 +230,7 @@ struct MessageService::MessageChannel {
 
 struct MessageService::OpenChannelParams {
   ChannelEndpoint source;
-  std::optional<base::Value::Dict> source_tab;
+  std::optional<base::DictValue> source_tab;
   ExtensionApiFrameIdMap::FrameData source_frame;
   std::unique_ptr<MessagePort> receiver;
   PortId receiver_port_id;
@@ -241,7 +246,7 @@ struct MessageService::OpenChannelParams {
 
   // Takes ownership of receiver.
   OpenChannelParams(const ChannelEndpoint& source,
-                    std::optional<base::Value::Dict> source_tab,
+                    std::optional<base::DictValue> source_tab,
                     const ExtensionApiFrameIdMap::FrameData& source_frame,
                     MessagePort* receiver,
                     const PortId& receiver_port_id,
@@ -268,7 +273,7 @@ struct MessageService::OpenChannelParams {
                           include_guest_process_info,
                           /*open_channel_tracking_ids=*/{}) {}
   OpenChannelParams(const ChannelEndpoint& source,
-                    std::optional<base::Value::Dict> source_tab,
+                    std::optional<base::DictValue> source_tab,
                     const ExtensionApiFrameIdMap::FrameData& source_frame,
                     MessagePort* receiver,
                     const PortId& receiver_port_id,
@@ -386,10 +391,11 @@ class MessageServiceFactory
         absl::Overload{
             [&](const WorkerId& worker) {
               return ChannelEndpoint(
-                  context, worker.render_process_id,
-                  PortContext::ForWorker(worker.thread_id, worker.version_id,
-                                         worker.render_process_id,
-                                         worker.extension_id));
+                  context, worker.render_process_id.GetUnsafeValue(),
+                  PortContext::ForWorker(
+                      worker.thread_id, worker.version_id,
+                      worker.render_process_id.GetUnsafeValue(),
+                      worker.extension_id));
             },
             [&](const content::RenderFrameHost* render_frame_host) {
               return ChannelEndpoint(
@@ -560,6 +566,30 @@ void MessageService::OpenChannelToExtension(
     }
   }
 
+  // Ensure the sender isn't using a serialization format that the receiver
+  // doesn't support.
+  mojom::SerializationFormat receiver_format =
+      MessageSerializationInfo::UsesStructuredClone(target_extension)
+          ? mojom::SerializationFormat::kStructuredClone
+          : mojom::SerializationFormat::kJson;
+
+  // We strictly enforce that the sender and receiver must use the same
+  // serialization format. This prevents ambiguity and potential security/data
+  // issues where a sender might think it's sending JSON but the receiver treats
+  // it as a structured clone (or vice versa), even if the data payload happens
+  // to be compatible.
+  if (source_port_id.serialization_format != receiver_format) {
+    opener_port->DispatchOnDisconnect(
+        kReceivingEndIncompatibleMessageSerializationFormat);
+    for (const auto& tracking_id : open_channel_tracking_ids) {
+      message_tracker->StopTrackingMessagingStage(
+          tracking_id,
+          MessageTracker::OpenChannelMessagePipelineResult::
+              kOpenChannelFailIncompatibleMessageSerializationFormat);
+    }
+    return;
+  }
+
   WebContents* source_contents = nullptr;
   if (source_render_frame_host) {
     source_contents =
@@ -570,7 +600,7 @@ void MessageService::OpenChannelToExtension(
   bool include_guest_process_info = false;
 
   // Get information about the opener's tab, if applicable.
-  std::optional<base::Value::Dict> source_tab =
+  std::optional<base::DictValue> source_tab =
       messaging_delegate_->MaybeGetTabInfo(source_contents);
 
   std::optional<url::Origin> source_origin;
@@ -623,7 +653,7 @@ void MessageService::OpenChannelToExtension(
 
     // If the target extension isn't even listening for connect/message events,
     // there is no need to go any further and the connection should be
-    // rejected without showing a prompt. See http://crbug.com/442497
+    // rejected without showing a prompt. See http://crbug.com/41148316
     EventRouter* event_router = EventRouter::Get(context);
     const char* const events[] = {
         "runtime.onConnectExternal",
@@ -1049,7 +1079,7 @@ void MessageService::AddChannel(std::unique_ptr<MessageChannel> channel,
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   ChannelId channel_id = receiver_port_id.GetChannelId();
-  CHECK(!base::Contains(channels_, channel_id));
+  CHECK(!channels_.contains(channel_id));
   channels_[channel_id] = std::move(channel);
   pending_lazy_context_channels_.erase(channel_id);
 }
@@ -1148,7 +1178,7 @@ void MessageService::CloseChannelImpl(MessageChannelMap::iterator channel_iter,
 }
 
 void MessageService::PostMessage(const PortId& source_port_id,
-                                 const Message& message) {
+                                 Message message) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   ChannelId channel_id = source_port_id.GetChannelId();
@@ -1156,35 +1186,35 @@ void MessageService::PostMessage(const PortId& source_port_id,
   if (iter == channels_.end()) {
     // If this channel is pending, queue up the PostMessage to run once
     // the channel opens.
-    EnqueuePendingMessage(source_port_id, channel_id, message);
+    EnqueuePendingMessage(source_port_id, channel_id, std::move(message));
     return;
   }
 
-  DispatchMessage(source_port_id, iter->second.get(), message);
+  DispatchMessage(source_port_id, iter->second.get(), std::move(message));
 }
 
 void MessageService::EnqueuePendingMessage(const PortId& source_port_id,
                                            const ChannelId& channel_id,
-                                           const Message& message) {
+                                           Message message) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   auto pending_for_incognito = pending_incognito_channels_.find(channel_id);
   if (pending_for_incognito != pending_incognito_channels_.end()) {
-    pending_for_incognito->second.push_back(
-        PendingMessage(source_port_id, message));
+    pending_for_incognito->second.emplace_back(source_port_id,
+                                               std::move(message));
     // A channel should only be holding pending messages because it is in one
     // of these states.
-    DCHECK(!base::Contains(pending_lazy_context_channels_, channel_id));
+    DCHECK(!pending_lazy_context_channels_.contains(channel_id));
     return;
   }
   EnqueuePendingMessageForLazyBackgroundLoad(source_port_id, channel_id,
-                                             message);
+                                             std::move(message));
 }
 
 void MessageService::EnqueuePendingMessageForLazyBackgroundLoad(
     const PortId& source_port_id,
     const ChannelId& channel_id,
-    const Message& message) {
+    Message message) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   auto pending = pending_lazy_context_channels_.find(channel_id);
@@ -1207,21 +1237,21 @@ void MessageService::EnqueuePendingMessageForLazyBackgroundLoad(
   }
 
   context_id.GetTaskQueue()->AddPendingTask(
-      context_id,
-      base::BindOnce(&MessageService::PendingLazyContextPostMessage,
-                     weak_factory_.GetWeakPtr(), source_port_id, message));
+      context_id, base::BindOnce(&MessageService::PendingLazyContextPostMessage,
+                                 weak_factory_.GetWeakPtr(), source_port_id,
+                                 std::move(message)));
 }
 
 void MessageService::DispatchMessage(const PortId& source_port_id,
                                      MessageChannel* channel,
-                                     const Message& message) {
+                                     Message message) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Figure out which port the ID corresponds to.
   MessagePort* dest_port = source_port_id.is_opener ? channel->receiver.get()
                                                     : channel->opener.get();
 
-  dest_port->DispatchOnMessage(message);
+  dest_port->DispatchOnMessage(std::move(message));
 }
 
 void MessageService::NotifyResponsePending(const PortId& port_id) {
@@ -1248,7 +1278,7 @@ bool MessageService::MaybeAddPendingLazyContextOpenChannelTask(
     BrowserContext* context,
     const Extension* extension,
     std::unique_ptr<OpenChannelParams>* params,
-    const PendingMessagesQueue& pending_messages) {
+    PendingMessagesQueue& pending_messages) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(ExtensionsBrowserClient::Get()->IsSameContext(context, context_));
 
@@ -1290,9 +1320,9 @@ bool MessageService::MaybeAddPendingLazyContextOpenChannelTask(
                      weak_factory_.GetWeakPtr(), std::move(*params),
                      std::move(open_channel_wakeup_context_tracking_id)));
 
-  for (const PendingMessage& message : pending_messages) {
-    EnqueuePendingMessageForLazyBackgroundLoad(message.first, channel_id,
-                                               message.second);
+  for (PendingMessage& message : pending_messages) {
+    EnqueuePendingMessageForLazyBackgroundLoad(message.port_id, channel_id,
+                                               std::move(message.message));
   }
   return true;
 }
@@ -1376,7 +1406,7 @@ void MessageService::OnOpenChannelAllowed(
                                                  &params, pending_messages)) {
     OpenChannelImpl(context, std::move(params), target_extension,
                     /*did_enqueue=*/false);
-    DispatchPendingMessages(pending_messages, channel_id);
+    DispatchPendingMessages(std::move(pending_messages), channel_id);
   }
 }
 
@@ -1426,15 +1456,15 @@ void MessageService::PendingLazyContextOpenChannel(
                   /*did_enqueue=*/true);
 }
 
-void MessageService::DispatchPendingMessages(const PendingMessagesQueue& queue,
+void MessageService::DispatchPendingMessages(PendingMessagesQueue queue,
                                              const ChannelId& channel_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   auto channel_iter = channels_.find(channel_id);
   if (channel_iter != channels_.end()) {
-    for (const PendingMessage& message : queue) {
-      DispatchMessage(message.first, channel_iter->second.get(),
-                      message.second);
+    for (PendingMessage& message : queue) {
+      DispatchMessage(message.port_id, channel_iter->second.get(),
+                      std::move(message.message));
     }
   }
 }

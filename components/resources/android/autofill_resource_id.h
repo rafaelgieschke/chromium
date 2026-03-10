@@ -25,10 +25,9 @@
 // Autofill popup and keyboard accessory images.
 // We use Android's |VectorDrawableCompat| for the following images that are
 // displayed using |DropdownAdapter|.
-LINK_RESOURCE_ID(IDR_AUTOFILL_AFFIRM_LINKED, R.drawable.affirm_linked)
-LINK_RESOURCE_ID(IDR_AUTOFILL_AFFIRM_UNLINKED, R.drawable.affirm_unlinked)
 LINK_RESOURCE_ID(IDR_AUTOFILL_CC_AMEX_OLD, R.drawable.amex_card)
 LINK_RESOURCE_ID(IDR_AUTOFILL_CC_AMEX, R.drawable.amex_card)
+LINK_RESOURCE_ID(IDR_AUTOFILL_CC_AMEX_NEW, R.drawable.amex_card)
 LINK_RESOURCE_ID(IDR_AUTOFILL_CC_DINERS_OLD, R.drawable.diners_card)
 LINK_RESOURCE_ID(IDR_AUTOFILL_CC_DINERS, R.drawable.diners_card)
 LINK_RESOURCE_ID(IDR_AUTOFILL_CC_DISCOVER_OLD, R.drawable.discover_card)
@@ -56,8 +55,7 @@ LINK_RESOURCE_ID(IDR_AUTOFILL_CC_VERVE, R.drawable.verve_card)
 LINK_RESOURCE_ID(IDR_AUTOFILL_CC_VISA_OLD, R.drawable.visa_card)
 LINK_RESOURCE_ID(IDR_AUTOFILL_CC_VISA, R.drawable.visa_card)
 LINK_RESOURCE_ID(IDR_AUTOFILL_GOOGLE_PAY, R.drawable.google_pay)
-LINK_RESOURCE_ID(IDR_AUTOFILL_KLARNA_LINKED, R.drawable.klarna_linked)
-LINK_RESOURCE_ID(IDR_AUTOFILL_KLARNA_UNLINKED, R.drawable.klarna_unlinked)
+LINK_RESOURCE_ID(IDR_AUTOFILL_GOOGLE_WALLET, R.drawable.googlewallet)
 LINK_RESOURCE_ID(IDR_AUTOFILL_METADATA_BNPL_GENERIC,
                  R.drawable.bnpl_icon_generic)
 LINK_RESOURCE_ID(IDR_AUTOFILL_METADATA_BNPL_GENERIC_OLD,
@@ -65,6 +63,7 @@ LINK_RESOURCE_ID(IDR_AUTOFILL_METADATA_BNPL_GENERIC_OLD,
 LINK_RESOURCE_ID(IDR_AUTOFILL_METADATA_CC_AMEX_OLD,
                  R.drawable.amex_metadata_card)
 LINK_RESOURCE_ID(IDR_AUTOFILL_METADATA_CC_AMEX, R.drawable.amex_metadata_card)
+LINK_RESOURCE_ID(IDR_AUTOFILL_METADATA_CC_AMEX_NEW, R.drawable.amex_metadata_card_new)
 LINK_RESOURCE_ID(IDR_AUTOFILL_METADATA_CC_CAPITALONE,
                  R.drawable.capitalone_metadata_card)
 LINK_RESOURCE_ID(IDR_AUTOFILL_METADATA_CC_DINERS_OLD,
@@ -104,8 +103,6 @@ LINK_RESOURCE_ID(IDR_AUTOFILL_METADATA_CC_VISA_OLD,
 LINK_RESOURCE_ID(IDR_AUTOFILL_METADATA_CC_VISA, R.drawable.visa_metadata_card)
 LINK_RESOURCE_ID(IDR_AUTOFILL_IBAN_OLD, R.drawable.iban_icon)
 LINK_RESOURCE_ID(IDR_AUTOFILL_IBAN, R.drawable.iban_icon)
-LINK_RESOURCE_ID(IDR_AUTOFILL_ZIP_LINKED, R.drawable.zip_linked)
-LINK_RESOURCE_ID(IDR_AUTOFILL_ZIP_UNLINKED, R.drawable.zip_unlinked)
 
 // Use DECLARE_RESOURCE_ID here as these resources are used for android only.
 DECLARE_RESOURCE_ID(IDR_ANDROID_AUTOFILL_CC_SCAN_NEW,
@@ -135,5 +132,6 @@ DECLARE_RESOURCE_ID(IDR_ANDROID_AUTOFILL_TRAVEL_LUGGAGE_AND_BAGS,
                     R.drawable.travel_luggage_and_bags)
 DECLARE_RESOURCE_ID(IDR_ANDROID_AUTOFILL_PERSON_CHECK, R.drawable.person_check)
 DECLARE_RESOURCE_ID(IDR_ANDROID_AUTOFILL_VEHICLE, R.drawable.directions_car)
-// Autofill AI icons.
-DECLARE_RESOURCE_ID(IDR_ANDROID_AUTOFILL_WALLET, R.drawable.wallet)
+// Note that R.drawable.google_wallet_24dp is always present, but the icon in
+// branded builds is different from the one in unbranded builds.
+DECLARE_RESOURCE_ID(IDR_ANDROID_AUTOFILL_WALLET, R.drawable.google_wallet_24dp)

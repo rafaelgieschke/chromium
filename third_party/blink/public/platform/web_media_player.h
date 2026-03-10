@@ -188,6 +188,11 @@ class WebMediaPlayer {
 
   virtual ~WebMediaPlayer() = default;
 
+  // Called just before the WebMediaPlayer is posted for destruction such that
+  // the WebMediaPlayer can clear any references to WebMediaPlayerClient and
+  // perform any other necessary cleanup.
+  virtual void Shutdown() = 0;
+
   virtual LoadTiming Load(LoadType,
                           const WebMediaPlayerSource&,
                           CorsMode,
@@ -444,6 +449,9 @@ class WebMediaPlayer {
   // HTMLVideoElement visibility is reported. The state is recorded using
   // `MediaLogEvent` s.
   virtual void RecordVideoOcclusionState(std::string_view occlusion_state) {}
+
+  // Sets the occlusion ratio of the video element at playback start.
+  virtual void SetVisibilityRatioAtPlaybackStart(double ratio) {}
 
   // Request the media player to record auto picture in picture related
   // information. This information helps identify why a request to enter picture

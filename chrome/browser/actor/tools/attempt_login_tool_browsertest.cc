@@ -19,6 +19,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/actor.mojom.h"
 #include "chrome/common/actor/action_result.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "components/affiliations/core/browser/mock_affiliation_service.h"
 #include "components/favicon/core/test/mock_favicon_service.h"
@@ -82,7 +83,7 @@ std::unique_ptr<KeyedService> CreateMockAffiliationService(
 
 class MockExecutionEngine : public ExecutionEngine {
  public:
-  explicit MockExecutionEngine(Profile* profile) : ExecutionEngine(profile) {}
+  explicit MockExecutionEngine(ActorTask& task) : ExecutionEngine(task) {}
   ~MockExecutionEngine() override = default;
 
   // Type alias to get around the comma in the flat_map template. MOCK_METHOD
@@ -113,8 +114,8 @@ class ActorAttemptLoginToolTest : public ActorToolsTest {
          password_manager::features::kActorLoginQualityLogs,
          password_manager::features::kActorLoginGetCredentialsNoLoginForm,
          actor::kGlicEnableAutoLoginDialogs,
-         actor::kGlicEnableAutoLoginPersistedPermissions},
-        /*disabled_features=*/{});
+         actor::kGlicEnableAutoLoginPersistedPermissions, features::kGlicActor},
+        /*disabled_features=*/{kGlicCrossOriginNavigationGating});
   }
 
   ~ActorAttemptLoginToolTest() override = default;
@@ -160,9 +161,9 @@ class ActorAttemptLoginToolTest : public ActorToolsTest {
                 g_browser_process->local_state()));
   }
 
-  std::unique_ptr<ExecutionEngine> CreateExecutionEngine(
-      Profile* profile) override {
-    return std::make_unique<::testing::NiceMock<MockExecutionEngine>>(profile);
+  static std::unique_ptr<ExecutionEngine> CreateExecutionEngine(
+      ActorTask& task) {
+    return std::make_unique<::testing::NiceMock<MockExecutionEngine>>(task);
   }
 
   MockActorLoginService& mock_login_service() { return mock_login_service_; }
@@ -194,6 +195,8 @@ class ActorAttemptLoginToolTest : public ActorToolsTest {
   MockActorLoginService mock_login_service_;
   base::test::ScopedFeatureList scoped_feature_list_;
   base::CallbackListSubscription create_services_subscription_;
+  ScopedExecutionEngineFactory mock_execution_engine_factory_{
+      base::BindRepeating(ActorAttemptLoginToolTest::CreateExecutionEngine)};
 };
 
 IN_PROC_BROWSER_TEST_F(ActorAttemptLoginToolTest, Basic) {

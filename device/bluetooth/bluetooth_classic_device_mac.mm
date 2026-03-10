@@ -6,6 +6,7 @@
 
 #include <string>
 
+#include "base/containers/span.h"
 #include "base/functional/bind.h"
 #include "base/hash/hash.h"
 #include "base/notimplemented.h"
@@ -67,11 +68,25 @@
 
 - (void)deviceDisconnected:(IOBluetoothUserNotification*)notification
                     device:(IOBluetoothDevice*)device {
+  // |_device| may have been cleared by the C++ owner during destruction.
+  // This can happen if the OS delivers a late disconnect notification after
+  // the adapter has decided to remove the device and the C++ object is being
+  // torn down. In that case we simply ignore the notification.
+  if (!_device) {
+    return;
+  }
+
   _device->OnDeviceDisconnected();
 }
 
 - (void)stopListening {
   [_disconnectNotification unregister];
+
+  // Proactively clear the back-pointer so that any late notifications that
+  // do arrive after the C++ BluetoothClassicDeviceMac has started
+  // destruction will see a null |_device| and become a no-op instead of
+  // dereferencing a freed object.
+  _device = nullptr;
 }
 
 @end
@@ -81,12 +96,19 @@ namespace {
 
 const char kApiUnavailable[] = "This API is not implemented on this platform.";
 
+base::span<const uint8_t> NSDataAsByteSpan(NSData* data) {
+  // SAFETY: NSData internally guarantees that the safely accessible size of the
+  // memory block pointed to by `bytes` is exactly equal to the value of
+  // `length`.
+  return UNSAFE_BUFFERS(base::span<const uint8_t>(
+      static_cast<const uint8_t*>(data.bytes), data.length));
+}
+
 BluetoothUUID GetUuid(IOBluetoothSDPUUID* sdp_uuid) {
   DCHECK(sdp_uuid);
 
-  const uint8_t* uuid_bytes =
-      reinterpret_cast<const uint8_t*>([sdp_uuid bytes]);
-  std::string uuid_str = base::HexEncode(uuid_bytes, 16);
+  base::span<const uint8_t> uuid_bytes = NSDataAsByteSpan(sdp_uuid);
+  std::string uuid_str = base::HexEncode(uuid_bytes.first(16u));
   DCHECK_EQ(uuid_str.size(), 32U);
   uuid_str.insert(8, "-");
   uuid_str.insert(13, "-");

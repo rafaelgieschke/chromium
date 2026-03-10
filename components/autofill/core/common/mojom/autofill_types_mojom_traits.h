@@ -222,12 +222,10 @@ struct StructTraits<autofill::mojom::FormFieldDataDataView,
     return r.max_length();
   }
 
-  static bool is_user_edited(const autofill::FormFieldData& r) {
-    return r.is_user_edited();
-  }
 
-  static bool is_autofilled(const autofill::FormFieldData& r) {
-    return r.is_autofilled();
+  static bool is_autofilled_according_to_renderer(
+      const autofill::FormFieldData& r) {
+    return r.is_autofilled_according_to_renderer();
   }
 
   static autofill::FormFieldData::CheckStatus check_status(
@@ -591,11 +589,6 @@ struct StructTraits<autofill::mojom::PasswordFormFillDataDataView,
   static std::vector<autofill::FieldRendererId> suggestion_banned_fields(
       const autofill::PasswordFormFillData& r) {
     return r.suggestion_banned_fields;
-  }
-
-  static bool notify_browser_of_successful_filling(
-      const autofill::PasswordFormFillData& r) {
-    return r.notify_browser_of_successful_filling;
   }
 
   static bool Read(autofill::mojom::PasswordFormFillDataDataView data,

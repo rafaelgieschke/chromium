@@ -7,24 +7,27 @@
 
 #import <UIKit/UIKit.h>
 
+#import "base/observer_list.h"
 #import "base/scoped_observation.h"
 #import "components/optimization_guide/core/hints/optimization_guide_decider.h"
 #import "components/optimization_guide/core/hints/optimization_guide_decision.h"
 #import "components/optimization_guide/core/hints/optimization_metadata.h"
 #import "components/optimization_guide/proto/contextual_cueing_metadata.pb.h"
+#import "ios/chrome/browser/intelligence/bwg/model/gemini_tab_helper_observer.h"
 #import "ios/chrome/browser/intelligence/proto_wrappers/page_context_wrapper.h"
 #import "ios/chrome/browser/optimization_guide/mojom/zero_state_suggestions_service.mojom.h"
-#import "ios/web/public/js_image_transcoder/java_script_image_transcoder.h"
+#import "ios/web/public/favicon/favicon_url.h"
 #import "ios/web/public/web_state_observer.h"
 #import "ios/web/public/web_state_user_data.h"
 
 @protocol BWGCommands;
+@protocol HelpCommands;
 @protocol LocationBarBadgeCommands;
-@protocol SnackbarCommands;
+@class GeminiPageContext;
 
-namespace base {
-class Value;
-}  // namespace base
+namespace gemini {
+enum class FloatyUpdateSource;
+}
 
 // Tab helper controlling the BWG feature and its current state for a given tab.
 class BwgTabHelper : public web::WebStateObserver,
@@ -35,11 +38,16 @@ class BwgTabHelper : public web::WebStateObserver,
 
   ~BwgTabHelper() override;
 
-  // Generate page Context (including snapshot and APC) and invokes the callback
-  // with the result.
-  void GeneratePageContext(
-      base::OnceCallback<void(PageContextWrapperCallbackResponse)> callback,
-      bool full_page_context = true);
+  // Set up generation of page Context and the callback to be run when the page
+  // context is ready.
+  void SetupPageContextGeneration(
+      base::RepeatingCallback<void(PageContextWrapperCallbackResponse)>
+          callback);
+
+  // Forces the generation of page context immediately, bypassing any wait for
+  // page load completion. Used when the page load timeout is exceeded.
+  // This is no op if page has already finished loading.
+  void ForcePageContextGeneration();
 
   // Executes the zero-state suggestions flow.
   void ExecuteZeroStateSuggestions(
@@ -69,8 +77,8 @@ class BwgTabHelper : public web::WebStateObserver,
   // Removes the associated WebState's session from storage.
   void DeleteBwgSessionInStorage();
 
-  // Whether BWG is available for the current web state.
-  bool IsBwgAvailableForWebState();
+  // Whether Gemini is available for the current web state.
+  bool IsGeminiAvailableForWebState();
 
   // Prepares the WebState for the BWG FRE (first run experience) backgrounding.
   // Takes a fullscreen screenshot and sets the session to active.
@@ -84,8 +92,8 @@ class BwgTabHelper : public web::WebStateObserver,
   // Set the BWG commands handler, used to show/hide the BWG UI.
   void SetBwgCommandsHandler(id<BWGCommands> handler);
 
-  // Set the snackbar commands handler for presenting snackbars.
-  void SetSnackbarCommandsHandler(id<SnackbarCommands> handler);
+  // Set help commands handler, for showing in-product help UI.
+  void SetHelpCommandsHandler(id<HelpCommands> handler);
 
   // Set the location bar badge commands handler.
   void SetLocationBarBadgeCommandsHandler(id<LocationBarBadgeCommands> handler);
@@ -100,17 +108,33 @@ class BwgTabHelper : public web::WebStateObserver,
   // criteria.
   bool ShouldPreventContextualPanelEntryPoint();
 
+  // Adds an observer.
+  void AddObserver(GeminiTabHelperObserver* observer);
+
+  // Removes an observer.
+  void RemoveObserver(GeminiTabHelperObserver* observer);
+
+  // Whether the observer exists in the observer list.
+  bool HasObserver(GeminiTabHelperObserver* observer);
+
   // Setter for `prevent_contextual_panel_entry_point_`.
   void SetPreventContextualPanelEntryPoint(bool should_prevent);
 
   // Sets a callback to be run when the page has finished loading.
-  void SetPageLoadedCallback(base::OnceClosure callback);
+  void SetPageLoadedCallback(base::RepeatingClosure callback);
 
-  // Getter `contextual_cue_label_`.
-  NSString* GetContextualCueLabel();
+  // Returns the partial PageContext for the current WebState, including URL,
+  // Title, and Favicon.
+  GeminiPageContext* GetPartialPageContext();
 
-  // Setter for `contextual_cue_label_`.
-  void SetContextualCueLabel(NSString* cue_label);
+  // Returns true if a show floaty trigger should be blocked resulting in an
+  // early return and the floaty remaining hidden. Used when the floaty is
+  // forced to be hidden such as an overlay, alert, or banner being presented
+  bool ShouldBlockFloatyFromShowing();
+
+  // Updates the state of a `source` that `is_presented`.
+  void UpdatePresentedSource(gemini::FloatyUpdateSource source,
+                             bool is_presented);
 
   // WebStateObserver:
   void WasShown(web::WebState* web_state) override;
@@ -122,6 +146,10 @@ class BwgTabHelper : public web::WebStateObserver,
   void PageLoaded(
       web::WebState* web_state,
       web::PageLoadCompletionStatus load_completion_status) override;
+  void TitleWasSet(web::WebState* web_state) override;
+  void FaviconUrlUpdated(
+      web::WebState* web_state,
+      const std::vector<web::FaviconURL>& candidates) override;
   void WebStateDestroyed(web::WebState* web_state) override;
 
  private:
@@ -137,15 +165,34 @@ class BwgTabHelper : public web::WebStateObserver,
   // Clears the zero-state suggestions and resets the service.
   void ClearZeroStateSuggestions();
 
+  // Notifies observers of the web state that the page context changed.
+  void NotifyPageContextUpdated(web::WebState* web_state);
+
   // Populates the page context fields if the wrapper exists.
   void PopulatePageContextFields();
 
-  // Callback for the OptimizationGuide with the result of whether the
-  // zero-state suggestions should be shown for the current URL.
-  void OnCanApplyZeroStateSuggestionsDecision(
-      const GURL& url,
+  // Computes the actual Gemini eligibility based on the response from
+  // `OnGeminiEligibilityDecision`.
+  bool ComputeGeminiEligibility(
       optimization_guide::OptimizationGuideDecision decision,
       const optimization_guide::OptimizationMetadata& metadata);
+
+  // Callback for the OptimizationGuide with the result of whether the
+  // zero-state suggestions should be shown for the current URL.
+  // Shows IPH for image remix if the user has enabled metadata requests (MSBB).
+  void OnGeminiEligibilityDecision(
+      const GURL& url_without_ref,
+      bool user_enabled_request_metadata,
+      optimization_guide::OptimizationGuideDecision decision,
+      const optimization_guide::OptimizationMetadata& metadata);
+
+  // Callback for the OptimizationGuide with the result to the on-demand call.
+  void OnGeminiEligibilityOnDemandDecision(
+      const GURL& url_without_ref,
+      const base::flat_map<
+          optimization_guide::proto::OptimizationType,
+          optimization_guide::OptimizationGuideDecisionWithMetadata>&
+          decisions);
 
   // Callback from OptimizationGuide metadata request.
   void OnCanApplyContextualCueingDecision(
@@ -163,16 +210,13 @@ class BwgTabHelper : public web::WebStateObserver,
                                     std::string server_id);
 
   // Removes the BWG session from the prefs.
-  void CleanupSessionFromPrefs(std::string session_id);
+  void CleanupSessionFromPrefs();
 
   // Updates the snapshot in storage for the associated Web State. If a snapshot
   // is cached (cropped fullscreen screenshot), use it to update the storage,
   // otherwise generate one normally for the content area.
   void UpdateWebStateSnapshotInStorage();
 
-  // Gets the associated WebState's visible URL during the last interaction, if
-  // present and not expired, from storage.
-  std::optional<std::string> GetURLOnLastInteraction();
 
   // Parses the response of a zero state suggestions execution.
   void ParseSuggestionsResponse(
@@ -197,8 +241,8 @@ class BwgTabHelper : public web::WebStateObserver,
   // Commands handler for BWG commands.
   __weak id<BWGCommands> bwg_commands_handler_ = nullptr;
 
-  // Commands handler for snackbars.
-  __weak id<SnackbarCommands> snackbar_commands_handler_ = nullptr;
+  // Commands handler for help commands.
+  __weak id<HelpCommands> help_commands_handler_ = nullptr;
 
   // Commands handler for location bar badge.
   __weak id<LocationBarBadgeCommands> location_bar_badge_commands_handler_ =
@@ -226,31 +270,43 @@ class BwgTabHelper : public web::WebStateObserver,
   // Whether to prevent contextual panel entry point.
   bool prevent_contextual_panel_entry_point_ = false;
 
-  // TODO(crbug.com/456782848): Cleanup when no longer needed/wanted.
-  // Experimental. Injects JS to extract the URL of an `og:image`, fetches its
-  // bytes, transcodes it to PNG safely and finally presents a snackbar with a
-  // button that presents a sheet on the current WebState, along with its
-  // resolution. Most of this work is async, so this is implemented as a chain
-  // of callbacks.
-  void PrepareWebPageReportedImagesSnackbar();
-  void OnImageExtractedFromWebState(const base::Value* value, NSError* error);
-  void OnImageFetched(NSData* data);
-  void OnImageTranscoded(NSData* png_data, NSError* error);
-
-  // TODO(crbug.com/456782848): Cleanup when no longer needed/wanted.
-  // Experimental. The image transcoder web JS feature to convert images to PNG
-  // safely.
-  std::unique_ptr<web::JavaScriptImageTranscoder> image_transcoder_;
-
   // The zero-state suggestions data and service for the current page.
   std::unique_ptr<ZeroStateSuggestions> zero_state_suggestions_;
 
   // Callback to be run when the page has finished loading.
-  base::OnceClosure page_loaded_callback_;
+  base::RepeatingClosure page_loaded_callback_;
 
-  // Contextual cue label generated for Gemini contextual cue metadata.
-  NSString* contextual_cue_label_;
+  // List of observers.
+  base::ObserverList<GeminiTabHelperObserver> observers_;
 
+  // Tracking variables for semantic event checks.
+  GURL current_url_;
+  std::u16string current_title_;
+  __strong UIImage* current_favicon_;
+
+  // The callback to be run when the page context is ready.
+  base::RepeatingCallback<void(PageContextWrapperCallbackResponse)>
+      page_context_wrapper_response_ready_callback_;
+
+  // Whether an external overlay is currently presented e.g. Lens Overlay. Used
+  // to avoid showing the floaty when view controllers are presented/dismissed
+  // while an overlay is presented.
+  bool is_external_overlay_presented_ = false;
+
+  // Whether an alert is currently presented. Used to avoid showing the floaty
+  // when view controllers are presented/dismissed while an alert is presented.
+  bool is_alert_presented_ = false;
+
+  // Whether a banner is currently presented. Used to avoid showing the floaty
+  // when view controllers are presented/dismissed while a banner is presented.
+  bool is_banner_presented_ = false;
+
+  // Whether a snackbar is currently presented. Used to avoid showing the floaty
+  // when view controllers are presented/dismissed while a snackbar is
+  // presented.
+  bool is_snackbar_presented_ = false;
+
+  // Weak pointer factory.
   base::WeakPtrFactory<BwgTabHelper> weak_ptr_factory_{this};
 };
 

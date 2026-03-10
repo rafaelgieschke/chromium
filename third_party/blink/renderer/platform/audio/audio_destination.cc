@@ -68,7 +68,7 @@ namespace {
 // to play audio via Web Audio API.
 constexpr uint32_t kFIFOSize = 128 * 128;
 
-const char* DeviceStateToString(AudioDestination::DeviceState state) {
+const String DeviceStateToString(AudioDestination::DeviceState state) {
   switch (state) {
     case AudioDestination::kRunning:
       return "running";
@@ -443,9 +443,11 @@ AudioDestination::AudioDestination(
                                 callback_buffer_size_));
   SendLogMessage(__func__, String::Format("=> (device sample rate=%.0f Hz)",
                                           web_audio_device_->SampleRate()));
-  SendLogMessage(__func__,
-                 String::Format("Output buffer bypass: %s",
-                                is_output_buffer_bypassed_ ? "yes" : "no"));
+  if (is_output_buffer_bypassed_) {
+    SendLogMessage(__func__, "Output buffer bypass: yes");
+  } else {
+    SendLogMessage(__func__, "Output buffer bypass: no");
+  }
 
   TRACE_EVENT1("webaudio", "AudioDestination::AudioDestination",
                "sink information",
@@ -486,11 +488,7 @@ AudioDestination::AudioDestination(
         media::AudioBus::CreateWrapper(render_bus_->NumberOfChannels());
     resampler_bus_->set_frames(render_bus_->length());
     for (unsigned int i = 0; i < render_bus_->NumberOfChannels(); ++i) {
-      // TODO(crbug.com/375449662): Spanify `AudioChannel::MuteableData`.
-      resampler_bus_->SetChannelData(
-          i, UNSAFE_TODO(base::span(
-                 render_bus_->Channel(i)->MutableData(),
-                 base::checked_cast<size_t>(render_bus_->length()))));
+      resampler_bus_->SetChannelData(i, render_bus_->Channel(i)->MutableSpan());
     }
   } else {
     SendLogMessage(
@@ -681,12 +679,13 @@ void AudioDestination::TransferElapsedFramesFrom(
   frames_elapsed_ += previous_platform_destination->FramesElapsed();
 }
 
-void AudioDestination::SendLogMessage(const char* const function_name,
+void AudioDestination::SendLogMessage(const String& function_name,
                                       const String& message) const {
-  WebRtcLogMessage(String::Format("[WA]AD::%s %s [state=%s]", function_name,
-                                  message.Utf8().c_str(),
-                                  DeviceStateToString(device_state_))
-                       .Utf8());
+  WebRtcLogMessage(
+      String::Format("[WA]AD::%s %s [state=%s]", function_name.Utf8().c_str(),
+                     message.Utf8().c_str(),
+                     DeviceStateToString(device_state_).Utf8().c_str())
+          .Utf8());
 }
 
 }  // namespace blink

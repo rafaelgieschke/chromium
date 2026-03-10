@@ -44,18 +44,28 @@ public interface TabWindowManager {
     /**
      * An index that represents the invalid state (i.e. when the window wasn't found in the list).
      */
-    @WindowId int INVALID_WINDOW_ID = -1;
+    @WindowId int INVALID_WINDOW_ID = MultiInstanceManager.INVALID_WINDOW_ID;
+
+    /** Represents an invalid task ID (i.e. when the task wasn't found in the list). */
+    int INVALID_TASK_ID = -1;
 
     // Maximum number of TabModelSelectors since Android N that supports split screen.
     int MAX_SELECTORS_LEGACY = 3;
 
     // Maximum number of TabModelSelectors since Android S that supports multiple instances of
-    // ChromeTabbedActivity.
+    // ChromeTabbedActivity on low-memory devices.
     int MAX_SELECTORS_S = 5;
 
-    // Maximum number of TabModelSelectors. Set high enough that it is functionally unlimited.
-    int MAX_SELECTORS = 1000;
+    // Maximum number of TabModelSelectors since Android S that supports a higher number of
+    // instances of ChromeTabbedActivity on high-memory devices.
+    int MAX_SELECTORS_20 = 20;
 
+    // Maximum number of TabModelSelectors that is high enough for the number of instances of
+    // ChromeTabbedActivity to be functionally unlimited.
+    int MAX_SELECTORS_1000 = 1000;
+
+    // Used when an identifier is required to identify the window of archived tabs.
+    String ARCHIVED_WINDOW_TAG = "archived";
     String ASSERT_INDICES_MATCH_HISTOGRAM_NAME = "Android.MultiWindowMode.AssertIndicesMatch";
     String ASSERT_INDICES_MATCH_HISTOGRAM_SUFFIX_NOT_REASSIGNED = ".NotReassigned";
     String ASSERT_INDICES_MATCH_HISTOGRAM_SUFFIX_REASSIGNED = ".Reassigned";
@@ -194,7 +204,10 @@ public interface TabWindowManager {
     @WindowId
     int getWindowIdForSelector(TabModelSelector selector);
 
-    /** Gets a Collection of all TabModelSelectors. */
+    /**
+     * Gets a Collection of all TabModelSelectors. Does not include the archived selector or
+     * selectors for custom tabs.
+     */
     Collection<TabModelSelector> getAllTabModelSelectors();
 
     /** Returns whether the tab with the given id can safely be deleted. */
@@ -227,4 +240,28 @@ public interface TabWindowManager {
      */
     @WindowId
     int findWindowIdForTabGroup(Token tabGroupId);
+
+    /**
+     * Registers a {@link TabModelSelector} for a Custom Tab.
+     *
+     * @param taskId The task id for the Custom Tab's associated activity.
+     * @param selector The {@link TabModelSelector} containing the custom tab.
+     */
+    void registerCustomTabsTabModelSelector(int taskId, TabModelSelector selector);
+
+    /**
+     * Unregisters a {@link TabModelSelector} for a Custom Tab.
+     *
+     * @param selector The {@link TabModelSelector} containing the custom tab.
+     */
+    void unregisterCustomTabsTabModelSelector(TabModelSelector selector);
+
+    /** Returns a collection of all Custom Tab {@link TabModelSelector}s. */
+    Collection<TabModelSelector> getCustomTabsTabModelSelectors();
+
+    /**
+     * Returns the task ID for a Custom Tab's {@link TabModelSelector}. If the TabModelSelector is
+     * not registered for a custom tab, will return -1.
+     */
+    int getTaskIdForCustomTab(TabModelSelector selector);
 }

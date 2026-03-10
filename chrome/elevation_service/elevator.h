@@ -21,8 +21,7 @@ namespace elevation_service {
 // `protection_level` argument. Access these via the `EncryptAppBoundString` API
 // in chrome.
 struct EncryptFlags {
-  // Specify that the Encrypt operation should always use the latest key.
-  bool use_latest_key = false;
+  // Currently no flags are supported.
 };
 
 inline constexpr IID kTestElevatorClsid = {
@@ -37,14 +36,17 @@ inline constexpr char kElevatorClsIdForTestingSwitch[] =
     "elevator-clsid-for-testing";
 inline constexpr char kFakeReencryptForTestingSwitch[] =
     "elevator-fake-reencrypt-for-testing";
+inline constexpr char kAllowUntrustedPathForTesting[] =
+    "elevator-allow-untrusted-path-for-testing";
 }  // namespace switches
 
 namespace internal {
 
-inline constexpr uint32_t kFlagUseLatestKey = 1 << 23;
+// Deprecated flag. Do not reuse value.
+inline constexpr uint32_t kFlagUseLatestKeyDeprecated = 1 << 23;
 
 // Update this each time a new flag is added.
-inline constexpr uint32_t kMaxFlag = kFlagUseLatestKey;
+inline constexpr uint32_t kMaxFlag = kFlagUseLatestKeyDeprecated;
 
 // A static assert verifies the flags can always fit into 24 bits.
 static_assert((kMaxFlag & 0xFFFFFF) == kMaxFlag);
@@ -121,6 +123,30 @@ class Elevator
       MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xA00A);
   static constexpr HRESULT kErrorInvalidValidationData =
       MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xA00B);
+  static constexpr HRESULT kErrorCouldNotObtainThreadToken =
+      MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xA00C);
+  static constexpr HRESULT kErrorCouldNotCreatePrimaryToken =
+      MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xA00D);
+  static constexpr HRESULT kErrorCouldNotObtainSidString =
+      MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xA00E);
+  static constexpr HRESULT kErrorCouldCreateSecurityDescriptor =
+      MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xA00F);
+  static constexpr HRESULT kErrorCouldAssignDefaultDacl =
+      MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xA010);
+  static constexpr HRESULT kErrorCouldNotLaunchBrowser =
+      MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xA011);
+  static constexpr HRESULT kErrorCouldNotDuplicateHandle =
+      MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xA012);
+  static constexpr HRESULT kErrorChromePathNotFound =
+      MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xA013);
+  static constexpr HRESULT kErrorCouldNotObtainUserEnvironment =
+      MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xA014);
+  static constexpr HRESULT kErrorCouldMutatePrimaryToken =
+      MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xA015);
+  static constexpr HRESULT kErrorCouldQueryPrimaryToken =
+      MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xA016);
+  static constexpr HRESULT kErrorCouldCreateAccessControlList =
+      MAKE_HRESULT(SEVERITY_ERROR, FACILITY_ITF, 0xA017);
 
   // Success codes.
   static constexpr HRESULT kSuccessShouldReencrypt =
@@ -150,7 +176,7 @@ class Elevator
 
   IFACEMETHODIMP RunIsolatedChrome(DWORD flags,
                                    const WCHAR* command_line,
-                                   BSTR* log,
+                                   [[maybe_unused]] BSTR* log,
                                    ULONG_PTR* proc_handle,
                                    DWORD* last_error) override;
 

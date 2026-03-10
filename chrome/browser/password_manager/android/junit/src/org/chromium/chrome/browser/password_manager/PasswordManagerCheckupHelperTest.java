@@ -40,14 +40,15 @@ import org.mockito.junit.MockitoRule;
 import org.robolectric.Robolectric;
 import org.robolectric.Shadows;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowLooper;
 import org.robolectric.shadows.ShadowPackageManager;
 import org.robolectric.shadows.ShadowSystemClock;
 
 import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.build.annotations.Nullable;
@@ -96,14 +97,13 @@ public class PasswordManagerCheckupHelperTest {
 
     @Mock private PendingIntent mPendingIntentMock;
 
-    @Mock private ObservableSupplier<ModalDialogManager> mModalDialogManagerSupplier;
-
     // TODO(crbug.com/40854050): Use fake instead of mock
     @Mock private PasswordManagerBackendSupportHelper mBackendSupportHelperMock;
 
     private SettingsCustomTabLauncher mSettingsCustomTabLauncher;
 
     private ModalDialogManager mModalDialogManager;
+    private SettableNonNullObservableSupplier<ModalDialogManager> mModalDialogManagerSupplier;
 
     @Mock private LoadingModalDialogCoordinator mLoadingModalDialogCoordinator;
     private LoadingModalDialogCoordinator.Observer mLoadingDialogCoordinatorObserver;
@@ -121,7 +121,7 @@ public class PasswordManagerCheckupHelperTest {
                 new ModalDialogManager(
                         mock(ModalDialogManager.Presenter.class),
                         ModalDialogManager.ModalDialogType.APP);
-        when(mModalDialogManagerSupplier.get()).thenReturn(mModalDialogManager);
+        mModalDialogManagerSupplier = ObservableSuppliers.createNonNull(mModalDialogManager);
         doAnswer(
                         invocation -> {
                             mLoadingDialogCoordinatorObserver = invocation.getArgument(0);
@@ -831,7 +831,7 @@ public class PasswordManagerCheckupHelperTest {
                 ContextUtils.getApplicationContext(),
                 mSettingsCustomTabLauncher);
 
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
         verify(mLoadingModalDialogCoordinator).dismiss();
     }
 
@@ -854,7 +854,7 @@ public class PasswordManagerCheckupHelperTest {
 
         mLoadingDialogCoordinatorObserver.onDismissable();
 
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
         verify(mLoadingModalDialogCoordinator).dismiss();
     }
 
@@ -1127,7 +1127,6 @@ public class PasswordManagerCheckupHelperTest {
     }
 
     private void chooseToSyncPasswords() {
-        when(mSyncServiceMock.isSyncFeatureEnabled()).thenReturn(true);
         when(mSyncServiceMock.getSelectedTypes()).thenReturn(Set.of(UserSelectableType.PASSWORDS));
         when(mSyncServiceMock.getAccountInfo())
                 .thenReturn(

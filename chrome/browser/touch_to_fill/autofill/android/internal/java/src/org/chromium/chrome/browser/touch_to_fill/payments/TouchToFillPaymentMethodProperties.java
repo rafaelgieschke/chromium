@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.touch_to_fill.payments;
 
 import android.graphics.drawable.Drawable;
-import android.view.View;
 
 import org.chromium.base.Callback;
 import org.chromium.build.annotations.Nullable;
@@ -134,6 +133,9 @@ class TouchToFillPaymentMethodProperties {
 
         // A section containing a clickable button with no background.
         int TEXT_BUTTON = 17;
+
+        // The header at the top of the BNPL ToS screen.
+        int TOS_HEADER = 18;
     }
 
     /** Metadata associated with a card's image. */
@@ -351,6 +353,26 @@ class TouchToFillPaymentMethodProperties {
     }
 
     /**
+     * Properties defined here reflect the visible state of the BNPL ToS header in the TouchToFill
+     * sheet for payments.
+     */
+    static class BnplTosHeaderProperties {
+        static final PropertyModel.ReadableIntPropertyKey ISSUER_IMAGE_DRAWABLE_ID =
+                new PropertyModel.ReadableIntPropertyKey("issuer_image_drawable_id");
+        static final PropertyModel.ReadableObjectPropertyKey<String> ISSUER_TITLE_STRING =
+                new PropertyModel.ReadableObjectPropertyKey<>("issuer_title_string");
+
+        static final PropertyModel.ReadableIntPropertyKey ICON_CONTENT_DESCRIPTION_ID =
+                new PropertyModel.ReadableIntPropertyKey("icon_content_description_id");
+
+        static final PropertyKey[] ALL_KEYS = {
+            ISSUER_IMAGE_DRAWABLE_ID, ISSUER_TITLE_STRING, ICON_CONTENT_DESCRIPTION_ID
+        };
+
+        private BnplTosHeaderProperties() {}
+    }
+
+    /**
      * Properties defined here reflect the visible state of the BNPL header for selection and
      * progress screen in the TouchToFill sheet for payments.
      */
@@ -421,25 +443,16 @@ class TouchToFillPaymentMethodProperties {
      * progress screen in the TouchToFill sheet for payments.
      */
     static class BnplSelectionProgressTermsProperties {
-        static final PropertyModel.ReadableIntPropertyKey TERMS_TEXT_ID =
-                new PropertyModel.ReadableIntPropertyKey("terms_text_id");
-        static final PropertyModel.ReadableObjectPropertyKey<String> HIDE_OPTIONS_LINK_TEXT =
-                new PropertyModel.ReadableObjectPropertyKey<>("hide_options_link_text");
-        static final PropertyModel.ReadableObjectPropertyKey<Callback<View>>
-                ON_LINK_CLICK_CALLBACK = new ReadableObjectPropertyKey<>("on_link_click_callback");
-        static final PropertyModel.ReadableBooleanPropertyKey APPLY_LINK_DEACTIVATED_STYLE =
-                new PropertyModel.ReadableBooleanPropertyKey("apply_link_deactivated_style");
-        static final PropertyKey[] ALL_KEYS = {
-            TERMS_TEXT_ID,
-            HIDE_OPTIONS_LINK_TEXT,
-            ON_LINK_CLICK_CALLBACK,
-            APPLY_LINK_DEACTIVATED_STYLE
-        };
+        static final PropertyModel.ReadableObjectPropertyKey<CharSequence> TERMS_TEXT =
+                new PropertyModel.ReadableObjectPropertyKey("terms_text");
+        static final PropertyKey[] ALL_KEYS = {TERMS_TEXT};
 
         private BnplSelectionProgressTermsProperties() {}
     }
 
     /** Properties defined here reflect the visible state of the footer showing legal messages. */
+    // TODO(crbug.com/486199794): Change TosFooterProperties to only contain a CharSequence
+    // PropertyModel.
     static class TosFooterProperties {
         static final PropertyModel.ReadableObjectPropertyKey<List<LegalMessageLine>>
                 LEGAL_MESSAGE_LINES =

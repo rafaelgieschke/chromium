@@ -4,14 +4,57 @@
 
 #include "third_party/blink/renderer/core/script_tools/model_context_testing.h"
 
-#include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/core/dom/abort_signal.h"
+#include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/core/script_tools/model_context.h"
+#include "third_party/blink/renderer/core/script_tools/script_tool_types.h"
 
 namespace blink {
 
-ModelContextTesting::ModelContextTesting(ModelContext* model_context)
-    : model_context_(model_context) {}
+namespace {
+
+String GetToolErrorMessage(const ScriptToolError& error) {
+  if (!error.message.empty()) {
+    return error.message;
+  }
+  String conversion;
+  switch (error.code) {
+    case ScriptToolErrorCode::kInvalidToolName:
+      conversion = "Tool was not executed due to invalid name";
+      break;
+    case ScriptToolErrorCode::kInvalidInputArguments:
+      conversion = "Tool was not executed due to invalid input arguments";
+      break;
+    case ScriptToolErrorCode::kMissingRequiredSubmitButton:
+      conversion =
+          "Tool was not executed due to missing required submit button";
+      break;
+    case ScriptToolErrorCode::kToolInvocationFailed:
+      conversion =
+          "Tool was executed but the invocation failed. For example, the "
+          "script function threw an error";
+      break;
+    case ScriptToolErrorCode::kToolCancelled:
+      conversion = "Tool was cancelled";
+      break;
+    default:
+      NOTREACHED();
+  }
+  if (error.message.empty()) {
+    return conversion;
+  }
+  return conversion + ": " + error.message;
+}
+
+}  // namespace
+
+ModelContextTesting::ModelContextTesting(ModelContext& model_context)
+    : model_context_(model_context) {
+  model_context_->SetToolChangeCallback(blink::BindRepeating(
+      &ModelContextTesting::OnToolChange, WrapWeakPersistent(this)));
+}
 
 HeapVector<Member<RegisteredTool>> ModelContextTesting::listTools() {
   HeapVector<Member<RegisteredTool>> tools;
@@ -26,18 +69,20 @@ HeapVector<Member<RegisteredTool>> ModelContextTesting::listTools() {
   return tools;
 }
 
-ScriptPromise<IDLString> ModelContextTesting::executeTool(
+ScriptPromise<IDLNullable<IDLString>> ModelContextTesting::executeTool(
     ScriptState* script_state,
     String tool_name,
-    String input_arguments) {
+    String input_arguments,
+    const ExecuteToolOptions* options) {
   auto* resolver =
-      MakeGarbageCollected<ScriptPromiseResolver<IDLString>>(script_state);
+      MakeGarbageCollected<ScriptPromiseResolver<IDLNullable<IDLString>>>(
+          script_state);
 
   ScriptPromise promise = resolver->Promise();
 
   auto callback =
-      [](ScriptPromiseResolver<IDLString>* resolver,
-         base::expected<WebString, WebDocument::ScriptToolError> result) {
+      [](ScriptPromiseResolver<IDLNullable<IDLString>>* resolver,
+         base::expected<String, ScriptToolError> result) {
         if (!resolver->GetScriptState() ||
             !resolver->GetScriptState()->ContextIsValid()) {
           return;
@@ -47,49 +92,57 @@ ScriptPromise<IDLString> ModelContextTesting::executeTool(
           resolver->Resolve(result.value());
         } else {
           resolver->Reject(MakeGarbageCollected<DOMException>(
-              DOMExceptionCode::kUnknownError, "Error executing tool."));
+              DOMExceptionCode::kUnknownError,
+              GetToolErrorMessage(result.error())));
         }
       };
 
   model_context_->ExecuteTool(
-      tool_name, input_arguments,
+      tool_name, input_arguments, options->getSignalOr(nullptr),
       blink::BindOnce(callback, WrapPersistent(resolver)));
 
   return promise;
 }
 
-void ModelContextTesting::registerToolsChangedCallback(
-    V8ToolsChangedCallback* callback) {
-  if (!callback) {
-    tools_changed_callback_ = nullptr;
-    model_context_->SetToolsChangedCallback(std::nullopt);
-    return;
-  }
+ScriptPromise<IDLString> ModelContextTesting::getCrossDocumentScriptToolResult(
+    ScriptState* script_state) {
+  auto* resolver =
+      MakeGarbageCollected<ScriptPromiseResolver<IDLString>>(script_state);
 
-  tools_changed_callback_ = callback;
-  model_context_->SetToolsChangedCallback(blink::BindRepeating(
-      &ModelContextTesting::OnToolsChanged, WrapWeakPersistent(this)));
+  ScriptPromise promise = resolver->Promise();
+
+  auto callback = [](ScriptPromiseResolver<IDLString>* resolver,
+                     String result) {
+    if (!resolver->GetScriptState() ||
+        !resolver->GetScriptState()->ContextIsValid()) {
+      return;
+    }
+
+    resolver->Resolve(result);
+  };
+
+  model_context_->GetCrossDocumentScriptToolResult(
+      blink::BindOnce(callback, WrapPersistent(resolver)));
+
+  return promise;
 }
 
-void ModelContextTesting::OnToolsChanged() {
-  if (!tools_changed_callback_) {
-    return;
-  }
+void ModelContextTesting::OnToolChange() {
+  // This is a non-cancelable and non-bubbling event.
+  DispatchEvent(*Event::Create(event_type_names::kToolchange));
+}
 
-  ScriptState* script_state =
-      tools_changed_callback_->CallbackRelevantScriptState();
-  if (!script_state || !script_state->ContextIsValid()) {
-    return;
-  }
+const AtomicString& ModelContextTesting::InterfaceName() const {
+  return event_type_names::kToolchange;
+}
 
-  ScriptState::Scope scope(script_state);
-  static_cast<void>(tools_changed_callback_->Invoke(nullptr));
+ExecutionContext* ModelContextTesting::GetExecutionContext() const {
+  return model_context_->GetExecutionContext();
 }
 
 void ModelContextTesting::Trace(Visitor* visitor) const {
-  ScriptWrappable::Trace(visitor);
+  EventTarget::Trace(visitor);
   visitor->Trace(model_context_);
-  visitor->Trace(tools_changed_callback_);
 }
 
 }  // namespace blink

@@ -30,7 +30,6 @@
 #include "chrome/browser/web_applications/web_app_command_scheduler.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/browser/web_applications/web_app_registrar.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/webapps/common/web_app_id.h"
 #include "components/webapps/isolated_web_apps/test_support/signing_keys.h"
@@ -52,7 +51,7 @@ constexpr std::string_view kIsolatedAppVersion = "1.0.0";
 std::optional<IsolationData::OpenedTabsCounterNotificationState>
 ReadIwaNotificationStateWithLock(const webapps::AppId& app_id,
                                  AppLock& lock,
-                                 base::Value::Dict& debug_value) {
+                                 base::DictValue& debug_value) {
   const WebApp* web_app = lock.registrar().GetAppById(app_id);
   if (!web_app) {
     return std::nullopt;

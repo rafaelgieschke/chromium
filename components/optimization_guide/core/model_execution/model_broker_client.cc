@@ -18,7 +18,6 @@
 #include "components/optimization_guide/core/model_execution/session_impl.h"
 #include "components/optimization_guide/proto/on_device_model_execution_config.pb.h"
 #include "components/optimization_guide/proto/text_safety_model_metadata.pb.h"
-#include "components/optimization_guide/public/mojom/model_broker.mojom-shared.h"
 #include "components/optimization_guide/public/mojom/model_broker.mojom.h"
 #include "mojo/public/cpp/base/proto_wrapper.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -199,10 +198,14 @@ ModelSubscriber& ModelBrokerClient::GetSubscriber(
     mojo::PendingRemote<mojom::ModelSubscriber> pending;
     ptr = std::make_unique<ModelSubscriber>(
         pending.InitWithNewPipeAndPassReceiver());
-    remote_->Subscribe(mojom::ModelSubscriptionOptions::New(feature, true),
+    remote_->Subscribe(mojom::ModelSubscriptionOptions::New(feature),
                        std::move(pending));
   }
   return *ptr;
+}
+
+void ModelBrokerClient::RequestAssetsFor(mojom::OnDeviceFeature feature) {
+  remote_->RequestAssetsFor(feature);
 }
 
 bool ModelBrokerClient::HasSubscriber(mojom::OnDeviceFeature feature) {
@@ -212,8 +215,17 @@ bool ModelBrokerClient::HasSubscriber(mojom::OnDeviceFeature feature) {
 void ModelBrokerClient::CreateSession(mojom::OnDeviceFeature feature,
                                       const SessionConfigParams& config_params,
                                       CreateSessionCallback callback) {
+  RequestAssetsFor(feature);
   GetSubscriber(feature).CreateSession(std::move(config_params),
                                        std::move(callback), logger_);
+}
+
+void ModelBrokerClient::AddModelDownloadProgressObserver(
+    mojo::PendingRemote<on_device_model::mojom::DownloadObserver> observer) {
+  // TODO: crbug.com/474999857 Enable this interface on Android.
+#if !BUILDFLAG(IS_ANDROID)
+  remote_->AddModelDownloadProgressObserver(std::move(observer));
+#endif  // !BUILDFLAG(IS_ANDROID)
 }
 
 }  // namespace optimization_guide

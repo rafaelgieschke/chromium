@@ -9,7 +9,6 @@
 <translation id="101823271612280837">Nahrávanie bolo zastavené. Herný panel sa nedá používať v režime tabletu.</translation>
 <translation id="1024364763893396229">Uložte zariadenie <ph name="NAME" /></translation>
 <translation id="1032891413405719768">Batéria dotykového pera je takmer vybitá</translation>
-<translation id="1036073649888683237">Ak chcete spravovať upozornenia, prejdite do Nastavení</translation>
 <translation id="1036348656032585052">Vypnúť</translation>
 <translation id="1037492556044956303">Pridali ste zariadenie <ph name="DEVICE_NAME" /></translation>
 <translation id="1038106730571050514">Zobraziť návrhy</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388"><ph name="INDEX" /> nedávna fotka z <ph name="TOTAL_COUNT" />.</translation>
 <translation id="2201687081523799384">Zbaliť Úlohy Google</translation>
 <translation id="2208323208084708176">Režim zjednotenej pracovnej plochy</translation>
-<translation id="2210311543574621570">Schránka sa zobrazí, keď pridržíte klávesy Ctrl + V. Túto skratku môžete vypnúť tak, že na chrome://flags deaktivujete experimentálnu funkciu #clipboard-history-longpress.</translation>
 <translation id="2215920961700443347">Žiadny internet. Pripojte sa k internetu a skúste to znova.</translation>
 <translation id="2222841058024245321">7. plocha</translation>
 <translation id="2223384056430485343">Na rozdelenej obrazovke</translation>
@@ -428,6 +426,7 @@ Pripojených je viacero zariadení (<ph name="DEVICECOUNT" />).</translation>
 <translation id="2478076885740497414">Inštalovať aplikáciu</translation>
 <translation id="2482878487686419369">Upozornenia</translation>
 <translation id="2484513351006226581">Stlačením klávesov <ph name="KEYBOARD_SHORTCUT" /> zmeníte rozloženie klávesnice.</translation>
+<translation id="2485422356828889247">Odinštalovať</translation>
 <translation id="2486214324139475545">Ukážka plochy <ph name="DESK_NAME" />. Plocha je aktívna.</translation>
 <translation id="2486405091093637109">Rozlíšenie obrazovky <ph name="DISPLAY_NAME" /> bolo zmenené na <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Hz). Ak to nepotvrdíte, predchádzajúce nastavenia budú obnovené o <ph name="TIMEOUT_SECONDS" />.</translation>
 <translation id="2487915095798731898">Pripojiť sa</translation>
@@ -2195,7 +2194,6 @@ Ak chcete zariadenie vypnúť, znova pridržte jeho vypínač.</translation>
 <translation id="8241650983304689286">Pridať kartu do nového rozdeleného zobrazenia</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, sila signálu <ph name="SIGNAL_STRENGTH" />, batéria telefónu <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Zobraziť všetok obsah na Disku Google</translation>
-<translation id="8257510091797044096">Nastavenie zariadenia</translation>
 <translation id="8261506727792406068">Odstrániť</translation>
 <translation id="8262312463845990408">Prepnúť prehrávanie</translation>
 <translation id="8268302343625273732">Zobraziť všetky zadania v Učebni Google</translation>

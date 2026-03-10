@@ -78,6 +78,9 @@ class CORE_EXPORT HTMLTextAreaElement final : public TextControlElement {
 
   void SetFocused(bool is_focused, mojom::blink::FocusType) override;
 
+ protected:
+  bool SupportsBaseAppearanceInternal(BaseAppearanceValue) const override;
+
  private:
   FRIEND_TEST_ALL_PREFIXES(HTMLTextAreaElementTest, SanitizeUserInputValue);
 
@@ -114,6 +117,7 @@ class CORE_EXPORT HTMLTextAreaElement final : public TextControlElement {
   bool IsEnumeratable() const override { return true; }
   bool IsInteractiveContent() const override;
   bool IsLabelable() const override { return true; }
+  FocusgroupFlags NativeArrowKeyAxes() const final;
 
   mojom::blink::FormControlType FormControlType() const override;
   const AtomicString& FormControlTypeAsString() const override;

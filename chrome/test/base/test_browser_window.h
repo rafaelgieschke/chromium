@@ -14,10 +14,9 @@
 #include "build/build_config.h"
 #include "chrome/browser/ui/autofill/test/test_autofill_bubble_handler.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
+#include "chrome/browser/ui/dialogs/browser_dialogs.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/translate/partial_translate_bubble_model.h"
 #include "chrome/browser/ui/webui/tab_search/tab_search.mojom.h"
@@ -31,6 +30,7 @@
 #endif  //  !BUILDFLAG(IS_ANDROID)
 
 class LocationBarTesting;
+class GlobalBrowserCollection;
 class OmniboxView;
 
 namespace qrcode_generator {
@@ -55,7 +55,8 @@ class SharingHubBubbleView;
 // contains a valid LocationBar, all other getters return NULL.
 // However, some of them can be preset to a specific value.
 // See BrowserWithTestWindowTest for an example of using this class.
-class TestBrowserWindow : public BrowserWindow, public BrowserListObserver {
+class TestBrowserWindow : public BrowserWindow,
+                          public BrowserCollectionObserver {
  public:
   TestBrowserWindow();
   TestBrowserWindow(const TestBrowserWindow&) = delete;
@@ -113,7 +114,6 @@ class TestBrowserWindow : public BrowserWindow, public BrowserListObserver {
   void Maximize() override {}
   void Minimize() override {}
   void Restore() override {}
-  void OnWebApiWindowResizableChanged() override {}
   bool GetCanResize() override;
   ui::mojom::WindowShowState GetWindowShowState() const override;
   bool ShouldHideUIForFullscreen() const override;
@@ -133,7 +133,6 @@ class TestBrowserWindow : public BrowserWindow, public BrowserListObserver {
   void SetDevToolsScrimVisibility(bool visible) override {}
   void ResetToolbarTabState(content::WebContents* contents) override {}
   void FocusToolbar() override {}
-  ExtensionsContainer* GetExtensionsContainer() override;
   void ToolbarSizeChanged(bool is_animating) override {}
   void TabDraggingStatusChanged(bool is_dragging) override {}
   void LinkOpeningFromGesture(WindowOpenDisposition disposition) override {}
@@ -159,7 +158,7 @@ class TestBrowserWindow : public BrowserWindow, public BrowserListObserver {
   bool IsToolbarVisible() const override;
   bool IsLocationBarVisible() const override;
   bool IsToolbarShowing() const override;
-  bool IsBorderlessModeEnabled() const override;
+  bool IsUnframedModeEnabled() const override;
   void ShowChromeLabs() override {}
   BrowserView* AsBrowserView() override;
   SharingDialog* ShowSharingDialog(content::WebContents* contents,
@@ -203,9 +202,6 @@ class TestBrowserWindow : public BrowserWindow, public BrowserListObserver {
   void StartPartialTranslate(const std::string& source_language,
                              const std::string& target_language,
                              const std::u16string& text_selection) override;
-  void ShowOneClickSigninConfirmation(
-      const std::u16string& email,
-      base::OnceCallback<void(bool)> confirmed_callback) override {}
   DownloadBubbleUIController* GetDownloadBubbleUIController() override;
   void ConfirmBrowserCloseWithPendingDownloads(
       int download_count,
@@ -249,11 +245,7 @@ class TestBrowserWindow : public BrowserWindow, public BrowserListObserver {
 
   void SetCloseCallback(base::OnceClosure close_callback);
 
-  void CreateTabSearchBubble(
-      tab_search::mojom::TabSearchSection section =
-          tab_search::mojom::TabSearchSection::kSearch,
-      tab_search::mojom::TabOrganizationFeature feature =
-          tab_search::mojom::TabOrganizationFeature::kNone) override {}
+  void CreateTabSearchBubble() override {}
   void CloseTabSearchBubble() override {}
 
   bool IsTabModalPopupDeprecated() const override;
@@ -281,13 +273,16 @@ class TestBrowserWindow : public BrowserWindow, public BrowserListObserver {
     ~TestLocationBar() override = default;
 
     // LocationBar:
-    void FocusLocation(bool select_all) override {}
+    void FocusLocation(bool select_all, bool clear_focus_if_failed) override {}
     void FocusSearch() override {}
+    void UpdateFocusBehavior(bool toolbar_visible) override {}
     void UpdateContentSettingsIcons() override {}
     void SaveStateToContents(content::WebContents* contents) override {}
     void Revert() override {}
     OmniboxView* GetOmniboxView() override;
     OmniboxController* GetOmniboxController() override;
+    bool ShouldCloseOmniboxPopup(ui::MouseEvent* event) override;
+    ChipController* GetChipController() override;
     LocationBarTesting* GetLocationBarForTesting() override;
     LocationBarModel* GetLocationBarModel() override;
     content::WebContents* GetWebContents() override;
@@ -295,10 +290,24 @@ class TestBrowserWindow : public BrowserWindow, public BrowserListObserver {
         override;
     void OnChanged() override {}
     void UpdateWithoutTabRestore() override {}
+    ui::TrackedElement* GetAnchorOrNull() override;
+    Browser* GetBrowser() override;
+    bool IsInitialized() const override;
+    bool IsVisible() const override;
+    bool IsDrawn() const override;
+    bool IsFullscreen() const override;
+    bool IsEditingOrEmpty() const override;
+    void InvalidateLayout() override {}
+    gfx::Rect Bounds() const override;
+    gfx::Size MinimumSize() const override;
+    gfx::Size PreferredSize() const override;
+    void Update(content::WebContents* contents) override {}
+    void ResetTabState(content::WebContents* contents) override {}
+    bool HasSecurityStateChanged() override;
   };
 
-  // BrowserListObserver:
-  void OnBrowserAdded(Browser* browser) override;
+  // BrowserCollectionObserver:
+  void OnBrowserCreated(BrowserWindowInterface* browser) override;
 
   autofill::TestAutofillBubbleHandler autofill_bubble_handler_;
   TestLocationBar location_bar_;
@@ -312,8 +321,8 @@ class TestBrowserWindow : public BrowserWindow, public BrowserListObserver {
   bool is_tab_strip_editable_ = true;
   bool is_tab_modal_popup_deprecated_ = false;
 
-  base::ScopedObservation<BrowserList, BrowserListObserver>
-      browser_list_observer_{this};
+  base::ScopedObservation<GlobalBrowserCollection, BrowserCollectionObserver>
+      browser_collection_observation_{this};
   raw_ptr<Browser> browser_;
   base::OnceClosure close_callback_;
 };

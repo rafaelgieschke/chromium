@@ -22,9 +22,10 @@ namespace content {
 
 namespace {
 
-using ObserverListType = base::ObserverList<PeerConnectionTrackerHostObserver,
-                                            /*check_empty=*/true,
-                                            /*allow_reentrancy=*/false>;
+using ObserverListType =
+    base::ObserverList<PeerConnectionTrackerHostObserver,
+                       /*check_empty=*/true,
+                       base::ObserverListReentrancyPolicy::kDisallowReentrancy>;
 ObserverListType& GetObserverList() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   static base::NoDestructor<ObserverListType> observer_list{};
@@ -146,7 +147,7 @@ void PeerConnectionTrackerHost::OnPeerConnectionSessionIdSet(
 }
 
 void PeerConnectionTrackerHost::AddStandardStats(int lid,
-                                                 base::Value::List value) {
+                                                 base::ListValue value) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   for (auto& observer : GetObserverList()) {

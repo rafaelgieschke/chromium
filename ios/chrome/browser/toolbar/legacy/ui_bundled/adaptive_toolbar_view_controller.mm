@@ -9,7 +9,9 @@
 #import "base/time/time.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_animator.h"
 #import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_reason.h"
-#import "ios/chrome/browser/shared/public/commands/omnibox_commands.h"
+#import "ios/chrome/browser/intelligence/features/features.h"
+#import "ios/chrome/browser/shared/public/commands/browser_coordinator_commands.h"
+#import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
 #import "ios/chrome/browser/shared/ui/util/animation_util.h"
@@ -18,8 +20,8 @@
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/adaptive_toolbar_menus_provider.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/adaptive_toolbar_view.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/adaptive_toolbar_view_controller_delegate.h"
-#import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/toolbar_button.h"
-#import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/toolbar_button_factory.h"
+#import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/legacy_toolbar_button.h"
+#import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/legacy_toolbar_button_factory.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/toolbar_configuration.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/toolbar_tab_grid_button.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/buttons/toolbar_tab_group_state.h"
@@ -70,11 +72,11 @@ const base::TimeDelta kProgressBarEndAnimationDuration =
 
 #pragma mark - Public
 
-- (ToolbarButton*)tabGridButton {
+- (LegacyToolbarButton*)tabGridButton {
   return self.view.tabGridButton;
 }
 
-- (ToolbarButton*)toolsMenuButton {
+- (LegacyToolbarButton*)toolsMenuButton {
   return self.view.toolsMenuButton;
 }
 
@@ -136,6 +138,19 @@ const base::TimeDelta kProgressBarEndAnimationDuration =
   [self.view.tabGridButton layoutIfNeeded];
 }
 
+- (void)disconnect {
+  if (!IsGeminiCopresenceEnabled()) {
+    return;
+  }
+
+  for (LegacyToolbarButton* button in self.view.allButtons) {
+    // Ensures that unrecognized command selectors aren't called and context
+    // menu interactions are disabled after disconnecting view controller.
+    button.geminiHandler = nil;
+    button.contextMenuInteractionEnabled = NO;
+  }
+}
+
 #pragma mark - UIViewController
 
 - (void)viewDidAppear:(BOOL)animated {
@@ -189,10 +204,10 @@ const base::TimeDelta kProgressBarEndAnimationDuration =
 
   [self updateUIOnTraitChange:nil];
 
-  NSArray<UITrait>* traits = TraitCollectionSetForTraits(@[
+  NSArray<UITrait>* traits = @[
     UITraitVerticalSizeClass.class, UITraitHorizontalSizeClass.class,
     UITraitPreferredContentSizeCategory.class
-  ]);
+  ];
   __weak __typeof(self) weakSelf = self;
   UITraitChangeHandler handler = ^(id<UITraitEnvironment> traitEnvironment,
                                    UITraitCollection* previousCollection) {
@@ -206,6 +221,19 @@ const base::TimeDelta kProgressBarEndAnimationDuration =
   // TODO(crbug.com/41413004): Remove this call once iPad trait collection
   // override issue is fixed.
   [self updateAllButtonsVisibility];
+  if (@available(iOS 26, *)) {
+    // There is a bug on iOS 26 when transitioning from windowed to
+    // fullscreen where the layout is incorrectly considered as (isCompactWidth
+    // && isCompactHeight).
+    if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET) {
+      __weak __typeof(self) weakSelf = self;
+      dispatch_after(
+          dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)),
+          dispatch_get_main_queue(), ^{
+            [weakSelf updateAllButtonsVisibility];
+          });
+    }
+  }
 }
 
 - (void)didMoveToParentViewController:(UIViewController*)parent {
@@ -241,11 +269,7 @@ const base::TimeDelta kProgressBarEndAnimationDuration =
   [self updateProgressBarVisibility];
 }
 
-- (void)setLocationBarHeight:(CGFloat)height {
-  [self.view setLocationBarHeight:height];
-}
-
-#pragma mark - ToolbarConsumer
+#pragma mark - LegacyToolbarConsumer
 
 - (void)setCanGoForward:(BOOL)canGoForward {
   self.view.forwardButton.enabled = canGoForward;
@@ -427,13 +451,6 @@ const base::TimeDelta kProgressBarEndAnimationDuration =
 // Updates `locationBarContainer` height and adjusts its corner radius for the
 // fullscreen `progress`
 - (void)updateLocationBarHeightForFullscreenProgress:(CGFloat)progress {
-  /// When multiline omnibox is enabled and focused, refrain from updating the
-  /// location bar container height, this is already handled by the toolbar
-  /// height delegate.
-  if (IsMultilineBrowserOmniboxEnabled() && _locationBarFocused) {
-    return;
-  }
-
   const CGFloat expandedHeight =
       LocationBarHeight(self.traitCollection.preferredContentSizeCategory);
   const CGFloat collapsedHeight =
@@ -476,18 +493,18 @@ const base::TimeDelta kProgressBarEndAnimationDuration =
 // Updates all buttons visibility to match any recent WebState or SizeClass
 // change.
 - (void)updateAllButtonsVisibility {
-  for (ToolbarButton* button in self.view.allButtons) {
+  for (LegacyToolbarButton* button in self.view.allButtons) {
     [button updateHiddenInCurrentSizeClass];
   }
 }
 
 // Registers the actions which will be triggered when tapping a button.
 - (void)addStandardActionsForAllButtons {
-  for (ToolbarButton* button in self.view.allButtons) {
+  for (LegacyToolbarButton* button in self.view.allButtons) {
     if (button != self.view.toolsMenuButton &&
         button != self.view.openNewTabButton) {
-      [button addTarget:self.omniboxCommandsHandler
-                    action:@selector(cancelOmniboxEdit)
+      [button addTarget:self.browserCoordinatorHandler
+                    action:@selector(hideComposebox)
           forControlEvents:UIControlEventTouchUpInside];
     }
     [button addTarget:self

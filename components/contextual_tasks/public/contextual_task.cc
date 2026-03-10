@@ -15,11 +15,16 @@ namespace contextual_tasks {
 Thread::Thread(ThreadType type,
                const std::string& server_id,
                const std::string& title,
-               const std::string& conversation_turn_id)
+               int64_t last_turn_time_unix_epoch_millis,
+               std::optional<std::string> conversation_turn_id)
     : type(type),
       server_id(server_id),
       title(title),
-      conversation_turn_id(conversation_turn_id) {}
+      last_turn_time(base::Time::FromMillisecondsSinceUnixEpoch(
+          last_turn_time_unix_epoch_millis)),
+      conversation_turn_id(conversation_turn_id) {
+  DCHECK(type != ThreadType::kAiMode || conversation_turn_id);
+}
 Thread::Thread(const Thread& other) = default;
 Thread::~Thread() = default;
 
@@ -59,7 +64,8 @@ std::optional<Thread> ContextualTask::GetThread() const {
   return thread_;
 }
 
-UrlResource::UrlResource(const GURL& url) : url(url) {}
+UrlResource::UrlResource(const GURL& url, ResourceType resource_type)
+    : url(url), resource_type(resource_type) {}
 UrlResource::UrlResource(const base::Uuid& url_id, const GURL& url)
     : url_id(url_id), url(url) {}
 UrlResource::UrlResource(const UrlResource& other) = default;

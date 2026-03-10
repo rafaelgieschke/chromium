@@ -82,9 +82,13 @@ void PostStyleUpdateScope::ApplyAnimations() {
     element_animations->CssAnimations().MaybeApplyPendingUpdate(element.Get());
   }
 
-  // NOTE(crbug.com/446159591): With AnimationTrigger enabled, we see renderer
-  // hang reports. This hang should be fixed before enabling AnimationTrigger.
-  if (RuntimeEnabledFeatures::AnimationTriggerEnabled()) {
+  // NOTE: We avoid performing the trigger attachments if we know we still need
+  // to run layout because the trigger names (and scopes) are made visible by
+  // propagating them through the fragment tree which happens during layout.
+  // Otherwise, we run the risk of performing attachments based on obsolete
+  // trigger names and scopes.
+  if (RuntimeEnabledFeatures::AnimationTriggerEnabled() &&
+      !document_.View()->NeedsLayout()) {
     document_.GetDocumentAnimations().UpdateAnimationTriggerAttachments();
   }
 

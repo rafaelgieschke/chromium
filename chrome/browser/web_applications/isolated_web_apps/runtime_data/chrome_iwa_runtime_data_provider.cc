@@ -6,6 +6,7 @@
 
 #include "base/auto_reset.h"
 #include "base/check_is_test.h"
+#include "base/containers/to_value_list.h"
 #include "base/values.h"
 
 namespace web_app {
@@ -16,13 +17,14 @@ ChromeIwaRuntimeDataProvider* g_instance = nullptr;
 
 base::Value
 ChromeIwaRuntimeDataProvider::SpecialAppPermissionsInfo::AsDebugValue() const {
-  return base::Value(base::Value::Dict().Set(
-      "skip_capture_started_notification", skip_capture_started_notification));
+  return base::Value(base::DictValue().Set("skip_capture_started_notification",
+                                           skip_capture_started_notification));
 }
 
 ChromeIwaRuntimeDataProvider::UserInstallAllowlistItemData::
-    UserInstallAllowlistItemData(const std::string& enterprise_name)
-    : enterprise_name(enterprise_name) {}
+    UserInstallAllowlistItemData(const std::string& enterprise_name,
+                                 std::vector<IwaEntitlementsSet> entitlements)
+    : enterprise_name(enterprise_name), entitlements(std::move(entitlements)) {}
 
 ChromeIwaRuntimeDataProvider::UserInstallAllowlistItemData::
     ~UserInstallAllowlistItemData() = default;
@@ -34,7 +36,11 @@ base::Value
 ChromeIwaRuntimeDataProvider::UserInstallAllowlistItemData::AsDebugValue()
     const {
   return base::Value(
-      base::Value::Dict().Set("enterprise_name", enterprise_name));
+      base::DictValue()
+          .Set("enterprise_name", enterprise_name)
+          .Set("entitlements",
+               base::ToValueList(entitlements,
+                                 &IwaEntitlementsSet::AsDebugValue)));
 }
 
 // static

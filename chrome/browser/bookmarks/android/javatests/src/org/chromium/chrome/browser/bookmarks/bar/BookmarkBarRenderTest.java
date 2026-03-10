@@ -26,7 +26,6 @@ import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.supplier.ObservableSupplierImpl;
 import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.test.BaseActivityTestRule;
 import org.chromium.base.test.params.ParameterAnnotations;
@@ -35,10 +34,12 @@ import org.chromium.base.test.params.ParameterSet;
 import org.chromium.base.test.params.ParameterizedRunner;
 import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.bookmarks.BookmarkManagerOpener;
 import org.chromium.chrome.browser.bookmarks.BookmarkOpener;
 import org.chromium.chrome.browser.browser_controls.TopControlsStacker;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.fullscreen.BrowserControlsManager;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.layouts.LayoutManager;
@@ -129,11 +130,12 @@ public class BookmarkBarRenderTest {
                             mResourceManager,
                             mBrowserControlsManager,
                             /* heightChangeCallback= */ result -> {},
-                            /* profileSupplier= */ new ObservableSupplierImpl<>(),
+                            /* profileSupplier= */ ObservableSuppliers.alwaysNull(),
                             viewStub,
                             mCurrentTab,
                             mBookmarkOpener,
-                            new ObservableSupplierImpl<>(mBookmarkManagerOpener),
+                            /* bookmarkManagerOpenerSupplier= */ ObservableSuppliers.createNonNull(
+                                    mBookmarkManagerOpener),
                             mTopControlsStacker,
                             ObservableSuppliers.alwaysNull(),
                             mTopUiThemeColorProvider);
@@ -147,6 +149,7 @@ public class BookmarkBarRenderTest {
     @MediumTest
     @UiThreadTest
     @Feature({"RenderTest"})
+    @DisableFeatures({ChromeFeatureList.ANDROID_BOOKMARK_BAR_FAST_FOLLOW})
     public void testEmptyState() throws IOException {
         mRenderTestRule.render(mView, "EmptyState");
     }

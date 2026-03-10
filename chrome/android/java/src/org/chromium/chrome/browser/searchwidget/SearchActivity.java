@@ -34,10 +34,11 @@ import org.chromium.base.ResettersForTesting;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.base.supplier.ObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
+import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.OneShotCallback;
 import org.chromium.base.supplier.OneshotSupplier;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.build.annotations.Initializer;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
@@ -58,10 +59,10 @@ import org.chromium.chrome.browser.omnibox.BackKeyBehaviorDelegate;
 import org.chromium.chrome.browser.omnibox.LocationBarCoordinator;
 import org.chromium.chrome.browser.omnibox.LocationBarEmbedder;
 import org.chromium.chrome.browser.omnibox.LocationBarEmbedderUiOverrides;
-import org.chromium.chrome.browser.omnibox.OmniboxActionDelegateImpl;
 import org.chromium.chrome.browser.omnibox.UrlFocusChangeListener;
 import org.chromium.chrome.browser.omnibox.suggestions.CachedZeroSuggestionsManager;
 import org.chromium.chrome.browser.omnibox.suggestions.OmniboxLoadUrlParams;
+import org.chromium.chrome.browser.omnibox.suggestions.action.OmniboxActionDelegateImpl;
 import org.chromium.chrome.browser.password_manager.ManagePasswordsReferrer;
 import org.chromium.chrome.browser.password_manager.PasswordManagerLauncher;
 import org.chromium.chrome.browser.profiles.Profile;
@@ -72,6 +73,7 @@ import org.chromium.chrome.browser.tab.TabFavicon;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabwindow.TabWindowInfo;
 import org.chromium.chrome.browser.toolbar.VoiceToolbarButtonController;
+import org.chromium.chrome.browser.ui.edge_to_edge.NoOpTopInsetProvider;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.ui.messages.snackbar.SnackbarManager.SnackbarManageable;
 import org.chromium.chrome.browser.ui.native_page.NativePage;
@@ -81,6 +83,7 @@ import org.chromium.chrome.browser.ui.searchactivityutils.SearchActivityExtras.S
 import org.chromium.chrome.browser.ui.system.StatusBarColorController;
 import org.chromium.components.browser_ui.modaldialog.AppModalPresenter;
 import org.chromium.components.metrics.OmniboxEventProtos.OmniboxEventProto.PageClassification;
+import org.chromium.components.omnibox.AutocompleteInput;
 import org.chromium.components.omnibox.OmniboxFeatures;
 import org.chromium.ui.base.ActivityKeyboardVisibilityDelegate;
 import org.chromium.ui.base.ActivityWindowAndroid;
@@ -243,9 +246,10 @@ public class SearchActivity extends AsyncInitializationActivity
     private View mAnchorView;
 
     private SnackbarManager mSnackbarManager;
-    private final ObservableSupplierImpl<Profile> mProfileSupplier = new ObservableSupplierImpl<>();
-    private final ObservableSupplierImpl<TabModelSelector> mTabModelSelectorSupplier =
-            new ObservableSupplierImpl<>();
+    private final SettableMonotonicObservableSupplier<Profile> mProfileSupplier =
+            ObservableSuppliers.createMonotonic();
+    private final SettableMonotonicObservableSupplier<TabModelSelector> mTabModelSelectorSupplier =
+            ObservableSuppliers.createMonotonic();
 
     // SearchBoxDataProvider and LocationBarEmbedderUiOverrides are passed to several child
     // components upon construction. Ensure we don't accidentally introduce disconnection by
@@ -256,7 +260,7 @@ public class SearchActivity extends AsyncInitializationActivity
     private UmaActivityObserver mUmaActivityObserver;
 
     public SearchActivity() {
-        mStartupMetricsTracker = new StartupMetricsTracker(mTabModelSelectorSupplier);
+        mStartupMetricsTracker = new StartupMetricsTracker(mTabModelSelectorSupplier, () -> false);
         mLocationBarUiOverrides.setForcedPhoneStyleOmnibox();
     }
 
@@ -302,7 +306,8 @@ public class SearchActivity extends AsyncInitializationActivity
         var contentView = createContentView();
         setContentView(contentView);
         mStartupMetricsTracker.registerSearchActivityViewObserver(contentView);
-        mSnackbarManager = new SnackbarManager(this, contentView, null);
+        mSnackbarManager =
+                new SnackbarManager(this, contentView, null, null, getModalDialogManager());
 
         // Build the search box.
         mSearchBox = contentView.findViewById(R.id.search_location_bar);
@@ -322,7 +327,7 @@ public class SearchActivity extends AsyncInitializationActivity
                         mSearchBoxDataProvider,
                         null,
                         assertNonNull(getWindowAndroid()),
-                        /* activityTabSupplier= */ () -> null,
+                        /* activityTabSupplier= */ ObservableSuppliers.alwaysNull(),
                         (Supplier<@Nullable ModalDialogManager>) getModalDialogManagerSupplier(),
                         /* shareDelegateSupplier= */ null,
                         /* incognitoStateProvider= */ null,
@@ -364,7 +369,7 @@ public class SearchActivity extends AsyncInitializationActivity
                                                 assumeNonNull(getProfileProviderSupplier().get())
                                                         .getOriginalProfile(),
                                                 ManagePasswordsReferrer.CHROME_SETTINGS,
-                                                getModalDialogManagerSupplier().asNonNull(),
+                                                getModalDialogManagerSupplier().asNonNull().get(),
                                                 /* managePasskeys= */ false),
                                 // Open Quick Delete Dialog callback:
                                 null,
@@ -373,7 +378,8 @@ public class SearchActivity extends AsyncInitializationActivity
                         null,
                         backPressManager,
                         /* omniboxSuggestionsDropdownScrollListener= */ null,
-                        /* tabModelSelectorSupplier= */ new ObservableSupplierImpl<>(),
+                        /* tabModelSelectorSupplier= */ ObservableSuppliers.createMonotonic(),
+                        /* topInsetProvider= */ new NoOpTopInsetProvider(),
                         new LocationBarEmbedder() {},
                         mLocationBarUiOverrides,
                         findViewById(R.id.control_container),
@@ -385,7 +391,8 @@ public class SearchActivity extends AsyncInitializationActivity
                         TabFavicon::getBitmap,
                         /* multiInstanceManager= */ null,
                         mSnackbarManager,
-                        findViewById(R.id.bottom_container));
+                        findViewById(R.id.bottom_container),
+                        /* omniboxChipManager= */ null);
         mLocationBarCoordinator.setUrlBarFocusable(true);
         mLocationBarCoordinator.setShouldShowMicButtonWhenUnfocused(true);
         assumeNonNull(mLocationBarCoordinator.getOmniboxStub()).addUrlFocusChangeListener(this);
@@ -644,7 +651,10 @@ public class SearchActivity extends AsyncInitializationActivity
         RecordHistogram.recordBooleanHistogram(
                 HISTOGRAM_LAUNCHED_WITH_QUERY, !TextUtils.isEmpty(query));
 
-        mSearchBox.beginQuery(mIntentOrigin, mSearchType, query, getWindowAndroid());
+        mLocationBarCoordinator.setUrlBarFocus(
+                new AutocompleteInput().setUserText(query).setSelection(0, Integer.MAX_VALUE));
+
+        mSearchBox.beginQuery(mIntentOrigin, mSearchType, getWindowAndroid());
     }
 
     @SuppressWarnings("NullAway")
@@ -655,6 +665,7 @@ public class SearchActivity extends AsyncInitializationActivity
             mLocationBarCoordinator.destroy();
             mLocationBarCoordinator = null;
         }
+        mSearchBoxDataProvider.destroy();
         mHandler.removeCallbacksAndMessages(null);
         super.onDestroy();
     }
@@ -868,7 +879,8 @@ public class SearchActivity extends AsyncInitializationActivity
 
     @VisibleForTesting
     void recordNavigationTargetType(GURL url) {
-        var templateSvc = TemplateUrlServiceFactory.getForProfile(mProfileSupplier.get());
+        var templateSvc =
+                TemplateUrlServiceFactory.getForProfile(assertNonNull(mProfileSupplier.get()));
         boolean isSearch =
                 templateSvc != null
                         && templateSvc.isSearchResultsPageFromDefaultSearchProvider(url);
@@ -940,7 +952,7 @@ public class SearchActivity extends AsyncInitializationActivity
         return mLocationBarUiOverrides;
     }
 
-    /* package */ ObservableSupplier<Profile> getProfileSupplierForTesting() {
+    /* package */ MonotonicObservableSupplier<Profile> getProfileSupplierForTesting() {
         return mProfileSupplier;
     }
 

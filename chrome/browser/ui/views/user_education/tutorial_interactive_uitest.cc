@@ -14,7 +14,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/interaction/browser_elements.h"
-#include "chrome/browser/ui/views/tabs/tab_close_button.h"
+#include "chrome/browser/ui/views/tabs/tab/tab_close_button.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/webui/customize_buttons/customize_buttons_handler.h"
 #include "chrome/browser/ui/webui/new_tab_page/new_tab_page_ui.h"
@@ -26,6 +26,7 @@
 #include "chrome/test/interaction/interaction_test_util_browser.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
 #include "chrome/test/interaction/tracked_element_webcontents.h"
+#include "components/user_education/common/feature_promo/impl/feature_promo_controller_impl.h"
 #include "components/user_education/common/help_bubble/help_bubble_params.h"
 #include "components/user_education/common/tutorial/tutorial.h"
 #include "components/user_education/common/tutorial/tutorial_description.h"
@@ -53,7 +54,7 @@ constexpr char kTestTutorialMetricPrefix[] = "Test";
 DEFINE_LOCAL_CUSTOM_ELEMENT_EVENT_TYPE(kCustomEventType1);
 }  // namespace
 
-using user_education::FeaturePromoControllerCommon;
+using user_education::FeaturePromoControllerImpl;
 using user_education::HelpBubbleArrow;
 using user_education::HelpBubbleViews;
 using user_education::TutorialDescription;
@@ -81,7 +82,7 @@ class TutorialInteractiveUitest : public InProcessBrowserTest {
 
  protected:
   TutorialService* GetTutorialService() {
-    return static_cast<FeaturePromoControllerCommon*>(
+    return static_cast<FeaturePromoControllerImpl*>(
                UserEducationServiceFactory::GetForBrowserContext(
                    browser()->profile())
                    ->GetFeaturePromoControllerForTesting())

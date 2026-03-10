@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/webui/ash/borealis_installer/borealis_installer_ui.h"
 
 #include "ash/constants/ash_features.h"
-#include "chrome/common/url_constants.h"
+#include "ash/constants/webui_url_constants.h"
 #include "chrome/grit/borealis_installer_resources.h"
 #include "chrome/grit/borealis_installer_resources_map.h"
 #include "chrome/grit/generated_resources.h"
@@ -26,7 +26,7 @@ BorealisInstallerUI::BorealisInstallerUI(content::WebUI* web_ui)
   content::WebUIDataSource* html_source =
       content::WebUIDataSource::CreateAndAdd(
           web_ui->GetWebContents()->GetBrowserContext(),
-          chrome::kChromeUIBorealisInstallerHost);
+          ash::kChromeUIBorealisInstallerHost);
   static constexpr webui::LocalizedString kStrings[] = {
       {"cancel", IDS_CANCEL},
       {"close", IDS_CLOSE},
@@ -96,7 +96,7 @@ void BorealisInstallerUI::OnPageClosed() {
   page_closed_ = true;
   // CloseDialog() is a no-op if we are not in a dialog (e.g. user
   // access the page using the URL directly, which is not supported).
-  ui::MojoWebDialogUI::CloseDialog(base::Value::List());
+  ui::MojoWebDialogUI::CloseDialog(base::ListValue());
 }
 
 bool BorealisInstallerUI::RequestClosePage() {

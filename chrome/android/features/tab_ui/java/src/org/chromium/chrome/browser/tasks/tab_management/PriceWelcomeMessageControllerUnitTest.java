@@ -4,13 +4,14 @@
 
 package org.chromium.chrome.browser.tasks.tab_management;
 
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.reset;
-import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -27,7 +28,9 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
+import org.chromium.base.supplier.SettableNullableObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.price_tracking.PriceTrackingFeatures;
 import org.chromium.chrome.browser.price_tracking.PriceTrackingUtilities;
@@ -61,12 +64,12 @@ public class PriceWelcomeMessageControllerUnitTest {
 
     @Captor private ArgumentCaptor<TabModelObserver> mTabModelObserverCaptor;
 
-    private final ObservableSupplierImpl<TabGroupModelFilter> mTabGroupModelFilterSupplier =
-            new ObservableSupplierImpl<>();
-    private final ObservableSupplierImpl<TabListCoordinator> mTabListCoordinatorSupplier =
-            new ObservableSupplierImpl<>();
-    private final ObservableSupplierImpl<PriceWelcomeMessageReviewActionProvider>
-            mActionProviderSupplier = new ObservableSupplierImpl<>();
+    private final SettableMonotonicObservableSupplier<TabGroupModelFilter>
+            mTabGroupModelFilterSupplier = ObservableSuppliers.createMonotonic();
+    private final SettableMonotonicObservableSupplier<TabListCoordinator>
+            mTabListCoordinatorSupplier = ObservableSuppliers.createMonotonic();
+    private final SettableNullableObservableSupplier<PriceWelcomeMessageReviewActionProvider>
+            mActionProviderSupplier = ObservableSuppliers.createNullable();
 
     private PriceWelcomeMessageController mController;
     private MockTab mTab;
@@ -219,35 +222,35 @@ public class PriceWelcomeMessageControllerUnitTest {
     @Test
     public void testBuild_priceAnnotationsEnabled() {
         reset(mMessageCardProvider);
-        ObservableSupplierImpl<TabGroupModelFilter> spySupplier = spy(mTabGroupModelFilterSupplier);
+        var filterSupplier = ObservableSuppliers.<TabGroupModelFilter>createMonotonic();
         mController =
                 PriceWelcomeMessageController.build(
                         mContext,
                         mTabSwitcherMessageManager,
-                        spySupplier,
+                        filterSupplier,
                         mMessageCardProvider,
                         mActionProviderSupplier,
                         mProfile,
                         mTabListCoordinatorSupplier);
         verify(mMessageCardProvider).subscribeMessageService(any(PriceMessageService.class));
-        verify(spySupplier).addSyncObserverAndCallIfNonNull(any());
+        assertTrue(filterSupplier.hasObservers());
     }
 
     @Test
     public void testBuild_priceAnnotationsDisabled() {
         PriceTrackingFeatures.setPriceAnnotationsEnabledForTesting(false);
         reset(mMessageCardProvider);
-        ObservableSupplierImpl<TabGroupModelFilter> spySupplier = spy(mTabGroupModelFilterSupplier);
+        var filterSupplier = ObservableSuppliers.<TabGroupModelFilter>createMonotonic();
         mController =
                 PriceWelcomeMessageController.build(
                         mContext,
                         mTabSwitcherMessageManager,
-                        spySupplier,
+                        filterSupplier,
                         mMessageCardProvider,
                         mActionProviderSupplier,
                         mProfile,
                         mTabListCoordinatorSupplier);
         verify(mMessageCardProvider, never()).subscribeMessageService(any());
-        verify(spySupplier, never()).addSyncObserverAndCallIfNonNull(any());
+        assertFalse(filterSupplier.hasObservers());
     }
 }

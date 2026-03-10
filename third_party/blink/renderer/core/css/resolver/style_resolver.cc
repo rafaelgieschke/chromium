@@ -92,6 +92,7 @@
 #include "third_party/blink/renderer/core/dom/first_letter_pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 #include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
+#include "third_party/blink/renderer/core/dom/node-inl.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/space_split_string.h"
 #include "third_party/blink/renderer/core/dom/text.h"
@@ -107,6 +108,7 @@
 #include "third_party/blink/renderer/core/html/html_image_element.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
+#include "third_party/blink/renderer/core/html/shadow/shadow_element_utils.h"
 #include "third_party/blink/renderer/core/html/track/text_track.h"
 #include "third_party/blink/renderer/core/html/track/text_track_cue.h"
 #include "third_party/blink/renderer/core/html/track/vtt/vtt_cue.h"
@@ -129,7 +131,7 @@
 #include "third_party/blink/renderer/core/style_property_shorthand.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
-#include "third_party/blink/renderer/core/view_transition/view_transition_pseudo_element_base.h"
+#include "third_party/blink/renderer/core/view_transition/view_transition_transition_element.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -256,13 +258,13 @@ bool HasAnimationsOrTransitions(const StyleResolverState& state) {
 }
 
 bool HasTimelines(const StyleResolverState& state) {
-  if (state.StyleBuilder().ScrollTimelineName()) {
+  if (!state.StyleBuilder().ScrollTimelineName().empty()) {
     return true;
   }
-  if (state.StyleBuilder().ViewTimelineName()) {
+  if (!state.StyleBuilder().ViewTimelineName().empty()) {
     return true;
   }
-  if (state.StyleBuilder().TimelineScope()) {
+  if (!state.StyleBuilder().TimelineScope().IsNone()) {
     return true;
   }
   if (ElementAnimations* element_animations = GetElementAnimations(state)) {
@@ -509,13 +511,17 @@ void ApplyInertness(StyleResolverState& state) {
   std::optional<bool> css_inert;
 
   if (state.StyleBuilder().Interactivity() == EInteractivity::kInert &&
-      !state.StyleBuilder().InteractivityIsInherited() &&
-      !state.StyleBuilder().IsCSSInert()) {
-    // If the computed value of 'interactivity' is 'inert', set the internal
-    // CSS inertness flag to true. With this flag set, it is not possible to
-    // escape CSS inertness in the subtree with 'interactivity' set to 'auto'
-    // in a descendant.
+      !state.StyleBuilder().InteractivityIsInherited()) {
+    // If we applied interactivity:inert to this element, we also need to
+    // set IsCSSInert to true. With this flag set, it is not possible to escape
+    // CSS inertness in the subtree with 'interactivity' set to 'auto' in a
+    // descendant.
+    //
     // TODO(crbug.com/413291835): This is not in line with the current spec.
+    //
+    // We explicitly set css_inert even if the inherited IsCSSInert is already
+    // true because we need independent property inheritance from an ancestor
+    // to stop by setting IsCSSInertIsInherited to false.
     css_inert = true;
   }
 
@@ -656,11 +662,9 @@ namespace {
 
 inline ScopedStyleResolver* ScopedResolverFor(const Element& element) {
   TreeScope* tree_scope = &element.GetTreeScope();
-  if (RuntimeEnabledFeatures::Svg2CascadeEnabled()) {
-    if (const auto* svg_element = DynamicTo<SVGElement>(element)) {
-      if (SVGElement* corresponding = svg_element->CorrespondingElement()) {
-        tree_scope = &corresponding->GetTreeScope();
-      }
+  if (const auto* svg_element = DynamicTo<SVGElement>(element)) {
+    if (SVGElement* corresponding = svg_element->CorrespondingElement()) {
+      tree_scope = &corresponding->GetTreeScope();
     }
   }
   if (ScopedStyleResolver* resolver = tree_scope->GetScopedStyleResolver()) {
@@ -702,12 +706,12 @@ inline UAShadowPseudoResult UAShadowPseudoCascading(const Element& element) {
   // this (developer-expected) behavior to those existing
   // pseudo-elements.  (It's possible that we could, but it would
   // require a good bit of compatibility analysis.)
-  DCHECK(shadow_pseudo_id.empty() || !shadow_pseudo_id.StartsWith("-") ||
-         shadow_pseudo_id.StartsWith("-webkit-") ||
-         shadow_pseudo_id.StartsWith("-internal-"))
+  DCHECK(shadow_pseudo_id.empty() || !shadow_pseudo_id.starts_with("-") ||
+         shadow_pseudo_id.starts_with("-webkit-") ||
+         shadow_pseudo_id.starts_with("-internal-"))
       << "shadow pseudo IDs should either begin with -webkit- or -internal- "
          "or not begin with a -";
-  return {true, shadow_pseudo_id.StartsWith("-")};
+  return {true, shadow_pseudo_id.starts_with("-")};
 }
 
 // Matches :host and :host-context rules if the element is a shadow host.
@@ -735,15 +739,16 @@ void MatchSlottedRules(const Element&,
 void MatchSlottedRulesForUAHost(const Element& element,
                                 ElementRuleCollector& collector,
                                 StyleRuleUsageTracker* tracker) {
-  if (element.ShadowPseudoId() !=
-      shadow_element_names::kPseudoInputPlaceholder) {
+  if (shadow_element_utils::PseudoIdForShadowElementName(
+          element.ShadowPseudoId()) == kPseudoIdNone) {
     return;
   }
 
-  // We allow ::placeholder pseudo-element after ::slotted(). Since we are
-  // matching such pseudo-elements starting from inside the UA shadow DOM of
-  // the element having the placeholder, we need to match ::slotted rules from
-  // the scopes to which the placeholder's host element may be slotted.
+  // We allow UA shadow pseudo-elements such as ::placeholder after ::slotted().
+  // Since we are matching such pseudo-elements starting from inside the UA
+  // shadow DOM of the element having the placeholder, we need to match
+  // ::slotted rules from the scopes to which the placeholder's host element may
+  // be slotted.
   //
   // Example:
   //
@@ -1287,18 +1292,16 @@ void StyleResolver::MatchAllRules(StyleResolverState& state,
     // Now check SMIL animation override style.
     auto* svg_element = DynamicTo<SVGElement>(element);
     if (include_smil_properties && svg_element) {
-      if (RuntimeEnabledFeatures::Svg2CascadeEnabled()) {
-        if (SVGElement* corresponding = svg_element->CorrespondingElement()) {
-          // According to the spec[1], animations that are cloned into the <use>
-          // shadow tree, should run in that tree, while animations applied to
-          // the referenced element which are not cloned should have an instance
-          // in the <use> tree as if it was cloned.
-          //
-          // We apply the animations from the referenced subtree for now.
-          //
-          // [1] https://svgwg.org/svg2-draft/struct.html#UseAnimations
-          svg_element = corresponding;
-        }
+      if (SVGElement* corresponding = svg_element->CorrespondingElement()) {
+        // According to the spec[1], animations that are cloned into the <use>
+        // shadow tree, should run in that tree, while animations applied to
+        // the referenced element which are not cloned should have an instance
+        // in the <use> tree as if it was cloned.
+        //
+        // We apply the animations from the referenced subtree for now.
+        //
+        // [1] https://svgwg.org/svg2-draft/struct.html#UseAnimations
+        svg_element = corresponding;
       }
       collector.AddElementStyleProperties(
           svg_element->AnimatedSMILStyleProperties(), CascadeOrigin::kAuthor,
@@ -1417,7 +1420,6 @@ const ComputedStyle* StyleResolver::ResolveStyle(
 
   ApplyAnchorData(state);
   ApplyInertness(state);
-  ApplyTriggerData(state);
 
   IncrementResolvedStyleCounters(style_request, GetDocument());
   if (InvalidationTracingFlag::IsEnabled()) [[unlikely]] {
@@ -1749,7 +1751,8 @@ void StyleResolver::ApplyBaseStyleNoCache(
           {.origin = CascadeOrigin::kUserAgent});
     }
 
-    if (RuntimeEnabledFeatures::OverlayPropertyEnabled()) {
+    if (RuntimeEnabledFeatures::OverlayPropertyEnabled() &&
+        !RuntimeEnabledFeatures::OverlayGlobalRuleRemovalEnabled()) {
       // UA rule: * { overlay: none !important }
       // Implemented here because DCHECKs ensures we don't add universal rules
       // to the UA sheets. Note that this is a universal rule in any namespace.
@@ -1818,20 +1821,16 @@ void StyleResolver::ApplyBaseStyleNoCache(
         style_request.matching_behavior != kMatchAllRulesExcludingSMIL);
   }
 
-  const MatchResult& match_result = collector.MatchedResult();
+  const MatchResult& match_result = cascade.GetMatchResult();
 
   if (IsForPseudoElement(*element, style_request)) {
     if (!match_result.HasMatchedProperties()) {
-      InitStyle(*element, style_request, *initial_style_, state.ParentStyle(),
-                state.OriginatingElementStyle(), state);
-      StyleAdjuster::AdjustComputedStyle(state, nullptr /* element */);
       state.SetHadNoMatchedProperties();
-      return;
     }
   }
 
-  const MatchResult& result = cascade.GetMatchResult();
-  CacheSuccess cache_success = ApplyMatchedCache(state, style_request, result);
+  CacheSuccess cache_success =
+      ApplyMatchedCache(state, style_request, match_result);
   ComputedStyleBuilder& builder = state.StyleBuilder();
 
   if (style_recalc_context.is_ensuring_style &&
@@ -2510,8 +2509,8 @@ void StyleResolver::CollectPseudoRulesForElement(
         element.GetPseudoElement(kPseudoIdViewTransition);
     if (view_transition_element) {
       auto* view_transition_group_element =
-          view_transition_element->GetPseudoElement(
-              kPseudoIdViewTransitionGroup, pseudo_argument);
+          To<ViewTransitionTransitionElement>(*view_transition_element)
+              .FindViewTransitionGroupPseudoElement(pseudo_argument);
       if (view_transition_group_element) {
         style_request.pseudo_ident_list =
             To<ViewTransitionPseudoElementBase>(*view_transition_group_element)
@@ -2572,7 +2571,7 @@ bool StyleResolver::ApplyAnimatedStyle(
   if (!IsAnimationStyleChange(*animating_element) ||
       !state.StyleBuilder().BaseData()) {
     state.StyleBuilder().SetBaseData(StyleBaseData::Create(
-        state.StyleBuilder().CloneStyle(), cascade.GetImportantSet()));
+        state.StyleBuilder().CloneStyle(), cascade.ReleaseImportantSet()));
   }
 
   CSSAnimations::CalculateAnimationUpdate(
@@ -2583,7 +2582,7 @@ bool StyleResolver::ApplyAnimatedStyle(
       state.AnimationUpdate(), *animating_element, state.StyleBuilder(),
       state.OldStyle(), style_recalc_context, state.CanTriggerAnimations());
 
-  bool apply = !state.AnimationUpdate().IsEmpty();
+  bool apply = state.AnimationUpdate().HasActiveInterpolations();
   if (apply) {
     const ActiveInterpolationsMap& animations =
         state.AnimationUpdate().ActiveInterpolationsForAnimations();
@@ -2618,6 +2617,15 @@ bool StyleResolver::ApplyAnimatedStyle(
     DCHECK(!state.GetFontBuilder().FontDirty());
   }
 
+  if (ElementAnimations* animations =
+          animating_element->GetElementAnimations()) {
+    if (StyleBaseData* base_data = state.StyleBuilder().BaseData()) {
+      if (const CSSBitset* important_set = base_data->GetBaseImportantSet()) {
+        animations->CancelCompositedAnimationsAffectingProperties(
+            *important_set);
+      }
+    }
+  }
   CSSAnimations::CalculateCompositorAnimationUpdate(
       state.AnimationUpdate(), *animating_element, element,
       *state.StyleBuilder().GetBaseComputedStyle(), state.ParentStyle(),
@@ -3004,7 +3012,7 @@ const ComputedStyle* StyleResolver::StyleForInterpolations(
 
   ApplyBaseStyle(&element, style_recalc_context, style_request, state, cascade);
   state.StyleBuilder().SetBaseData(StyleBaseData::Create(
-      state.StyleBuilder().CloneStyle(), cascade.GetImportantSet()));
+      state.StyleBuilder().CloneStyle(), cascade.ReleaseImportantSet()));
 
   ApplyInterpolations(state, cascade, interpolations);
   return state.TakeStyle();
@@ -3185,7 +3193,7 @@ void StyleResolver::UpdateMediaType() {
   if (LocalFrameView* view = GetDocument().View()) {
     bool was_print = print_media_type_;
     print_media_type_ =
-        EqualIgnoringASCIICase(view->MediaType(), media_type_names::kPrint);
+        EqualIgnoringAsciiCase(view->MediaType(), media_type_names::kPrint);
     if (was_print != print_media_type_) {
       matched_properties_cache_.ClearViewportDependent();
     }
@@ -3347,6 +3355,7 @@ void StyleResolver::PropagateStyleToViewport() {
                    TextDirection::kLtr);
   }
 
+  // TODO(crbug.com/429459566): Add propagation of image-animation property.
   // Background
   {
     const ComputedStyle* background_style = document_element_style;
@@ -3660,21 +3669,6 @@ StyleRulePositionTry* StyleResolver::ResolvePositionTryRule(
   }
 
   return position_try_rule;
-}
-
-void StyleResolver::ApplyTriggerData(StyleResolverState& state) {
-  if (state.GetPseudoId() != PseudoId::kPseudoIdNone) {
-    // TODO(crbug.com/451477493): Applying trigger data here would clobber the
-    // style of the pseudo's originating element. We should investigate a
-    // cleaner solution to this than making an exception here.
-    return;
-  }
-
-  // TODO(crbug.com/467727342): Move this to a safer location. This function
-  // is called during ResolveStyle which might not correspond to an actual
-  // change in the affected element's style.
-  CSSAnimations::UpdateNamedTriggers(
-      state.StyleBuilder(), state.AnimationUpdate(), state.GetElement());
 }
 
 }  // namespace blink

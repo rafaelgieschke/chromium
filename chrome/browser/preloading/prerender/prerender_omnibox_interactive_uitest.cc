@@ -177,7 +177,7 @@ class PrerenderOmniboxUIBrowserTest : public InProcessBrowserTest,
 
   void SelectAutocompleteMatchAndWaitForActivation(
       OmniboxPopupSelection selection,
-      content::FrameTreeNodeId host_id) {
+      content::PrerenderHostId host_id) {
     content::test::PrerenderHostObserver prerender_observer(
         *GetActiveWebContents(), host_id);
     browser()
@@ -221,7 +221,8 @@ class PrerenderOmniboxUIBrowserTest : public InProcessBrowserTest,
           ->OnFocusChanged(OMNIBOX_FOCUS_VISIBLE,
                            OMNIBOX_FOCUS_CHANGE_EXPLICIT);
     } else {
-      browser()->window()->GetLocationBar()->FocusLocation(false);
+      browser()->window()->GetLocationBar()->FocusLocation(
+          /*is_user_initiated=*/false, /*clear_focus_if_failed=*/false);
     }
   }
 
@@ -798,7 +799,7 @@ class PrerenderOmniboxSearchSuggestionUIBrowserTest
     EXPECT_TRUE(autocomplete_controller->done());
   }
 
-  content::FrameTreeNodeId InputSearchQueryAndWaitForTrigger(
+  content::PrerenderHostId InputSearchQueryAndWaitForTrigger(
       std::string_view search_query,
       const GURL& expected_url) {
     content::test::PrerenderHostRegistryObserver registry_observer(
@@ -807,7 +808,7 @@ class PrerenderOmniboxSearchSuggestionUIBrowserTest
     // The suggestion service should hint a search term which is be displayed in
     // the page with `expected_url`.
     registry_observer.WaitForTrigger(expected_url);
-    content::FrameTreeNodeId host_id =
+    content::PrerenderHostId host_id =
         prerender_helper().GetHostForUrl(expected_url);
     return host_id;
   }
@@ -876,7 +877,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderOmniboxSearchSuggestionUIBrowserTest,
   AddNewSuggestionRule("prerender22", {"prerender222", "prerender223"});
   std::string search_query_1 = "prerender22";
   GURL prerender_url = GetSearchUrl(search_query_1, "prerender222");
-  content::FrameTreeNodeId host_id =
+  content::PrerenderHostId host_id =
       InputSearchQueryAndWaitForTrigger(search_query_1, prerender_url);
   ASSERT_TRUE(host_id);
 
@@ -884,7 +885,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderOmniboxSearchSuggestionUIBrowserTest,
   AddNewSuggestionRule("prerender33", {"prerender333", "prerender334"});
   std::string search_query_2 = "prerender33";
   GURL prerender_url2 = GetSearchUrl(search_query_2, "prerender333");
-  content::FrameTreeNodeId host_id2 =
+  content::PrerenderHostId host_id2 =
       InputSearchQueryAndWaitForTrigger(search_query_2, prerender_url2);
   ASSERT_NE(host_id, host_id2);
   prerender_helper().WaitForPrerenderLoadCompletion(*GetActiveWebContents(),
@@ -944,8 +945,8 @@ IN_PROC_BROWSER_TEST_F(PrerenderOmniboxSearchSuggestionUIBrowserTest,
       });
 
   // The displayed url shouldn't contain the parameter of pf=cs.
-  EXPECT_FALSE(base::Contains(
-      GetActiveWebContents()->GetLastCommittedURL().spec(), "pf=cs"));
+  EXPECT_FALSE(
+      GetActiveWebContents()->GetLastCommittedURL().spec().contains("pf=cs"));
 
   histogram_tester.ExpectBucketCount(
       internal::kHistogramPrerenderPredictionStatusDefaultSearchEngine,
@@ -1013,7 +1014,7 @@ IN_PROC_BROWSER_TEST_F(PrerenderOmniboxReferrerChainUIBrowserTest,
                                                       *GetActiveWebContents());
 
   registry_observer.WaitForTrigger(kPrerenderingUrl);
-  content::FrameTreeNodeId host_id =
+  content::PrerenderHostId host_id =
       prerender_helper().GetHostForUrl(kPrerenderingUrl);
   ASSERT_TRUE(host_id);
   prerender_helper().WaitForPrerenderLoadCompletion(host_id);

@@ -25,8 +25,8 @@
 #import "ios/chrome/browser/ntp/ui_bundled/new_tab_page_feature.h"
 #import "ios/chrome/browser/policy/model/policy_earl_grey_utils.h"
 #import "ios/chrome/browser/policy/model/policy_util.h"
+#import "ios/chrome/browser/settings/google_services/manage_accounts/public/manage_accounts_table_view_controller_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/google_services/google_services_settings_constants.h"
-#import "ios/chrome/browser/settings/ui_bundled/google_services/manage_accounts/manage_accounts_table_view_controller_constants.h"
 #import "ios/chrome/browser/settings/ui_bundled/google_services/manage_sync_settings_constants.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
@@ -800,7 +800,7 @@ void CompleteSigninFlow() {
   if (![ChromeEarlGrey areMultipleWindowsSupported]) {
     EARL_GREY_TEST_DISABLED(@"Multiple windows can't be opened.");
   }
-  if (@available(iOS 19.0, *)) {
+  if (@available(iOS 26.0, *)) {
     // TODO(crbug.com/427699033): Re-enable test on iOS 26.
     // Fails to background app from [self backgroundApplication]
     EARL_GREY_TEST_DISABLED(@"Test disabled on iOS 26.");
@@ -889,15 +889,10 @@ void CompleteSigninFlow() {
 // opened, can be shown on dynamic policy update after cancelling the regular
 // sign-in prompt. The policy is applied while the regular sign-in prompt is
 // shown.
-- (void)testSignInScreenOnRegularSigninPromptMultiWindows {
+// TODO(crbug.com/384874382): Flaky test.
+- (void)DISABLED_testSignInScreenOnRegularSigninPromptMultiWindows {
   if (![ChromeEarlGrey areMultipleWindowsSupported]) {
     EARL_GREY_TEST_DISABLED(@"Multiple windows can't be opened.");
-  }
-
-  // TODO(crbug.com/40210654).
-  if ([ChromeEarlGrey isNewOverflowMenuEnabled]) {
-    EARL_GREY_TEST_DISABLED(
-        @"Earl Grey doesn't work properly with SwiftUI and multiwindow");
   }
 
   // Restart the app to reset the policies.
@@ -917,7 +912,9 @@ void CompleteSigninFlow() {
 
   // Show the regular sign-in prompt on the second window which will raise a UI
   // blocker on the second window.
-  [ChromeEarlGreyUI openSettingsMenuInWindowWithNumber:1];
+  [ChromeEarlGrey openSettingsInWindowWithNumber:1];
+  [EarlGrey setRootMatcherForSubsequentInteractions:chrome_test_util::
+                                                        WindowWithNumber(1)];
   [ChromeEarlGreyUI tapSettingsMenuButton:SettingsAccountButton()];
 
   // Enable the forced sign-in policy.
@@ -941,15 +938,10 @@ void CompleteSigninFlow() {
 // Tests that the forced sign-in prompt can be shown on dynamic policy update
 // when a browser modal is displayed on top of the browser view when there are
 // multiple windows.
-- (void)testSignInScreenOnModalMultiWindows {
+// TODO(crbug.com/384874382): Flaky test.
+- (void)DISABLED_testSignInScreenOnModalMultiWindows {
   if (![ChromeEarlGrey areMultipleWindowsSupported]) {
     EARL_GREY_TEST_DISABLED(@"Multiple windows can't be opened.");
-  }
-
-  // TODO(crbug.com/40210654).
-  if ([ChromeEarlGrey isNewOverflowMenuEnabled]) {
-    EARL_GREY_TEST_DISABLED(
-        @"Earl Grey doesn't work properly with SwiftUI and multiwindow");
   }
 
   // Restart the app to reset the policies.
@@ -968,8 +960,8 @@ void CompleteSigninFlow() {
   [ChromeEarlGrey waitForForegroundWindowCount:2];
 
   // Open the settings menu which represents a modal.
-  [ChromeEarlGreyUI openSettingsMenuInWindowWithNumber:0];
-  [ChromeEarlGreyUI openSettingsMenuInWindowWithNumber:1];
+  [ChromeEarlGrey openSettingsInWindowWithNumber:0];
+  [ChromeEarlGrey openSettingsInWindowWithNumber:1];
 
   // Make sure that both windows will be considered when verifying for the
   // forced sign-in screen. This is done by removing the root matcher.

@@ -65,7 +65,6 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_writer.h"
@@ -1800,7 +1799,7 @@ TEST_F(AcceleratorControllerTest, SideVolumeButtonLocation) {
 
   // Tests that |side_volume_button_location_| is read correctly if the location
   // file exists.
-  base::Value::Dict location;
+  base::DictValue location;
   location.Set(kVolumeButtonRegion, kVolumeButtonRegionScreen);
   location.Set(kVolumeButtonSide, kVolumeButtonSideLeft);
   base::ScopedTempDir file_tmp_dir;
@@ -2048,9 +2047,7 @@ TEST_F(AcceleratorControllerTest, PressAndReleasePowerButtonWithFunctionKey) {
 TEST_F(AcceleratorControllerTest, ToggleCapsLockAcceleratorsWithFunctionKey) {
   base::test::ScopedFeatureList feature_list;
   feature_list.InitWithFeatures(
-      {features::kModifierSplit, features::kShortcutStateMachines,
-       features::kPeripheralCustomization},
-      {});
+      {features::kModifierSplit, features::kPeripheralCustomization}, {});
 
   AnchoredNudgeManagerImpl* nudge_manager =
       Shell::Get()->anchored_nudge_manager();
@@ -2100,116 +2097,7 @@ TEST_F(AcceleratorControllerTest, ToggleCapsLockAcceleratorsWithFunctionKey) {
 }
 
 // Tests the AcceleratorAction::kToggleCapsLock accelerator.
-TEST_F(AcceleratorControllerTest, ToggleCapsLockAccelerators) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(features::kShortcutStateMachines);
-
-  ImeControllerImpl* controller = Shell::Get()->ime_controller();
-  TestImeControllerClient client;
-  controller->SetClient(&client);
-  EXPECT_EQ(0, client.set_caps_lock_count_);
-
-  // 1. Press Alt, Press Search, Release Search, Release Alt.
-  // Note when you press Alt then press search, the key_code at this point is
-  // VKEY_LWIN (for search) and Alt is the modifier.
-  const ui::Accelerator press_alt_then_search(ui::VKEY_LWIN, ui::EF_ALT_DOWN);
-  EXPECT_FALSE(ProcessInController(press_alt_then_search));
-  // When you release Search before Alt, the key_code is still VKEY_LWIN and
-  // Alt is still the modifier.
-  const ui::Accelerator release_search_before_alt(
-      CreateReleaseAccelerator(ui::VKEY_LWIN, ui::EF_ALT_DOWN));
-  EXPECT_TRUE(ProcessInController(release_search_before_alt));
-  EXPECT_EQ(1, client.set_caps_lock_count_);
-  EXPECT_TRUE(controller->IsCapsLockEnabled());
-  controller->UpdateCapsLockState(false);
-
-  // 2. Press Search, Press Alt, Release Search, Release Alt.
-  const ui::Accelerator press_search_then_alt(ui::VKEY_MENU,
-                                              ui::EF_COMMAND_DOWN);
-  EXPECT_FALSE(ProcessInController(press_search_then_alt));
-  EXPECT_TRUE(ProcessInController(release_search_before_alt));
-  EXPECT_EQ(2, client.set_caps_lock_count_);
-  EXPECT_TRUE(controller->IsCapsLockEnabled());
-  controller->UpdateCapsLockState(false);
-
-  // 3. Press Alt, Press Search, Release Alt, Release Search.
-  EXPECT_FALSE(ProcessInController(press_alt_then_search));
-  const ui::Accelerator release_alt_before_search(
-      CreateReleaseAccelerator(ui::VKEY_MENU, ui::EF_COMMAND_DOWN));
-  EXPECT_TRUE(ProcessInController(release_alt_before_search));
-  EXPECT_EQ(3, client.set_caps_lock_count_);
-  EXPECT_TRUE(controller->IsCapsLockEnabled());
-  controller->UpdateCapsLockState(false);
-
-  // 4. Press Search, Press Alt, Release Alt, Release Search.
-  EXPECT_FALSE(ProcessInController(press_search_then_alt));
-  EXPECT_TRUE(ProcessInController(release_alt_before_search));
-  EXPECT_EQ(4, client.set_caps_lock_count_);
-  EXPECT_TRUE(controller->IsCapsLockEnabled());
-  controller->UpdateCapsLockState(false);
-
-  // 5. Press M, Press Alt, Press Search, Release Alt. After that CapsLock
-  // should not be triggered. https://crbug.com/789283
-  ui::test::EventGenerator* generator = GetEventGenerator();
-  generator->PressKey(ui::VKEY_M, ui::EF_NONE);
-  generator->PressKey(ui::VKEY_MENU, ui::EF_NONE);
-  generator->PressKey(ui::VKEY_LWIN, ui::EF_ALT_DOWN);
-  generator->ReleaseKey(ui::VKEY_MENU, ui::EF_COMMAND_DOWN);
-  EXPECT_FALSE(controller->IsCapsLockEnabled());
-  controller->UpdateCapsLockState(false);
-  generator->ReleaseKey(ui::VKEY_M, ui::EF_NONE);
-  generator->ReleaseKey(ui::VKEY_LWIN, ui::EF_ALT_DOWN);
-
-  // 6. Toggle CapsLock shortcut should still work after the partial screenshot
-  // shortcut is used. (https://crbug.com/920030)
-  {
-    // Press Ctrl+Shift+F5 then release to enter the partial screenshot session.
-    const ui::Accelerator press_partial_screenshot_shortcut(
-        ui::VKEY_MEDIA_LAUNCH_APP1, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN);
-    EXPECT_TRUE(ProcessInController(press_partial_screenshot_shortcut));
-    const ui::Accelerator release_partial_screenshot_shortcut =
-        CreateReleaseAccelerator(ui::VKEY_MEDIA_LAUNCH_APP1,
-                                 ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN);
-    EXPECT_FALSE(ProcessInController(release_partial_screenshot_shortcut));
-
-    // Press mouse left button, move mouse and release mouse button. Then
-    // the partial screenshot is taken.
-    generator->MoveMouseTo(0, 0);
-    generator->PressLeftButton();
-    generator->MoveMouseTo(10, 10);
-    generator->ReleaseLeftButton();
-    auto* capture_mode_controller = CaptureModeController::Get();
-    EXPECT_TRUE(capture_mode_controller->IsActive());
-    EXPECT_EQ(CaptureModeSource::kRegion, capture_mode_controller->source());
-
-    // Press Search, Press Alt, Release Search, Release Alt. CapsLock should be
-    // triggered.
-    EXPECT_FALSE(ProcessInController(press_search_then_alt));
-    EXPECT_TRUE(ProcessInController(release_search_before_alt));
-    EXPECT_EQ(5, client.set_caps_lock_count_);
-    EXPECT_TRUE(controller->IsCapsLockEnabled());
-    controller->UpdateCapsLockState(false);
-  }
-
-  // 7. Toggle CapsLock shortcut should still work after fake events generated.
-  // (https://crbug.com/918317).
-  generator->PressKey(ui::VKEY_PROCESSKEY, ui::EF_IME_FABRICATED_KEY);
-  generator->ReleaseKey(ui::VKEY_UNKNOWN, ui::EF_IME_FABRICATED_KEY);
-
-  // Press Search, Press Alt, Release Search, Release Alt. CapsLock should be
-  // triggered.
-  EXPECT_FALSE(ProcessInController(press_search_then_alt));
-  EXPECT_TRUE(ProcessInController(release_search_before_alt));
-  EXPECT_EQ(6, client.set_caps_lock_count_);
-  EXPECT_TRUE(controller->IsCapsLockEnabled());
-  controller->UpdateCapsLockState(false);
-}
-
-// Tests the AcceleratorAction::kToggleCapsLock accelerator.
 TEST_F(AcceleratorControllerTest, ToggleCapsLockAcceleratorsStateMachines) {
-  base::test::ScopedFeatureList feature_list_;
-  feature_list_.InitAndEnableFeature(features::kShortcutStateMachines);
-
   ImeControllerImpl* controller = Shell::Get()->ime_controller();
   TestImeControllerClient client;
   controller->SetClient(&client);
@@ -2394,9 +2282,9 @@ TEST_F(AcceleratorControllerTest, DisallowedAtModalWindow) {
     actionsAllowedAtModalWindow.insert(action);
   }
   for (const auto& action : actionsAllowedAtModalWindow) {
-    EXPECT_TRUE(base::Contains(all_actions, action) ||
-                base::Contains(all_debug_actions, action) ||
-                base::Contains(all_dev_actions, action))
+    EXPECT_TRUE(all_actions.contains(action) ||
+                all_debug_actions.contains(action) ||
+                all_dev_actions.contains(action))
         << " action from kActionsAllowedAtModalWindow"
         << " not found in kAcceleratorData, kDebugAcceleratorData or"
         << " kDeveloperAcceleratorData action: " << action;
@@ -2406,7 +2294,7 @@ TEST_F(AcceleratorControllerTest, DisallowedAtModalWindow) {
   wm::ActivateWindow(window.get());
   ShellTestApi().SimulateModalWindowOpenForTest(true);
   for (const auto& action : all_actions) {
-    if (!base::Contains(actionsAllowedAtModalWindow, action)) {
+    if (!actionsAllowedAtModalWindow.contains(action)) {
       EXPECT_TRUE(controller_->PerformActionIfEnabled(action, {}))
           << " for action (disallowed at modal window): " << action;
     }
@@ -2509,7 +2397,7 @@ TEST_F(AcceleratorControllerTest, DisallowedWithNoWindow) {
   std::map<AcceleratorAction, ui::Accelerator> accelerators_needing_window;
   for (const AcceleratorData& accelerator_data : kAcceleratorData) {
     auto iter = actions_needing_window.find(accelerator_data.action);
-    if (!base::Contains(actions_needing_window, accelerator_data.action)) {
+    if (!actions_needing_window.contains(accelerator_data.action)) {
       continue;
     }
 

@@ -252,6 +252,18 @@ class CONTENT_EXPORT PrefetchRequest final {
   const PrefetchRendererInitiatorInfo* GetRendererInitiatorInfo() const;
   const PrefetchBrowserInitiatorInfo* GetBrowserInitiatorInfo() const;
 
+  // Whether or not the prefetch proxy would be required to fetch the given url
+  // based on `prefetch_type_`.
+  bool IsProxyRequiredForURL(const GURL& url) const;
+
+  // Whether or not the given origin would become a cross-site/cross-origin
+  // request.
+  bool IsCrossSiteRequest(const url::Origin& origin) const;
+  bool IsCrossOriginRequest(const url::Origin& origin) const;
+
+  // Whether or not an isolated network context is required to prefetch `url`.
+  bool IsIsolatedNetworkContextRequired(const GURL& url) const;
+
  private:
   // The type of this prefetch. This controls some specific details about how
   // the prefetch is handled, including whether an isolated network context or
@@ -297,8 +309,8 @@ class CONTENT_EXPORT PrefetchRequest final {
   const bool is_javascript_enabled_;
 
   // The referrer to use for the initial request.
-  // Only for initialization of `PrefetchContainer::referrer_`.
-  // For other cases, use `PrefetchContainer::referrer_` instead.
+  // Only for initialization of `PrefetchContainer::resource_request_`'s
+  // `referrer` / `referrer_policy`, which are updated upon redirects.
   const blink::mojom::Referrer initial_referrer_;
 
   // The origin and URL that initiates the prefetch request.

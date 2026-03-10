@@ -82,8 +82,6 @@ class LayerTreeTest : public testing::Test, public TestHooks {
         return "Skia Vulkan";
       case viz::RendererType::kSkiaGraphiteDawn:
         return "Skia Graphite Dawn";
-      case viz::RendererType::kSkiaGraphiteMetal:
-        return "Skia Graphite Metal";
       case viz::RendererType::kSoftware:
         return "Software";
     }
@@ -230,8 +228,7 @@ class LayerTreeTest : public testing::Test, public TestHooks {
     return renderer_type_ == viz::RendererType::kSkiaVk;
   }
   bool use_skia_graphite() const {
-    return renderer_type_ == viz::RendererType::kSkiaGraphiteDawn ||
-           renderer_type_ == viz::RendererType::kSkiaGraphiteMetal;
+    return renderer_type_ == viz::RendererType::kSkiaGraphiteDawn;
   }
 
   const viz::RendererType renderer_type_;
@@ -315,7 +312,7 @@ class LayerTreeTest : public testing::Test, public TestHooks {
 // the unit test suite. Instead, comment out the usage of this macro for
 // a specific test name. eg.
 // // TODO(crbug.com/abcd): Disabled for some reasons stated here.
-// // SINGLE_AND_MULTI_THREAD_TEST_F(SomeRandomTest)
+// // SINGLE_THREAD_TEST_F(SomeRandomTest)
 #define SINGLE_THREAD_TEST_F(TEST_FIXTURE_NAME)                   \
   TEST_F(TEST_FIXTURE_NAME, RunSingleThread_DelegatingRenderer) { \
     RunTest(CompositorMode::SINGLE_THREADED);                     \
@@ -326,7 +323,7 @@ class LayerTreeTest : public testing::Test, public TestHooks {
 // the unit test suite. Instead, comment out the usage of this macro for
 // a specific test name. eg.
 // // TODO(crbug.com/abcd): Disabled for some reasons stated here.
-// // SINGLE_AND_MULTI_THREAD_TEST_F(SomeRandomTest)
+// // MULTI_THREAD_TEST_F(SomeRandomTest)
 #define MULTI_THREAD_TEST_F(TEST_FIXTURE_NAME)                   \
   TEST_F(TEST_FIXTURE_NAME, RunMultiThread_DelegatingRenderer) { \
     RunTest(CompositorMode::THREADED);                           \

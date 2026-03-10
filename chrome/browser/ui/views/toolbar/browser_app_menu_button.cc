@@ -12,6 +12,7 @@
 #include "base/rand_util.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
+#include "build/branding_buildflags.h"
 #include "cc/paint/paint_flags.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -202,7 +203,7 @@ void BrowserAppMenuButton::UpdateTextAndHighlightColor() {
     int message_id = IDS_APP_MENU_BUTTON_UPDATE;
     // Select an update text option randomly. Show this text in all browser
     // windows.
-    static const int update_text_option = base::RandInt(1, 3);
+    static const int update_text_option = base::RandIntInclusive(1, 3);
     if (update_text_option == 1) {
       message_id = IDS_APP_MENU_BUTTON_UPDATE_ALT1;
     } else if (update_text_option == 2) {

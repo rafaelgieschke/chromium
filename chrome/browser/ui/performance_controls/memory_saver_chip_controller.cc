@@ -4,7 +4,7 @@
 
 #include "chrome/browser/ui/performance_controls/memory_saver_chip_controller.h"
 
-#include "base/byte_count.h"
+#include "base/byte_size.h"
 #include "base/task/single_thread_task_runner.h"
 #include "chrome/browser/ui/actions/chrome_action_id.h"
 #include "chrome/browser/ui/page_action/page_action_icon_type.h"
@@ -25,9 +25,7 @@ constexpr base::TimeDelta kChipVisibleDuration = base::Seconds(12);
 
 MemorySaverChipController::MemorySaverChipController(
     page_actions::PageActionController& page_action_controller)
-    : page_action_controller_(page_action_controller) {
-  CHECK(IsPageActionMigrated(PageActionIconType::kMemorySaver));
-}
+    : page_action_controller_(page_action_controller) {}
 
 MemorySaverChipController::~MemorySaverChipController() = default;
 
@@ -52,7 +50,7 @@ void MemorySaverChipController::ShowEducationChip() {
 }
 
 void MemorySaverChipController::ShowMemorySavedChip(
-    base::ByteCount bytes_saved) {
+    base::ByteSize bytes_saved) {
   page_action_controller_->Show(kActionShowMemorySaverChip);
   page_action_controller_->ShowSuggestionChip(kActionShowMemorySaverChip);
   std::u16string savings_string = ui::FormatBytes(bytes_saved);

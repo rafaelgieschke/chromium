@@ -298,6 +298,10 @@ class CONTENT_EXPORT WebContentsImpl
 
   void OnScreenOrientationChange();
 
+  ScreenOrientationProvider* GetScreenOrientationProvider() const {
+    return screen_orientation_provider_.get();
+  }
+
   ScreenOrientationProvider* GetScreenOrientationProviderForTesting() const {
     return screen_orientation_provider_.get();
   }
@@ -406,6 +410,7 @@ class CONTENT_EXPORT WebContentsImpl
   RenderWidgetHostView* GetRenderWidgetHostView() override;
   RenderWidgetHostView* GetTopLevelRenderWidgetHostView() override;
   RenderWidgetHost* FindWidgetAtPoint(const gfx::PointF& point) override;
+  std::vector<RenderWidgetHostView*> GetPopupWidgets() override;
   void ClosePage() override;
   std::optional<SkColor> GetThemeColor() override;
   std::optional<SkColor> GetBackgroundColor() override;
@@ -558,6 +563,7 @@ class CONTENT_EXPORT WebContentsImpl
   int GetMinimumZoomPercent() override;
   int GetMaximumZoomPercent() override;
   void SetPageScale(float page_scale_factor) override;
+  void SetIgnoreZoomGestures(bool ignore) override;
   gfx::Size GetPreferredSize() override;
   bool GotResponseToPointerLockRequest(
       blink::mojom::PointerLockResult result) override;
@@ -727,8 +733,7 @@ class CONTENT_EXPORT WebContentsImpl
   void DOMContentLoaded(RenderFrameHostImpl* render_frame_host) override;
   void DocumentOnLoadCompleted(RenderFrameHostImpl* render_frame_host) override;
   void UpdateTitle(RenderFrameHostImpl* render_frame_host,
-                   const std::u16string& title,
-                   base::i18n::TextDirection title_direction) override;
+                   const std::u16string& title) override;
   // The app title is an alternative title. If non-empty, the browser may choose
   // to use the app title instead of the regular title for a web app displayed
   // in an app window. See
@@ -788,6 +793,7 @@ class CONTENT_EXPORT WebContentsImpl
   void Maximize() override;
   void Minimize() override;
   void Restore() override;
+  void SetResizable(bool resizable) override;
 #endif
 #if BUILDFLAG(IS_ANDROID)
   void UpdateUserGestureCarryoverInfo() override;
@@ -847,9 +853,6 @@ class CONTENT_EXPORT WebContentsImpl
                              bool blocked) override;
   void OnVibrate(RenderFrameHostImpl*) override;
 
-  std::optional<network::ParsedPermissionsPolicy>
-  GetPermissionsPolicyForIsolatedWebApp(RenderFrameHostImpl* source) override;
-
   // Called when WebAudio starts or stops playing audible audio in an
   // AudioContext.
   void AudioContextPlaybackStarted(RenderFrameHostImpl* host,
@@ -888,6 +891,8 @@ class CONTENT_EXPORT WebContentsImpl
       IsClipboardPasteAllowedCallback callback) override;
   void OnTextCopiedToClipboard(RenderFrameHostImpl* render_frame_host,
                                const std::u16string& copied_text) override;
+  void TextSelectionChanged(RenderFrameHostImpl* render_frame_host,
+                            std::u16string_view selected_text) override;
   void IsClipboardPasteAllowedWrapperCallback(
       IsClipboardPasteAllowedCallback callback,
       std::optional<ClipboardPasteData> clipboard_paste_data);
@@ -972,6 +977,8 @@ class CONTENT_EXPORT WebContentsImpl
       RenderViewHostImpl* render_view_host) override;
   void DidReceiveInputEvent(RenderWidgetHostImpl* render_widget_host,
                             const blink::WebInputEvent& event) override;
+  void SimulateUserInteraction(RenderWidgetHostImpl* render_widget_host,
+                               const blink::WebInputEvent& event) override;
   bool ShouldIgnoreWebInputEvents(const blink::WebInputEvent& event) override;
   bool ShouldIgnoreInputEvents() override;
   void OnIgnoredUIEvent() override;
@@ -998,7 +1005,7 @@ class CONTENT_EXPORT WebContentsImpl
   bool ShouldIgnoreUnresponsiveRenderer() override;
   bool IsGuest() override;
   std::optional<SkColor> GetBaseBackgroundColor() override;
-  std::unique_ptr<PrefetchHandle> StartPrefetch(
+  [[nodiscard]] std::unique_ptr<PrefetchHandle> StartPrefetch(
       const GURL& prefetch_url,
       bool use_prefetch_proxy,
       const std::string& embedder_histogram_suffix,
@@ -1055,6 +1062,8 @@ class CONTENT_EXPORT WebContentsImpl
       NavigationHandle* navigation_handle) override;
   void DidNavigateMainFramePreCommit(NavigationHandle* navigation_handle,
                                      bool navigation_is_within_page) override;
+  void DidNavigateAnyFramePreCommit(NavigationHandle* navigation_handle,
+                                    bool navigation_is_within_page) override;
   void DidNavigateMainFramePostCommit(
       RenderFrameHostImpl* render_frame_host,
       const LoadCommittedDetails& details) override;
@@ -1188,6 +1197,7 @@ class CONTENT_EXPORT WebContentsImpl
   bool OnRenderFrameProxyVisibilityChanged(
       RenderFrameProxyHost* render_frame_proxy_host,
       blink::mojom::FrameVisibility visibility) override;
+  PrerenderHostId GetPrerenderHostId() override;
   void SendScreenRects() override;
   void SendActiveState(bool active) override;
   TextInputManager* GetTextInputManager() override;
@@ -1201,7 +1211,7 @@ class CONTENT_EXPORT WebContentsImpl
       ui::Compositor* compositor) override;
   void OnInputIgnored(const blink::WebInputEvent& event) override;
 #if BUILDFLAG(IS_ANDROID)
-  float GetCurrentTouchSequenceYOffset() override;
+  gfx::PointF GetCurrentTouchSequenceOffset() override;
 #endif
 
   // RenderFrameHostManager::Delegate ------------------------------------------
@@ -1244,7 +1254,6 @@ class CONTENT_EXPORT WebContentsImpl
   bool IsPageInPreviewMode() const override;
   void CancelPreviewByMojoBinderPolicy(
       const std::string& interface_name) override;
-  void OnWebApiWindowResizableChanged() override;
 
   // blink::mojom::ColorChooserFactory ---------------------------------------
   void OnColorChooserFactoryReceiver(
@@ -1591,6 +1600,15 @@ class CONTENT_EXPORT WebContentsImpl
     return pointer_lock_widget_;
   }
 
+  const std::set<raw_ptr<RenderFrameHostImpl, SetExperimental>>&
+  fullscreen_frames_for_testing() const {
+    return fullscreen_frames_;
+  }
+
+  GlobalRenderFrameHostId current_fullscreen_frame_id_for_testing() const {
+    return current_fullscreen_frame_id_;
+  }
+
   ui::mojom::VirtualKeyboardMode GetVirtualKeyboardMode() const;
 
   const std::optional<base::Location>& ownership_location() const {
@@ -1641,8 +1659,6 @@ class CONTENT_EXPORT WebContentsImpl
                            NotifyFullscreenAcquired);
   FRIEND_TEST_ALL_PREFIXES(WebContentsImplBrowserTest,
                            NotifyFullscreenAcquired_Navigate);
-  FRIEND_TEST_ALL_PREFIXES(WebContentsImplBrowserTest,
-                           NotifyFullscreenAcquired_SameOrigin);
   FRIEND_TEST_ALL_PREFIXES(WebContentsImplBrowserTest,
                            PropagateFullscreenOptions);
   FRIEND_TEST_ALL_PREFIXES(WebContentsImplBrowserTest,
@@ -1819,13 +1835,22 @@ class CONTENT_EXPORT WebContentsImpl
 
     // Exposed to deal with IPC message handlers which need to stop iteration
     // early.
-    const base::ObserverList<WebContentsObserver>& observer_list() {
+    const base::ObserverList<
+        WebContentsObserver,
+        /*check_empty=*/false,
+        base::ObserverListReentrancyPolicy::kAllowReentrancyUntriaged>&
+    observer_list() {
       return observers_;
     }
 
    private:
     bool is_notifying_observers_ = false;
-    base::ObserverList<WebContentsObserver> observers_;
+    // TODO(crbug.com/484371187): Investigate if reentrancy can be removed.
+    base::ObserverList<
+        WebContentsObserver,
+        /*check_empty=*/false,
+        base::ObserverListReentrancyPolicy::kAllowReentrancyUntriaged>
+        observers_;
   };
 
   // See WebContents::Create for a description of these parameters.
@@ -2201,6 +2226,12 @@ class CONTENT_EXPORT WebContentsImpl
   void RecursivelyConstructAXTree(ui::AXNode* node,
                                   std::vector<ui::AXNodeData>& nodes);
 
+  // Performs some checks before sending user interaction notification to
+  // observers for a given `WebInputEvent`.
+  void HandleUserInteractionForInputEvent(
+      RenderWidgetHostImpl* render_widget_host,
+      const blink::WebInputEvent& event);
+
 #if BUILDFLAG(IS_ANDROID)
   // Apply the cached primary subframe importance to the primary frame tree.
   void ApplyPrimaryPageSubframeImportance();
@@ -2475,6 +2506,9 @@ class CONTENT_EXPORT WebContentsImpl
 
   // Whether overscroll should be unconditionally disabled.
   bool force_disable_overscroll_content_;
+
+  // Whether zoom gestures (pinch, double-tap) should be ignored.
+  bool ignore_zoom_gestures_ = false;
 
   // Whether the last JavaScript dialog shown was suppressed. Used for testing.
   bool last_dialog_suppressed_;

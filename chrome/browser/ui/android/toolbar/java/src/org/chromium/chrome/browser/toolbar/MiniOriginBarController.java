@@ -22,7 +22,7 @@ import androidx.core.view.WindowInsetsCompat;
 
 import org.chromium.base.Callback;
 import org.chromium.base.supplier.NonNullObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsSizer;
@@ -32,6 +32,7 @@ import org.chromium.chrome.browser.omnibox.LocationBar;
 import org.chromium.components.browser_ui.widget.TouchEventObserver;
 import org.chromium.ui.KeyboardVisibilityDelegate;
 import org.chromium.ui.KeyboardVisibilityDelegate.KeyboardVisibilityListener;
+import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.base.ViewUtils;
 import org.chromium.ui.insets.InsetObserver;
 import org.chromium.ui.insets.InsetObserver.WindowInsetsAnimationListener;
@@ -111,7 +112,7 @@ public class MiniOriginBarController implements Observer {
     private final KeyboardVisibilityListener mKeyboardVisibilityObserver;
     private final Context mContext;
     private final ControlContainer mControlContainer;
-    private final ObservableSupplierImpl<Boolean> mSuppressToolbarSceneLayerSupplier;
+    private final SettableNonNullObservableSupplier<Boolean> mSuppressToolbarSceneLayerSupplier;
     private final BrowserControlsSizer mBrowserControlsSizer;
     private final NonNullObservableSupplier<Boolean> mIsKeyboardAccessorySheetShowing;
     private final MiniOriginWindowInsetsAnimationListener mWindowInsetsAnimationListener;
@@ -127,7 +128,7 @@ public class MiniOriginBarController implements Observer {
     private float mStartingLocationBarX;
     // The final horizontal position of the location bar when the mini origin bar is in its
     // fully-minimized state.
-    private float mFinalLocationBarX;
+    private float mFinalLocationBarTranslationX;
     private boolean mShowingMiniOriginBar;
 
     /**
@@ -146,10 +147,10 @@ public class MiniOriginBarController implements Observer {
             KeyboardVisibilityDelegate keyboardVisibilityDelegate,
             Context context,
             ControlContainer controlContainer,
-            ObservableSupplierImpl<Boolean> suppressToolbarSceneLayerSupplier,
+            SettableNonNullObservableSupplier<Boolean> suppressToolbarSceneLayerSupplier,
             BrowserControlsSizer browserControlsSizer,
             InsetObserver insetObserver,
-            ObservableSupplierImpl<Integer> controlContainerTranslationSupplier,
+            SettableNonNullObservableSupplier<Integer> controlContainerTranslationSupplier,
             NonNullObservableSupplier<Boolean> isKeyboardAccessorySheetShowing,
             BooleanSupplier isOmniboxFocusedSupplier) {
         mLocationBar = locationBar;
@@ -205,7 +206,9 @@ public class MiniOriginBarController implements Observer {
                                     : MiniOriginEvent.KEYBOARD_DISAPPEARED);
                 };
 
-        mIsFormFieldFocusedSupplier.getObservable().addObserver(mIsFormFieldFocusedObserver);
+        mIsFormFieldFocusedSupplier
+                .getObservable()
+                .addSyncObserverAndPostIfNonNull(mIsFormFieldFocusedObserver);
         mKeyboardVisibilityDelegate.addKeyboardVisibilityListener(mKeyboardVisibilityObserver);
 
         mTouchEventObserver =
@@ -229,7 +232,8 @@ public class MiniOriginBarController implements Observer {
                                 showing
                                         ? MiniOriginEvent.ACCESSORY_SHEET_APPEARED
                                         : MiniOriginEvent.ACCESSORY_SHEET_DISAPPEARED);
-        mIsKeyboardAccessorySheetShowing.addObserver(mAccessorySheetShowingObserver);
+        mIsKeyboardAccessorySheetShowing.addSyncObserverAndPostIfNonNull(
+                mAccessorySheetShowingObserver);
     }
 
     private void updateMiniOriginBarState(@MiniOriginEvent int event) {
@@ -306,9 +310,17 @@ public class MiniOriginBarController implements Observer {
         locationBarView.measure(
                 MeasureSpec.makeMeasureSpec(controlContainerWidth, MeasureSpec.AT_MOST),
                 MeasureSpec.makeMeasureSpec(newLocationBarHeight, MeasureSpec.AT_MOST));
-        mStartingLocationBarX = mDefaultLocationBarLayoutParams.leftMargin;
+
+        boolean isRtl = LocalizationUtils.isLayoutRtl();
+        int viewWidth = locationBarView.getMeasuredWidth();
+        // The "resting position" of the left edge of the location bar assuming no translation.
+        float baseLayoutLeftX = isRtl ? controlContainerWidth - viewWidth : 0;
+
+        mStartingLocationBarX = mDefaultLocationBarLayoutParams.leftMargin - baseLayoutLeftX;
         float finalLocationBarWidth = locationBarView.getMeasuredWidth() * LOCATION_BAR_FINAL_SCALE;
-        mFinalLocationBarX = (controlContainerWidth - finalLocationBarWidth) / 2;
+        // The final x coordinate of the left edge that centers it horizontally.
+        float targetAbsoluteLeftX = (controlContainerWidth - finalLocationBarWidth) / 2f;
+        mFinalLocationBarTranslationX = targetAbsoluteLeftX - baseLayoutLeftX;
     }
 
     private void hideMiniOriginBar() {
@@ -457,7 +469,8 @@ public class MiniOriginBarController implements Observer {
     private void setMinimizationProgress(float minimizationProgress) {
         float translationX =
                 mStartingLocationBarX
-                        + minimizationProgress * (mFinalLocationBarX - mStartingLocationBarX);
+                        + minimizationProgress
+                                * (mFinalLocationBarTranslationX - mStartingLocationBarX);
         mLocationBar.getContainerView().setTranslationX(translationX);
 
         float scale = 1.0f - minimizationProgress / LOCATION_BAR_SCALE_DENOMINATOR;
@@ -475,8 +488,8 @@ public class MiniOriginBarController implements Observer {
         private int mMaxKeyboardHeight;
         private final KeyboardVisibilityDelegate mKeyboardVisibilityDelegate;
         private final ViewGroup mContainerView;
-        private final ObservableSupplierImpl<Integer> mTranslationSupplier;
-        private final ObservableSupplierImpl<Boolean> mSuppressToolbarSceneLayerSupplier;
+        private final SettableNonNullObservableSupplier<Integer> mTranslationSupplier;
+        private final SettableNonNullObservableSupplier<Boolean> mSuppressToolbarSceneLayerSupplier;
         private final BooleanSupplier mShowingMiniOriginBar;
         private final Runnable mOnAnimationPreparedSignal;
         private final Callback<Boolean> mAnimationEndedSignal;
@@ -493,8 +506,8 @@ public class MiniOriginBarController implements Observer {
         MiniOriginWindowInsetsAnimationListener(
                 KeyboardVisibilityDelegate keyboardVisibilityDelegate,
                 ViewGroup containerView,
-                ObservableSupplierImpl<Integer> translationSupplier,
-                ObservableSupplierImpl<Boolean> suppressToolbarSceneLayerSupplier,
+                SettableNonNullObservableSupplier<Integer> translationSupplier,
+                SettableNonNullObservableSupplier<Boolean> suppressToolbarSceneLayerSupplier,
                 BooleanSupplier showingMiniOriginBar,
                 Runnable animationPreparedSignal,
                 Callback<Boolean> animationEndedSignal,

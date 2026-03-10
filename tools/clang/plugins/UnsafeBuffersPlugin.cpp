@@ -218,7 +218,26 @@ class UnsafeBuffersDiagnosticConsumer : public clang::DiagnosticConsumer {
         diag_note_link_(engine_->getCustomDiagID(
             clang::DiagnosticsEngine::Level::Note,
             "See //docs/unsafe_buffers.md for help.")) {}
+
+#ifdef LLVM_FORCE_HEAD_REVISION
+  ~UnsafeBuffersDiagnosticConsumer() override {
+    if (next_) {
+      NumErrors = next_->getNumErrors();
+      NumWarnings = next_->getNumWarnings();
+      next_->clang::DiagnosticConsumer::~DiagnosticConsumer();
+    }
+  }
+#else
   ~UnsafeBuffersDiagnosticConsumer() override = default;
+
+  void finish() override {
+    if (next_) {
+      next_->finish();
+      NumErrors = next_->getNumErrors();
+      NumWarnings = next_->getNumWarnings();
+    }
+  }
+#endif
 
   void clear() override {
     if (next_) {
@@ -240,14 +259,6 @@ class UnsafeBuffersDiagnosticConsumer : public clang::DiagnosticConsumer {
   void EndSourceFile() override {
     if (next_) {
       next_->EndSourceFile();
-      NumErrors = next_->getNumErrors();
-      NumWarnings = next_->getNumWarnings();
-    }
-  }
-
-  void finish() override {
-    if (next_) {
-      next_->finish();
       NumErrors = next_->getNumErrors();
       NumWarnings = next_->getNumWarnings();
     }
@@ -286,6 +297,7 @@ class UnsafeBuffersDiagnosticConsumer : public clang::DiagnosticConsumer {
 
     const bool is_libc_diagnostic =
         diag_id == clang::diag::warn_unsafe_buffer_libc_call ||
+        diag_id == clang::diag::warn_unsafe_buffer_format_attr_call ||
         diag_id == clang::diag::note_unsafe_buffer_printf_call;
 
     const bool is_unique_ptr_diagnostic =

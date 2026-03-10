@@ -8,6 +8,7 @@
 #import <variant>
 
 #import "base/apple/bundle_locations.h"
+#import "base/functional/callback_helpers.h"
 #import "base/json/json_writer.h"
 #import "base/memory/raw_ptr.h"
 #import "base/memory/weak_ptr.h"
@@ -17,6 +18,8 @@
 #import "base/strings/utf_string_conversions.h"
 #import "base/test/gtest_util.h"
 #import "base/test/ios/wait_util.h"
+#import "base/test/scoped_feature_list.h"
+#import "base/test/test_future.h"
 #import "base/test/test_timeouts.h"
 #import "base/values.h"
 #import "components/autofill/core/browser/autofill_field.h"
@@ -42,6 +45,7 @@
 #import "components/autofill/ios/browser/mock_password_autofill_agent_delegate.h"
 #import "components/autofill/ios/browser/password_autofill_agent.h"
 #import "components/autofill/ios/browser/test_autofill_client_ios.h"
+#import "components/autofill/ios/common/features.h"
 #import "components/autofill/ios/common/field_data_manager_factory_ios.h"
 #import "components/autofill/ios/form_util/form_handlers_java_script_feature.h"
 #import "components/prefs/pref_service.h"
@@ -82,7 +86,7 @@ MinimalFormFieldDataForFilling() {
   field.set_value(u"test-username");
   field.set_host_form_id(FormRendererId(1));
   field.set_renderer_id(FieldRendererId(2));
-  field.set_is_autofilled(true);
+  field.set_is_autofilled_according_to_renderer(true);
   return {autofill::FormFieldData::FillData(std::move(field))};
 }
 
@@ -197,8 +201,7 @@ class AutofillAgentTests : public web::WebTest {
 };
 
 // Tests that form's name and fields' identifiers, values, and whether they are
-// autofilled are sent to the JS. Fields with empty values and those that are
-// not autofilled are skipped. Tests logic based on renderer ids usage.
+// autofilled are sent to the JS.
 TEST_F(AutofillAgentTests,
        OnFormDataFilledTestWithFrameMessagingUsingRendererIDs) {
   std::vector<autofill::FormFieldData::FillData> fill_data;
@@ -209,7 +212,7 @@ TEST_F(AutofillAgentTests,
   field.set_name_attribute(field.name());
   field.set_id_attribute(u"number");
   field.set_value(u"number_value");
-  field.set_is_autofilled(true);
+  field.set_is_autofilled_according_to_renderer(true);
   field.set_renderer_id(FieldRendererId(2));
   fill_data.push_back(autofill::FormFieldData::FillData(field));
   field.set_label(u"Name on Card");
@@ -217,7 +220,7 @@ TEST_F(AutofillAgentTests,
   field.set_name_attribute(field.name());
   field.set_id_attribute(u"name");
   field.set_value(u"name_value");
-  field.set_is_autofilled(true);
+  field.set_is_autofilled_according_to_renderer(true);
   field.set_renderer_id(FieldRendererId(3));
   fill_data.push_back(autofill::FormFieldData::FillData(field));
   field.set_label(u"Expiry Month");
@@ -225,7 +228,7 @@ TEST_F(AutofillAgentTests,
   field.set_name_attribute(field.name());
   field.set_id_attribute(u"expiry_month");
   field.set_value(u"01");
-  field.set_is_autofilled(false);
+  field.set_is_autofilled_according_to_renderer(false);
   field.set_renderer_id(FieldRendererId(4));
   fill_data.push_back(autofill::FormFieldData::FillData(field));
   field.set_label(u"Unknown field");
@@ -233,19 +236,24 @@ TEST_F(AutofillAgentTests,
   field.set_name_attribute(field.name());
   field.set_id_attribute(u"unknown");
   field.set_value(u"");
-  field.set_is_autofilled(true);
+  field.set_is_autofilled_according_to_renderer(true);
   field.set_renderer_id(FieldRendererId(5));
   fill_data.push_back(autofill::FormFieldData::FillData(field));
 
   [autofill_agent_ fillData:fill_data
                     section:Section()
-                    inFrame:fake_web_frames_manager_->GetMainWebFrame()];
+                    inFrame:fake_web_frames_manager_->GetMainWebFrame()
+             withActionType:autofill::mojom::FormActionType::kFill];
   fake_web_state_.WasShown();
 
   EXPECT_EQ(u"__gCrWeb.callFunctionInGcrWeb('autofill', 'fillForm', "
-            u"[{\"fields\":{\"2\":{\"hostFormId\":0,\"section\":\"-default\","
-            u"\"value\":\"number_value\"},\"3\":{\"hostFormId\":0,\"section\":"
-            u"\"-default\",\"value\":\"name_value\"}}}, 0]);",
+            u"[{\"fields\":{\"2\":{\"hostFormId\":0,\"isAutofilled\":true,"
+            u"\"section\":\"-default\",\"value\":\"number_value\"},"
+            u"\"3\":{\"hostFormId\":0,\"isAutofilled\":true,\"section\":"
+            u"\"-default\",\"value\":\"name_value\"},\"4\":{\"hostFormId\":0,"
+            u"\"isAutofilled\":false,\"section\":\"-default\","
+            u"\"value\":\"01\"},\"5\":{\"hostFormId\":0,\"isAutofilled\":true,"
+            u"\"section\":\"-default\",\"value\":\"\"}}}, 0]);",
             fake_main_frame_->GetLastJavaScriptCall());
 }
 
@@ -259,7 +267,7 @@ TEST_F(AutofillAgentTests, FillSpecificFormField) {
   field.set_name_attribute(field.name());
   field.set_id_attribute(u"number");
   field.set_value(u"number_value");
-  field.set_is_autofilled(true);
+  field.set_is_autofilled_according_to_renderer(true);
   field.set_renderer_id(FieldRendererId(2));
 
   [autofill_agent_
@@ -353,7 +361,7 @@ TEST_F(AutofillAgentTests, DriverFillSpecificFormField) {
   field.set_name_attribute(field.name());
   field.set_id_attribute(u"number");
   field.set_value(u"number_value");
-  field.set_is_autofilled(true);
+  field.set_is_autofilled_according_to_renderer(true);
   field.set_renderer_id(FieldRendererId(2));
 
   AutofillDriverIOS* main_frame_driver =
@@ -390,7 +398,7 @@ TEST_F(AutofillAgentTests, DriverPreviewSpecificFormField) {
   field.set_name_attribute(field.name());
   field.set_id_attribute(u"number");
   field.set_value(u"number_value");
-  field.set_is_autofilled(true);
+  field.set_is_autofilled_according_to_renderer(true);
   field.set_renderer_id(FieldRendererId(2));
 
   AutofillDriverIOS* main_frame_driver =
@@ -474,12 +482,14 @@ TEST_F(AutofillAgentTests, showAutofillPopup_ShowVirtualCards) {
       {autofill::test::NextMonth(), "/", autofill::test::NextYear().substr(2)});
 
   // Initialize suggestion.
-  std::vector<std::string> minor_texts = {"Quicksilver ••1111"};
+  std::vector<std::u16string> minor_texts = {u"Quicksilver ••1111"};
   std::vector<autofill::Suggestion> autofillSuggestions = {
-      autofill::Suggestion("Virtual card", minor_texts, expiration_date_label,
+      autofill::Suggestion(u"Virtual card", minor_texts,
+                           base::UTF8ToUTF16(expiration_date_label),
                            autofill::Suggestion::Icon::kCardVisa,
                            autofill::SuggestionType::kVirtualCreditCardEntry),
-      autofill::Suggestion("Quicksilver ••1111", expiration_date_label,
+      autofill::Suggestion(u"Quicksilver ••1111",
+                           base::UTF8ToUTF16(expiration_date_label),
                            autofill::Suggestion::Icon::kCardVisa,
                            autofill::SuggestionType::kCreditCardEntry),
   };
@@ -562,7 +572,7 @@ TEST_F(AutofillAgentTests, showAutofillPopup_EmptyIconInCreditCardSuggestion) {
       .WillRepeatedly(testing::Return(FillingProduct::kCreditCard));
 
   std::vector<autofill::Suggestion> autofillSuggestions = {
-      autofill::Suggestion("", "", autofill::Suggestion::Icon::kNoIcon,
+      autofill::Suggestion(u"", u"", autofill::Suggestion::Icon::kNoIcon,
                            autofill::SuggestionType::kCreditCardEntry)};
 
   // Completion handler to retrieve suggestions.
@@ -588,9 +598,10 @@ TEST_F(AutofillAgentTests, showAutofillPopup_PlusAddresses) {
   testing::NiceMock<autofill::MockAutofillSuggestionDelegate> mock_delegate;
 
   const std::string fillExistingSuggestionText = "existing";
-  std::vector<autofill::Suggestion> autofillSuggestions = {autofill::Suggestion(
-      fillExistingSuggestionText, "", autofill::Suggestion::Icon::kNoIcon,
-      autofill::SuggestionType::kFillExistingPlusAddress)};
+  std::vector<autofill::Suggestion> autofillSuggestions = {
+      autofill::Suggestion(base::UTF8ToUTF16(fillExistingSuggestionText), u"",
+                           autofill::Suggestion::Icon::kNoIcon,
+                           autofill::SuggestionType::kFillExistingPlusAddress)};
 
   // Completion handler to retrieve suggestions.
   auto completionHandler = ^(NSArray<FormSuggestion*>* suggestions,
@@ -648,7 +659,7 @@ TEST_F(AutofillAgentTests,
 
   // Initialize suggestion, initially without a custom icon.
   std::vector<autofill::Suggestion> autofillSuggestions = {
-      autofill::Suggestion("", "", suggestion_network_icon,
+      autofill::Suggestion(u"", u"", suggestion_network_icon,
                            autofill::SuggestionType::kCreditCardEntry)};
   ASSERT_TRUE(
       std::holds_alternative<gfx::Image>(autofillSuggestions[0].custom_icon));
@@ -685,13 +696,13 @@ TEST_F(AutofillAgentTests, onSuggestionsReady_ClearForm) {
   // Make the suggestions available to AutofillAgent.
   std::vector<autofill::Suggestion> autofillSuggestions;
   autofillSuggestions.push_back(
-      autofill::Suggestion("", "", autofill::Suggestion::Icon::kNoIcon,
+      autofill::Suggestion(u"", u"", autofill::Suggestion::Icon::kNoIcon,
                            autofill::SuggestionType::kAddressEntry));
   autofillSuggestions.push_back(
-      autofill::Suggestion("", "", autofill::Suggestion::Icon::kNoIcon,
+      autofill::Suggestion(u"", u"", autofill::Suggestion::Icon::kNoIcon,
                            autofill::SuggestionType::kAddressEntry));
   autofillSuggestions.push_back(
-      autofill::Suggestion("", "", autofill::Suggestion::Icon::kNoIcon,
+      autofill::Suggestion(u"", u"", autofill::Suggestion::Icon::kNoIcon,
                            SuggestionType::kUndoOrClear));
   [autofill_agent_
        showAutofillPopup:autofillSuggestions
@@ -744,13 +755,13 @@ TEST_F(AutofillAgentTests, onSuggestionsReady_ClearFormWithGPay) {
   // Make the suggestions available to AutofillAgent.
   std::vector<autofill::Suggestion> autofillSuggestions;
   autofillSuggestions.push_back(
-      autofill::Suggestion("", "", autofill::Suggestion::Icon::kNoIcon,
+      autofill::Suggestion(u"", u"", autofill::Suggestion::Icon::kNoIcon,
                            autofill::SuggestionType::kCreditCardEntry));
   autofillSuggestions.push_back(
-      autofill::Suggestion("", "", autofill::Suggestion::Icon::kNoIcon,
+      autofill::Suggestion(u"", u"", autofill::Suggestion::Icon::kNoIcon,
                            autofill::SuggestionType::kCreditCardEntry));
   autofillSuggestions.push_back(
-      autofill::Suggestion("", "", autofill::Suggestion::Icon::kNoIcon,
+      autofill::Suggestion(u"", u"", autofill::Suggestion::Icon::kNoIcon,
                            SuggestionType::kUndoOrClear));
   [autofill_agent_
        showAutofillPopup:autofillSuggestions
@@ -941,8 +952,8 @@ TEST_F(AutofillAgentTests, FillData_UpdateWithResults) {
   // Set the result returned from filling.
   std::string serializedResult;
   ASSERT_TRUE(base::JSONWriter::Write(
-      base::Value::Dict().Set(base::NumberToString(field_id.value()),
-                              base::UTF16ToUTF8(field_value)),
+      base::DictValue().Set(base::NumberToString(field_id.value()),
+                            base::UTF16ToUTF8(field_value)),
       &serializedResult));
   base::Value result(serializedResult);
   fake_main_frame_->AddJsResultForFunctionCall(&result, "autofill.fillForm");
@@ -956,7 +967,10 @@ TEST_F(AutofillAgentTests, FillData_UpdateWithResults) {
   fake_web_state_.WasShown();
 
   // Fill form data.
-  [autofill_agent_ fillData:fields section:Section() inFrame:fake_main_frame_];
+  [autofill_agent_ fillData:fields
+                    section:Section()
+                    inFrame:fake_main_frame_
+             withActionType:autofill::mojom::FormActionType::kFill];
 
   // Run queues to yield the filling results.
   web::test::WaitForBackgroundTasks();
@@ -985,8 +999,8 @@ TEST_F(AutofillAgentTests, FillData_UnknowFieldIdInResults) {
   // Set the result returned from filling.
   std::string serializedResult;
   ASSERT_TRUE(base::JSONWriter::Write(
-      base::Value::Dict().Set(base::NumberToString(unknown_field_id.value()),
-                              base::UTF16ToUTF8(fields[0].value)),
+      base::DictValue().Set(base::NumberToString(unknown_field_id.value()),
+                            base::UTF16ToUTF8(fields[0].value)),
       &serializedResult));
   base::Value result(serializedResult);
   fake_main_frame_->AddJsResultForFunctionCall(&result, "autofill.fillForm");
@@ -997,7 +1011,10 @@ TEST_F(AutofillAgentTests, FillData_UnknowFieldIdInResults) {
   fake_web_state_.WasShown();
 
   // Fill form data.
-  [autofill_agent_ fillData:fields section:Section() inFrame:fake_main_frame_];
+  [autofill_agent_ fillData:fields
+                    section:Section()
+                    inFrame:fake_main_frame_
+             withActionType:autofill::mojom::FormActionType::kFill];
 
   // Run queues to yield the filling results.
   web::test::WaitForBackgroundTasks();
@@ -1059,7 +1076,7 @@ TEST_F(AutofillAgentTests, DidSelectSuggestion_ClearFormEntry) {
   // Set the result returned from filling.
   std::string serializedResult;
   ASSERT_TRUE(base::JSONWriter::Write(
-      base::Value::List()
+      base::ListValue()
           .Append(base::Value(base::NumberToString(field1_id.value())))
           .Append(base::Value(base::NumberToString(field2_id.value()))),
       &serializedResult));
@@ -1106,4 +1123,39 @@ TEST_F(AutofillAgentTests, DidSelectSuggestion_ClearFormEntry) {
   // Check that the completion handler was called after handling the results
   // from the JS call.
   EXPECT_TRUE(completion_handler_called);
+}
+
+// Tests selecting the Undo autofill suggestion.
+TEST_F(AutofillAgentTests, DidSelectSuggestion_Undo) {
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(kAutofillUndoIos);
+
+  // Mock the suggestion delegate that will be called by the "Undo" action
+  autofill::MockAutofillSuggestionDelegate mock_delegate;
+  EXPECT_CALL(mock_delegate,
+              DidAcceptSuggestion(
+                  ::testing::Field(&autofill::Suggestion::type,
+                                   autofill::SuggestionType::kUndoOrClear),
+                  ::testing::_));
+
+  // Show the popup to set the delegate used by didSelectSuggestion.
+  std::vector<autofill::Suggestion> suggestions;
+  suggestions.emplace_back(u"", autofill::SuggestionType::kUndoOrClear);
+  [autofill_agent_ showAutofillPopup:suggestions
+                  suggestionDelegate:mock_delegate.GetWeakPtr()];
+
+  // Select suggestion to trigger undo.
+  FormRendererId form_id(1);
+  FieldRendererId field1_id(2);
+  FormSuggestion* form_suggestion =
+      SimpleFormSuggestion(u"", autofill::SuggestionType::kUndoOrClear);
+  [autofill_agent_ didSelectSuggestion:form_suggestion
+                               atIndex:0
+                                  form:@"single-username-form"
+                        formRendererID:form_id
+                       fieldIdentifier:@"username-field-1"
+                       fieldRendererID:field1_id
+                               frameID:base::SysUTF8ToNSString(kTestFrameId)
+                     completionHandler:^(){
+                     }];
 }

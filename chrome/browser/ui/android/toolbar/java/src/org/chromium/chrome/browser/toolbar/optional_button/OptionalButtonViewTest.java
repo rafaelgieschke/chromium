@@ -531,7 +531,7 @@ public class OptionalButtonViewTest {
         mOptionalButtonView.onTransitionEnd(null);
 
         // Advance looper to begin collapse transition.
-        mShadowLooper.runOneTask();
+        mShadowLooper.runToEndOfTasks();
 
         // Normally called by TransitionManager.
         mOptionalButtonView.onTransitionStart(null);
@@ -599,7 +599,7 @@ public class OptionalButtonViewTest {
         ColorFilter filterAfterExpansion = mButtonBackground.getColorFilter();
 
         // Advance looper to begin collapse transition.
-        mShadowLooper.runOneTask();
+        mShadowLooper.runToEndOfTasks();
         // Normally called by TransitionManager.
         mOptionalButtonView.onTransitionStart(null);
         mOptionalButtonView.onTransitionEnd(null);
@@ -686,7 +686,7 @@ public class OptionalButtonViewTest {
         mOptionalButtonView.onTransitionEnd(null);
 
         // Advance looper to begin collapse transition.
-        mShadowLooper.runOneTask();
+        mShadowLooper.runToEndOfTasks();
         // Run callbacks for collapse transition.
         mOptionalButtonView.onTransitionStart(null);
         mOptionalButtonView.onTransitionEnd(null);
@@ -934,7 +934,7 @@ public class OptionalButtonViewTest {
         mOptionalButtonView.updateButtonWithAnimation(buttonData);
 
         // Get past the delay to show the text bubble.
-        mShadowLooper.runOneTask();
+        mShadowLooper.runToEndOfTasks();
 
         // Icon is visible without animation.
         assertEquals(View.VISIBLE, mOptionalButtonView.getVisibility());

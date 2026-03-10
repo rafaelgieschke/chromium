@@ -17,6 +17,8 @@
 #import "ios/chrome/browser/badges/ui_bundled/badge_tappable_item.h"
 #import "ios/chrome/browser/badges/ui_bundled/badge_type.h"
 #import "ios/chrome/browser/badges/ui_bundled/badge_type_util.h"
+#import "ios/chrome/browser/contextual_panel/model/contextual_panel_item_type.h"
+#import "ios/chrome/browser/contextual_panel/model/contextual_panel_tab_helper.h"
 #import "ios/chrome/browser/infobars/model/badge_state.h"
 #import "ios/chrome/browser/infobars/model/infobar_badge_tab_helper.h"
 #import "ios/chrome/browser/infobars/model/infobar_badge_tab_helper_delegate.h"
@@ -77,8 +79,10 @@ bool IsInfobarTypeSupportedInReaderMode(InfobarType infobarType,
     case InfobarType::kInfobarTypeCollaborationGroup:
     case InfobarType::kInfobarTypeCollaborationOutOfDate:
     case InfobarType::kInfobarTypeSaveCvc:
-      return IsProactiveSuggestionsFrameworkEnabled() ||
-             IsReaderModeBadgeSupportEnabled();
+      return IsProactiveSuggestionsFrameworkEnabled();
+    case InfobarType::kInfobarTypeAutofillAiSaveEntity:
+      // This infobar does not support badges.
+      return false;
   }
 }
 
@@ -172,8 +176,7 @@ LocationBarBadgeType LocationBarBadgeTypeFromBadgeType(BadgeType badgeType) {
     _webStateObserver = std::make_unique<web::WebStateObserverBridge>(self);
 
     if (_webState) {
-      InfobarBadgeTabHelper::GetOrCreateForWebState(_webState)->SetDelegate(
-          self);
+      InfobarBadgeTabHelper::FromWebState(_webState)->SetDelegate(self);
       if (ReaderModeTabHelper* readerModeTabHelper =
               ReaderModeTabHelper::FromWebState(_webState)) {
         readerModeTabHelper->AddObserver(_readerModeObserver.get());
@@ -303,6 +306,15 @@ LocationBarBadgeType LocationBarBadgeTypeFromBadgeType(BadgeType badgeType) {
       }
     }
 
+    // Add badge at the front of the list if it is the Reader mode badge.
+    if (badgeType == kBadgeTypeReaderMode) {
+      BadgeTappableItem* readerModeItem =
+          [[BadgeTappableItem alloc] initWithBadgeType:kBadgeTypeReaderMode];
+      readerModeItem.badgeState = infobarTypeBadgeStatePair.second;
+      [badges insertObject:readerModeItem atIndex:0];
+      continue;
+    }
+
     BadgeTappableItem* item =
         [[BadgeTappableItem alloc] initWithBadgeType:badgeType];
     item.badgeState = infobarTypeBadgeStatePair.second;
@@ -324,7 +336,7 @@ LocationBarBadgeType LocationBarBadgeTypeFromBadgeType(BadgeType badgeType) {
     return;
   }
   if (_webState) {
-    InfobarBadgeTabHelper::GetOrCreateForWebState(_webState)->SetDelegate(nil);
+    InfobarBadgeTabHelper::FromWebState(_webState)->SetDelegate(nil);
     if (ReaderModeTabHelper* readerModeTabHelper =
             ReaderModeTabHelper::FromWebState(_webState)) {
       readerModeTabHelper->RemoveObserver(_readerModeObserver.get());
@@ -333,7 +345,7 @@ LocationBarBadgeType LocationBarBadgeTypeFromBadgeType(BadgeType badgeType) {
   }
   _webState = webState;
   if (_webState) {
-    InfobarBadgeTabHelper::GetOrCreateForWebState(_webState)->SetDelegate(self);
+    InfobarBadgeTabHelper::FromWebState(_webState)->SetDelegate(self);
     if (ReaderModeTabHelper* readerModeTabHelper =
             ReaderModeTabHelper::FromWebState(_webState)) {
       readerModeTabHelper->AddObserver(_readerModeObserver.get());
@@ -346,9 +358,8 @@ LocationBarBadgeType LocationBarBadgeTypeFromBadgeType(BadgeType badgeType) {
 }
 
 - (InfobarBadgeTabHelper*)badgeTabHelper {
-  return self.webState
-             ? InfobarBadgeTabHelper::GetOrCreateForWebState(self.webState)
-             : nullptr;
+  return self.webState ? InfobarBadgeTabHelper::FromWebState(self.webState)
+                       : nullptr;
 }
 
 - (BadgeType)permissionsBadgeType {
@@ -400,6 +411,10 @@ LocationBarBadgeType LocationBarBadgeTypeFromBadgeType(BadgeType badgeType) {
 - (NSArray<NSNumber*>*)badgeTypesForOverflowMenu {
   NSMutableArray<NSNumber*>* badgeTypes = [NSMutableArray array];
   for (id<BadgeItem> badgeItem in self.badges) {
+    // Skip Reader mode badge.
+    if (badgeItem.badgeType == BadgeType::kBadgeTypeReaderMode) {
+      continue;
+    }
     [badgeTypes addObject:@(badgeItem.badgeType)];
   }
   return badgeTypes;
@@ -468,6 +483,7 @@ LocationBarBadgeType LocationBarBadgeTypeFromBadgeType(BadgeType badgeType) {
       case InfobarType::kInfobarTypePasswordUpdate:
       case InfobarType::kInfobarTypeSaveCard:
       case InfobarType::kInfobarTypeSaveAutofillAddressProfile:
+      case InfobarType::kInfobarTypeAutofillAiSaveEntity:
         // Special case where we dynamically want to exclude the badge for
         // certain infobars while still keeping a badge type for the infobar
         // in BadgeTypeForInfobarType(). This ad hoc logic is temporary the

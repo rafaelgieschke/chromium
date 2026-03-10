@@ -8,6 +8,7 @@
 
 #include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/time/time.h"
 
 namespace actor {
 
@@ -35,6 +36,8 @@ BASE_FEATURE(kActorBypassTOUValidationForGuestView,
 BASE_FEATURE(kGlicActionUseOptimizationGuide, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kGlicExternalProtocolActionResultCode,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kGlicGranularBlockingActionResultCodes,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kGlicBlockNavigationToDangerousContentTypes,
@@ -72,6 +75,14 @@ BASE_FEATURE_PARAM(bool,
                    &kGlicCrossOriginNavigationGating,
                    "include_hardcoded_block_list_entries",
                    true);
+BASE_FEATURE_PARAM(bool,
+                   kGlicAllowImplicitToolOriginGrants,
+                   &kGlicCrossOriginNavigationGating,
+                   "allow_implicit_tool_origin_grants",
+                   true);
+
+BASE_FEATURE(kGlicRecordNavigationConfirmationRequestMetrics,
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kGlicEnableAutoLoginDialogs, base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -91,7 +102,7 @@ BASE_FEATURE(kGlicNavigateUsingLoadURL, base::FEATURE_ENABLED_BY_DEFAULT);
 // Whether to specify that an opaque origin should be set for the initiator
 // in NavigateTool requests. Fix for http://crbug.com/436224875
 BASE_FEATURE(kGlicNavigateToolUseOpaqueInitiator,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // When the above NavigateWithBrowserNavigator is off, uses the legacy
 // NavigateTool path but with user gesture disabled. Also a fix for b/460113906
@@ -103,8 +114,13 @@ BASE_FEATURE(kGlicNavigateWithoutUserGesture, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kGlicPerformActionsReturnsBeforeStateChange,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
+BASE_FEATURE(kGlicEarlyAddTaskTabs, base::FEATURE_ENABLED_BY_DEFAULT);
+
 BASE_FEATURE(kGlicSkipBeforeUnloadDialogAndNavigate,
              base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Killswitch for b/465690937.
+BASE_FEATURE(kGlicDeferActUntilUninterrupted, base::FEATURE_ENABLED_BY_DEFAULT);
 
 const base::FeatureParam<bool> kFullPageScreenshot{
     &kGlicTabScreenshotPaintPreviewBackend, "full_page_screenshot", false};
@@ -138,5 +154,12 @@ BASE_FEATURE(kActorRestartObservationDelayControllerOnNavigate,
 
 BASE_FEATURE(kActorSendBrowserSignalForAction,
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kGlicActorLoadAndExtractContentTool,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+const base::FeatureParam<base::TimeDelta>
+    kGlicActorLoadAndExtractContentToolTimeout{
+        &kGlicActorLoadAndExtractContentTool, "timeout", base::Seconds(30)};
 
 }  // namespace actor

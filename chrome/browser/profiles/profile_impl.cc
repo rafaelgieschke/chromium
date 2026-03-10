@@ -13,7 +13,6 @@
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/environment.h"
 #include "base/files/file.h"
 #include "base/files/file_path.h"
@@ -262,6 +261,10 @@
 #if BUILDFLAG(SAFE_BROWSING_AVAILABLE)
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #endif
+
+#if !BUILDFLAG(IS_ANDROID)
+#include "chrome/browser/themes/theme_service_factory.h"
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 using bookmarks::BookmarkModel;
 using content::BrowserThread;
@@ -662,7 +665,8 @@ void ProfileImpl::LoadPrefsForNormalStartup(bool async_prefs) {
       profile_policy_connector_->policy_service(),
       g_browser_process->browser_policy_connector(),
       std::move(pref_validation_delegate), GetIOTaskRunner(), key_.get(), path_,
-      async_prefs, g_browser_process->os_crypt_async());
+      async_prefs, g_browser_process->os_crypt_async(),
+      g_browser_process->device_parental_controls());
   key_->SetPrefs(prefs_.get());
 }
 
@@ -1030,7 +1034,7 @@ void ProfileImpl::DestroyOffTheRecordProfile(Profile* otr_profile) {
 }
 
 bool ProfileImpl::HasOffTheRecordProfile(const OTRProfileID& otr_profile_id) {
-  return base::Contains(otr_profiles_, otr_profile_id);
+  return otr_profiles_.contains(otr_profile_id);
 }
 
 bool ProfileImpl::HasAnyOffTheRecordProfile() {
@@ -1093,6 +1097,9 @@ void ProfileImpl::OnLocaleReady(CreateMode create_mode) {
   CHECK(!ProfilePasswordStoreFactory::HasStore(this));
   CHECK(!AccountPasswordStoreFactory::HasStore(this));
   CHECK(!ReadingListModelFactory::HasModel(this));
+#if !BUILDFLAG(IS_ANDROID)
+  CHECK(!ThemeServiceFactory::GetForProfileIfExists(this));
+#endif  // !BUILDFLAG(IS_ANDROID)
   browser_sync::MaybeMigrateSyncingUserToSignedIn(GetPath(), GetPrefs());
 
 #if BUILDFLAG(IS_CHROMEOS)
@@ -1108,14 +1115,6 @@ void ProfileImpl::OnLocaleReady(CreateMode create_mode) {
 #if BUILDFLAG(IS_CHROMEOS)
   arc::ArcServiceLauncher::Get()->MaybeSetProfile(this);
 #endif
-
-#if BUILDFLAG(ENABLE_DICE_SUPPORT)
-  // Revert the DICe migration as early as possible to avoid user-visible theme
-  // changes upon startup.
-  if (base::FeatureList::IsEnabled(switches::kRollbackDiceMigration)) {
-    DiceMigrationService::RevertDiceMigration(GetPrefs());
-  }
-#endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 
   SimpleDependencyManager::GetInstance()->CreateServices(GetProfileKey());
 
@@ -1143,7 +1142,7 @@ void ProfileImpl::OnPrefsLoaded(CreateMode create_mode, bool success) {
 
   // Fail fast if the browser is shutting down. We want to avoid launching new
   // UI, finalising profile creation, etc. which would trigger a crash down the
-  // the line. See crbug.com/625646
+  // the line. See crbug.com/40475418
   if (g_browser_process->IsShuttingDown()) {
     if (delegate_)
       delegate_->OnProfileCreationFinished(this, create_mode, false, false);
@@ -1551,7 +1550,7 @@ bool ProfileImpl::IsNewProfile() const {
 #if !BUILDFLAG(IS_ANDROID)
   // The profile is new if the preference files has just been created, except on
   // first run, because the installer may create a preference file. See
-  // https://crbug.com/728402
+  // https://crbug.com/40523550
   if (first_run::IsChromeFirstRun())
     return true;
 #endif
@@ -1596,8 +1595,8 @@ GURL ProfileImpl::GetHomePage() {
 
   if (GetPrefs()->GetBoolean(prefs::kHomePageIsNewTabPage))
     return GURL(chrome::kChromeUINewTabURL);
-  GURL home_page(url_formatter::FixupURL(
-      GetPrefs()->GetString(prefs::kHomePage), std::string()));
+  GURL home_page(
+      url_formatter::FixupURL(GetPrefs()->GetString(prefs::kHomePage)));
   if (!home_page.is_valid())
     return GURL(chrome::kChromeUINewTabURL);
   return home_page;

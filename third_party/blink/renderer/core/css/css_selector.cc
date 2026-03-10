@@ -44,6 +44,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
+#include "third_party/blink/renderer/core/html/html_install_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
@@ -405,7 +406,9 @@ PseudoId CSSSelector::GetPseudoId(PseudoType type) {
       return kPseudoIdViewTransitionNew;
     case kPseudoOverscrollAreaParent:
       return kPseudoIdOverscrollAreaParent;
+    case kPseudoAnimatedImage:
     case kPseudoActive:
+    case kPseudoActiveOption:
     case kPseudoActiveViewTransition:
     case kPseudoActiveViewTransitionType:
     case kPseudoAny:
@@ -429,6 +432,7 @@ PseudoId CSSSelector::GetPseudoId(PseudoType type) {
     case kPseudoEmpty:
     case kPseudoEnabled:
     case kPseudoEnd:
+    case kPseudoFiltered:
     case kPseudoFirstChild:
     case kPseudoFirstOfType:
     case kPseudoFirstPage:
@@ -496,6 +500,7 @@ PseudoId CSSSelector::GetPseudoId(PseudoType type) {
     case kPseudoRightPage:
     case kPseudoRoot:
     case kPseudoScope:
+    case kPseudoSelectHasSlottedButton:
     case kPseudoSelectorFragmentAnchor:
     case kPseudoSingleButton:
     case kPseudoSlotted:
@@ -506,6 +511,9 @@ PseudoId CSSSelector::GetPseudoId(PseudoType type) {
     case kPseudoTargetCurrent:
     case kPseudoTargetBefore:
     case kPseudoTargetAfter:
+    case kPseudoTextField:
+    case kPseudoToolFormActive:
+    case kPseudoToolSubmitActive:
     case kPseudoUnknown:
     case kPseudoUnparsed:
     case kPseudoUserInvalid:
@@ -578,12 +586,15 @@ constexpr static NameToPseudoStruct kPseudoTypeWithoutArgumentsMap[] = {
     {"-internal-overscroll-target", CSSSelector::kPseudoOverscrollTarget},
     {"-internal-popover-in-top-layer", CSSSelector::kPseudoPopoverInTopLayer},
     {"-internal-relative-anchor", CSSSelector::kPseudoRelativeAnchor},
+    {"-internal-select-has-slotted-button",
+     CSSSelector::kPseudoSelectHasSlottedButton},
     {"-internal-selector-fragment-anchor",
      CSSSelector::kPseudoSelectorFragmentAnchor},
     {"-internal-shadow-host-has-non-auto-appearance",
      CSSSelector::kPseudoHostHasNonAutoAppearance},
     {"-internal-spatial-navigation-focus",
      CSSSelector::kPseudoSpatialNavigationFocus},
+    {"-internal-text-field", CSSSelector::kPseudoTextField},
     {"-internal-video-persistent", CSSSelector::kPseudoVideoPersistent},
     {"-internal-video-persistent-ancestor",
      CSSSelector::kPseudoVideoPersistentAncestor},
@@ -601,8 +612,10 @@ constexpr static NameToPseudoStruct kPseudoTypeWithoutArgumentsMap[] = {
     {"-webkit-scrollbar-track", CSSSelector::kPseudoScrollbarTrack},
     {"-webkit-scrollbar-track-piece", CSSSelector::kPseudoScrollbarTrackPiece},
     {"active", CSSSelector::kPseudoActive},
+    {"active-option", CSSSelector::kPseudoActiveOption},
     {"active-view-transition", CSSSelector::kPseudoActiveViewTransition},
     {"after", CSSSelector::kPseudoAfter},
+    {"animated-image", CSSSelector::kPseudoAnimatedImage},
     {"any-link", CSSSelector::kPseudoAnyLink},
     {"autofill", CSSSelector::kPseudoAutofill},
     {"backdrop", CSSSelector::kPseudoBackdrop},
@@ -623,6 +636,7 @@ constexpr static NameToPseudoStruct kPseudoTypeWithoutArgumentsMap[] = {
     {"enabled", CSSSelector::kPseudoEnabled},
     {"end", CSSSelector::kPseudoEnd},
     {"file-selector-button", CSSSelector::kPseudoFileSelectorButton},
+    {"filtered", CSSSelector::kPseudoFiltered},
     {"first", CSSSelector::kPseudoFirstPage},
     {"first-child", CSSSelector::kPseudoFirstChild},
     {"first-letter", CSSSelector::kPseudoFirstLetter},
@@ -685,6 +699,8 @@ constexpr static NameToPseudoStruct kPseudoTypeWithoutArgumentsMap[] = {
     {"target-before", CSSSelector::kPseudoTargetBefore},
     {"target-current", CSSSelector::kPseudoTargetCurrent},
     {"target-text", CSSSelector::kPseudoTargetText},
+    {"tool-form-active", CSSSelector::kPseudoToolFormActive},
+    {"tool-submit-active", CSSSelector::kPseudoToolSubmitActive},
     {"user-invalid", CSSSelector::kPseudoUserInvalid},
     {"user-valid", CSSSelector::kPseudoUserValid},
     {"valid", CSSSelector::kPseudoValid},
@@ -783,11 +799,11 @@ CSSSelector::PseudoType CSSSelector::NameToPseudoType(
   }
 
   if (match->type == CSSSelector::kPseudoPermissionGranted &&
-      !RuntimeEnabledFeatures::PermissionElementEnabled(
-          document ? document->GetExecutionContext() : nullptr) &&
       !RuntimeEnabledFeatures::GeolocationElementEnabled(
           document ? document->GetExecutionContext() : nullptr) &&
       !RuntimeEnabledFeatures::UserMediaElementEnabled(
+          document ? document->GetExecutionContext() : nullptr) &&
+      !RuntimeEnabledFeatures::InstallElementEnabled(
           document ? document->GetExecutionContext() : nullptr)) {
     return CSSSelector::kPseudoUnknown;
   }
@@ -837,7 +853,18 @@ CSSSelector::PseudoType CSSSelector::NameToPseudoType(
   }
 
   if (match->type == CSSSelector::kPseudoOverscrollAreaParent &&
-      !RuntimeEnabledFeatures::CSSOverscrollGesturesEnabled()) {
+      !RuntimeEnabledFeatures::OverscrollGesturesEnabled()) {
+    return CSSSelector::kPseudoUnknown;
+  }
+
+  if ((match->type == CSSSelector::kPseudoActiveOption ||
+       match->type == CSSSelector::kPseudoFiltered) &&
+      !RuntimeEnabledFeatures::CustomizableComboboxEnabled() &&
+      !RuntimeEnabledFeatures::FilterableSelectEnabled()) {
+    return CSSSelector::kPseudoUnknown;
+  }
+  if (match->type == CSSSelector::kPseudoAnimatedImage &&
+      !RuntimeEnabledFeatures::CSSImageAnimationEnabled()) {
     return CSSSelector::kPseudoUnknown;
   }
 
@@ -981,8 +1008,10 @@ void CSSSelector::UpdatePseudoType(const AtomicString& value,
       [[fallthrough]];
     // For pseudo-classes
     case kPseudoActive:
+    case kPseudoActiveOption:
     case kPseudoActiveViewTransition:
     case kPseudoActiveViewTransitionType:
+    case kPseudoAnimatedImage:
     case kPseudoAny:
     case kPseudoAnyLink:
     case kPseudoAutofill:
@@ -1002,6 +1031,7 @@ void CSSSelector::UpdatePseudoType(const AtomicString& value,
     case kPseudoEmpty:
     case kPseudoEnabled:
     case kPseudoEnd:
+    case kPseudoFiltered:
     case kPseudoFirstChild:
     case kPseudoFirstOfType:
     case kPseudoFocus:
@@ -1060,6 +1090,7 @@ void CSSSelector::UpdatePseudoType(const AtomicString& value,
     case kPseudoRequired:
     case kPseudoRoot:
     case kPseudoScope:
+    case kPseudoSelectHasSlottedButton:
     case kPseudoSelectorFragmentAnchor:
     case kPseudoSingleButton:
     case kPseudoStart:
@@ -1068,6 +1099,7 @@ void CSSSelector::UpdatePseudoType(const AtomicString& value,
     case kPseudoTargetCurrent:
     case kPseudoTargetBefore:
     case kPseudoTargetAfter:
+    case kPseudoTextField:
     case kPseudoUnknown:
     case kPseudoUnparsed:
     case kPseudoUserInvalid:
@@ -1081,6 +1113,12 @@ void CSSSelector::UpdatePseudoType(const AtomicString& value,
     case kPseudoWindowInactive:
     case kPseudoXrOverlay:
       if (Match() != kPseudoClass) {
+        bits_.set<PseudoTypeField>(kPseudoUnknown);
+      }
+      break;
+    case kPseudoToolFormActive:
+    case kPseudoToolSubmitActive:
+      if (Match() != kPseudoClass || !RuntimeEnabledFeatures::WebMCPEnabled()) {
         bits_.set<PseudoTypeField>(kPseudoUnknown);
       }
       break;
@@ -1537,7 +1575,9 @@ void CSSSelector::SetHasArgumentMatchInShadowTree() {
   data_.rare_data_->bits_.has_.argument_match_in_shadow_tree_ = true;
 }
 
-static bool ValidateSubSelector(const CSSSelector* selector) {
+namespace {
+
+bool IsSubSelectorCompound(const CSSSelector* selector) {
   switch (selector->Match()) {
     case CSSSelector::kTag:
     case CSSSelector::kUniversalTag:
@@ -1556,53 +1596,24 @@ static bool ValidateSubSelector(const CSSSelector* selector) {
       return false;
     case CSSSelector::kPagePseudoClass:
     case CSSSelector::kPseudoClass:
-      break;
+      if (const CSSSelectorList* sublist = selector->SelectorList()) {
+        for (const CSSSelector* subselector = sublist->First(); subselector;
+             subselector = CSSSelectorList::Next(*subselector)) {
+          if (!subselector->IsFullyCompound()) {
+            return false;
+          }
+        }
+      }
+      return true;
     case CSSSelector::kInvalidList:
       NOTREACHED();
   }
-
-  switch (selector->GetPseudoType()) {
-    case CSSSelector::kPseudoEmpty:
-    case CSSSelector::kPseudoLink:
-    case CSSSelector::kPseudoVisited:
-    case CSSSelector::kPseudoTarget:
-    case CSSSelector::kPseudoEnabled:
-    case CSSSelector::kPseudoDisabled:
-    case CSSSelector::kPseudoChecked:
-    case CSSSelector::kPseudoIndeterminate:
-    case CSSSelector::kPseudoNthChild:
-    case CSSSelector::kPseudoNthLastChild:
-    case CSSSelector::kPseudoNthOfType:
-    case CSSSelector::kPseudoNthLastOfType:
-    case CSSSelector::kPseudoFirstChild:
-    case CSSSelector::kPseudoLastChild:
-    case CSSSelector::kPseudoFirstOfType:
-    case CSSSelector::kPseudoLastOfType:
-    case CSSSelector::kPseudoOnlyOfType:
-    case CSSSelector::kPseudoHost:
-    case CSSSelector::kPseudoHostContext:
-    case CSSSelector::kPseudoNot:
-    case CSSSelector::kPseudoSpatialNavigationFocus:
-    case CSSSelector::kPseudoHasDatalist:
-    case CSSSelector::kPseudoIsHtml:
-    case CSSSelector::kPseudoListBox:
-    case CSSSelector::kPseudoHostHasNonAutoAppearance:
-      // TODO(https://crbug.com/1346456): Many pseudos should probably be
-      // added to this list.  The default: case below should also be removed
-      // so that those adding new pseudos know they need to choose one path or
-      // the other here.
-      //
-      // However, it's not clear why a pseudo should be in one list or the
-      // other.  It's also entirely possible that this entire switch() should
-      // be removed and all cases should return true.
-      return true;
-    default:
-      return false;
-  }
 }
 
-bool CSSSelector::IsCompound() const {
-  if (!ValidateSubSelector(this)) {
+}  // namespace
+
+bool CSSSelector::IsFullyCompound() const {
+  if (!IsSubSelectorCompound(this)) {
     return false;
   }
 
@@ -1613,7 +1624,7 @@ bool CSSSelector::IsCompound() const {
     if (prev_sub_selector->Relation() != kSubSelector) {
       return false;
     }
-    if (!ValidateSubSelector(sub_selector)) {
+    if (!IsSubSelectorCompound(sub_selector)) {
       return false;
     }
 
@@ -1792,11 +1803,13 @@ bool CSSSelector::IsAllowedAfterPart() const {
     //
     // All non-structural pseudo-classes should be allowed, and structural
     // pseudo-classes should be forbidden.
+    case kPseudoAnimatedImage:
     case kPseudoAutofill:
     case kPseudoAutofillPreviewed:
     case kPseudoAutofillSelected:
     case kPseudoWebKitAutofill:
     case kPseudoActive:
+    case kPseudoActiveOption:
     case kPseudoActiveViewTransition:
     case kPseudoActiveViewTransitionType:
     case kPseudoAnyLink:
@@ -1806,6 +1819,7 @@ bool CSSSelector::IsAllowedAfterPart() const {
     case kPseudoDisabled:
     case kPseudoDrag:
     case kPseudoEnabled:
+    case kPseudoFiltered:
     case kPseudoFocus:
     case kPseudoFocusVisible:
     case kPseudoFocusWithin:
@@ -1829,6 +1843,7 @@ bool CSSSelector::IsAllowedAfterPart() const {
     case kPseudoReadOnly:
     case kPseudoReadWrite:
     case kPseudoRequired:
+    case kPseudoSelectHasSlottedButton:
     case kPseudoSelectorFragmentAnchor:
     case kPseudoState:
     case kPseudoTarget:
@@ -1862,6 +1877,9 @@ bool CSSSelector::IsAllowedAfterPart() const {
     case kPseudoTargetCurrent:
     case kPseudoTargetBefore:
     case kPseudoTargetAfter:
+    case kPseudoTextField:
+    case kPseudoToolFormActive:
+    case kPseudoToolSubmitActive:
     case kPseudoVideoPersistent:
     case kPseudoVideoPersistentAncestor:
       return true;
@@ -2136,6 +2154,97 @@ CSSSelector::RelationType ConvertRelationToRelative(
       return CSSSelector::kRelativeIndirectAdjacent;
     default:
       NOTREACHED();
+  }
+}
+
+// static
+bool CSSSelector::SupportsPseudoStateChange(PseudoType type) {
+  switch (type) {
+    case CSSSelector::kPseudoAnimatedImage:
+    case CSSSelector::kPseudoActive:
+    case CSSSelector::kPseudoActiveOption:
+    case CSSSelector::kPseudoActiveViewTransition:
+    case CSSSelector::kPseudoActiveViewTransitionType:
+    case CSSSelector::kPseudoAnyLink:
+    case CSSSelector::kPseudoAutofill:
+    case CSSSelector::kPseudoAutofillPreviewed:
+    case CSSSelector::kPseudoAutofillSelected:
+    case CSSSelector::kPseudoChecked:
+    case CSSSelector::kPseudoDefault:
+    case CSSSelector::kPseudoDefined:
+    case CSSSelector::kPseudoDir:
+    case CSSSelector::kPseudoDisabled:
+    case CSSSelector::kPseudoDrag:
+    case CSSSelector::kPseudoEmpty:
+    case CSSSelector::kPseudoEnabled:
+    case CSSSelector::kPseudoFiltered:
+    case CSSSelector::kPseudoFirstChild:
+    case CSSSelector::kPseudoFirstOfType:
+    case CSSSelector::kPseudoFocus:
+    case CSSSelector::kPseudoFocusVisible:
+    case CSSSelector::kPseudoFocusWithin:
+    case CSSSelector::kPseudoFullScreen:
+    case CSSSelector::kPseudoFullScreenAncestor:
+    case CSSSelector::kPseudoFullscreen:
+    case CSSSelector::kPseudoHas:
+    case CSSSelector::kPseudoHasDatalist:
+    case CSSSelector::kPseudoHasSlotted:
+    case CSSSelector::kPseudoHover:
+    case CSSSelector::kPseudoInRange:
+    case CSSSelector::kPseudoIndeterminate:
+    case CSSSelector::kPseudoInterestSource:
+    case CSSSelector::kPseudoInterestTarget:
+    case CSSSelector::kPseudoInvalid:
+    case CSSSelector::kPseudoLang:
+    case CSSSelector::kPseudoLastChild:
+    case CSSSelector::kPseudoLastOfType:
+    case CSSSelector::kPseudoLink:
+    case CSSSelector::kPseudoLinkTo:
+    case CSSSelector::kPseudoListBox:
+    case CSSSelector::kPseudoModal:
+    case CSSSelector::kPseudoMultiSelectFocus:
+    case CSSSelector::kPseudoNthChild:
+    case CSSSelector::kPseudoNthLastChild:
+    case CSSSelector::kPseudoNthLastOfType:
+    case CSSSelector::kPseudoNthOfType:
+    case CSSSelector::kPseudoOnlyChild:
+    case CSSSelector::kPseudoOnlyOfType:
+    case CSSSelector::kPseudoOpen:
+    case CSSSelector::kPseudoOptional:
+    case CSSSelector::kPseudoOutOfRange:
+    case CSSSelector::kPseudoOverscrollTarget:
+    case CSSSelector::kPseudoPaused:
+    case CSSSelector::kPseudoPermissionGranted:
+    case CSSSelector::kPseudoPictureInPicture:
+    case CSSSelector::kPseudoPlaceholderShown:
+    case CSSSelector::kPseudoPlaying:
+    case CSSSelector::kPseudoPopoverOpen:
+    case CSSSelector::kPseudoReadOnly:
+    case CSSSelector::kPseudoReadWrite:
+    case CSSSelector::kPseudoRequired:
+    case CSSSelector::kPseudoSelectHasSlottedButton:
+    case CSSSelector::kPseudoSelection:
+    case CSSSelector::kPseudoSelectorFragmentAnchor:
+    case CSSSelector::kPseudoState:
+    case CSSSelector::kPseudoTarget:
+    case CSSSelector::kPseudoTargetAfter:
+    case CSSSelector::kPseudoTargetBefore:
+    case CSSSelector::kPseudoTargetCurrent:
+    case CSSSelector::kPseudoTextField:
+    case CSSSelector::kPseudoToolFormActive:
+    case CSSSelector::kPseudoToolSubmitActive:
+    case CSSSelector::kPseudoUserInvalid:
+    case CSSSelector::kPseudoUserValid:
+    case CSSSelector::kPseudoValid:
+    case CSSSelector::kPseudoVideoPersistent:
+    case CSSSelector::kPseudoVideoPersistentAncestor:
+    case CSSSelector::kPseudoVisited:
+    case CSSSelector::kPseudoWebKitAutofill:
+    case CSSSelector::kPseudoWebkitAnyLink:
+    case CSSSelector::kPseudoXrOverlay:
+      return true;
+    default:
+      return false;
   }
 }
 

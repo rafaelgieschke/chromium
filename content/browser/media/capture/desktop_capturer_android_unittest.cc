@@ -8,8 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "base/android/callback_android.h"
 #include "base/android/jni_android.h"
-#include "base/android/jni_callback.h"
 #include "base/android/jni_utils.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/check.h"
@@ -70,9 +70,9 @@ class MockDesktopCapturerAndroidJni
   ~MockDesktopCapturerAndroidJni() override = default;
   MOCK_METHOD(base::android::ScopedJavaLocalRef<jobject>,
               Create,
-              (JNIEnv*, jlong),
+              (JNIEnv*, int64_t),
               (override));
-  MOCK_METHOD(jboolean,
+  MOCK_METHOD(bool,
               StartCapture,
               (JNIEnv*, const base::android::JavaRef<jobject>&),
               (override));

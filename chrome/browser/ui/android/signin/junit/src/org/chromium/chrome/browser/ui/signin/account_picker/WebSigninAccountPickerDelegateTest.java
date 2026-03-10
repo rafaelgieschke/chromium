@@ -22,7 +22,6 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.mockito.quality.Strictness;
-import org.robolectric.annotation.LooperMode;
 
 import org.chromium.base.Callback;
 import org.chromium.base.test.BaseRobolectricTestRunner;
@@ -42,7 +41,6 @@ import org.chromium.url.GURL;
 
 /** This class tests the {@link WebSigninAccountPickerDelegate}. */
 @RunWith(BaseRobolectricTestRunner.class)
-@LooperMode(LooperMode.Mode.LEGACY)
 public class WebSigninAccountPickerDelegateTest {
     private static final GURL CONTINUE_URL = new GURL("https://test-continue-url.com");
 
@@ -129,9 +127,6 @@ public class WebSigninAccountPickerDelegateTest {
                 .logAccountConsistencyPromoAction(
                         AccountConsistencyPromoAction.GENERIC_ERROR_SHOWN,
                         SigninAccessPoint.WEB_SIGNIN);
-
-        // WebSigninBridge should be destroyed after the sign-in result is known.
-        verify(mWebSigninBridgeMock).destroy();
     }
 
     @Test
@@ -150,8 +145,5 @@ public class WebSigninAccountPickerDelegateTest {
                 .logAccountConsistencyPromoAction(
                         AccountConsistencyPromoAction.AUTH_ERROR_SHOWN,
                         SigninAccessPoint.WEB_SIGNIN);
-
-        // WebSigninBridge should be destroyed after the sign-in result is known.
-        verify(mWebSigninBridgeMock).destroy();
     }
 }

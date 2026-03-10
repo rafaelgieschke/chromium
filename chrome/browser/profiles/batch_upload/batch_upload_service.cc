@@ -4,11 +4,11 @@
 
 #include "chrome/browser/profiles/batch_upload/batch_upload_service.h"
 
+#include <algorithm>
 #include <array>
 #include <map>
 
 #include "base/check_deref.h"
-#include "base/containers/contains.h"
 #include "base/containers/to_vector.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -88,7 +88,7 @@ syncer::LocalDataDescription GetPrimaryTypeLocalDataDescription(
     const std::map<syncer::DataType, syncer::LocalDataDescription>&
         local_data_descriptions_map,
     syncer::DataType primary_type) {
-  CHECK(base::Contains(kBatchUploadAvailableTypesOrder, primary_type));
+  CHECK(std::ranges::contains(kBatchUploadAvailableTypesOrder, primary_type));
   CHECK(local_data_descriptions_map.contains(primary_type));
   const syncer::LocalDataDescription& primary_local_data_description =
       local_data_descriptions_map.at(primary_type);
@@ -164,7 +164,7 @@ bool HasLocalDataToShow(
 
 void RecordBatchUploadTriggeredMetrics(
     BatchUploadService::EntryPoint entry_point,
-    signin::IdentityManager& identity_manager,
+    const GaiaId& gaia_id,
     PrefService& prefs) {
   signin::ProfileMenuAvatarButtonPromoInfo::Type promo_type;
   switch (entry_point) {
@@ -198,8 +198,8 @@ void RecordBatchUploadTriggeredMetrics(
       break;
   }
 
-  signin::RecordAvatarButtonPromoAcceptedAtPromoShownCount(
-      promo_type, &identity_manager, prefs);
+  signin::RecordAvatarButtonPromoAcceptedAtPromoShownCount(promo_type, gaia_id,
+                                                           prefs);
 }
 
 }  // namespace
@@ -275,6 +275,7 @@ void BatchUploadService::OnGetLocalDataDescriptionsReady(
     return;
   }
 
+  std::move(state_.dialog_state_->dialog_shown_callback_).Run(true);
   delegate_->ShowBatchUploadDialog(
       state_.dialog_state_->browser_,
       GetOrderedListOfNonEmptyDataDescriptions(
@@ -283,7 +284,7 @@ void BatchUploadService::OnGetLocalDataDescriptionsReady(
       /*complete_callback=*/
       base::BindOnce(&BatchUploadService::OnBatchUploadDialogResult,
                      base::Unretained(this)));
-  std::move(state_.dialog_state_->dialog_shown_callback_).Run(true);
+  // The dialog may be reset at this point: `state_.dialog_state_` may be null.
 }
 
 void BatchUploadService::OnBatchUploadDialogResult(
@@ -313,8 +314,11 @@ void BatchUploadService::OnBatchUploadDialogResult(
   // so that it reacts to the state after the migration.
   std::move(state_.dialog_state_->dialog_closed_callback_).Run();
 
+  GaiaId primary_gaia =
+      identity_manager_->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin)
+          .gaia;
   RecordBatchUploadTriggeredMetrics(state_.dialog_state_->entry_point_,
-                                    identity_manager_.get(), prefs_.get());
+                                    primary_gaia, prefs_.get());
   ResetDialogState();
 }
 

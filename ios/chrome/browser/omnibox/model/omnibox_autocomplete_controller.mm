@@ -37,6 +37,7 @@
 #import "ios/chrome/browser/omnibox/model/omnibox_text_controller.h"
 #import "ios/chrome/browser/omnibox/model/omnibox_text_model.h"
 #import "ios/chrome/browser/omnibox/model/suggestions/autocomplete_result_wrapper.h"
+#import "ios/chrome/browser/omnibox/public/omnibox_ui_features.h"
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_backed_boolean.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
@@ -418,6 +419,13 @@ using base::UserMetricsAction;
     return;
   }
 
+  // In the composebox, allow suggestions on clobber.
+  if (_omniboxPresentationContext == OmniboxPresentationContext::kComposebox &&
+      IsZPSOnClobberEnabled() && !text.length()) {
+    [self startZeroSuggestRequestWithText:text userClobbered:YES];
+    return;
+  }
+
   // Use text_model()->input during the refactoring while the edit model is
   // still using it crbug.com/390409559.
   _omniboxTextModel->input = AutocompleteInput(
@@ -432,7 +440,7 @@ using base::UserMetricsAction;
   input.set_current_title(_omniboxClient->GetTitle());
   input.set_prevent_inline_autocomplete(preventInlineAutocomplete);
   [self attachSuggestInputsToAutocompleteInput:input];
-  [self attachAimToolModeToAutocompleteInput:input];
+  [self attachInputStateToAutocompleteInput:input];
 
   [self startAutocompleteWithInput:input];
 }
@@ -443,10 +451,12 @@ using base::UserMetricsAction;
     return;
   }
 
-  // Early exit if a query is already in progress or the popup is already open.
+  // Early exit if a query is already in progress or the popup is already open
   // This is what allows this method to be called multiple times in multiple
-  // code locations without harm.
-  if (!_autocompleteController->done() || self.hasSuggestions) {
+  // code locations without harm. Exept if the event is user triggered by
+  // clobbering the text.
+  if (!userClobberedPermanentText &&
+      (!_autocompleteController->done() || self.hasSuggestions)) {
     return;
   }
 
@@ -478,7 +488,7 @@ using base::UserMetricsAction;
   input.set_current_title(_omniboxClient->GetTitle());
   input.set_focus_type(metrics::OmniboxFocusType::INTERACTION_FOCUS);
   [self attachSuggestInputsToAutocompleteInput:input];
-  [self attachAimToolModeToAutocompleteInput:input];
+  [self attachInputStateToAutocompleteInput:input];
 
   [self startAutocompleteWithInput:input];
 }
@@ -587,13 +597,13 @@ using base::UserMetricsAction;
 
 #pragma mark - Private
 
-- (void)attachAimToolModeToAutocompleteInput:(AutocompleteInput&)input {
+- (void)attachInputStateToAutocompleteInput:(AutocompleteInput&)input {
   if (_omniboxPresentationContext != OmniboxPresentationContext::kComposebox ||
       !_omniboxClient) {
     return;
   }
 
-  input.set_aim_tool_mode(_omniboxClient->AimToolMode());
+  input.set_input_state(_omniboxClient->GetInputState());
 }
 
 /// Attaches the client's suggest inputs if valid.
@@ -605,9 +615,8 @@ using base::UserMetricsAction;
   std::optional<lens::proto::LensOverlaySuggestInputs> suggestInputs =
       _omniboxClient->GetLensOverlaySuggestInputs();
 
-  if (!suggestInputs ||
-      _omniboxClient->AimToolMode() !=
-          omnibox::ChromeAimToolsAndModels::TOOL_MODE_UNSPECIFIED) {
+  if (!suggestInputs || _omniboxClient->GetInputState().active_tool !=
+                            omnibox::ToolMode::TOOL_MODE_UNSPECIFIED) {
     return;
   }
 
@@ -742,6 +751,15 @@ using base::UserMetricsAction;
               match, "disposition", disposition, "altenate_nav_url",
               alternateNavURL, "pasted_text", pastedText);
 
+  // Update the match with the final destination URL.
+  const BOOL isPastedText = !pastedText.empty();
+  base::TimeDelta elapsedTimeSinceUserFirstModifiedOmnibox =
+      [self.omniboxMetricsRecorder
+          elapsedTimeSinceUserFirstModifiedOmniboxWithPastedText:isPastedText];
+  self.autocompleteController
+      ->UpdateMatchDestinationURLWithAdditionalSearchboxStats(
+          elapsedTimeSinceUserFirstModifiedOmnibox, &match);
+
   GURL destinationURL = action ? action->getUrl() : match.destination_url;
 
   std::u16string inputText(pastedText);
@@ -771,7 +789,7 @@ using base::UserMetricsAction;
                                 popupSelection:selection
                          windowOpenDisposition:disposition
                                       isAction:action
-                                  isPastedText:!pastedText.empty()];
+                                  isPastedText:isPastedText];
 
   if (action) {
     OmniboxAction::ExecutionContext context(
@@ -786,12 +804,9 @@ using base::UserMetricsAction;
     // Skip the revert here to avoid changing the size of the multiline omnibox
     // when accepting input, changes will be reverted at endEditing
     // (crbug.com/458055336).
-    BOOL skipRevert = (IsMultilineBrowserOmniboxEnabled() &&
-                       _omniboxPresentationContext ==
-                           OmniboxPresentationContext::kLocationBar) ||
-                      (IsComposeboxIOSEnabled() &&
-                       _omniboxPresentationContext ==
-                           OmniboxPresentationContext::kComposebox);
+    BOOL skipRevert =
+        IsComposeboxIOSEnabled() &&
+        _omniboxPresentationContext == OmniboxPresentationContext::kComposebox;
     if (!skipRevert) {
       base::AutoReset<bool> tmp(&_omniboxTextModel->in_revert, true);
       [self.omniboxTextController

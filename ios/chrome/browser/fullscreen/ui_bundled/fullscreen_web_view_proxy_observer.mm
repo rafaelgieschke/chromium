@@ -59,14 +59,25 @@
 
 - (void)webViewScrollViewDidScroll:
     (CRWWebViewScrollViewProxy*)webViewScrollViewProxy {
-  if (!base::FeatureList::IsEnabled(web::features::kSmoothScrollingDefault)) {
+  if (!web::features::ShouldUseBroadcasterForSmoothScrolling()) {
+    // When the broadcaster is disabled, the model's top inset must be manually
+    // updated to ensure that it correctly identifies the top of the page when
+    // calculating overscroll and scroll boundaries.
+    self.model->SetTopContentInset(webViewScrollViewProxy.contentInset.top);
+    self.model->SetContentHeight(webViewScrollViewProxy.contentSize.height);
+    self.model->SetScrollViewHeight(webViewScrollViewProxy.frame.size.height);
     self.model->SetYContentOffset(webViewScrollViewProxy.contentOffset.y);
   }
 }
 
 - (void)webViewScrollViewWillBeginDragging:
     (CRWWebViewScrollViewProxy*)webViewScrollViewProxy {
-  if (!base::FeatureList::IsEnabled(web::features::kSmoothScrollingDefault)) {
+  if (!web::features::ShouldUseBroadcasterForSmoothScrolling()) {
+    // Manually relay dimensions on drag start to ensure the model has
+    // up-to-date state before processing the scroll.
+    self.model->SetTopContentInset(webViewScrollViewProxy.contentInset.top);
+    self.model->SetContentHeight(webViewScrollViewProxy.contentSize.height);
+    self.model->SetScrollViewHeight(webViewScrollViewProxy.frame.size.height);
     self.model->SetYContentOffset(webViewScrollViewProxy.contentOffset.y);
     self.model->SetScrollViewIsScrolling(true);
     self.model->SetScrollViewIsDragging(true);
@@ -77,7 +88,7 @@
             (CRWWebViewScrollViewProxy*)webViewScrollViewProxy
                             withVelocity:(CGPoint)velocity
                      targetContentOffset:(inout CGPoint*)targetContentOffset {
-  if (!base::FeatureList::IsEnabled(web::features::kSmoothScrollingDefault)) {
+  if (!web::features::ShouldUseBroadcasterForSmoothScrolling()) {
     self.model->SetScrollViewIsDragging(false);
   }
 }
@@ -85,7 +96,7 @@
 - (void)webViewScrollViewDidEndDragging:
             (CRWWebViewScrollViewProxy*)webViewScrollViewProxy
                          willDecelerate:(BOOL)decelerate {
-  if (!base::FeatureList::IsEnabled(web::features::kSmoothScrollingDefault)) {
+  if (!web::features::ShouldUseBroadcasterForSmoothScrolling()) {
     self.model->SetScrollViewIsDragging(false);
     if (!decelerate) {
       self.model->SetScrollViewIsScrolling(false);
@@ -95,14 +106,14 @@
 
 - (void)webViewScrollViewDidEndDecelerating:
     (CRWWebViewScrollViewProxy*)webViewScrollViewProxy {
-  if (!base::FeatureList::IsEnabled(web::features::kSmoothScrollingDefault)) {
+  if (!web::features::ShouldUseBroadcasterForSmoothScrolling()) {
     self.model->SetScrollViewIsScrolling(false);
   }
 }
 
 - (void)webViewScrollViewWillBeginZooming:
     (CRWWebViewScrollViewProxy*)webViewScrollViewProxy {
-  if (!base::FeatureList::IsEnabled(web::features::kSmoothScrollingDefault)) {
+  if (!web::features::ShouldUseBroadcasterForSmoothScrolling()) {
     self.model->SetScrollViewIsZooming(true);
   }
 }
@@ -110,7 +121,7 @@
 - (void)webViewScrollViewDidEndZooming:
             (CRWWebViewScrollViewProxy*)webViewScrollViewProxy
                                atScale:(CGFloat)scale {
-  if (!base::FeatureList::IsEnabled(web::features::kSmoothScrollingDefault)) {
+  if (!web::features::ShouldUseBroadcasterForSmoothScrolling()) {
     self.model->SetScrollViewIsZooming(false);
   }
 }

@@ -72,18 +72,12 @@ void PrefetchStreamingURLLoader::Start(
       prefetch_url_loader_client_receiver_.BindNewPipeAndPassRemote(
           base::SingleThreadTaskRunner::GetCurrentDefault()),
       net::MutableNetworkTrafficAnnotationTag(network_traffic_annotation));
-  if (base::FeatureList::IsEnabled(features::kPrefetchGracefulNotification)) {
-    // We call `DisconnectPrefetchURLLoaderMojo()` in `OnComplete()`, so
-    // disconnection reaching this handler is always unexpected disconnection
-    // before `OnComplete()` and should be considered as a failure.
-    prefetch_url_loader_client_receiver_.set_disconnect_handler(base::BindOnce(
-        &PrefetchStreamingURLLoader::OnComplete, weak_ptr_factory_.GetWeakPtr(),
-        network::URLLoaderCompletionStatus(net::ERR_ABORTED)));
-  } else {
-    prefetch_url_loader_client_receiver_.set_disconnect_handler(base::BindOnce(
-        &PrefetchStreamingURLLoader::DisconnectPrefetchURLLoaderMojo,
-        weak_ptr_factory_.GetWeakPtr()));
-  }
+  // We call `DisconnectPrefetchURLLoaderMojo()` in `OnComplete()`, so
+  // disconnection reaching this handler is always unexpected disconnection
+  // before `OnComplete()` and should be considered as a failure.
+  prefetch_url_loader_client_receiver_.set_disconnect_handler(base::BindOnce(
+      &PrefetchStreamingURLLoader::OnComplete, weak_ptr_factory_.GetWeakPtr(),
+      network::URLLoaderCompletionStatus(net::ERR_ABORTED)));
 
   if (!timeout_duration.is_zero()) {
     timeout_timer_.Start(
@@ -164,7 +158,12 @@ void PrefetchStreamingURLLoader::CancelIfNotServing() {
   if (used_for_serving_) {
     return;
   }
-  DisconnectPrefetchURLLoaderMojo();
+
+  // Cancels the prefetch by pretending an aborted completion.
+  // This is no-op after the prefetch is already completed, as in such cases
+  // `DisconnectPrefetchURLLoaderMojo()` should be already called and
+  // `response_reader_` is cleared.
+  OnComplete(network::URLLoaderCompletionStatus(net::ERR_ABORTED));
 }
 
 void PrefetchStreamingURLLoader::DisconnectPrefetchURLLoaderMojo() {
@@ -183,6 +182,15 @@ void PrefetchStreamingURLLoader::DisconnectPrefetchURLLoaderMojo() {
   prefetch_url_loader_.reset();
   prefetch_url_loader_client_receiver_.reset();
   timeout_timer_.Stop();
+
+  // Avoid notifications to `response_reader_` after scheduled for deletion.
+  // This can happen e.g.
+  // - `CancelIfNotServing()` is called from `PrefetchContainer` dtor (covered
+  //   by unit tests).
+  // - An async task that is not tied to `prefetch_url_loader_client_receiver_`
+  //   and causes state changes (e.g. timeout), after this point before the
+  //   async self deletion is completed (actual cases not confirmed though).
+  response_reader_.reset();
 
   if (!self_pointer_) {
     return;
@@ -223,6 +231,7 @@ void PrefetchStreamingURLLoader::OnReceiveResponse(
     std::optional<mojo_base::BigBuffer> cached_metadata) {
   TRACE_EVENT("loading", "PrefetchStreamingURLLoader::OnReceiveResponse",
               flow_);
+  CHECK(head);
 
   // Cached metadata is not supported for prefetch.
   cached_metadata.reset();
@@ -258,7 +267,8 @@ void PrefetchStreamingURLLoader::OnReceiveRedirect(
 void PrefetchStreamingURLLoader::HandleRedirect(
     PrefetchRedirectStatus redirect_status,
     const net::RedirectInfo& redirect_info,
-    network::mojom::URLResponseHeadPtr redirect_head) {
+    network::mojom::URLResponseHeadPtr redirect_head,
+    PrefetchUpdateHeadersParams update_headers_params) {
   TRACE_EVENT("loading", "PrefetchStreamingURLLoader::HandleRedirect", flow_);
 
   if (!is_waiting_handle_redirect_from_prefetch_service_) {
@@ -276,9 +286,9 @@ void PrefetchStreamingURLLoader::HandleRedirect(
     case PrefetchRedirectStatus::kFollow:
       CHECK(prefetch_url_loader_);
       prefetch_url_loader_->FollowRedirect(
-          /*removed_headers=*/std::vector<std::string>(),
-          /*modified_headers=*/net::HttpRequestHeaders(),
-          /*modified_cors_exempt_headers=*/net::HttpRequestHeaders(),
+          std::move(update_headers_params.removed_headers),
+          std::move(update_headers_params.modified_headers),
+          std::move(update_headers_params.modified_cors_exempt_headers),
           /*new_url=*/std::nullopt);
       break;
     case PrefetchRedirectStatus::kSwitchNetworkContext:

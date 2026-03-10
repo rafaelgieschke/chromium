@@ -4,6 +4,7 @@
 
 package org.chromium.content.browser.selection;
 
+import static org.chromium.build.NullUtil.assertNonNull;
 import static org.chromium.build.NullUtil.assumeNonNull;
 
 import android.app.Activity;
@@ -37,6 +38,7 @@ import androidx.annotation.VisibleForTesting;
 
 import org.jni_zero.CalledByNative;
 import org.jni_zero.JNINamespace;
+import org.jni_zero.JniType;
 import org.jni_zero.NativeMethods;
 
 import org.chromium.base.ApiCompatibilityUtils;
@@ -65,6 +67,7 @@ import org.chromium.content.browser.selection.SelectActionMenuHelper.TextSelecti
 import org.chromium.content.browser.webcontents.WebContentsImpl;
 import org.chromium.content_public.browser.ActionModeCallback;
 import org.chromium.content_public.browser.ActionModeCallbackHelper;
+import org.chromium.content_public.browser.ContentFeatureMap;
 import org.chromium.content_public.browser.ImeEventObserver;
 import org.chromium.content_public.browser.PendingSelectionMenu;
 import org.chromium.content_public.browser.RenderFrameHost;
@@ -76,6 +79,7 @@ import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.browser.WebContents.UserDataFactory;
 import org.chromium.content_public.browser.selection.SelectionActionMenuDelegate;
 import org.chromium.content_public.browser.selection.SelectionDropdownMenuDelegate;
+import org.chromium.content_public.common.ContentFeatures;
 import org.chromium.ui.base.Clipboard;
 import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.base.ViewAndroidDelegate;
@@ -123,6 +127,8 @@ public class SelectionPopupControllerImpl extends ActionModeCallbackHelper
     // selection change response will be asynchronous. 300ms should accomodate
     // most such trailing, async delays.
     private static final int SHOW_DELAY_MS = 300;
+
+    private static final String USED_CACHED_MENU_HISTOGRAM = "Android.SelectionMenu.UsedCachedMenu";
 
     // A flag to determine if we should get readback view from WindowAndroid.
     // The readback view could be the ContainerView, which WindowAndroid has no control on that.
@@ -261,7 +267,8 @@ public class SelectionPopupControllerImpl extends ActionModeCallbackHelper
      *     #create()} is not called yet.
      */
     @CalledByNative
-    public static @Nullable SelectionPopupControllerImpl fromWebContents(WebContents webContents) {
+    public static @Nullable SelectionPopupControllerImpl fromWebContents(
+            @JniType("content::WebContents*") WebContents webContents) {
         return webContents.getOrSetUserData(
                 SelectionPopupControllerImpl.class, UserDataFactoryLazyHolder.INSTANCE);
     }
@@ -273,8 +280,9 @@ public class SelectionPopupControllerImpl extends ActionModeCallbackHelper
      * @param webContents {@link WebContents} object.
      * @return {@link SelectionPopupController} object. {@code null} if not available.
      */
+    @CalledByNative
     public static @Nullable SelectionPopupControllerImpl fromWebContentsNoCreate(
-            WebContents webContents) {
+            @JniType("content::WebContents*") WebContents webContents) {
         return webContents.getOrSetUserData(SelectionPopupControllerImpl.class, null);
     }
 
@@ -353,7 +361,7 @@ public class SelectionPopupControllerImpl extends ActionModeCallbackHelper
         }
         if (initializeNative) {
             mNativeSelectionPopupController =
-                    SelectionPopupControllerImplJni.get().init(this, mWebContents);
+                    SelectionPopupControllerImplJni.get().init(mWebContents);
             ImeAdapterImpl imeAdapter = ImeAdapterImpl.fromWebContents(mWebContents);
             if (imeAdapter != null) imeAdapter.addEventObserver(this);
         }
@@ -839,8 +847,13 @@ public class SelectionPopupControllerImpl extends ActionModeCallbackHelper
         if (gainFocus) {
             restoreSelectionPopupsIfNecessary();
         } else {
-            ImeAdapterImpl.fromWebContents(mWebContents)
-                    .cancelRequestToScrollFocusedEditableNodeIntoView();
+            ImeAdapterImpl adapter = assertNonNull(ImeAdapterImpl.fromWebContents(mWebContents));
+
+            // Gracefully handle a null adapter in non-debug builds.
+            if (adapter != null) {
+                adapter.cancelRequestToScrollFocusedEditableNodeIntoView();
+            }
+
             if (getPreserveSelectionOnNextLossOfFocus()) {
                 setPreserveSelectionOnNextLossOfFocus(false);
                 hidePopupsAndPreserveSelection();
@@ -934,6 +947,12 @@ public class SelectionPopupControllerImpl extends ActionModeCallbackHelper
                     getSelectedText(),
                     isSelectActionModeAllowed(MENU_ITEM_PROCESS_TEXT),
                     mSelectionActionMenuDelegate);
+            if (ContentFeatureMap.isEnabled(ContentFeatures.NO_SELECTION_MENU_CACHING)) {
+                return pendingMenu;
+            }
+            // Record this after the feature flag check as otherwise clients in the enabled group
+            // will skew the data.
+            RecordHistogram.recordBooleanHistogram(USED_CACHED_MENU_HISTOGRAM, false);
             mSelectionMenuCachedResult =
                     new SelectionMenuCachedResult(
                             mClassificationResult,
@@ -942,6 +961,8 @@ public class SelectionPopupControllerImpl extends ActionModeCallbackHelper
                             getSelectedText(),
                             menuType,
                             pendingMenu);
+        } else {
+            RecordHistogram.recordBooleanHistogram(USED_CACHED_MENU_HISTOGRAM, true);
         }
 
         // Return the cached menu items for this selection.
@@ -1958,7 +1979,7 @@ public class SelectionPopupControllerImpl extends ActionModeCallbackHelper
     interface Natives {
         boolean isMagnifierWithSurfaceControlSupported();
 
-        long init(SelectionPopupControllerImpl self, WebContents webContents);
+        long init(@JniType("content::WebContents*") WebContents webContents);
 
         void setTextHandlesTemporarilyHidden(long nativeSelectionPopupController, boolean hidden);
 

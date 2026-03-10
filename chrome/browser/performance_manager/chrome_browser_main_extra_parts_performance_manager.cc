@@ -10,7 +10,6 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/functional/bind.h"
-#include "base/memory/memory_pressure_monitor.h"
 #include "base/memory/weak_ptr.h"
 #include "base/power_monitor/battery_state_sampler.h"
 #include "base/power_monitor/power_monitor_buildflags.h"
@@ -37,12 +36,12 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "chrome/common/chrome_features.h"
+#include "components/memory_pressure/multi_source_memory_pressure_monitor.h"
 #include "components/performance_manager/decorators/page_aggregator.h"
 #include "components/performance_manager/embedder/graph_features.h"
 #include "components/performance_manager/embedder/performance_manager_lifetime.h"
 #include "components/performance_manager/embedder/performance_manager_registry.h"
 #include "components/performance_manager/embedder/scoped_global_scenario_memory.h"
-#include "components/performance_manager/graph/policies/bfcache_policy.h"
 #include "components/performance_manager/graph/policies/process_priority_policy.h"
 #include "components/performance_manager/performance_manager_feature_observer_client.h"
 #include "components/performance_manager/public/decorators/page_live_state_decorator.h"
@@ -67,10 +66,6 @@
 #include "chromeos/dbus/power/power_manager_client.h"
 #include "components/performance_manager/power/battery_level_provider_chromeos.h"
 #include "components/performance_manager/power/dbus_power_manager_sampling_event_source.h"
-
-#if defined(ARCH_CPU_X86_64)
-#include "chrome/browser/performance_manager/policies/userspace_swap_policy_chromeos.h"
-#endif  // defined(ARCH_CPU_X86_64)
 
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
@@ -97,7 +92,10 @@
 
 #if BUILDFLAG(IS_WIN)
 #include "base/path_service.h"
-#include "chrome/browser/performance_manager/policies/priority_boost_disabler.h"
+#include "chrome/browser/performance_manager/policies/priority_boost_browser_network_policy.h"
+#include "chrome/browser/performance_manager/policies/priority_boost_foreground_browser_network_policy.h"
+#include "chrome/browser/performance_manager/policies/priority_boost_gpu_browser_network_policy.h"
+#include "chrome/browser/performance_manager/policies/priority_boost_loading_browser_network_policy.h"
 #endif
 
 namespace {
@@ -174,13 +172,6 @@ void ChromeBrowserMainExtraPartsPerformanceManager::CreatePoliciesAndDecorators(
   }
 
 #if BUILDFLAG(IS_CHROMEOS)
-#if defined(ARCH_CPU_X86_64)
-  if (performance_manager::policies::UserspaceSwapPolicy::
-          UserspaceSwapSupportedAndEnabled()) {
-    graph->PassToGraph(
-        std::make_unique<performance_manager::policies::UserspaceSwapPolicy>());
-  }
-#endif  // defined(ARCH_CPU_X86_64)
 
   graph->PassToGraph(std::make_unique<
                      performance_manager::policies::OomScorePolicyChromeOS>());
@@ -205,11 +196,29 @@ void ChromeBrowserMainExtraPartsPerformanceManager::CreatePoliciesAndDecorators(
     graph->PassToGraph(
         std::make_unique<performance_manager::TerminationTargetPolicy>());
   }
-  if (base::FeatureList::IsEnabled(features::kDisableBoostPriority) &&
-      features::kDisableBoostPriorityMode.Get() ==
-          features::DisableBoostPriorityMode::kAfterLoading) {
-    graph->PassToGraph(
-        std::make_unique<performance_manager::PriorityBoostDisabler>());
+  if (base::FeatureList::IsEnabled(features::kDisableBoostPriority)) {
+    switch (features::kDisableBoostPriorityExemption.Get()) {
+      case features::DisableBoostPriorityExemption::kBrowserNetwork:
+        graph->PassToGraph(
+            std::make_unique<performance_manager::policies::
+                                 PriorityBoostBrowserNetworkPolicy>());
+        break;
+      case features::DisableBoostPriorityExemption::kGpuBrowserNetwork:
+        graph->PassToGraph(
+            std::make_unique<performance_manager::policies::
+                                 PriorityBoostGpuBrowserNetworkPolicy>());
+        break;
+      case features::DisableBoostPriorityExemption::kLoadingBrowserNetwork:
+        graph->PassToGraph(
+            std::make_unique<performance_manager::policies::
+                                 PriorityBoostLoadingBrowserNetworkPolicy>());
+        break;
+      case features::DisableBoostPriorityExemption::kForegroundBrowserNetwork:
+        graph->PassToGraph(std::make_unique<
+                           performance_manager::policies::
+                               PriorityBoostForegroundBrowserNetworkPolicy>());
+        break;
+    }
   }
 #endif  // BUILDFLAG(IS_WIN)
 
@@ -230,24 +239,21 @@ void ChromeBrowserMainExtraPartsPerformanceManager::CreatePoliciesAndDecorators(
   graph->PassToGraph(FormInteractionTabHelper::CreateGraphObserver());
 
 #if URGENT_DISCARDING_FROM_PERFORMANCE_MANAGER()
-  graph->PassToGraph(
-      std::make_unique<
-          performance_manager::policies::UrgentPageDiscardingPolicy>());
-#endif  // URGENT_DISCARDING_FROM_PERFORMANCE_MANAGER()
-
-  if (base::FeatureList::IsEnabled(
-          performance_manager::features::
-              kBackgroundTabLoadingFromPerformanceManager)) {
+  if (!base::FeatureList::IsEnabled(
+          performance_manager::features::kDisableTabDiscarding)) {
     graph->PassToGraph(
         std::make_unique<
-            performance_manager::policies::BackgroundTabLoadingPolicy>(
-            base::BindRepeating([]() {
-              content::GetUIThreadTaskRunner({})->PostTask(
-                  FROM_HERE,
-                  base::BindOnce(
-                      &SessionRestore::OnTabLoaderFinishedLoadingTabs));
-            })));
+            performance_manager::policies::UrgentPageDiscardingPolicy>());
   }
+#endif  // URGENT_DISCARDING_FROM_PERFORMANCE_MANAGER()
+
+  graph->PassToGraph(std::make_unique<
+                     performance_manager::policies::BackgroundTabLoadingPolicy>(
+      base::BindRepeating([]() {
+        content::GetUIThreadTaskRunner({})->PostTask(
+            FROM_HERE,
+            base::BindOnce(&SessionRestore::OnTabLoaderFinishedLoadingTabs));
+      })));
 
   // The freezing policy isn't enabled on Android yet as it doesn't play well
   // with the freezing logic already in place in renderers. This logic should be
@@ -280,12 +286,6 @@ void ChromeBrowserMainExtraPartsPerformanceManager::CreatePoliciesAndDecorators(
           performance_manager::features::kThrottleUnimportantFrameRate)) {
     graph->PassToGraph(std::make_unique<
                        performance_manager::policies::FrameThrottlingPolicy>());
-  }
-
-  if (base::FeatureList::IsEnabled(
-          performance_manager::features::kBFCachePerformanceManagerPolicy)) {
-    graph->PassToGraph(
-        std::make_unique<performance_manager::policies::BFCachePolicy>());
   }
 
 #if !BUILDFLAG(IS_ANDROID)
@@ -346,11 +346,13 @@ ChromeBrowserMainExtraPartsPerformanceManager::GetFeatureObserverClient() {
 }
 
 void ChromeBrowserMainExtraPartsPerformanceManager::PostCreateThreads() {
+  CHECK(g_browser_process->local_state());
   performance_manager_lifetime_ =
       std::make_unique<performance_manager::PerformanceManagerLifetime>(
           performance_manager::GraphFeatures::WithDefault(),
           base::BindOnce(&ChromeBrowserMainExtraPartsPerformanceManager::
-                             CreatePoliciesAndDecorators));
+                             CreatePoliciesAndDecorators),
+          g_browser_process->local_state());
 
   // There are no existing loaded profiles.
   DCHECK(g_browser_process->profile_manager()->GetLoadedProfiles().empty());
@@ -371,7 +373,7 @@ void ChromeBrowserMainExtraPartsPerformanceManager::PostCreateThreads() {
   // early UI code can register observers, but only start them in
   // PreMainMessageLoopRun because they require other systems like the
   // HostFrameSinkManager to exist.
-  base::ByteCount system_memory = base::SysInfo::AmountOfPhysicalMemory();
+  base::ByteSize system_memory = base::SysInfo::AmountOfTotalPhysicalMemory();
   user_performance_tuning_manager_ = base::WrapUnique(
       new performance_manager::user_tuning::UserPerformanceTuningManager(
           g_browser_process->local_state(),
@@ -432,7 +434,7 @@ void ChromeBrowserMainExtraPartsPerformanceManager::PostCreateThreads() {
 
 void ChromeBrowserMainExtraPartsPerformanceManager::PostBrowserStart() {
   // The MemoryPressureMonitor might not be available in some tests.
-  if (base::MemoryPressureMonitor::Get()) {
+  if (memory_pressure::MultiSourceMemoryPressureMonitor::Get()) {
     if (memory::EnterpriseMemoryLimitPrefObserver::PlatformIsSupported()) {
       memory_limit_pref_observer_ =
           std::make_unique<memory::EnterpriseMemoryLimitPrefObserver>(

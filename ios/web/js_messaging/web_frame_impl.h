@@ -55,10 +55,10 @@ class WebFrameImpl final : public WebFrame,
   BrowserState* GetBrowserState() override;
 
   bool CallJavaScriptFunction(const std::string& name,
-                              const base::Value::List& parameters) override;
+                              const base::ListValue& parameters) override;
   bool CallJavaScriptFunction(
       const std::string& name,
-      const base::Value::List& parameters,
+      const base::ListValue& parameters,
       base::OnceCallback<void(const base::Value*)> callback,
       base::TimeDelta timeout) override;
 
@@ -73,11 +73,11 @@ class WebFrameImpl final : public WebFrame,
   // WebFrameContentWorldAPI:
   bool CallJavaScriptFunctionInContentWorld(
       const std::string& name,
-      const base::Value::List& parameters,
+      const base::ListValue& parameters,
       JavaScriptContentWorld* content_world) override;
   bool CallJavaScriptFunctionInContentWorld(
       const std::string& name,
-      const base::Value::List& parameters,
+      const base::ListValue& parameters,
       JavaScriptContentWorld* content_world,
       base::OnceCallback<void(const base::Value*)> callback,
       base::TimeDelta timeout) override;
@@ -89,6 +89,9 @@ class WebFrameImpl final : public WebFrame,
   // WebStateObserver:
   void WebStateDestroyed(web::WebState* web_state) override;
 
+  // Sends the response `value` to the message with id `message_id`.
+  void OnJSResultReceivedForMessageWithId(int message_id, id value);
+
  private:
   // Calls the JavaScript function `name` in the frame context in the same
   // manner as the inherited CallJavaScriptFunction functions. `content_world`
@@ -97,7 +100,7 @@ class WebFrameImpl final : public WebFrame,
   // function will be sent back to the receiver with `CompleteRequest()`.
   bool CallJavaScriptFunctionInContentWorld(
       const std::string& name,
-      const base::Value::List& parameters,
+      const base::ListValue& parameters,
       JavaScriptContentWorld* content_world,
       bool reply_with_result);
 
@@ -121,7 +124,7 @@ class WebFrameImpl final : public WebFrame,
   // will be sent back to the receiver.
   bool ExecuteJavaScriptFunction(JavaScriptContentWorld* content_world,
                                  const std::string& name,
-                                 const base::Value::List& parameters,
+                                 const base::ListValue& parameters,
                                  int message_id,
                                  bool reply_with_result);
 
@@ -130,9 +133,6 @@ class WebFrameImpl final : public WebFrame,
   // between the various ExecuteJavaScript() functions.
   ExecuteJavaScriptCallbackWithError ExecuteJavaScriptCallbackAdapter(
       base::OnceCallback<void(const base::Value*)> callback);
-  // Prints the information about the error that was generated from the
-  // execution of the given arbitrary JavaScript string.
-  void LogScriptWarning(NSString* script, NSError* error);
 
   // Runs the request associated with the message with id `message_id`. The
   // completion callback, if any, associated with `message_id` will be called

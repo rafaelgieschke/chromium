@@ -27,6 +27,7 @@
 
 namespace persistent_cache {
 
+enum class Client;
 struct PendingBackend;
 class PersistentCache;
 
@@ -60,6 +61,7 @@ class COMPONENT_EXPORT(PERSISTENT_CACHE) PersistentCacheCollection {
   // management within `top_directory`.
   PersistentCacheCollection(base::FilePath top_directory,
                             int64_t target_footprint,
+                            Client client,
                             size_t lru_capacity = kDefaultLruCacheCapacity);
 
   // Constructs an instance that will use `storage_delegate` for file management
@@ -68,6 +70,7 @@ class COMPONENT_EXPORT(PERSISTENT_CACHE) PersistentCacheCollection {
       base::FilePath top_directory,
       int64_t target_footprint,
       std::unique_ptr<BackendStorage::Delegate> storage_delegate,
+      Client client,
       size_t lru_capacity = kDefaultLruCacheCapacity);
 
   PersistentCacheCollection(const PersistentCacheCollection&) = delete;
@@ -81,12 +84,12 @@ class COMPONENT_EXPORT(PERSISTENT_CACHE) PersistentCacheCollection {
   // `BaseNameFromCacheId()` below for gory details.
   base::expected<std::optional<EntryMetadata>, TransactionError> Find(
       const std::string& cache_id,
-      std::string_view key,
+      base::span<const uint8_t> key,
       BufferProvider buffer_provider);
 
   base::expected<void, TransactionError> Insert(
       const std::string& cache_id,
-      std::string_view key,
+      base::span<const uint8_t> key,
       base::span<const uint8_t> content,
       EntryMetadata metadata = EntryMetadata{});
 

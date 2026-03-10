@@ -20,6 +20,8 @@ source_set("profiles") {
     "profile_key.cc",
     "profile_key.h",
     "profiles_state.h",
+    "sql_init_error_message_ids.cc",
+    "sql_init_error_message_ids.h",
   ]
 
   if (is_android) {
@@ -31,7 +33,11 @@ source_set("profiles") {
   }
 
   # Cannot depend on //chrome/browser:browser.
-  deps = []
+  deps = [
+    "//chrome/app:branded_strings",
+    "//chrome/app:generated_resources",
+    "//sql",
+  ]
   if (is_android) {
     deps += [
       "//chrome/browser/profiles/android:jni_headers",
@@ -68,7 +74,10 @@ source_set("profile") {
     "refcounted_profile_keyed_service_factory.h",
   ]
 
-  public_deps = [ "//base" ]
+  public_deps = [
+    "//base",
+    "//components/media_router/common",
+  ]
 
   # Cannot depend on //chrome/browser:browser.
   deps = [
@@ -79,7 +88,6 @@ source_set("profile") {
     "//components/keyed_service/content",
     "//components/language/core/browser",
     "//components/live_caption:constants",
-    "//components/media_router/common",
     "//components/pref_registry",
     "//components/prefs",
     "//components/profile_metrics",
@@ -193,6 +201,8 @@ source_set("profile_util_impl") {
     "//chrome/app/vector_icons",
     "//chrome/browser:browser_process",
     "//chrome/browser/autofill",
+    "//chrome/browser/bookmarks",
+    "//chrome/browser/browsing_topics",
     "//chrome/browser/history",
     "//chrome/browser/password_manager/factories",
     "//chrome/browser/prefs",
@@ -240,6 +250,10 @@ source_set("profile_util_impl") {
     ]
   }
 
+  if (is_android) {
+    deps += [ "//components/supervised_user/core/browser/android" ]
+  }
+
   if (is_chromeos) {
     deps += [
       "//chrome/browser/ash/login/users",
@@ -264,6 +278,7 @@ source_set("profiles_extra_parts_impl") {
     "//base",
     "//chrome/browser:browser_process",
     "//chrome/browser:font_pref",
+    "//chrome/browser/accessibility_annotator",
     "//chrome/browser/affiliations",
     "//chrome/browser/ai",
     "//chrome/browser/autocomplete",
@@ -274,40 +289,64 @@ source_set("profiles_extra_parts_impl") {
     "//chrome/browser/background_sync",
     "//chrome/browser/bitmap_fetcher",
     "//chrome/browser/bluetooth",
+    "//chrome/browser/bookmarks",
     "//chrome/browser/breadcrumbs",
+    "//chrome/browser/browsing_topics",
     "//chrome/browser/btm",
     "//chrome/browser/client_hints",
+    "//chrome/browser/collaboration",
+    "//chrome/browser/collaboration/comments",
+    "//chrome/browser/collaboration/messaging",
     "//chrome/browser/commerce",
     "//chrome/browser/consent_auditor",
     "//chrome/browser/content_index",
     "//chrome/browser/content_settings:content_settings_factory",
+    "//chrome/browser/contextual_cueing",
     "//chrome/browser/contextual_search",
     "//chrome/browser/contextual_tasks",
+    "//chrome/browser/contextual_tasks:ui",
     "//chrome/browser/custom_handlers",
+    "//chrome/browser/data_sharing",
+    "//chrome/browser/digital_credentials",
     "//chrome/browser/dom_distiller",
+    "//chrome/browser/domain_reliability",
     "//chrome/browser/engagement",
     "//chrome/browser/favicon",
     "//chrome/browser/feature_engagement",
     "//chrome/browser/file_system_access",
+    "//chrome/browser/finds",
+    "//chrome/browser/glic",
+    "//chrome/browser/heavy_ad_intervention",
     "//chrome/browser/history",
+    "//chrome/browser/history_clusters",
+    "//chrome/browser/history_embeddings",
+    "//chrome/browser/k_anonymity_service",
+    "//chrome/browser/language_detection",
+    "//chrome/browser/lookalikes",
     "//chrome/browser/media/router",
     "//chrome/browser/media/webrtc",
     "//chrome/browser/notifications",
     "//chrome/browser/omnibox",
     "//chrome/browser/optimization_guide",
+    "//chrome/browser/origin_trials",
     "//chrome/browser/page_content_annotations",
     "//chrome/browser/page_content_annotations:extraction_service",
+    "//chrome/browser/page_image_service",
     "//chrome/browser/passage_embeddings",
     "//chrome/browser/password_manager/factories",
     "//chrome/browser/payments/browser_binding:browser_bound_key_deleter",
     "//chrome/browser/permissions",
     "//chrome/browser/persisted_state_db",
     "//chrome/browser/plus_addresses",
+    "//chrome/browser/predictors",
     "//chrome/browser/prefs",
+    "//chrome/browser/preloading",
+    "//chrome/browser/preloading/prefetch/no_state_prefetch",
     "//chrome/browser/preloading/search_preload",
     "//chrome/browser/privacy_sandbox:headers",
     "//chrome/browser/privacy_sandbox/notice:factory",
     "//chrome/browser/reading_list",
+    "//chrome/browser/reduce_accept_language",
     "//chrome/browser/regional_capabilities",
     "//chrome/browser/safe_browsing",
     "//chrome/browser/safe_browsing:advanced_protection",
@@ -318,6 +357,7 @@ source_set("profiles_extra_parts_impl") {
     "//chrome/browser/segmentation_platform",
     "//chrome/browser/send_tab_to_self",
     "//chrome/browser/serial",
+    "//chrome/browser/sharing",
     "//chrome/browser/signin",
     "//chrome/browser/storage_access_api",
     "//chrome/browser/subscription_eligibility",
@@ -373,40 +413,40 @@ source_set("profiles_extra_parts_impl") {
     deps += [
       "//chrome/browser/auxiliary_search",
       "//chrome/browser/commerce/merchant_viewer:merchant_viewer_data_manager",
-      "//chrome/browser/fast_checkout",
       "//chrome/browser/tab",
       "//components/commerce/core:merchant_signal_db_proto",
     ]
   } else {
     deps += [
       "//chrome/browser/accessibility/tree_fixing:service",
+      "//chrome/browser/accessibility_annotator/content_annotator",
       "//chrome/browser/apps/app_service",
       "//chrome/browser/autofill",
       "//chrome/browser/badging",
-      "//chrome/browser/contextual_cueing",
-      "//chrome/browser/contextual_tasks:ui",
       "//chrome/browser/device_api",
       "//chrome/browser/devtools",
       "//chrome/browser/feedback",
       "//chrome/browser/hid",
       "//chrome/browser/media/router/discovery/access_code:access_code_sink_service",
+      "//chrome/browser/private_ai",
+      "//chrome/browser/record_replay",
       "//chrome/browser/screen_ai:screen_ai_service_router_factory",
       "//chrome/browser/search",
       "//chrome/browser/search_engine_choice",
       "//chrome/browser/themes",
+      "//chrome/browser/ui/desktop_to_mobile_promos:service",
       "//chrome/browser/ui/global_error",
       "//chrome/browser/ui/global_media_controls",
       "//chrome/browser/ui/lens",
       "//chrome/browser/ui/media_router",
       "//chrome/browser/ui/performance_controls",
-      "//chrome/browser/ui/promos:service",
       "//chrome/browser/ui/read_anything",
       "//chrome/browser/ui/tabs/organization",
       "//chrome/browser/ui/tabs/saved_tab_groups",
       "//chrome/browser/ui/views/side_panel",
       "//chrome/browser/ui/waap",
       "//chrome/browser/ui/webui/signin",
-      "//chrome/browser/ui/webui/signin:login",
+      "//chrome/browser/ui/webui/signin:login_ui_service",
       "//chrome/browser/user_education",
     ]
   }
@@ -439,8 +479,15 @@ source_set("profiles_extra_parts_impl") {
     deps += [ ":profile_util" ]
   }
 
+  if (is_win || is_mac || is_linux || is_chromeos) {
+    deps += [ "//chrome/browser/multistep_filter" ]
+  }
+
   if (is_win || is_mac || is_linux) {
-    deps += [ "//chrome/browser/browser_switcher" ]
+    deps += [
+      "//chrome/browser/browser_switcher",
+      "//chrome/browser/search_integrity",
+    ]
   }
 
   if (enable_extensions_core) {
@@ -467,13 +514,6 @@ source_set("profiles_extra_parts_impl") {
     deps += [ "//chrome/browser/enterprise/data_controls" ]
   }
 
-  if (enable_glic || enable_glic_android) {
-    deps += [ "//chrome/browser/glic" ]
-    if (enable_glic) {
-      deps += [ "//chrome/browser/ui/tabs:glic" ]
-    }
-  }
-
   if (enable_on_device_translation) {
     deps += [ "//chrome/browser/on_device_translation" ]
   }
@@ -490,7 +530,10 @@ source_set("profiles_extra_parts_impl") {
   }
 
   if (!is_android) {
-    deps += [ "//chrome/browser/password_manager:startup_import" ]
+    deps += [
+      "//chrome/browser/password_manager:startup_import",
+      "//chrome/browser/ui/tabs:glic",
+    ]
   }
 }
 
@@ -532,6 +575,7 @@ source_set("unit_tests") {
     "//base",
     "//base/test:test_support",
     "//chrome/browser",
+    "//chrome/browser/browsing_topics",
     "//chrome/browser/signin",
     "//chrome/test:test_support",
     "//components/prefs:test_support",

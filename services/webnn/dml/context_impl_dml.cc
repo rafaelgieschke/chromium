@@ -2,18 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/349653202): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "services/webnn/dml/context_impl_dml.h"
 
 #include <limits>
 
 #include "base/bits.h"
 #include "base/check.h"
-#include "base/check_is_test.h"
 #include "base/compiler_specific.h"
 #include "base/containers/span.h"
 #include "base/strings/strcat.h"
@@ -38,12 +32,6 @@
 namespace webnn::dml {
 
 using Microsoft::WRL::ComPtr;
-
-namespace {
-
-ContextImplDml::BackendForTesting* g_backend_for_testing = nullptr;
-
-}  // namespace
 
 // The context properties follow the supported feature level on the platform.
 // https://learn.microsoft.com/en-us/windows/ai/directml/dml-feature-level-history
@@ -140,7 +128,6 @@ ContextProperties ContextImplDml::GetProperties(
        // https://learn.microsoft.com/en-us/windows/win32/api/directml/ns-directml-dml_element_wise_dequantize_linear_operator_desc#tensor-support
        /*dequantize_linear_input=*/{kInts8To32, kMaxRank},
        /*dequantize_linear_scale=*/{DataTypeConstraint::kFloat32, kMaxRank},
-       /*dequantize_linear_zero_point=*/{kInts8To32, kMaxRank},
 
        // https://learn.microsoft.com/en-us/windows/win32/api/directml/ns-directml-dml_element_wise_add_operator_desc#tensor-support
        /*add_input=*/{kFloat16To32Ints32, kMaxRank},
@@ -577,8 +564,6 @@ ContextProperties ContextImplDml::GetProperties(
     properties.data_type_limits.input.data_types = SupportedDataTypes::All();
     properties.data_type_limits.constant.data_types = SupportedDataTypes::All();
     properties.data_type_limits.dequantize_linear_input.data_types = kInts4To32;
-    properties.data_type_limits.dequantize_linear_zero_point.data_types =
-        kInts4To32;
     properties.data_type_limits.quantize_linear_zero_point.data_types =
         DataTypeConstraint::kInts4ToInts8;
   }
@@ -602,6 +587,7 @@ ContextImplDml::ContextImplDml(
     scoped_refptr<base::SingleThreadTaskRunner> main_task_runner)
     : WebNNContextImpl(std::move(receiver),
                        std::move(context_provider),
+                       ContextBackendUma::kDirectML,
                        GetProperties(adapter->max_supported_feature_level()),
                        std::move(options),
                        std::move(write_tensor_consumer),
@@ -624,27 +610,15 @@ base::WeakPtr<WebNNContextImpl> ContextImplDml::AsWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
 
-// static
-void ContextImplDml::SetBackendForTesting(
-    BackendForTesting* backend_for_testing) {
-  g_backend_for_testing = backend_for_testing;
-}
-
 void ContextImplDml::CreateGraphImpl(
     mojo::PendingAssociatedReceiver<mojom::WebNNGraph> receiver,
     mojom::GraphInfoPtr graph_info,
     WebNNGraphImpl::ComputeResourceInfo compute_resource_info,
     base::flat_map<OperandId, std::unique_ptr<WebNNConstantOperand>>
         constant_operands,
-    base::flat_map<OperandId, WebNNTensorImpl*> constant_tensor_operands,
+    base::flat_map<OperandId, scoped_refptr<WebNNTensorImpl>>
+        constant_tensor_operands,
     WebNNContextImpl::CreateGraphImplCallback callback) {
-  if (g_backend_for_testing) {
-    g_backend_for_testing->CreateGraphImpl(std::move(receiver), this,
-                                           std::move(compute_resource_info),
-                                           std::move(callback));
-    return;
-  }
-
   GraphImplDml::CreateAndBuild(
       std::move(receiver), adapter_, weak_factory_.GetWeakPtr(),
       std::move(graph_info), std::move(compute_resource_info),
@@ -658,11 +632,6 @@ base::expected<scoped_refptr<WebNNTensorImpl>, mojom::ErrorPtr>
 ContextImplDml::CreateTensorImpl(
     mojo::PendingAssociatedReceiver<mojom::WebNNTensor> receiver,
     mojom::TensorInfoPtr tensor_info) {
-  if (g_backend_for_testing) {
-    return g_backend_for_testing->CreateTensorImpl(this, std::move(receiver),
-                                                   std::move(tensor_info));
-  }
-
   // DML requires resources to be in multiple of 4 bytes.
   // https://learn.microsoft.com/en-us/windows/ai/directml/dml-helper-functions#dmlcalcbuffertensorsize
   constexpr uint64_t kDMLBufferAlignment = 4ull;
@@ -722,9 +691,8 @@ ContextImplDml::CreateTensorImpl(
   //
   // Safe to use ContextImplDml* because this context owns the buffer
   // being connected and that context cannot destruct before the buffer.
-  return base::MakeRefCounted<TensorImplDml>(std::move(receiver),
-                                             std::move(buffer), AsWeakPtr(),
-                                             std::move(tensor_info));
+  return base::MakeRefCounted<TensorImplDml>(
+      std::move(receiver), std::move(buffer), *this, std::move(tensor_info));
 }
 
 base::expected<scoped_refptr<WebNNTensorImpl>, mojom::ErrorPtr>
@@ -744,9 +712,9 @@ ContextImplDml::CreateTensorFromSharedImageImpl(
                                         "Failed to create tensor."));
   }
 
-  return base::MakeRefCounted<TensorImplDml>(
-      std::move(receiver), std::move(representation), AsWeakPtr(),
-      std::move(tensor_info));
+  return base::MakeRefCounted<TensorImplDml>(std::move(receiver),
+                                             std::move(representation), *this,
+                                             std::move(tensor_info));
 }
 
 void ContextImplDml::ReadTensor(
@@ -837,8 +805,9 @@ void ContextImplDml::OnReadbackComplete(
     return;
   }
 
-  mojo_base::BigBuffer dst_buffer = WriteDataToDataPipeOrBigBuffer(base::span(
-      static_cast<const uint8_t*>(mapped_download_data), read_byte_size));
+  mojo_base::BigBuffer dst_buffer =
+      WriteDataToDataPipeOrBigBuffer(UNSAFE_TODO(base::span(
+          static_cast<const uint8_t*>(mapped_download_data), read_byte_size)));
 
   download_buffer->Unmap(0, nullptr);
 
@@ -980,7 +949,8 @@ void ContextImplDml::HandleContextLostOrCrash(std::string_view message_for_log,
     // device removal.
     // TODO(crbug.com/364445586): Move non-GPU backends like TFLite outside of
     // the GPU process.
-    DestroyAllContextsAndKillGpuProcess("device removed.");
+    OnLost("Device removed.");
+    DestroyAllContextsAndKillGpuProcess();
     return;
   }
 
@@ -1002,16 +972,6 @@ void ContextImplDml::HandleContextLostOrCrash(std::string_view message_for_log,
 
 CommandQueue* ContextImplDml::GetCommandQueue() const {
   return adapter_->command_queue();
-}
-
-void ContextImplDml::RemoveDeviceForTesting() {
-  CHECK_IS_TEST();
-
-  ComPtr<ID3D12Device5> d3d12_device_5;
-  CHECK_EQ(
-      adapter_->d3d12_device()->QueryInterface(IID_PPV_ARGS(&d3d12_device_5)),
-      S_OK);
-  d3d12_device_5->RemoveDevice();
 }
 
 }  // namespace webnn::dml

@@ -125,6 +125,11 @@
       interfaceName: "HTMLUnknownElement",
     },
     {
+      name: "credential",
+      interfaceName: "HTMLCredentialElement",
+      runtimeEnabled: "LoginElement",
+    },
+    {
       name: "data",
       interfaceName: "HTMLDataElement",
     },
@@ -307,6 +312,11 @@
       interfaceName: "HTMLLIElement",
     },
     {
+      name: "login",
+      interfaceName: "HTMLLoginElement",
+      runtimeEnabled: "LoginElement",
+    },
+    {
       name: "link",
       constructorNeedsCreateElementFlags: true,
     },
@@ -399,13 +409,6 @@
       interfaceName: "HTMLParagraphElement",
     },
     "param",
-    {
-      name: "permission",
-      interfaceName: "HTMLPermissionElement",
-      runtimeEnabled: "PermissionElement",
-      runtimeFlagHasOriginTrial: true,
-      noTypeHelpers: true,
-    },
     {
       name: "picture",
       interfaceName: "HTMLPictureElement",

@@ -15,6 +15,7 @@
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/cpp/permissions_policy/permissions_policy.h"
 #include "services/network/public/mojom/referrer_policy.mojom-blink-forward.h"
+#include "third_party/blink/public/common/permissions_policy/document_policy.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "third_party/blink/public/mojom/blob/blob_url_store.mojom-blink-forward.h"
@@ -58,6 +59,7 @@ struct CORE_EXPORT GlobalScopeCreationParams final {
       Vector<network::mojom::blink::ContentSecurityPolicyPtr>
           response_content_security_policies,
       network::mojom::ReferrerPolicy referrer_policy,
+      DocumentPolicy::DocumentPolicyBundle document_policy,
       const SecurityOrigin*,
       bool starter_secure_context,
       HttpsState starter_https_state,
@@ -80,7 +82,7 @@ struct CORE_EXPORT GlobalScopeCreationParams final {
       ukm::SourceId ukm_source_id = ukm::kInvalidSourceId,
       const std::optional<ExecutionContextToken>& parent_context_token =
           std::nullopt,
-      bool parent_cross_origin_isolated_capability = false,
+      bool cross_origin_isolated_capability = false,
       bool parent_is_isolated_context = false,
       InterfaceRegistry* interface_registry = nullptr,
       scoped_refptr<base::SingleThreadTaskRunner>
@@ -134,6 +136,8 @@ struct CORE_EXPORT GlobalScopeCreationParams final {
       response_content_security_policies;
 
   network::mojom::ReferrerPolicy referrer_policy;
+
+  DocumentPolicy::DocumentPolicyBundle document_policy;
 
   // Origin trial features to be inherited by worker/worklet from the document
   // loading it.
@@ -218,8 +222,8 @@ struct CORE_EXPORT GlobalScopeCreationParams final {
   std::optional<ExecutionContextToken> parent_context_token;
 
   // https://html.spec.whatwg.org/C/#concept-settings-object-cross-origin-isolated-capability
-  // Used by dedicated workers, and set to false when there is no parent.
-  const bool parent_cross_origin_isolated_capability;
+  // Whether the execution context has access to cross-origin isolated APIs.
+  const bool cross_origin_isolated_capability;
 
   // Governs whether Direct Sockets are available in a worker context, false
   // when no parent exists.

@@ -17,7 +17,8 @@ const char kVersionSwitchName[] = "version";
 const char kProcessTypeController[] = "controller";
 const char kProcessTypeDaemon[] = "daemon";
 const char kProcessTypeDesktop[] = "desktop";
-const char kProcessTypeHost[] = "host";
+const char kProcessTypeNetwork[] = "network";
+const char kProcessTypeSingleProcessHost[] = "single_process_host";
 const char kProcessTypeRdpDesktopSession[] = "rdp_desktop_session";
 const char kProcessTypeEvaluateCapability[] = "evaluate_capability";
 const char kProcessTypeFileChooser[] = "file_chooser";
@@ -25,12 +26,14 @@ const char kProcessTypeUrlForwarderConfigurator[] =
     "url_forwarder_configurator";
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 const char kProcessTypeXSessionChooser[] = "xsession_chooser";
+const char kProcessTypeUserSystemdEnv[] = "user_systemd_env";
 #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
 const char kEvaluateCapabilitySwitchName[] = "evaluate-type";
 
 #if BUILDFLAG(IS_LINUX)
 const char kEnableWtmpdb[] = "enable-wtmpdb";
+const char kSystemdUserEnvUsernameSwitchName[] = "username";
 #endif
 
 const char kEnableCorpMessaging[] = "enable-corp-messaging";

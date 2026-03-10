@@ -26,6 +26,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
+#include "base/scoped_observation.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/bind.h"
@@ -38,10 +39,11 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/tabs/features.h"
 #include "chrome/browser/ui/tabs/split_tab_metrics.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
@@ -59,6 +61,7 @@
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/tabs/window_finder.h"
 #include "chrome/browser/ui/web_applications/test/web_app_browsertest_util.h"
+#include "chrome/browser/web_applications/model/display_override.h"
 #include "chrome/browser/web_applications/test/os_integration_test_override_impl.h"
 #include "chrome/browser/web_applications/test/web_app_install_test_utils.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
@@ -70,11 +73,11 @@
 #include "chromeos/ui/base/window_properties.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/prefs/pref_service.h"
+#include "components/split_tabs/split_tab_id.h"
 #include "components/tab_groups/tab_group_color.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "components/tab_groups/tab_group_visual_data.h"
 #include "components/tabs/public/split_tab_data.h"
-#include "components/tabs/public/split_tab_id.h"
 #include "components/tabs/public/tab_group.h"
 #include "components/tabs/public/tab_interface.h"
 #include "content/public/browser/web_contents.h"
@@ -97,6 +100,7 @@
 #include "ui/views/controls/native/native_view_host.h"
 #include "ui/views/test/widget_activation_waiter.h"
 #include "ui/views/view.h"
+#include "ui/views/view_utils.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_delegate.h"
 
@@ -126,6 +130,7 @@
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/test/simple_test_tick_clock.h"
+#include "chrome/browser/ash/boca/on_task/on_task_locked_controller.h"
 #include "chrome/browser/ash/system_web_apps/test_support/test_system_web_app_installation.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller_chromeos.h"
@@ -179,7 +184,9 @@ class FakeTabDragTarget : public TabDragTarget {
     return nullptr;
   }
   void OnTabDragEntered() override { drag_entered_ = true; }
-  void OnTabDragExited() override { drag_exited_ = true; }
+  void OnTabDragExited(const gfx::Point& point_in_screen) override {
+    drag_exited_ = true;
+  }
   void OnTabDragEnded() override { drag_ended_ = true; }
   bool CanDropTab() override { return can_drop_; }
   void HandleTabDrop(DragController& controller) override {
@@ -350,7 +357,7 @@ class QuitDraggingObserver {
 //   by releasing the mouse or cancelling the DnD session;
 // - else, that the move loop ends, i.e. attaching to an existing browser or
 //   fully ending the tab drag.
-class BrowserChangeWaiter : public BrowserListObserver {
+class BrowserChangeWaiter : public BrowserCollectionObserver {
  public:
   enum class ChangeType {
     kAdded,
@@ -358,11 +365,12 @@ class BrowserChangeWaiter : public BrowserListObserver {
   };
 
   explicit BrowserChangeWaiter(ChangeType type) : type_(type) {
-    BrowserList::AddObserver(this);
+    browser_collection_observation_.Observe(
+        GlobalBrowserCollection::GetInstance());
   }
   BrowserChangeWaiter(const BrowserChangeWaiter&) = delete;
   BrowserChangeWaiter& operator=(const BrowserChangeWaiter&) = delete;
-  ~BrowserChangeWaiter() override { BrowserList::RemoveObserver(this); }
+  ~BrowserChangeWaiter() override = default;
 
   // The closure must ensure the system DnD session/move loop ends (see comment
   // above).
@@ -371,14 +379,14 @@ class BrowserChangeWaiter : public BrowserListObserver {
     run_loop_.Run();
   }
 
-  // BrowserListObserver:
-  void OnBrowserAdded(Browser* browser) override {
+  // BrowserCollectionObserver:
+  void OnBrowserCreated(BrowserWindowInterface* browser) override {
     if (type_ == ChangeType::kAdded) {
       Quit();
     }
   }
 
-  void OnBrowserRemoved(Browser* browser) override {
+  void OnBrowserClosed(BrowserWindowInterface* browser) override {
     if (type_ == ChangeType::kRemoved) {
       Quit();
     }
@@ -396,16 +404,21 @@ class BrowserChangeWaiter : public BrowserListObserver {
     quit_called_ = true;
     if (closure_) {
       // For ChangeType::kRemoved, the browser is still closing and
-      // synchronously running the closure now can lead to reentrancy issues, so
-      // we instead PostTask() it. We also need to make sure we only quit the
-      // RunLoop after the closure has run.
+      // synchronously running the closure now can lead to reentrancy issues,
+      // so we instead PostTask() it. We also need to make sure we only quit
+      // the RunLoop after the closure has run.
+      // Use a double-PostTask to leverage SequencedTaskRunner FIFO ordering:
+      // the first PostTask runs before SynchronouslyDestroyBrowser (enqueued
+      // later in OnWindowClosing), and the second runs after it, ensuring the
+      // closure executes after ~Browser() completes. See crbug.com/431671320.
       // It won't hurt to use the same approach for ChangeType::kAdded.
       base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
           FROM_HERE,
           base::BindOnce(
               [](base::OnceClosure closure, base::OnceClosure quit_closure) {
-                std::move(closure).Run();
-                std::move(quit_closure).Run();
+                base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+                    FROM_HERE,
+                    std::move(closure).Then(std::move(quit_closure)));
               },
               std::move(closure_), run_loop_.QuitClosure()));
     } else {
@@ -417,6 +430,8 @@ class BrowserChangeWaiter : public BrowserListObserver {
   bool quit_called_ = false;
   base::OnceClosure closure_;
   base::RunLoop run_loop_{base::RunLoop::Type::kNestableTasksAllowed};
+  base::ScopedObservation<GlobalBrowserCollection, BrowserCollectionObserver>
+      browser_collection_observation_{this};
 };
 
 void SetID(WebContents* web_contents, int id) {
@@ -452,7 +467,8 @@ std::string IDString(TabStripModel* model) {
 }
 
 TabStrip* GetTabStripForBrowser(BrowserWindowInterface* browser) {
-  return BrowserView::GetBrowserViewForBrowser(browser)->tabstrip();
+  return BrowserView::GetBrowserViewForBrowser(browser)
+      ->horizontal_tab_strip_for_testing();
 }
 
 TabDragController* GetTabDragController(TabStrip* tab_strip) {
@@ -2024,7 +2040,7 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
 }
 
 // Wayland-chrome doesn't cancel tab dragging on esc.
-#if !BUILDFLAG(IS_OZONE_WAYLAND)
+#if !BUILDFLAG(SUPPORTS_OZONE_WAYLAND)
 
 // Canceling tab dragging while the detached tab is reattached should
 // not cause dangling ptr. (crbug.com/459242414)
@@ -2070,7 +2086,7 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   EXPECT_EQ("0 1", IDString(browser()->tab_strip_model()));
 }
 
-#endif  // !BUILDFLAG(IS_OZONE_WAYLAND)
+#endif  // !BUILDFLAG(SUPPORTS_OZONE_WAYLAND)
 
 #if BUILDFLAG(IS_WIN)
 
@@ -2303,7 +2319,7 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
 
 // TODO(crbug.com/40934892): ChromeOS and Wayland flakes for tests that involve
 // detaching to a new window.
-#if !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_OZONE_WAYLAND)
+#if !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(SUPPORTS_OZONE_WAYLAND)
 class TabDragTargetTest : public DetachToBrowserTabDragControllerTest {
  public:
   TabDragTargetTest() {
@@ -2320,7 +2336,7 @@ class TabDragTargetTest : public DetachToBrowserTabDragControllerTest {
   std::unique_ptr<test::FakeTabDragPointResolver> resolver_;
 };
 
-#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OZONE_WAYLAND)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(SUPPORTS_OZONE_WAYLAND)
 INSTANTIATE_TEST_SUITE_P(
     TabDragging,
     TabDragTargetTest,
@@ -3799,10 +3815,10 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
 }
 
 // Creates a browser with four tabs. The first two tabs belong in Tab Group 1.
-// Dragging the collapsed group header of Tab Group 1 will result in Tab Group 1
-// expanding.
+// Dragging the collapsed group header of Tab Group 1 will not expand the
+// group.
 IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
-                       DragCollapsedGroupHeaderExpandsGroup) {
+                       DragCollapsedGroupHeaderRemainsCollapsed) {
   ASSERT_TRUE(browser()->tab_strip_model()->SupportsTabGroups());
 
   TabStrip* tab_strip = GetTabStripForBrowser(browser());
@@ -3820,14 +3836,14 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   ASSERT_EQ(4, model->count());
   ASSERT_EQ(2u, group_model->GetTabGroup(group)->ListTabs().length());
 
-  // Drag group1, this should expand the group.
+  // Drag group1, group should remain collapsed.
   ASSERT_TRUE(PressInputAtCenter(tab_strip->group_header(group)));
   ASSERT_TRUE(DragInputToCenter(tab_strip->tab_at(1)));
   ASSERT_TRUE(TabDragController::IsActive());
-  EXPECT_FALSE(model->IsGroupCollapsed(group));
+  EXPECT_TRUE(model->IsGroupCollapsed(group));
   ASSERT_TRUE(ReleaseInput());
   StopAnimating(tab_strip);
-  EXPECT_FALSE(model->IsGroupCollapsed(group));
+  EXPECT_TRUE(model->IsGroupCollapsed(group));
 }
 
 #if BUILDFLAG(IS_MAC)
@@ -3971,7 +3987,8 @@ class DetachToBrowserTabDragControllerTestWithTabbedWebApp
     web_app_info->title = u"A tabbed web app";
     web_app_info->user_display_mode =
         web_app::mojom::UserDisplayMode::kStandalone;
-    web_app_info->display_override = {blink::mojom::DisplayMode::kTabbed};
+    web_app_info->display_override = {
+        web_app::DisplayOverride::Create(blink::mojom::DisplayMode::kTabbed)};
     if (add_home_tab) {
       blink::Manifest::TabStrip manifest_tab_strip;
       manifest_tab_strip.home_tab = blink::Manifest::HomeTabParams();
@@ -4274,15 +4291,14 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTest,
   // Place the first browser directly below the second in such a way that
   // dragging a tab upwards will drag it directly into the second browser's
   // tabstrip.
-  const BrowserView* const browser_view2 =
+  BrowserView* const browser_view2 =
       BrowserView::GetBrowserViewForBrowser(browser2);
-  const gfx::Rect tabstrip_region2_bounds =
-      browser_view2->browser_widget()
-          ->GetFrameView()
-          ->GetBoundsForTabStripRegion(
-              browser_view2->tab_strip_view()->GetMinimumSize());
+  browser_view2->GetWidget()->LayoutRootViewIfNecessary();
+  auto* const tabstrip = browser_view2->tab_strip_view()->GetTabStripView();
+  gfx::Rect tabstrip_bounds = tabstrip->GetLocalBounds();
+  tabstrip_bounds = tabstrip->ConvertRectToWidget(tabstrip_bounds);
   gfx::Rect bounds = initial_bounds;
-  bounds.Offset(0, tabstrip_region2_bounds.bottom());
+  bounds.Offset(0, tabstrip_bounds.bottom());
   browser()->window()->SetBounds(bounds);
 
   // Ensure the first browser is on top so clicks go to it.
@@ -4762,7 +4778,7 @@ namespace {
 bool WebContentsIsFastResized(BrowserWindowInterface* browser) {
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
   ContentsWebView* contents_web_view =
-      static_cast<ContentsWebView*>(browser_view->GetContentsView());
+      views::AsViewClass<ContentsWebView>(browser_view->GetContentsView());
   return contents_web_view->holder()->fast_resize();
 }
 
@@ -5869,7 +5885,8 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTestWithOnTaskLocked,
   EXPECT_EQ(Browser::Type::TYPE_APP, browser()->GetType());
 
   // Lock the app for OnTask and set up app for testing drag behavior.
-  browser()->SetLockedForOnTask(true);
+  ash::boca::OnTaskLockedController::From(browser())->set_locked_for_on_task(
+      true);
   AddTabsAndResetBrowser(browser(), /*additional_tabs=*/3, GetAppUrl());
   TabStripModel* const tab_strip_model = browser()->tab_strip_model();
   ASSERT_EQ("0 1 2 3", IDString(tab_strip_model));
@@ -5903,7 +5920,8 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTestWithOnTaskLocked,
   EXPECT_EQ(Browser::Type::TYPE_APP, browser()->GetType());
 
   // Lock the app for OnTask and set up app for testing drag behavior.
-  browser()->SetLockedForOnTask(true);
+  ash::boca::OnTaskLockedController::From(browser())->set_locked_for_on_task(
+      true);
   AddTabsAndResetBrowser(browser(), /*additional_tabs=*/3, GetAppUrl());
 
   // Drag tab away from tab strip and verify it is not detached.
@@ -5932,7 +5950,8 @@ IN_PROC_BROWSER_TEST_P(DetachToBrowserTabDragControllerTestWithOnTaskLocked,
   EXPECT_EQ(Browser::Type::TYPE_APP, browser()->GetType());
 
   // Lock the app for OnTask.
-  browser()->SetLockedForOnTask(true);
+  ash::boca::OnTaskLockedController::From(browser())->set_locked_for_on_task(
+      true);
   const gfx::Rect& initial_bounds =
       browser()->window()->GetNativeWindow()->bounds();
 
@@ -6029,9 +6048,6 @@ class SideBySideTabDragControllerTest
                                     ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
     }
   }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_{features::kSideBySide};
 };
 
 // Flaky. https://crbug.com/40748225

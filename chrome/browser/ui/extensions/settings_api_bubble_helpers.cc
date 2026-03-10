@@ -4,9 +4,12 @@
 
 #include "chrome/browser/ui/extensions/settings_api_bubble_helpers.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/auto_reset.h"
+#include "base/functional/bind.h"
+#include "base/memory/ptr_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -134,20 +137,27 @@ void MaybeShowExtensionControlledSearchNotification(
     return;
   }
 
-  std::optional<ExtensionSettingsOverriddenDialog::Params> params =
-      settings_overridden_params::GetSearchOverriddenParams(profile);
-  if (!params) {
-    return;
-  }
+  // Ansynchronously collect the parameters needed for the dialog, then show it.
+  settings_overridden_params::GetSearchOverriddenParamsThenRun(
+      web_contents,
+      base::BindOnce(
+          [](Profile* profile, content::WebContents* web_contents,
+             std::unique_ptr<ExtensionSettingsOverriddenDialog::Params>
+                 params) {
+            if (!params) {
+              return;
+            }
+            auto dialog = std::make_unique<ExtensionSettingsOverriddenDialog>(
+                std::move(*params), *profile);
+            if (!dialog->ShouldShow()) {
+              return;
+            }
 
-  auto dialog = std::make_unique<ExtensionSettingsOverriddenDialog>(
-      std::move(*params), profile);
-  if (!dialog->ShouldShow()) {
-    return;
-  }
-
-  gfx::NativeWindow parent_window = web_contents->GetTopLevelNativeWindow();
-  ShowSettingsOverriddenDialog(std::move(dialog), parent_window);
+            gfx::NativeWindow parent_window =
+                web_contents->GetTopLevelNativeWindow();
+            ShowSettingsOverriddenDialog(std::move(dialog), parent_window);
+          },
+          profile, web_contents));
 #endif
 }
 
@@ -187,6 +197,7 @@ void MaybeShowExtensionControlledNewTabPage(
   }
 
   Profile* const profile = browser->GetProfile();
+  CHECK(profile);
 
   std::optional<ExtensionSettingsOverriddenDialog::Params> params =
       settings_overridden_params::GetNtpOverriddenParams(profile);
@@ -195,7 +206,7 @@ void MaybeShowExtensionControlledNewTabPage(
   }
 
   auto dialog = std::make_unique<ExtensionSettingsOverriddenDialog>(
-      std::move(*params), profile);
+      std::move(*params), *profile);
   if (!dialog->ShouldShow()) {
     return;
   }

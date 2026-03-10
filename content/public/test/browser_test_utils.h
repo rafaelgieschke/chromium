@@ -588,6 +588,14 @@ void SimulateKeyPress(WebContents* web_contents,
                       bool alt,
                       bool command);
 
+// Sends a key press asynchronously for the given |character|.
+// Figures out the appropriate |key|, |code|, |key_code| and |shift| modifier
+// for the US layout.
+//
+// Note: Input event to a page may not work right after a page load, see
+// `SimulateEndOfPaintHoldingOnPrimaryMainFrame` for a workaround.
+void SimulateCharTyped(WebContents* web_contents, char16_t character);
+
 // Like SimulateKeyPress(), but does not send the char (AKA keypress) event.
 // This is useful for arrow keys and other key presses that do not generate
 // characters.
@@ -744,10 +752,10 @@ struct JsLiteralHelper {
   }
 
   static base::Value Convert(const base::Value& value) { return value.Clone(); }
-  static base::Value Convert(const base::Value::List& value) {
+  static base::Value Convert(const base::ListValue& value) {
     return base::Value(value.Clone());
   }
-  static base::Value Convert(const base::Value::Dict& value) {
+  static base::Value Convert(const base::DictValue& value) {
     return base::Value(value.Clone());
   }
 };
@@ -776,7 +784,7 @@ struct JsLiteralHelper<url::Origin> {
 // string literals. |args| can be a mix of different types.
 template <typename... Args>
 base::Value ListValueOf(Args&&... args) {
-  base::Value::List values;
+  base::ListValue values;
   (values.Append(JsLiteralHelper<std::remove_cvref_t<Args>>::Convert(
        std::forward<Args>(args))),
    ...);
@@ -815,8 +823,7 @@ base::Value ListValueOf(Args&&... args) {
 // supported by base::Value. Numbers, lists, and dicts also work.
 template <typename... Args>
 std::string JsReplace(std::string_view script_template, Args&&... args) {
-  base::Value::List values =
-      ListValueOf(std::forward<Args>(args)...).TakeList();
+  base::ListValue values = ListValueOf(std::forward<Args>(args)...).TakeList();
   std::vector<std::string> replacements(values.size());
   for (size_t i = 0; i < values.size(); ++i) {
     CHECK(base::JSONWriter::Write(values[i], &replacements[i]));
@@ -886,8 +893,8 @@ class EvalJsResult {
   [[nodiscard]] int ExtractInt() const;
   [[nodiscard]] bool ExtractBool() const;
   [[nodiscard]] double ExtractDouble() const;
-  [[nodiscard]] const base::Value::List& ExtractList() const LIFETIME_BOUND;
-  [[nodiscard]] const base::Value::Dict& ExtractDict() const LIFETIME_BOUND;
+  [[nodiscard]] const base::ListValue& ExtractList() const LIFETIME_BOUND;
+  [[nodiscard]] const base::DictValue& ExtractDict() const LIFETIME_BOUND;
   [[nodiscard]] const std::string& ExtractError() const LIFETIME_BOUND;
 
   [[nodiscard]] bool is_ok() const {
@@ -898,6 +905,7 @@ class EvalJsResult {
     return is_ok() && value()->is_string();
   }
   [[nodiscard]] bool is_bool() const { return is_ok() && value()->is_bool(); }
+  [[nodiscard]] bool is_int() const { return is_ok() && value()->is_int(); }
   [[nodiscard]] bool is_list() const { return is_ok() && value()->is_list(); }
   [[nodiscard]] bool is_dict() const { return is_ok() && value()->is_dict(); }
 
@@ -1071,9 +1079,6 @@ RenderFrameHost* ChildFrameAt(const ToRenderFrameHost& adapter, size_t index);
 // Returns true if |frame| has origin-keyed process isolation due to the
 // OriginAgentCluster header.
 bool HasOriginKeyedProcess(RenderFrameHost* frame);
-
-// Returns true if `frame` has a sandboxed SiteInstance.
-bool HasSandboxedSiteInstance(RenderFrameHost* frame);
 
 // Returns the frames visited by |RenderFrameHost::ForEachRenderFrameHost| in
 // the same order.
@@ -1328,7 +1333,8 @@ class RenderProcessHostWatcher : public RenderProcessHostObserver {
   ~RenderProcessHostWatcher() override;
 
   // Waits until the expected event is triggered. This may only be called once.
-  void Wait();
+  // Returns false if waiting stops for any other reason, e.g. timeout.
+  bool Wait();
 
   // Returns true if a renderer process exited cleanly (without hitting
   // RenderProcessExited with an abnormal TerminationStatus). This should be
@@ -1336,8 +1342,8 @@ class RenderProcessHostWatcher : public RenderProcessHostObserver {
   bool did_exit_normally() { return did_exit_normally_; }
 
  private:
-  // Quit the run loop and clean up.
-  void QuitRunLoop();
+  // Register the event and clean up.
+  void OnEvent();
 
   // Overridden RenderProcessHost::LifecycleObserver methods.
   void RenderProcessReady(RenderProcessHost* host) override;
@@ -1352,8 +1358,7 @@ class RenderProcessHostWatcher : public RenderProcessHostObserver {
 
   std::unique_ptr<ScopedAllowRendererCrashes> allow_renderer_crashes_;
 
-  base::RunLoop run_loop_;
-  base::OnceClosure quit_closure_;
+  WaiterHelper waiter_helper_;
 };
 
 // Implementation helper for:
@@ -1533,8 +1538,17 @@ class RenderFrameSubmissionObserver
   // Resets the current |render_frame_count|;
   void ResetCounter() { render_frame_count_ = 0; }
 
-  // Blocks the browser ui thread until the next OnRenderFrameSubmission.
+  // Blocks the browser ui thread until the next OnRenderFrameSubmission
+  // or OnRenderFrameMetadataChangedAfterActivation.
   void WaitForAnyFrameSubmission();
+
+  // Tell observer to explicitly wait for next frame submission in
+  // WaitForNextFrameSubmission.
+  void SetWaitForNextFrame();
+
+  // Blocks the browser ui thread until a new frame is submitted since
+  // the frame count is recorded in SetWaitForNextFrame.
+  void WaitForNextFrameSubmission();
 
   // Blocks the browser ui thread until the next
   // OnRenderFrameMetadataChangedAfterActivation.
@@ -1582,17 +1596,18 @@ class RenderFrameSubmissionObserver
   void OnLocalSurfaceIdChanged(
       const cc::RenderFrameMetadata& metadata) override;
 
-  // If true then the next OnRenderFrameSubmission will cancel the blocking
-  // |run_loop_| otherwise the blocking will continue until the next
-  // OnRenderFrameMetadataChangedAfterActivation.
-  bool break_on_any_frame_ = false;
-
   const base::WeakPtr<RenderFrameMetadataProviderImpl>
       render_frame_metadata_provider_;
   base::OnceClosure quit_closure_;
   // If non-null, run when metadata changes.
   base::OnceClosure metadata_change_closure_;
   int render_frame_count_ = 0;
+
+  // Used to wait for render frame submission. In WaitForNextFrameSubmission, it
+  // is used as a target render frame count. In WaitForAnyFrameSubmission, it is
+  // used to block until one of OnRenderFrameSubmission or
+  // OnRenderFrameMetadataChangedAfterActivation is called.
+  std::optional<int> wait_for_render_frame_count_;
 };
 
 // This class is intended to synchronize the renderer main thread, renderer impl
@@ -1714,6 +1729,27 @@ class InputEventAckWaiter : public RenderWidgetHost::InputEventObserver {
   InputEventAckPredicate predicate_;
   bool event_received_ = false;
   base::OnceClosure quit_closure_;
+};
+
+// Watches for gesture tap events.
+class GestureTapEventObserver : public RenderWidgetHost::InputEventObserver {
+ public:
+  GestureTapEventObserver() = default;
+
+  GestureTapEventObserver(const GestureTapEventObserver&) = delete;
+  GestureTapEventObserver& operator=(const GestureTapEventObserver&) = delete;
+
+  ~GestureTapEventObserver() override = default;
+
+  // RenderWidgetHost::InputEventObserver:
+  void OnInputEvent(const RenderWidgetHost& host,
+                    const blink::WebInputEvent& event,
+                    InputEventSource source) override;
+
+  int num_gesture_tap_seen() const { return num_gesture_tap_seen_; }
+
+ private:
+  int num_gesture_tap_seen_ = 0;
 };
 
 // Sets up a ui::TestClipboard for use in browser tests. On Windows,
@@ -2272,10 +2308,9 @@ class BlobURLStoreInterceptor
 
   blink::mojom::BlobURLStore* GetForwardingInterface() override;
 
-  void Register(
-      mojo::PendingRemote<blink::mojom::Blob> blob,
-      const GURL& url,
-      RegisterCallback callback) override;
+  void Register(mojo::PendingRemote<blink::mojom::Blob> blob,
+                const GURL& url,
+                RegisterCallback callback) override;
 
  private:
   explicit BlobURLStoreInterceptor(GURL target_url);
@@ -2300,6 +2335,13 @@ int LoadBasicRequest(network::mojom::NetworkContext* network_context,
 // has the same properties as factories vended to the Renderer process that
 // hosts the |frame|).
 int LoadBasicRequest(RenderFrameHost* frame, const GURL& url);
+
+// Wait until the network context has/doesn't have preloaded shared dictionary
+// info. Returns true if the expected value was observed within the timeout,
+// false otherwise.
+bool WaitUntilHasPreloadSharedDictionaryInfo(
+    network::mojom::NetworkContext* network_context,
+    bool expected_value);
 
 // Ensures that all StoragePartitions for the given BrowserContext have their
 // cookies flushed to disk.
@@ -2463,40 +2505,50 @@ class DidFinishNavigationObserver : public WebContentsObserver {
   base::RepeatingCallback<void(NavigationHandle*)> callback_;
 };
 
-// Wait for a new WebContents to be created, and for it to finish navigation.
-// It will detect WebContents creation after construction, even if it's before
-// Wait() is called.  The intended pattern is:
+// Wait for new `WebContents` to be created and finish loading. It will detect
+// `WebContents` creation after construction, even if it's before `Wait()` is
+// called. The intended pattern is:
 //
 // CreateAndLoadWebContentsObserver observer;
 // ...Do something that creates one WebContents and causes it to navigate...
 // observer.Wait();
 class CreateAndLoadWebContentsObserver {
  public:
-  // Used to wait for the given number of WebContents to be created. The load of
-  // the last expected WebContents is awaited.
-  explicit CreateAndLoadWebContentsObserver(int num_expected_contents = 1);
+  CreateAndLoadWebContentsObserver(
+      size_t num_expected_contents = 1,
+      base::RepeatingCallback<bool(WebContents*)> filter =
+          base::BindRepeating([](WebContents*) { return true; }));
   ~CreateAndLoadWebContentsObserver();
 
-  // Wait for the last expected WebContents to finish loading. The test will
-  // fail if an additional WebContents creation is observed before `Wait()`
-  // completes.
+  // Wait for `num_expected_contents_` `WebContents` passing `filter_` to be
+  // created and loaded. The test will fail if too many are created before
+  // `Wait()` completes. The test will timeout and fail if too few are created.
   WebContents* Wait();
 
  private:
+  // Callback for `RegisterWebContentsCreationCallback()`.
   void OnWebContentsCreated(WebContents* web_contents);
 
-  // Unregister for WebContents creation callbacks if we are registered.  May
-  // be called multiple times.
-  void UnregisterIfNeeded();
+  // Returns the `WebContents` created and loaded passing `filter_` since this
+  // was constructed.
+  std::vector<WebContents*> GetFilteredWebContents();
 
-  std::optional<LoadStopObserver> load_stop_observer_;
+  // Subscription for `RegisterWebContentsCreationCallback()`.
   base::CallbackListSubscription creation_subscription_;
 
-  raw_ptr<WebContents, DanglingUntriaged> web_contents_ = nullptr;
+  // Allows `Wait()` to sleep until a new `WebContents` is created.
   base::OnceClosure contents_creation_quit_closure_;
 
-  const int num_expected_contents_;
-  int num_new_contents_seen_ = 0;
+  // Allows `Wait()` to sleep until each `WebContents` loads.
+  std::vector<std::unique_ptr<LoadStopObserver>> load_stop_observers_;
+
+  // Number of `WebContents` expected to be created and loaded passing
+  // `filter_`.
+  const size_t num_expected_contents_;
+
+  // Only `WebContents` that return true from `filter_` are counted. Useful for
+  // tests that e.g. want to ignore certain WeBUIs.
+  base::RepeatingCallback<bool(WebContents*)> filter_;
 };
 
 // Waits for the given number of calls to
@@ -2755,6 +2807,10 @@ class RequestCloseWidgetInterceptor
   mojo::test::ScopedSwapImplForTesting<blink::mojom::PopupWidgetHost>
       swapped_impl_;
 };
+
+// Crash the process associated with `adapter`. Waits for the crash to be seen
+// by the browser process. Returns `false` if the test times out before that.
+[[nodiscard]] bool CrashFrameProcess(const ToRenderFrameHost& adapter);
 
 }  // namespace content
 

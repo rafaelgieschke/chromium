@@ -177,8 +177,9 @@ static bool IsRectInDirection(SpatialNavigationDirection direction,
 }
 
 int LineBoxes(const LayoutObject& layout_object) {
-  if (!layout_object.IsInline() || layout_object.IsAtomicInlineLevel())
+  if (!layout_object.IsNonAtomicInline()) {
     return 1;
+  }
 
   // If it has empty quads, it's most likely not a line broken ("fragmented")
   // text. <a><div></div></a> has for example one empty rect.
@@ -339,7 +340,7 @@ bool ScrollInDirection(Node* container, SpatialNavigationDirection direction) {
   // TODO(crbug.com/914775): Use UserScroll() instead. UserScroll() does a
   // smooth, animated scroll which might make it easier for users to understand
   // spatnav's moves. Another advantage of using ScrollableArea::UserScroll() is
-  // that it returns a ScrollResult so we don't need to call
+  // that it returns a ScrollConsumption so we don't need to call
   // CanScrollInDirection(). Regular arrow-key scrolling (without
   // --enable-spatial-navigation) already uses smooth scrolling by default.
   ScrollableArea* scroller = ScrollableAreaFor(container);
@@ -795,12 +796,9 @@ LayoutUnit TallestInlineAtomicChild(const LayoutObject& layout_object) {
   if (!layout_object.IsLayoutInline())
     return max_child_size;
 
-  for (LayoutObject* child = layout_object.SlowFirstChild(); child;
+  for (const LayoutObject* child = layout_object.SlowFirstChild(); child;
        child = child->NextSibling()) {
-    if (child->IsOutOfFlowPositioned())
-      continue;
-
-    if (child->IsAtomicInlineLevel()) {
+    if (child->IsAtomicInline()) {
       max_child_size =
           std::max(To<LayoutBox>(child)->LogicalHeight(), max_child_size);
     }

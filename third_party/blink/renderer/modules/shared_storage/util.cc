@@ -39,7 +39,7 @@ bool StringFromV8(v8::Isolate* isolate, v8::Local<v8::Value> val, String* out) {
 }
 
 bool IsReservedLockName(const String& lock_name) {
-  return lock_name.StartsWith('-');
+  return lock_name.starts_with('-');
 }
 
 bool IsValidSharedStorageBatchUpdateMethodsArgument(
@@ -210,7 +210,7 @@ bool CheckPrivateAggregationConfig(
         return false;
       }
       const uint16_t max_contributions_clamped =
-          base::MakeClampedNum(requested_max_contributions);
+          base::ClampedNumeric(requested_max_contributions);
       out_private_aggregation_config->max_contributions =
           max_contributions_clamped;
     }

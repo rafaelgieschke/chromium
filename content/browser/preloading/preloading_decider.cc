@@ -32,8 +32,7 @@
 #include "content/public/browser/web_contents.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/preloading/anchor_element_interaction_host.mojom.h"
-#include "third_party/blink/public/mojom/speculation_rules/speculation_rules.mojom-data-view.h"
-#include "third_party/blink/public/mojom/speculation_rules/speculation_rules.mojom-forward.h"
+#include "third_party/blink/public/mojom/speculation_rules/speculation_rules.mojom-shared.h"
 
 namespace content {
 
@@ -580,8 +579,9 @@ void PreloadingDecider::UpdateSpeculationCandidates(
     }
 
     SpeculationCandidateKey key{candidate->url, candidate->action};
-    if (tags_map_for_immediate_preloading.count(key) != 0) {
-      candidate->tags = tags_map_for_immediate_preloading[key];
+    if (auto it = tags_map_for_immediate_preloading.find(key);
+        it != tags_map_for_immediate_preloading.end()) {
+      candidate->tags = it->second;
     }
   }
 
@@ -610,7 +610,7 @@ PreloadingDecider::GetMergedSpeculationTagsFromSuitableCandidates(
   // Iterate through all suitable candidates and merge their tags.
   for (const auto& candidate_pair : suitable_candidates) {
     for (const auto& tag : candidate_pair.second->tags) {
-      if (!base::Contains(merged_tags, tag)) {
+      if (!std::ranges::contains(merged_tags, tag)) {
         merged_tags.push_back(tag);
       }
     }

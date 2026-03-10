@@ -23,6 +23,7 @@
 #include "base/containers/span.h"
 #include "base/dcheck_is_on.h"
 #include "base/files/file.h"
+#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
@@ -87,6 +88,7 @@
 #include "third_party/blink/public/common/indexeddb/indexeddb_metadata.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/blink/public/mojom/blob/blob.mojom.h"
+#include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-shared.h"
 #include "third_party/leveldatabase/env_chromium.h"
 #include "third_party/leveldatabase/leveldb_chrome.h"
 #include "third_party/perfetto/include/perfetto/tracing/track.h"
@@ -171,13 +173,6 @@ leveldb_env::Options GetLevelDBOptions() {
   // Thread-safe: static local construction, and `leveldb::Cache` implements
   // internal synchronization.
   options.block_cache = leveldb_chrome::GetSharedWebBlockCache();
-
-  // Thread-safe: calls base histogram `FactoryGet()` methods, which are
-  // thread-safe.
-  options.on_get_error = base::BindRepeating(
-      ReportLevelDBError, "WebCore.IndexedDB.LevelDBReadErrors");
-  options.on_write_error = base::BindRepeating(
-      ReportLevelDBError, "WebCore.IndexedDB.LevelDBWriteErrors");
 
   // Thread-safe: static local construction, and `BloomFilterPolicy` state is
   // read-only after construction.
@@ -284,12 +279,13 @@ std::tuple<bool, Status> AreSchemasKnown(TransactionalLevelDBDatabase* db) {
   if (!found) {
     return {true, s};
   }
-  if (raw_db_data_version < 0) {
+  std::optional<IndexedDBDataFormatVersion> db_data_version =
+      IndexedDBDataFormatVersion::Decode(raw_db_data_version);
+  if (!db_data_version) {
     return {false, Status::Corruption("Invalid IndexedDB data version.")};
   }
 
-  return {IndexedDBDataFormatVersion::GetCurrent().IsAtLeast(
-              IndexedDBDataFormatVersion::Decode(raw_db_data_version)),
+  return {IndexedDBDataFormatVersion::GetCurrent().IsAtLeast(*db_data_version),
           s};
 }
 
@@ -1232,7 +1228,13 @@ Status BackingStore::Initialize(bool clean_active_journal) {
       INTERNAL_CONSISTENCY_ERROR(SET_UP_METADATA);
       return InternalInconsistencyStatus();
     }
-    db_data_version = IndexedDBDataFormatVersion::Decode(raw_db_data_version);
+    std::optional<IndexedDBDataFormatVersion> decoded =
+        IndexedDBDataFormatVersion::Decode(raw_db_data_version);
+    if (!decoded) {
+      INTERNAL_CONSISTENCY_ERROR(SET_UP_METADATA);
+      return InternalInconsistencyStatus();
+    }
+    db_data_version = *decoded;
   }
   if (latest_known_data_version == db_data_version) {
     // Up to date. Nothing to do.
@@ -1275,7 +1277,8 @@ bool BackingStore::CanOpportunisticallyClose() const {
   return true;
 }
 
-void BackingStore::TearDown(base::WaitableEvent* signal_on_destruction) {
+void BackingStore::SignalWhenDestructionComplete(
+    base::WaitableEvent* signal_on_destruction) && {
   if (IsBlobCleanupPending()) {
     ForceRunBlobCleanup();
   }
@@ -1283,8 +1286,13 @@ void BackingStore::TearDown(base::WaitableEvent* signal_on_destruction) {
   db()->leveldb_state()->RequestDestruction(signal_on_destruction);
 }
 
-void BackingStore::InvalidateBlobReferences() {
+void BackingStore::OnForceClosing() {
+  // Invalidate blob references.
   active_blob_registry()->ForceShutdown();
+  // Don't run the preclosing tasks during ForceClose, whether or not we've
+  // started them. Compaction in particular can run long and cannot be
+  // interrupted, so it can cause shutdown hangs.
+  StopPreCloseTasks();
 }
 
 Status BackingStore::UpgradeBlobEntriesToV4(
@@ -1538,7 +1546,7 @@ BackingStore::DoOpenAndVerify(BucketContext& bucket_context,
       if (!ldb_status.IsNotFound()) {
         ReportLevelDBError("WebCore.IndexedDB.LevelDBOpenErrors", ldb_status);
       }
-      return {nullptr, std::move(ldb_status), IndexedDBDataLossInfo(),
+      return {nullptr, std::move(ldb_status), std::move(data_loss_info),
               is_disk_full};
     }
   }
@@ -1601,11 +1609,11 @@ BackingStore::DoOpenAndVerify(BucketContext& bucket_context,
                           bucket_context.AsWeakPtr()));
   status = backing_store->Initialize(/*clean_active_blob_journal=*/!in_memory);
   if (!status.ok()) [[unlikely]] {
-    base::WaitableEvent leveldb_destruct_event;
-    backing_store->TearDown(&leveldb_destruct_event);
+    base::WaitableEvent destruct_event;
+    std::move(*backing_store).SignalWhenDestructionComplete(&destruct_event);
     backing_store.reset();
-    leveldb_destruct_event.Wait();
-    return {nullptr, status, IndexedDBDataLossInfo(), /*is_disk_full=*/false};
+    destruct_event.Wait();
+    return {nullptr, status, std::move(data_loss_info), /*is_disk_full=*/false};
   }
   backing_store->db()->scopes()->StartRecoveryAndCleanupTasks();
   backing_store->bucket_context_ = &bucket_context;
@@ -1646,6 +1654,13 @@ BackingStore::OpenAndVerify(BucketContext& bucket_context,
                          sanitized_message);
   }
   return return_values;
+}
+
+// static
+uint64_t BackingStore::ReadSizeFromDisk(const base::FilePath& database_path,
+                                        const base::FilePath& blob_path) {
+  return base::ComputeDirectorySize(database_path) +
+         base::ComputeDirectorySize(blob_path);
 }
 
 Status BackingStore::GetCompleteMetadata(
@@ -1752,7 +1767,7 @@ Status BackingStore::Database::DeleteDatabase(
     base::OnceClosure on_complete) {
   TRACE_EVENT0("IndexedDB", "BackingStore::DeleteDatabase");
 
-  scoped_refptr<TransactionalLevelDBTransaction> transaction =
+  std::unique_ptr<TransactionalLevelDBTransaction> transaction =
       GetTransactionalLevelDBFactory()->CreateLevelDBTransaction(
           backing_store_->db(),
           backing_store_->db()->scopes()->CreateScope(std::move(locks)));
@@ -1842,7 +1857,7 @@ Status BackingStore::Transaction::CreateObjectStore(
     blink::IndexedDBKeyPath key_path,
     bool auto_increment) {
   CHECK_EQ(mode(), blink::mojom::IDBTransactionMode::VersionChange);
-  if (base::Contains(database_->metadata().object_stores, object_store_id)) {
+  if (database_->metadata().object_stores.contains(object_store_id)) {
     return Status::InvalidArgument("Invalid object_store_id");
   }
 
@@ -2259,26 +2274,51 @@ StatusOr<IndexedDBValue> BackingStore::Transaction::GetRecord(
   return record;
 }
 
-int64_t BackingStore::GetInMemorySize() const {
-  CHECK(in_memory());
-
-  int64_t blob_size = 0;
-  for (const auto& kvp : in_memory_external_object_map_) {
-    for (const IndexedDBExternalObject& object :
-         kvp.second->external_objects()) {
-      if (object.object_type() == IndexedDBExternalObject::ObjectType::kBlob) {
-        blob_size += object.size();
+uint64_t BackingStore::EstimateSize(bool write_in_progress) const {
+  if (in_memory()) {
+    uint64_t blob_size = 0;
+    for (const auto& kvp : in_memory_external_object_map_) {
+      for (const IndexedDBExternalObject& object :
+           kvp.second->external_objects()) {
+        if (object.object_type() ==
+            IndexedDBExternalObject::ObjectType::kBlob) {
+          blob_size += object.size();
+        }
       }
     }
+
+    int64_t level_db_size = 0;
+    Status s = GetDBSizeFromEnv(db_->env(), "/", &level_db_size);
+    if (!s.ok()) {
+      LOG(ERROR) << "Failed to GetDBSizeFromEnv: " << s.ToString();
+    }
+    CHECK_GE(level_db_size, 0);
+    return blob_size + level_db_size;
   }
 
-  int64_t level_db_size = 0;
-  Status s = GetDBSizeFromEnv(db_->env(), "/", &level_db_size);
-  if (!s.ok()) {
-    LOG(ERROR) << "Failed to GetDBSizeFromEnv: " << s.ToString();
+#if BUILDFLAG(IS_WIN)
+  // On Windows, `base::FileEnumerator` (and therefore
+  // `base::ComputeDirectorySize()`) will not report up-to-date sizes when a
+  // file is currently being written. When transactions are not set to
+  // "flush"/"sync" (terminology varies based on context), LevelDB will keep
+  // open its file handles. Therefore, on Windows, `ComputeDirectorySize()` may
+  // not take into account recent writes, leading to situations where
+  // `navigator.storage.estimate()` will not report updates when interleaved
+  // with relaxed durability IDB transactions. The workaround for this is to
+  // open and close new file handles for all the files in the LevelDB data
+  // directory before calculating usage, as this updates the file system
+  // directory entry's metadata. See crbug.com/1489517 and
+  // https://devblogs.microsoft.com/oldnewthing/20111226-00/?p=8813
+  if (write_in_progress) {
+    base::FileEnumerator(database_path_, /*recursive=*/false,
+                         base::FileEnumerator::FILES)
+        .ForEach([](const base::FilePath& file_path) {
+          base::File file(file_path, base::File::FLAG_OPEN |
+                                         base::File::FLAG_WIN_SHARE_DELETE);
+        });
   }
-
-  return blob_size + level_db_size;
+#endif
+  return ReadSizeFromDisk(database_path_, blob_path_);
 }
 
 StatusOr<BackingStore::RecordIdentifier> BackingStore::Transaction::PutRecord(
@@ -2305,8 +2345,10 @@ StatusOr<BackingStore::RecordIdentifier> BackingStore::Transaction::PutRecord(
   std::string v;
   EncodeVarInt(version, &v);
   // The value must fit inline as larger values would have gotten wrapped.
-  CHECK_EQ(value.bits.storage_type(),
-           mojo_base::BigBuffer::StorageType::kBytes);
+  if (value.bits.storage_type() != mojo_base::BigBuffer::StorageType::kBytes) {
+    return base::unexpected(
+        Status::InvalidArgument("Value bits must be inlined"));
+  }
   v.append(value.bits.begin(), value.bits.end());
 
   s = leveldb_transaction->Put(object_store_data_key, &v);
@@ -2910,7 +2952,7 @@ void BackingStore::OnCleanupStarted() {
   }
 }
 
-void BackingStore::OnCleanupDone() {
+void BackingStore::OnCleanupStopped(bool completed) {
   if (dbs_snapshot_.has_value()) {
     base::ListValue dbs_snapshot_before = *std::move(dbs_snapshot_);
     dbs_snapshot_.reset();
@@ -2927,9 +2969,11 @@ void BackingStore::OnCleanupDone() {
     }
   }
 
-  // Update the timers for traditional sweeper.
-  UpdateEarliestSweepTime();
-  UpdateEarliestCompactionTime();
+  if (completed) {
+    // Update the timers for traditional sweeper.
+    UpdateEarliestSweepTime();
+    UpdateEarliestCompactionTime();
+  }
 }
 
 StatusOr<base::ListValue> BackingStore::SnapshotAllDatabases(
@@ -3097,7 +3141,7 @@ StatusOr<IndexedDBKey> BackingStore::Transaction::GetFirstPrimaryKeyForIndexKey(
 StatusOr<bool> BackingStore::DatabaseExists(std::u16string_view database_name) {
   return GetDatabaseNames().transform(
       [&](const std::vector<std::u16string>& names) {
-        return base::Contains(names, database_name);
+        return std::ranges::contains(names, database_name);
       });
 }
 

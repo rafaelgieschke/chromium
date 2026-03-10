@@ -110,9 +110,9 @@ TEST(StringImplTest, LowerASCII) {
   static const UChar kTestWithNonASCIICapitalized[2] = {0x0041,
                                                         0x00e1};  // A\xE1
 
-  // Make sure we support scoped_refptr<const StringImpl>.
-  scoped_refptr<const StringImpl> const_ref = test_string_impl->IsolatedCopy();
-  DCHECK(const_ref->HasOneRef());
+  // Make sure we support scoped_refptr<StringImpl>.
+  scoped_refptr<StringImpl> isolated_ref = test_string_impl->IsolatedCopy();
+  DCHECK(isolated_ref->HasOneRef());
   EXPECT_TRUE(Equal(
       StringImpl::Create(kTestWithNonASCII).get(),
       StringImpl::Create(kTestWithNonASCIICapitalized)->LowerASCII().get()));
@@ -121,48 +121,55 @@ TEST(StringImplTest, LowerASCII) {
       StringImpl::Create(kTestWithNonASCIIComparison)->LowerASCII().get()));
 }
 
-TEST(StringImplTest, UpperASCII) {
+TEST(StringImplTest, ToAsciiUpper) {
   scoped_refptr<StringImpl> test_string_impl =
       StringImpl::Create(base::span_from_cstring("LINK"));
   EXPECT_TRUE(test_string_impl->Is8Bit());
   EXPECT_TRUE(StringImpl::Create(base::span_from_cstring("a\xE1"))->Is8Bit());
 
-  EXPECT_TRUE(Equal(
-      test_string_impl.get(),
-      StringImpl::Create(base::span_from_cstring("link"))->UpperASCII().get()));
-  EXPECT_TRUE(Equal(
-      test_string_impl.get(),
-      StringImpl::Create(base::span_from_cstring("LINK"))->UpperASCII().get()));
-  EXPECT_TRUE(Equal(
-      test_string_impl.get(),
-      StringImpl::Create(base::span_from_cstring("lInk"))->UpperASCII().get()));
+  EXPECT_TRUE(Equal(test_string_impl.get(),
+                    StringImpl::Create(base::span_from_cstring("link"))
+                        ->ToAsciiUpper()
+                        .get()));
+  EXPECT_TRUE(Equal(test_string_impl.get(),
+                    StringImpl::Create(base::span_from_cstring("LINK"))
+                        ->ToAsciiUpper()
+                        .get()));
+  EXPECT_TRUE(Equal(test_string_impl.get(),
+                    StringImpl::Create(base::span_from_cstring("lInk"))
+                        ->ToAsciiUpper()
+                        .get()));
 
   blink::CaseMap case_map(blink::g_empty_atom);
   EXPECT_TRUE(Equal(
       case_map.ToUpper(StringImpl::Create(base::span_from_cstring("LINK")))
           .Impl(),
-      StringImpl::Create(base::span_from_cstring("LINK"))->UpperASCII().get()));
+      StringImpl::Create(base::span_from_cstring("LINK"))
+          ->ToAsciiUpper()
+          .get()));
   EXPECT_TRUE(Equal(
       case_map.ToUpper(StringImpl::Create(base::span_from_cstring("lInk")))
           .Impl(),
-      StringImpl::Create(base::span_from_cstring("lInk"))->UpperASCII().get()));
+      StringImpl::Create(base::span_from_cstring("lInk"))
+          ->ToAsciiUpper()
+          .get()));
 
   EXPECT_TRUE(Equal(StringImpl::Create(base::span_from_cstring("A\xE1")).get(),
                     StringImpl::Create(base::span_from_cstring("a\xE1"))
-                        ->UpperASCII()
+                        ->ToAsciiUpper()
                         .get()));
   EXPECT_TRUE(Equal(StringImpl::Create(base::span_from_cstring("A\xC1")).get(),
                     StringImpl::Create(base::span_from_cstring("a\xC1"))
-                        ->UpperASCII()
+                        ->ToAsciiUpper()
                         .get()));
 
   EXPECT_FALSE(Equal(StringImpl::Create(base::span_from_cstring("A\xE1")).get(),
                      StringImpl::Create(base::span_from_cstring("a\xC1"))
-                         ->UpperASCII()
+                         ->ToAsciiUpper()
                          .get()));
   EXPECT_FALSE(Equal(StringImpl::Create(base::span_from_cstring("A\xE1")).get(),
                      StringImpl::Create(base::span_from_cstring("A\xC1"))
-                         ->UpperASCII()
+                         ->ToAsciiUpper()
                          .get()));
 
   static const UChar kTest[4] = {0x006c, 0x0069, 0x006e, 0x006b};  // link
@@ -174,9 +181,10 @@ TEST(StringImplTest, UpperASCII) {
   EXPECT_FALSE(test_string_impl16->Is8Bit());
 
   EXPECT_TRUE(Equal(test_string_impl16.get(),
-                    StringImpl::Create(kTest)->UpperASCII().get()));
-  EXPECT_TRUE(Equal(test_string_impl16.get(),
-                    StringImpl::Create(kTestCapitalized)->UpperASCII().get()));
+                    StringImpl::Create(kTest)->ToAsciiUpper().get()));
+  EXPECT_TRUE(
+      Equal(test_string_impl16.get(),
+            StringImpl::Create(kTestCapitalized)->ToAsciiUpper().get()));
 
   static const UChar kTestWithNonASCII[2] = {0x0061, 0x00e1};  // a\xE1
   static const UChar kTestWithNonASCIIComparison[2] = {0x0061,
@@ -184,14 +192,15 @@ TEST(StringImplTest, UpperASCII) {
   static const UChar kTestWithNonASCIICapitalized[2] = {0x0041,
                                                         0x00e1};  // A\xE1
 
-  // Make sure we support scoped_refptr<const StringImpl>.
-  scoped_refptr<const StringImpl> const_ref = test_string_impl->IsolatedCopy();
-  DCHECK(const_ref->HasOneRef());
-  EXPECT_TRUE(Equal(StringImpl::Create(kTestWithNonASCIICapitalized).get(),
-                    StringImpl::Create(kTestWithNonASCII)->UpperASCII().get()));
+  // Make sure we support scoped_refptr<StringImpl>.
+  scoped_refptr<StringImpl> isolated_ref = test_string_impl->IsolatedCopy();
+  DCHECK(isolated_ref->HasOneRef());
+  EXPECT_TRUE(
+      Equal(StringImpl::Create(kTestWithNonASCIICapitalized).get(),
+            StringImpl::Create(kTestWithNonASCII)->ToAsciiUpper().get()));
   EXPECT_FALSE(Equal(
       StringImpl::Create(kTestWithNonASCIICapitalized).get(),
-      StringImpl::Create(kTestWithNonASCIIComparison)->UpperASCII().get()));
+      StringImpl::Create(kTestWithNonASCIIComparison)->ToAsciiUpper().get()));
 }
 
 TEST(StringImplTest, CodeUnitCompareIgnoringAsciiCase) {

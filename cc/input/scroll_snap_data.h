@@ -6,6 +6,7 @@
 #define CC_INPUT_SCROLL_SNAP_DATA_H_
 
 #include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -278,7 +279,7 @@ struct SnapAreaData {
 
   // Whether this area has scroll-snap-stop: always.
   // See https://www.w3.org/TR/css-scroll-snap-1/#scroll-snap-stop
-  bool must_snap;
+  bool must_snap = false;
 
   // Whether this area has focus or has a descendant element which has focus.
   bool has_focus_within = false;
@@ -287,7 +288,7 @@ struct SnapAreaData {
   ElementId element_id;
 };
 
-struct TargetSnapAreaElementIds {
+struct CC_EXPORT TargetSnapAreaElementIds {
   TargetSnapAreaElementIds() = default;
   TargetSnapAreaElementIds(ElementId x_id, ElementId y_id) : x(x_id), y(y_id) {}
   bool operator==(const TargetSnapAreaElementIds& other) const {
@@ -297,6 +298,8 @@ struct TargetSnapAreaElementIds {
   bool operator!=(const TargetSnapAreaElementIds& other) const {
     return !(*this == other);
   }
+
+  std::string ToString() const;
 
   // Note that the same element can be snapped to on both the x and y axes.
   ElementId x;

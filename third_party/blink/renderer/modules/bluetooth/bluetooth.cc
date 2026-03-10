@@ -343,10 +343,6 @@ ScriptPromise<IDLBoolean> Bluetooth::getAvailability(
 void Bluetooth::GetDevicesCallback(
     ScriptPromiseResolver<IDLSequence<BluetoothDevice>>* resolver,
     Vector<mojom::blink::WebBluetoothDevicePtr> devices) {
-  if (!resolver->GetExecutionContext() ||
-      resolver->GetExecutionContext()->IsContextDestroyed()) {
-    return;
-  }
 
   HeapVector<Member<BluetoothDevice>> bluetooth_devices;
   for (auto& device : devices) {
@@ -387,12 +383,6 @@ ScriptPromise<IDLSequence<BluetoothDevice>> Bluetooth::getDevices(
   if (!IsFeatureEnabled(window)) {
     exception_state.ThrowSecurityError(kPermissionsPolicyBlocked);
     return ScriptPromise<IDLSequence<BluetoothDevice>>();
-  }
-
-  LocalFrame* frame = window->GetFrame();
-  if (frame && frame->IsAdScriptInStack()) {
-    UseCounter::Count(GetExecutionContext(),
-                      WebFeature::kAdScriptInStackOnBluetooth);
   }
 
   AddUnsupportedPlatformConsoleMessage(window);
@@ -436,11 +426,6 @@ ScriptPromise<BluetoothDevice> Bluetooth::requestDevice(
   if (!LocalFrame::HasTransientUserActivation(frame)) {
     exception_state.ThrowSecurityError(kHandleGestureForPermissionRequest);
     return EmptyPromise();
-  }
-
-  if (frame->IsAdScriptInStack()) {
-    UseCounter::Count(GetExecutionContext(),
-                      WebFeature::kAdScriptInStackOnBluetooth);
   }
 
   EnsureServiceConnection(window);

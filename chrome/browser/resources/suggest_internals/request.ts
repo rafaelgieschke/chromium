@@ -95,11 +95,11 @@ export class SuggestRequestElement extends CrLitElement {
   private computePageClassification_(): string {
     assert(this.request);
 
-    if (!this.request.url.url) {
+    if (!this.request.url) {
       return '';
     }
     // Find pgcl value in request url.
-    const url = new URL(this.request.url.url);
+    const url = new URL(this.request.url);
     const queryMatches = url.search.match(/pgcl=(?<pgcl>[^&]*)/);
     // If no pgcl value in request, set pgcl to empty
     if (queryMatches === null || !queryMatches.groups) {
@@ -155,7 +155,7 @@ export class SuggestRequestElement extends CrLitElement {
     }
 
     try {
-      const url = new URL(this.request.url.url);
+      const url = new URL(this.request.url);
       const queryMatches = url.search.match(/(q|delq)=[^&]*/);
       return url.pathname + '?' + (queryMatches ? queryMatches[0] : '');
     } catch (e) {
@@ -226,37 +226,21 @@ export class SuggestRequestElement extends CrLitElement {
   protected onCopyRequestClick_() {
     navigator.clipboard.writeText(this.requestDataJson_);
 
-    this.dispatchEvent(new CustomEvent('show-toast', {
-      bubbles: true,
-      composed: true,
-      detail: 'Request Copied to Clipboard',
-    }));
+    this.fire('show-toast', 'Request Copied to Clipboard');
   }
 
   protected onCopyResponseClick_() {
     navigator.clipboard.writeText(this.responseJson_);
 
-    this.dispatchEvent(new CustomEvent('show-toast', {
-      bubbles: true,
-      composed: true,
-      detail: 'Response Copied to Clipboard',
-    }));
+    this.fire('show-toast', 'Response Copied to Clipboard');
   }
 
   protected onHardcodeResponseClick_() {
-    this.dispatchEvent(new CustomEvent('open-hardcode-response-dialog', {
-      bubbles: true,
-      composed: true,
-      detail: this.responseJson_,
-    }));
+    this.fire('open-hardcode-response-dialog', this.responseJson_);
   }
 
   protected onChipClick_(e: CustomEvent<string>) {
-    this.dispatchEvent(new CustomEvent('chip-click', {
-      bubbles: true,
-      composed: true,
-      detail: this.pgcl_,
-    }));
+    this.fire('chip-click', this.pgcl_);
     // Allow chip to be found with aria label (originally hidden).
     const button =
         this.shadowRoot.querySelector<HTMLElement>('cr-expand-button')!;

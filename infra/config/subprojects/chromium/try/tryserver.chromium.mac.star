@@ -30,6 +30,7 @@ try_.defaults.set(
     orchestrator_cores = 2,
     orchestrator_siso_remote_jobs = siso.remote_jobs.HIGH_JOBS_FOR_CQ,
     service_account = try_constants.DEFAULT_SERVICE_ACCOUNT,
+    siso_keep_going = siso.KEEP_GOING,
     siso_project = siso.project.DEFAULT_UNTRUSTED,
 )
 
@@ -160,11 +161,8 @@ try_.orchestrator_builder(
     name = "mac-rel",
     branch_selector = branches.selector.MAC_BRANCHES,
     mirrors = [
-        "ci/Mac Builder",
-        "ci/mac15-x64-rel-tests",
-        "ci/GPU Mac Builder",
-        "ci/Mac Release (Intel)",
-        "ci/Mac Retina Release (AMD)",
+        "ci/mac-arm64-rel",
+        "ci/mac15-arm64-rel-tests",
     ],
     gn_args = gn_args.config(
         configs = [
@@ -177,7 +175,7 @@ try_.orchestrator_builder(
             "enable_dangling_raw_ptr_feature_flag",
             "enable_backup_ref_ptr_feature_flag",
             "mac",
-            "x64",
+            "arm64",
         ],
     ),
     compilator = "mac-rel-compilator",
@@ -200,6 +198,56 @@ try_.compilator_builder(
     name = "mac-rel-compilator",
     branch_selector = branches.selector.MAC_BRANCHES,
     cpu = cpu.ARM64,
+    main_list_view = "try",
+)
+
+# TODO(crbug.com/415099984): Remove this builder and merge all the mirrored
+# tests/builds under mac-rel, once Mac GPU tests are ready for ARM migration.
+try_.orchestrator_builder(
+    name = "mac-gpu-rel",
+    branch_selector = branches.selector.MAC_BRANCHES,
+    mirrors = [
+        "ci/GPU Mac Builder",
+        "ci/Mac Release (Intel)",
+        "ci/Mac Retina Release (AMD)",
+    ],
+    gn_args = gn_args.config(
+        configs = [
+            "gpu_tests",
+            "release_try_builder",
+            "remoteexec",
+            "no_symbols",
+            "use_clang_coverage",
+            "partial_code_coverage_instrumentation",
+            "enable_dangling_raw_ptr_feature_flag",
+            "enable_backup_ref_ptr_feature_flag",
+            "mac",
+            "x64",
+        ],
+    ),
+    compilator = "mac-gpu-rel-compilator",
+    contact_team_email = "chrome-gpu-infra@google.com",
+    coverage_test_types = ["overall", "unit"],
+    experiments = {
+        # go/nplus1shardsproposal
+        "chromium.add_one_test_shard": 10,
+        # crbug.com/940930
+        "chromium.enable_cleandead": 100,
+    },
+    main_list_view = "try",
+    tryjob = try_.job(),
+    use_clang_coverage = True,
+    # TODO (crbug.com/1372179): Use orchestrator pool once overloaded test pools
+    # are addressed
+    #use_orchestrator_pool = True,
+)
+
+try_.compilator_builder(
+    name = "mac-gpu-rel-compilator",
+    branch_selector = branches.selector.MAC_BRANCHES,
+    description_html = "compilator for mac-gpu-rel.",
+    cpu = cpu.ARM64,
+    contact_team_email = "chrome-gpu-infra@google.com",
     main_list_view = "try",
 )
 
@@ -339,12 +387,6 @@ try_.orchestrator_builder(
     compilator = "mac15-arm64-rel-compilator",
     contact_team_email = "bling-engprod@google.com",
     main_list_view = "try",
-    tryjob = try_.job(
-        # TODO (crbug.com/415099984): change to 100,
-        # then move out of experimental CQ after,
-        # mac15-arm64-rel replaces mac14-arm64-rel on CQ.
-        experiment_percentage = 100,
-    ),
 )
 
 try_.compilator_builder(
@@ -575,6 +617,15 @@ try_.builder(
     execution_timeout = 20 * time.hour,
 )
 
+try_.builder(
+    name = "mac-treesinviz-enabled-rel",
+    mirrors = [
+        "ci/mac-treesinviz-enabled-rel",
+    ],
+    gn_args = "ci/mac-treesinviz-enabled-rel",
+    contact_team_email = "chrome-gpu-team@google.com",
+)
+
 ios_builder(
     name = "ios-asan",
     mirrors = [
@@ -749,6 +800,7 @@ ios_builder(
     gn_args = "ci/ios-wpt-fyi-rel",
     builderless = True,
     cpu = cpu.ARM64,
+    contact_team_email = "chrome-product-engprod@google.com",
 )
 
 ios_builder(
@@ -840,7 +892,7 @@ ios_builder(
 
 gpu.try_.optional_tests_builder(
     name = "mac_optional_gpu_tests_rel",
-    branch_selector = branches.selector.IOS_BRANCHES,
+    branch_selector = branches.selector.MAC_BRANCHES,
     description_html = ("Runs GPU tests on Mac Minis with Intel UHD 630 GPUs and Macbook Pros with AMD GPUs. " +
                         "Only automatically added to CLs that touch GPU-related files."),
     builder_spec = builder_config.builder_spec(
@@ -889,34 +941,33 @@ gpu.try_.optional_tests_builder(
     main_list_view = "try",
     max_concurrent_builds = 7,
     tryjob = try_.job(
-        location_filters = [
-            # Inclusion filters.
-            cq.location_filter(path_regexp = "chrome/browser/vr/.+"),
-            cq.location_filter(path_regexp = "content/browser/xr/.+"),
-            cq.location_filter(path_regexp = "content/test/data/gpu/.+"),
-            cq.location_filter(path_regexp = "content/test/gpu/.+"),
-            cq.location_filter(path_regexp = "gpu/.+"),
-            cq.location_filter(path_regexp = "media/audio/.+"),
-            cq.location_filter(path_regexp = "media/base/.+"),
-            cq.location_filter(path_regexp = "media/capture/.+"),
-            cq.location_filter(path_regexp = "media/filters/.+"),
-            cq.location_filter(path_regexp = "media/gpu/.+"),
-            cq.location_filter(path_regexp = "media/mojo/.+"),
-            cq.location_filter(path_regexp = "media/renderers/.+"),
-            cq.location_filter(path_regexp = "media/video/.+"),
-            cq.location_filter(path_regexp = "services/shape_detection/.+"),
-            cq.location_filter(path_regexp = "testing/buildbot/tryserver.chromium.mac.json"),
-            cq.location_filter(path_regexp = "testing/trigger_scripts/.+"),
-            cq.location_filter(path_regexp = "third_party/blink/renderer/modules/mediastream/.+"),
-            cq.location_filter(path_regexp = "third_party/blink/renderer/modules/webcodecs/.+"),
-            cq.location_filter(path_regexp = "third_party/blink/renderer/modules/webgl/.+"),
-            cq.location_filter(path_regexp = "third_party/blink/renderer/modules/webgpu/.+"),
-            cq.location_filter(path_regexp = "third_party/blink/renderer/platform/graphics/gpu/.+"),
-            cq.location_filter(path_regexp = "tools/clang/scripts/update.py"),
-            cq.location_filter(path_regexp = "ui/gl/.+"),
+        location_filters = gpu.try_.optional_trybot_location_filters.MAC,
+    ),
+)
 
-            # Exclusion filters.
-            cq.location_filter(exclude = True, path_regexp = ".*\\.md"),
-        ],
+gpu.try_.optional_tests_builder(
+    name = "gpu-fyi-cq-mac-arm64",
+    branch_selector = branches.selector.MAC_BRANCHES,
+    description_html = ("Runs GPU tests on M2 Macbook Pros. Only automatically added to CLs that " +
+                        "touch GPU-related files"),
+    mirrors = [
+        "ci/GPU FYI Mac arm64 Builder",
+        "ci/Mac FYI Retina Release (Apple M2)",
+    ],
+    builder_config_settings = builder_config.try_settings(
+        retry_failed_shards = False,
+    ),
+    gn_args = "ci/GPU FYI Mac arm64 Builder",
+    pool = "luci.chromium.gpu.try",
+    builderless = True,
+    cpu = "arm64",
+    ssd = None,
+    free_space = None,
+    alerts_enabled = False,
+    contact_team_email = "chrome-gpu-infra@google.com",
+    main_list_view = "try",
+    max_concurrent_builds = 7,
+    tryjob = try_.job(
+        location_filters = gpu.try_.optional_trybot_location_filters.MAC,
     ),
 )

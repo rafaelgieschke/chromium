@@ -11,8 +11,8 @@ AutocompleteProviderClient::GetHistoryClustersService() {
   return nullptr;
 }
 
-history_embeddings::HistoryEmbeddingsService*
-AutocompleteProviderClient::GetHistoryEmbeddingsService() {
+history_embeddings::HistoryEmbeddingsSearch*
+AutocompleteProviderClient::GetHistoryEmbeddingsSearch() {
   return nullptr;
 }
 
@@ -70,6 +70,10 @@ bool AutocompleteProviderClient::in_background_state() const {
 }
 
 bool AutocompleteProviderClient::IsOmniboxNextLensSearchChipEnabled() const {
+  return false;
+}
+
+bool AutocompleteProviderClient::IsOmniboxNextAimPopupEnabled() const {
   return false;
 }
 

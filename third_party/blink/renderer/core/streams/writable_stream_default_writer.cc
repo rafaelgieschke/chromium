@@ -19,8 +19,9 @@ namespace blink {
 namespace {
 
 String CreateWriterLockReleasedMessage(const char* verbed) {
-  return String::Format(
-      "This writable stream writer has been released and cannot be %s", verbed);
+  return UNSAFE_TODO(String::Format(
+      "This writable stream writer has been released and cannot be %s",
+      verbed));
 }
 
 v8::Local<v8::Value> CreateWriterLockReleasedException(v8::Isolate* isolate,
@@ -485,6 +486,8 @@ std::optional<double> WritableStreamDefaultWriter::GetDesiredSizeInternal()
 void WritableStreamDefaultWriter::ResetReadyPromise(ScriptState* script_state) {
   ready_resolver_ =
       MakeGarbageCollected<ScriptPromiseResolver<IDLUndefined>>(script_state);
+  // There is no guarantee that a ready promise will ever be resolved.
+  ready_resolver_->SuppressDetachCheck();
 }
 
 void WritableStreamDefaultWriter::Trace(Visitor* visitor) const {

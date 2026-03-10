@@ -17,7 +17,11 @@ pub mod ffi {
         pub fn HasAtLeastOneRef(&self) -> bool;
 
         fn AddRef(&self);
-        // SAFETY: Same requirements as in sequences::scoped_refptr::CxxRefCounted.
+
+        // TODO(crbug.com/472552387): Tweak `cxx` to make this `allow` obsolete.
+        #[allow(clippy::missing_safety_doc)]
+        /// # Safety
+        /// Same requirements as in sequences::scoped_refptr::CxxRefCounted.
         unsafe fn Release(&self);
     }
 
@@ -31,8 +35,6 @@ pub mod ffi {
         type SequencedTaskRunner = sequences::cxx::ffi::SequencedTaskRunner;
 
         pub fn CreateTaskEnvironment() -> UniquePtr<SingleThreadTaskEnvironment>;
-
-        pub fn RunAllCurrentTasks(runner: Pin<&mut SequencedTaskRunner>);
     }
 }
 
@@ -45,7 +47,7 @@ unsafe impl sequences::CxxRefCounted for ffi::TestRefCounted {
     }
 
     // SAFETY: The trait imposes the same requirements as `Release`.
-    unsafe fn release(&mut self) {
+    unsafe fn release(&self) {
         unsafe {
             self.Release();
         }

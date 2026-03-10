@@ -22,6 +22,7 @@
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/base64.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_to_number.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -66,6 +67,24 @@ TEST(HTTPParsersTest, ParseCacheControl) {
   EXPECT_EQ(base::TimeDelta(), header.max_age.value());
   EXPECT_EQ(std::nullopt, header.stale_while_revalidate);
 
+  header = ParseCacheControlDirectives(AtomicString("max-age=\"0\""),
+                                       AtomicString());
+  EXPECT_TRUE(header.parsed);
+  EXPECT_FALSE(header.contains_no_cache);
+  EXPECT_FALSE(header.contains_no_store);
+  EXPECT_FALSE(header.contains_must_revalidate);
+  EXPECT_EQ(base::TimeDelta(), header.max_age.value());
+  EXPECT_EQ(std::nullopt, header.stale_while_revalidate);
+
+  header =
+      ParseCacheControlDirectives(AtomicString("max-age=\"0"), AtomicString());
+  EXPECT_TRUE(header.parsed);
+  EXPECT_FALSE(header.contains_no_cache);
+  EXPECT_FALSE(header.contains_no_store);
+  EXPECT_FALSE(header.contains_must_revalidate);
+  EXPECT_EQ(base::TimeDelta(), header.max_age.value());
+  EXPECT_EQ(std::nullopt, header.stale_while_revalidate);
+
   header = ParseCacheControlDirectives(AtomicString("max-age"), AtomicString());
   EXPECT_TRUE(header.parsed);
   EXPECT_FALSE(header.contains_no_cache);
@@ -75,6 +94,15 @@ TEST(HTTPParsersTest, ParseCacheControl) {
   EXPECT_EQ(std::nullopt, header.stale_while_revalidate);
 
   header = ParseCacheControlDirectives(AtomicString("max-age=0, no-cache"),
+                                       AtomicString());
+  EXPECT_TRUE(header.parsed);
+  EXPECT_TRUE(header.contains_no_cache);
+  EXPECT_FALSE(header.contains_no_store);
+  EXPECT_FALSE(header.contains_must_revalidate);
+  EXPECT_EQ(base::TimeDelta(), header.max_age.value());
+  EXPECT_EQ(std::nullopt, header.stale_while_revalidate);
+
+  header = ParseCacheControlDirectives(AtomicString("max-age=\"0\", no-cache"),
                                        AtomicString());
   EXPECT_TRUE(header.parsed);
   EXPECT_TRUE(header.contains_no_cache);
@@ -94,6 +122,24 @@ TEST(HTTPParsersTest, ParseCacheControl) {
 
   header =
       ParseCacheControlDirectives(AtomicString("nonsense"), AtomicString());
+  EXPECT_TRUE(header.parsed);
+  EXPECT_FALSE(header.contains_no_cache);
+  EXPECT_FALSE(header.contains_no_store);
+  EXPECT_FALSE(header.contains_must_revalidate);
+  EXPECT_EQ(std::nullopt, header.max_age);
+  EXPECT_EQ(std::nullopt, header.stale_while_revalidate);
+
+  header =
+      ParseCacheControlDirectives(AtomicString("nonsense="), AtomicString());
+  EXPECT_TRUE(header.parsed);
+  EXPECT_FALSE(header.contains_no_cache);
+  EXPECT_FALSE(header.contains_no_store);
+  EXPECT_FALSE(header.contains_must_revalidate);
+  EXPECT_EQ(std::nullopt, header.max_age);
+  EXPECT_EQ(std::nullopt, header.stale_while_revalidate);
+
+  header =
+      ParseCacheControlDirectives(AtomicString("nonsense=\""), AtomicString());
   EXPECT_TRUE(header.parsed);
   EXPECT_FALSE(header.contains_no_cache);
   EXPECT_FALSE(header.contains_no_store);
@@ -533,7 +579,8 @@ void testServerTimingHeader(const char* headerValue,
   for (const auto& header : *results) {
     Vector<String> expectedResult = expectedResults[i++];
     EXPECT_EQ(header->Name(), expectedResult[0]);
-    EXPECT_EQ(header->Duration(), expectedResult[1].ToDouble());
+    EXPECT_EQ(header->Duration(),
+              StringToDouble(expectedResult[1]).value_or(0));
     EXPECT_EQ(header->Description(), expectedResult[2]);
   }
 }

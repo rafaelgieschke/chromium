@@ -39,12 +39,12 @@
 #include "chrome/browser/ui/browser_live_tab_context.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+#include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/tabs/tab_group_theme.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/app_menu_model.h"
 #include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/side_panel/history_clusters/history_clusters_side_panel_coordinator.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/favicon/core/history_ui_favicon_request_handler.h"
 #include "components/favicon_base/favicon_types.h"
@@ -59,6 +59,7 @@
 #include "components/sync_sessions/synced_session.h"
 #include "components/tab_groups/tab_group_id.h"
 #include "components/vector_icons/vector_icons.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_set.h"
 #include "ui/base/accelerators/accelerator.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/models/image_model.h"
@@ -145,7 +146,7 @@ struct RecentTabsSubMenuModel::SubMenuItem {
   }
 
   const int parent_id;
-  std::unordered_set<int> child_ids;
+  absl::flat_hash_set<int> child_ids;
   std::unique_ptr<ui::SimpleMenuModel> menu_model;
 };
 

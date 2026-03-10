@@ -16,6 +16,7 @@
 #include "content/browser/smart_card/smart_card_histograms.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/smart_card_delegate.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test.h"
@@ -37,6 +38,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/features_generated.h"
+#include "third_party/blink/public/mojom/navigation/navigation_params.mojom.h"
 #include "third_party/blink/public/mojom/smart_card/smart_card.mojom.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -151,7 +153,16 @@ class FakeSmartCardDelegate : public SmartCardDelegate {
   FakeSmartCardDelegate() = default;
   // SmartCardDelegate overrides:
   mojo::PendingRemote<device::mojom::SmartCardContextFactory>
-  GetSmartCardContextFactory(BrowserContext& browser_context) override;
+  GetSmartCardContextFactory(RenderFrameHost& render_frame_host) override;
+
+  void SetEmulationFactory(
+      content::GlobalRenderFrameHostId frame_id,
+      base::RepeatingCallback<
+          mojo::PendingRemote<device::mojom::SmartCardContextFactory>()>
+          factory_getter) override {}  // Do nothing.
+
+  void ClearEmulationFactory(
+      content::GlobalRenderFrameHostId frame_id) override {}  // Do nothing.
 
   MOCK_METHOD(bool,
               IsPermissionBlocked,
@@ -221,9 +232,6 @@ class SmartCardTestContentBrowserClient
   SmartCardDelegate* GetSmartCardDelegate() override;
   bool ShouldUrlUseApplicationIsolationLevel(BrowserContext* browser_context,
                                              const GURL& url) override;
-  std::optional<network::ParsedPermissionsPolicy>
-  GetPermissionsPolicyForIsolatedWebApp(WebContents* web_contents,
-                                        const url::Origin& app_origin) override;
 
  private:
   std::unique_ptr<SmartCardDelegate> delegate_;
@@ -231,12 +239,22 @@ class SmartCardTestContentBrowserClient
 
 class SmartCardTest : public ContentBrowserTest {
  public:
-  GURL GetIsolatedContextUrl() {
-    return embedded_https_test_server().GetURL(
-        "a.com",
-        "/set-header?Cross-Origin-Opener-Policy: same-origin&"
-        "Cross-Origin-Embedder-Policy: require-corp&"
-        "Permissions-Policy: smart-card%3D(self)");
+  GURL GetIsolatedContextUrl(bool include_coi_pp = true) {
+    if (include_coi_pp) {
+      return embedded_https_test_server().GetURL(
+          "a.com",
+          "/set-header?Cross-Origin-Opener-Policy: same-origin&"
+          "Cross-Origin-Embedder-Policy: require-corp&"
+          "Permissions-Policy: smart-card%3D(self), "
+          "cross-origin-isolated%3D(self)");
+    } else {
+      return embedded_https_test_server().GetURL(
+          "a.com",
+          "/set-header?Cross-Origin-Opener-Policy: same-origin&"
+          "Cross-Origin-Embedder-Policy: require-corp&"
+          "Permissions-Policy: smart-card%3D(self), "
+          "cross-origin-isolated%3D()");
+    }
   }
 
   FakeSmartCardDelegate& GetFakeSmartCardDelegate() {
@@ -354,26 +372,9 @@ bool SmartCardTestContentBrowserClient::ShouldUrlUseApplicationIsolationLevel(
   return true;
 }
 
-std::optional<network::ParsedPermissionsPolicy>
-SmartCardTestContentBrowserClient::GetPermissionsPolicyForIsolatedWebApp(
-    WebContents* web_contents,
-    const url::Origin& app_origin) {
-  network::ParsedPermissionsPolicyDeclaration coi_decl(
-      network::mojom::PermissionsPolicyFeature::kCrossOriginIsolated,
-      /*allowed_origins=*/{},
-      /*self_if_matches=*/std::nullopt, /*matches_all_origins=*/true,
-      /*matches_opaque_src=*/false);
-  network::ParsedPermissionsPolicyDeclaration smart_card_decl(
-      network::mojom::PermissionsPolicyFeature::kSmartCard,
-      /*allowed_origins=*/{},
-      /*self_if_matches=*/app_origin, /*matches_all_origins=*/false,
-      /*matches_opaque_src=*/false);
-  return {{coi_decl, smart_card_decl}};
-}
-
 mojo::PendingRemote<device::mojom::SmartCardContextFactory>
 FakeSmartCardDelegate::GetSmartCardContextFactory(
-    BrowserContext& browser_context) {
+    RenderFrameHost& render_frame_host) {
   return mock_context_factory.GetRemote();
 }
 
@@ -981,7 +982,7 @@ IN_PROC_BROWSER_TEST_F(SmartCardTest, ListReaders) {
   ASSERT_TRUE(NavigateToURL(shell(), GetIsolatedContextUrl()));
 
   auto expected_reader_names =
-      base::Value(base::Value::List().Append("Foo").Append("Bar"));
+      base::Value(base::ListValue().Append("Foo").Append("Bar"));
 
   EXPECT_EQ(expected_reader_names, EvalJs(shell(), R"((async () => {
        let context = await navigator.smartCard.establishContext();
@@ -1006,7 +1007,7 @@ IN_PROC_BROWSER_TEST_F(SmartCardTest, ListReadersEmpty) {
 
   ASSERT_TRUE(NavigateToURL(shell(), GetIsolatedContextUrl()));
 
-  auto expected_reader_names = base::Value(base::Value::List());
+  auto expected_reader_names = base::Value(base::ListValue());
 
   EXPECT_EQ(expected_reader_names, EvalJs(shell(), R"((async () => {
        let context = await navigator.smartCard.establishContext();
@@ -1250,7 +1251,7 @@ IN_PROC_BROWSER_TEST_F(SmartCardTest, Connect) {
   ASSERT_TRUE(NavigateToURL(shell(), GetIsolatedContextUrl()));
 
   auto expected_reader_names =
-      base::Value(base::Value::List().Append("Foo").Append("Bar"));
+      base::Value(base::ListValue().Append("Foo").Append("Bar"));
 
   EXPECT_EQ("[object SmartCardConnection], t1", EvalJs(shell(), R"(
     (async () => {
@@ -1848,29 +1849,12 @@ IN_PROC_BROWSER_TEST_F(SmartCardTest, ContextDiesConnectionStays) {
     })())"));
 }
 
-// A ContentBrowserClient that grants Isolated Web Apps the "smart-card"
-// permission, but not "cross-origin-isolated", which should result in Smart
-// Cards being disabled.
-class NoCoiPermissionSmartCardTestContentBrowserClient
-    : public SmartCardTestContentBrowserClient {
- public:
-  std::optional<network::ParsedPermissionsPolicy>
-  GetPermissionsPolicyForIsolatedWebApp(
-      WebContents* web_contents,
-      const url::Origin& app_origin) override {
-    return {{network::ParsedPermissionsPolicyDeclaration(
-        network::mojom::PermissionsPolicyFeature::kSmartCard,
-        /*allowed_origins=*/{},
-        /*self_if_matches=*/app_origin,
-        /*matches_all_origins=*/false, /*matches_opaque_src=*/false)}};
-  }
-};
-
 IN_PROC_BROWSER_TEST_F(SmartCardTest, NoCoiPermission) {
-  NoCoiPermissionSmartCardTestContentBrowserClient client;
+  SmartCardTestContentBrowserClient client;
   client.SetSmartCardDelegate(std::make_unique<FakeSmartCardDelegate>());
 
-  ASSERT_TRUE(NavigateToURL(shell(), GetIsolatedContextUrl()));
+  ASSERT_TRUE(
+      NavigateToURL(shell(), GetIsolatedContextUrl(/*include_coi_pp=*/false)));
 
   EXPECT_EQ(false, EvalJs(shell(), "self.crossOriginIsolated"));
   EXPECT_THAT(EvalJs(shell(), "navigator.smartCard.establishContext()"),

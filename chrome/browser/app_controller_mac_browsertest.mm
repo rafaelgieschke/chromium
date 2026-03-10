@@ -95,6 +95,8 @@
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "third_party/blink/public/common/features.h"
+#include "ui/color/color_id.h"
+#include "ui/color/color_provider.h"
 #import "ui/events/test/cocoa_test_event_utils.h"
 #include "ui/views/test/dialog_test.h"
 #include "ui/views/widget/any_widget_observer.h"
@@ -772,8 +774,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrowserTest,
   EXPECT_EQ(chrome::GetTotalBrowserCount(), 1u);
   // Close the current browser.
   Profile* profile = browser()->profile();
+  ui_test_utils::BrowserDestroyedObserver observer(browser());
   chrome::CloseAllBrowsers();
-  ui_test_utils::WaitForBrowserToClose();
+  observer.Wait();
   EXPECT_TRUE(GlobalBrowserCollection::GetInstance()->IsEmpty());
   // Create an incognito browser and check that it is the last active browser.
   Browser* incognito_browser = CreateIncognitoBrowser(profile);
@@ -851,8 +854,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrowserTest, OpenUrlWhenForcedIncognito) {
   EXPECT_EQ(chrome::GetTotalBrowserCount(), 1u);
   // Close the current non-incognito browser.
   Profile* profile = browser()->profile();
+  ui_test_utils::BrowserDestroyedObserver observer(browser());
   chrome::CloseAllBrowsers();
-  ui_test_utils::WaitForBrowserToClose();
+  observer.Wait();
   EXPECT_TRUE(GlobalBrowserCollection::GetInstance()->IsEmpty());
   // Force incognito mode.
   IncognitoModePrefs::SetAvailability(
@@ -884,8 +888,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerBrowserTest,
   EXPECT_EQ(chrome::GetTotalBrowserCount(), 1u);
   // Close the current non-incognito browser.
   Profile* profile = browser()->profile();
+  ui_test_utils::BrowserDestroyedObserver observer(browser());
   chrome::CloseAllBrowsers();
-  ui_test_utils::WaitForBrowserToClose();
+  observer.Wait();
   EXPECT_TRUE(GlobalBrowserCollection::GetInstance()->IsEmpty());
   // Force incognito mode.
   IncognitoModePrefs::SetAvailability(
@@ -1228,8 +1233,9 @@ IN_PROC_BROWSER_TEST_F(AppControllerMainMenuBrowserTest,
   EXPECT_EQ(chrome::GetTotalBrowserCount(), 1u);
   // Close the current non-incognito browser.
   Profile* profile = browser()->profile();
+  ui_test_utils::BrowserDestroyedObserver observer(browser());
   chrome::CloseAllBrowsers();
-  ui_test_utils::WaitForBrowserToClose();
+  observer.Wait();
   EXPECT_TRUE(GlobalBrowserCollection::GetInstance()->IsEmpty());
   // Force incognito mode.
   IncognitoModePrefs::SetAvailability(
@@ -1247,6 +1253,37 @@ IN_PROC_BROWSER_TEST_F(AppControllerMainMenuBrowserTest,
   EXPECT_EQ(chrome::GetTotalBrowserCount(), 1u);
   EXPECT_TRUE(new_browser->profile()->IsPrimaryOTRProfile());
   EXPECT_EQ(profile, new_browser->profile()->GetOriginalProfile());
+}
+
+// Regression test for https://crbug.com/487338374.
+// Destroys the browser that set _lastActiveBrowser, then forces a
+// HistoryMenuBridge rebuild that calls AddGroupEntryToMenu →
+// lastActiveColorProvider → GetColor(). Before the fix, this
+// dereferenced a dangling cached ColorProvider pointer.
+IN_PROC_BROWSER_TEST_F(AppControllerMainMenuBrowserTest,
+                       LastActiveColorProviderNulledOnBrowserClose) {
+  AppController* app_controller = AppController.sharedController;
+  Profile* profile = browser()->profile();
+
+  // Close a tab group to create a GROUP entry in TRS.
+  ASSERT_TRUE(AddTabAtIndex(1, GURL("about:blank"), ui::PAGE_TRANSITION_LINK));
+  TabStripModel* tab_strip = browser()->tab_strip_model();
+  auto group_id = tab_strip->AddToNewGroup({0});
+  tab_strip->CloseAllTabsInGroup(group_id);
+
+  // Destroy the browser that set _lastActiveBrowser.
+  Browser* browser2 = CreateBrowser(profile);
+  CloseBrowserSynchronously(browser());
+
+  // Force a HistoryMenuBridge rebuild. setLastProfile: early-returns when
+  // the profile hasn't changed, so nil it first.
+  [app_controller setLastProfile:nil];
+  [app_controller setLastProfile:profile];
+
+  const ui::ColorProvider& provider = [app_controller lastActiveColorProvider];
+  EXPECT_NE(provider.GetColor(ui::kColorSysPrimary), SK_ColorTRANSPARENT);
+
+  CloseBrowserSynchronously(browser2);
 }
 
 }  // namespace

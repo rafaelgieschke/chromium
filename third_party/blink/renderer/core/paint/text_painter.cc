@@ -522,14 +522,12 @@ void TextPainter::SetEmphasisMark(const AtomicString& emphasis_mark,
   }
 }
 
-void TextPainter::PaintDecorationLine(const TextDecorationInfo& decoration_info,
+void TextPainter::PaintDecorationLine(const DecorationGeometry& geometry,
+                                      bool has_decoration_override,
                                       const Color& line_color,
                                       const AutoDarkMode& auto_dark_mode) {
-  const DecorationGeometry& geometry = decoration_info.GetGeometry();
-
   DecorationLinePainter decoration_painter(graphics_context_);
-  if (svg_text_paint_state_.has_value() &&
-      !decoration_info.HasDecorationOverride()) {
+  if (svg_text_paint_state_.has_value() && !has_decoration_override) {
     SvgPaints paints;
     const SvgTextPaintState& state = svg_text_paint_state_.value();
     PrepareSvgPaints(state, svg_context_paints_, SvgPaintMode::kTextDecoration,
@@ -548,7 +546,12 @@ void TextPainter::PaintDecorationLine(const TextDecorationInfo& decoration_info,
 void TextPainter::ClipDecorationLine(
     const DecorationGeometry& geometry,
     float text_baseline,
-    const TextFragmentPaintInfo& fragment_paint_info) {
+    const TextFragmentPaintInfo& fragment_paint_info,
+    ETextDecorationSkipInk skip_ink) {
+  if (skip_ink == ETextDecorationSkipInk::kNone) {
+    return;
+  }
+
   if (fragment_paint_info.from >= fragment_paint_info.to ||
       !fragment_paint_info.shape_result) {
     return;
@@ -561,10 +564,16 @@ void TextPainter::ClipDecorationLine(
   const float upper = decoration_bounds.y() - text_baseline;
   const float stripe_width = decoration_bounds.height();
 
+  Font::InkSkipCJKHandling ink_skip_cjk_handling =
+      Font::InkSkipCJKHandling::kExcludeCJK;
+  if (skip_ink == ETextDecorationSkipInk::kAll &&
+      RuntimeEnabledFeatures::CSSTextDecorationSkipInkAllEnabled()) {
+    ink_skip_cjk_handling = Font::InkSkipCJKHandling::kIncludeCJK;
+  }
   Vector<Font::TextIntercept> text_intercepts;
-  font_.GetTextIntercepts(fragment_paint_info, graphics_context_.FillFlags(),
-                          std::make_tuple(upper, upper + stripe_width),
-                          text_intercepts);
+  font_.GetTextIntercepts(
+      fragment_paint_info, ink_skip_cjk_handling, graphics_context_.FillFlags(),
+      std::make_tuple(upper, upper + stripe_width), text_intercepts);
 
   const float dilation =
       std::min(geometry.Thickness(), kDecorationClipMaxDilation);

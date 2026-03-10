@@ -7,6 +7,7 @@
 
 #include "base/functional/callback.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/password_manager/actor_login/internal/actor_login_siwg_controller.h"
 #include "components/password_manager/core/browser/actor_login/actor_login_quality_logger_interface.h"
 #include "components/password_manager/core/browser/actor_login/internal/actor_login_delegate.h"
 #include "components/password_manager/core/browser/password_manager_driver.h"
@@ -21,6 +22,7 @@ namespace actor_login {
 
 class ActorLoginCredentialFiller;
 class ActorLoginGetCredentialsHelper;
+class ActorLoginMetricsHelper;
 
 // Delegate implementation, scoped to `WebContents` as its functionality is
 // intrinsically tied to a specific browser tab.
@@ -55,6 +57,7 @@ class ActorLoginDelegateImpl
   void AttemptLogin(const Credential& credential,
                     bool should_store_permission,
                     base::WeakPtr<ActorLoginQualityLoggerInterface> mqls_logger,
+                    base::TimeTicks attempt_login_tool_start_time,
                     LoginStatusResultOrErrorReply callback) override;
 
  private:
@@ -82,6 +85,11 @@ class ActorLoginDelegateImpl
   void OnAttemptLoginCompleted(
       base::expected<LoginStatusResult, ActorLoginError> result);
 
+  // Helper methods for recording metrics.
+  void RecordGetCredentialsMetricsAndResetHelper(
+      const CredentialsOrError& result);
+  void RecordAttemptLoginMetrics(const Credential& credential);
+
   // Store the pending callback. A non-null callback indicates an active
   // request.
   LoginStatusResultOrErrorReply pending_attempt_login_callback_;
@@ -95,8 +103,22 @@ class ActorLoginDelegateImpl
 
   raw_ptr<password_manager::PasswordManagerClient> client_ = nullptr;
 
+  // Helper for recording Actor.Login metrics. The helper is created at the
+  // beginning of a `GetCredentials` or `AttemptLogin` request, and it's
+  // reset (recording metrics) when the request is completed. If credentials
+  // are found, it's kept alive until an `AttemptLogin` request is made or
+  // until the flow is considered finished.
+  std::unique_ptr<ActorLoginMetricsHelper> metrics_helper_;
+
   // Fills credentials into a form. Scoped to one `AttemptLogin` request.
   std::unique_ptr<ActorLoginCredentialFiller> credential_filler_;
+
+  // Handles FedCM login. For prototyping purposes this uses heuristics to find
+  // and click the SiwG button. After the prototype, the click will be done
+  // through `ExecutionEngine`.
+  // Scoped to one `AttemptLogin` request.
+  // TODO(crbug.com/479505793): Implement the click without heuristics.
+  std::unique_ptr<ActorLoginSiwgController> siwg_controller_;
 
   base::WeakPtrFactory<ActorLoginDelegateImpl> weak_ptr_factory_{this};
 

@@ -70,9 +70,7 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
   // Notifies the WebView delegate that the JS window object has been cleared,
   // giving it a chance to bind native objects to the window before script
   // parsing begins.
-  void DispatchDidClearWindowObjectInMainWorld(
-      v8::Isolate* isolate,
-      v8::MicrotaskQueue* microtask_queue) override;
+  void DispatchDidClearWindowObjectInMainWorld(LocalDOMWindow*) override;
   void DocumentElementAvailable() override;
   void RunScriptsAtDocumentElementAvailable() override;
   void RunScriptsAtDocumentReady(bool document_is_empty) override;
@@ -148,7 +146,9 @@ class CORE_EXPORT LocalFrameClientImpl final : public LocalFrameClient {
       mojo::PendingRemote<mojom::blink::NavigationStateKeepAliveHandle>
           initiator_navigation_state_keep_alive_handle,
       bool is_container_initiated,
-      bool has_rel_opener) override;
+      bool has_rel_opener,
+      mojo::PendingReceiver<
+          mojom::blink::NavigationResumeDeferredCommitListener>) override;
   void DispatchWillSendSubmitEvent(HTMLFormElement*) override;
   void DidStartLoading() override;
   void DidStopLoading() override;

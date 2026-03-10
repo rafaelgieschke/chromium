@@ -43,7 +43,9 @@
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
+#include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/startup/infobar_utils.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/startup/startup_tab.h"
@@ -67,6 +69,10 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
 
+#if BUILDFLAG(IS_LINUX)
+#include "ui/display/screen.h"
+#endif
+
 #if BUILDFLAG(IS_MAC)
 #include "base/mac/mac_util.h"
 #include "chrome/browser/app_controller_mac.h"
@@ -82,6 +88,8 @@
 #endif
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+#include "chrome/browser/search_integrity/search_integrity.h"
+#include "chrome/browser/search_integrity/search_integrity_factory.h"
 #include "chrome/browser/ui/webui/whats_new/whats_new_fetcher.h"
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 
@@ -117,6 +125,57 @@ void AppendTabs(const StartupTabs& from, StartupTabs* to) {
 // Prepends the contents of |from| to the beginning of |to|.
 void PrependTabs(const StartupTabs& from, StartupTabs* to) {
   to->insert(to->begin(), from.begin(), from.end());
+}
+
+Browser* GetExistingBrowserForOpenBehavior(
+    Profile* profile,
+    chrome::startup::IsProcessStartup process_startup) {
+  Browser* workspace_browser = chrome::FindLastActiveWithProfile(profile);
+
+#if BUILDFLAG(IS_LINUX)
+  const bool match_original_profiles =
+      process_startup == chrome::startup::IsProcessStartup::kYes;
+  display::Screen* const screen = display::Screen::Get();
+  const std::string current_workspace =
+      screen ? screen->GetCurrentWorkspace() : std::string();
+
+  if (!current_workspace.empty()) {
+    GlobalBrowserCollection::GetInstance()->ForEach(
+        [&, current_workspace,
+         match_original_profiles](BrowserWindowInterface* window) {
+          Browser* const candidate = window->GetBrowserForMigrationOnly();
+
+          Profile* const candidate_profile = window->GetProfile();
+          if (match_original_profiles) {
+            if (candidate_profile->GetOriginalProfile() !=
+                profile->GetOriginalProfile()) {
+              return true;
+            }
+          } else if (candidate_profile != profile) {
+            return true;
+          }
+
+          if (window->GetType() != BrowserWindowInterface::Type::TYPE_NORMAL) {
+            return true;
+          }
+
+          BrowserWindow* const browser_window = candidate->window();
+          if (!browser_window) {
+            return true;
+          }
+
+          if (!browser_window->IsVisibleOnAllWorkspaces() &&
+              browser_window->GetWorkspace() != current_workspace) {
+            workspace_browser = candidate;
+            return false;
+          }
+          return true;
+        },
+        BrowserCollection::Order::kActivation);
+  }
+#endif  // BUILDFLAG(IS_LINUX)
+
+  return workspace_browser;
 }
 
 }  // namespace
@@ -159,6 +218,16 @@ void StartupBrowserCreatorImpl::Launch(
     bool restore_tabbed_browser) {
   DCHECK(profile);
   profile_ = profile;
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+  // Check for DSE integrity if flag is enabled.
+  if (base::FeatureList::IsEnabled(features::kDseIntegrity)) {
+    if (auto* search_integrity_service =
+            search_integrity::SearchIntegrityFactory::GetForProfile(profile_)) {
+      search_integrity_service->CheckSearchEngines();
+    }
+  }
+#endif
 
   DetermineURLsAndLaunch(process_startup, restore_tabbed_browser);
 
@@ -458,13 +527,6 @@ void StartupBrowserCreatorImpl::DetermineURLsAndLaunch(
             : CHROME_VERSION_STRING;
     MaybeShowNonMilestoneUpdateToast(browser, current_version_string);
   }
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
-  // Check for DSE integrity if flag is enabled.
-  if (base::FeatureList::IsEnabled(features::kDseIntegrity)) {
-    // TODO(466065123): The controller will instantiate the model, check the
-    // pref, and show the notification if needed.
-  }
-#endif
 }
 
 StartupBrowserCreatorImpl::DetermineStartupTabsResult::
@@ -568,7 +630,7 @@ StartupBrowserCreatorImpl::DetermineStartupTabs(
     }
 
     // Potentially add a tab appropriate to display the Privacy Sandbox
-    // confirmaton dialog on top of. Ideally such a tab will already exist
+    // confirmation dialog on top of. Ideally such a tab will already exist
     // in |tabs|, and no additional tab will be required.
     if (privacy_sandbox_dialog_required &&
         launch_result == LaunchResult::kNormally) {
@@ -631,8 +693,7 @@ Browser* StartupBrowserCreatorImpl::RestoreOrCreateBrowser(
   } else if (behavior == BrowserOpenBehavior::USE_EXISTING ||
              behavior ==
                  BrowserOpenBehavior::USE_EXISTING_AND_OVERWRITE_ACTIVE_TAB) {
-    browser = chrome::FindTabbedBrowser(
-        profile_, process_startup == chrome::startup::IsProcessStartup::kYes);
+    browser = GetExistingBrowserForOpenBehavior(profile_, process_startup);
   }
 
   base::AutoReset<bool> synchronous_launch_resetter(

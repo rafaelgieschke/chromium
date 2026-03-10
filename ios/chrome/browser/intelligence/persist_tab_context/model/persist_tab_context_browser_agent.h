@@ -18,7 +18,7 @@ namespace web {
 class WebState;
 }  // namespace web
 
-class PageContentCacheBridgeService;
+class PageContentCacheService;
 @class PersistTabContextStateObserver;
 
 // PersistTabContextBrowserAgent allows saving and retrieving saved page
@@ -46,8 +46,6 @@ class PersistTabContextBrowserAgent
       std::string,
       std::optional<std::unique_ptr<optimization_guide::proto::PageContext>>>;
 
-  // TODO(crbug.com/454689025): This browser agent's API is not yet approved for
-  // use by clients. DO NOT USE.
   // Asynchronously fetches a single page context associated with the given
   // `webstate_unique_id`.
   void GetSingleContextAsync(
@@ -56,8 +54,6 @@ class PersistTabContextBrowserAgent
                                   optimization_guide::proto::PageContext>>)>
           callback);
 
-  // TODO(crbug.com/454689025): This browser agent's API is not yet approved for
-  // use by clients. DO NOT USE.
   // Asynchronously fetches multiple page contexts for the provided vector of
   // `webstate_unique_ids`.
   void GetMultipleContextsAsync(
@@ -140,6 +136,17 @@ class PersistTabContextBrowserAgent
   // which case the last tab's page context should be saved to storage.
   __strong PersistTabContextStateAgent* persist_tab_context_state_agent_;
 
+  // Schedules a background task to delete the legacy directory used for
+  // filesystem storage.
+  void RemoveFilesystemStorage();
+
+  // Schedules a background task to delete the legacy directory used for SQLite
+  // storage.
+  void RemoveSqliteStorage();
+
+  // Runs cleanup tasks on the PageContentCache.
+  void RunCacheCleanup();
+
   // Profile-specific file path to store page contexts at in the app's cache.
   base::FilePath storage_directory_path_;
 
@@ -152,7 +159,7 @@ class PersistTabContextBrowserAgent
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   // The keyed service used to access the PageContentCache in.
-  raw_ptr<PageContentCacheBridgeService> page_content_cache_service_ = nullptr;
+  raw_ptr<PageContentCacheService> page_content_cache_service_ = nullptr;
 
   // Use PageContentCache for storage as opposed to the direct filesystem.
   const bool use_page_content_cache_;

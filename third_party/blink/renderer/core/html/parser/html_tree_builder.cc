@@ -290,13 +290,15 @@ HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser,
                                  bool include_shadow_roots,
                                  ContainerNode* fragment_target,
                                  Element* fragment_context_element,
-                                 CustomElementRegistry* registry)
+                                 CustomElementRegistry* registry,
+                                 StreamingSanitizer* sanitizer)
     : tree_(parser->ReentryPermit(),
             document,
             parser_content_policy,
             fragment_target,
             fragment_context_element,
-            registry),
+            registry,
+            sanitizer),
       insertion_mode_(kInitialMode),
       original_insertion_mode_(kInitialMode),
       should_skip_leading_newline_(false),
@@ -317,6 +319,7 @@ HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser,
                       include_shadow_roots,
                       nullptr,
                       nullptr,
+                      nullptr,
                       nullptr) {}
 HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser,
                                  ContainerNode* fragment_target,
@@ -324,7 +327,8 @@ HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser,
                                  ParserContentPolicy parser_content_policy,
                                  const HTMLParserOptions& options,
                                  bool include_shadow_roots,
-                                 CustomElementRegistry* registry)
+                                 CustomElementRegistry* registry,
+                                 StreamingSanitizer* sanitizer)
     : HTMLTreeBuilder(parser,
                       fragment_target->GetDocument(),
                       parser_content_policy,
@@ -332,7 +336,8 @@ HTMLTreeBuilder::HTMLTreeBuilder(HTMLDocumentParser* parser,
                       include_shadow_roots,
                       fragment_target,
                       context_element,
-                      registry) {
+                      registry,
+                      sanitizer) {
   DCHECK(IsMainThread());
   fragment_context_.Init(fragment_target, context_element);
 
@@ -425,9 +430,6 @@ void HTMLTreeBuilder::ConstructTree(AtomicHTMLToken* token) {
   parser_->tokenizer().SetForceNullCharacterReplacement(
       GetInsertionMode() == kTextMode || in_foreign_content);
   parser_->tokenizer().SetShouldAllowCDATA(in_foreign_content);
-  if (RuntimeEnabledFeatures::DOMPartsAPIEnabled()) {
-    parser_->tokenizer().SetShouldAllowDOMParts(tree_.InParsePartsScope());
-  }
 
   tree_.ExecuteQueuedTasks();
   // We might be detached now.
@@ -464,10 +466,31 @@ void HTMLTreeBuilder::ProcessToken(AtomicHTMLToken* token) {
     case HTMLToken::kEndOfFile:
       ProcessEndOfFile(token);
       break;
-    case HTMLToken::kDOMPart:
-      ProcessDOMPart(token);
+    case HTMLToken::kProcessingInstruction:
+      ProcessProcessingInstruction(token);
       break;
   }
+}
+
+void HTMLTreeBuilder::ProcessProcessingInstruction(AtomicHTMLToken* token) {
+  DCHECK_EQ(token->GetType(), HTMLToken::kProcessingInstruction);
+  if (GetInsertionMode() == kInitialMode ||
+      GetInsertionMode() == kBeforeHTMLMode ||
+      GetInsertionMode() == kAfterAfterBodyMode ||
+      GetInsertionMode() == kAfterAfterFramesetMode) {
+    tree_.InsertProcessingInstructionOnDocument(token);
+    return;
+  }
+  if (GetInsertionMode() == kAfterBodyMode) {
+    tree_.InsertProcessingInstructionOnHTMLHtmlElement(token);
+    return;
+  }
+  if (GetInsertionMode() == kInTableTextMode) {
+    DefaultForInTableText();
+    ProcessProcessingInstruction(token);
+    return;
+  }
+  tree_.InsertProcessingInstruction(token);
 }
 
 void HTMLTreeBuilder::ProcessDoctypeToken(AtomicHTMLToken* token) {
@@ -794,7 +817,7 @@ void HTMLTreeBuilder::ProcessStartTagForInBody(AtomicHTMLToken* token) {
           token->GetAttributeItem(html_names::kTypeAttr);
       bool disable_frameset =
           !type_attribute ||
-          !EqualIgnoringASCIICase(type_attribute->Value(), "hidden");
+          !EqualIgnoringAsciiCase(type_attribute->Value(), "hidden");
 
       tree_.ReconstructTheActiveFormattingElements();
       tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
@@ -1133,11 +1156,6 @@ bool HTMLTreeBuilder::ProcessTemplateEndTag(AtomicHTMLToken* token) {
   ResetInsertionModeAppropriately();
   if (template_stack_item) {
     DCHECK(template_stack_item->IsElementNode());
-    HTMLTemplateElement* template_element =
-        DynamicTo<HTMLTemplateElement>(template_stack_item->GetElement());
-    if (DocumentFragment* template_content = template_element->getContent()) {
-      tree_.FinishedTemplateElement(template_content);
-    }
   }
   return true;
 }
@@ -1235,7 +1253,7 @@ void HTMLTreeBuilder::ProcessStartTagForInTable(AtomicHTMLToken* token) {
       Attribute* type_attribute =
           token->GetAttributeItem(html_names::kTypeAttr);
       if (type_attribute &&
-          EqualIgnoringASCIICase(type_attribute->Value(), "hidden")) {
+          EqualIgnoringAsciiCase(type_attribute->Value(), "hidden")) {
         ParseError(token);
         tree_.InsertSelfClosingHTMLElementDestroyingToken(token);
         return;
@@ -2385,12 +2403,6 @@ void HTMLTreeBuilder::ProcessComment(AtomicHTMLToken* token) {
   tree_.InsertComment(token);
 }
 
-void HTMLTreeBuilder::ProcessDOMPart(AtomicHTMLToken* token) {
-  DCHECK_EQ(token->GetType(), HTMLToken::kDOMPart);
-  DCHECK(tree_.InParsePartsScope());
-  tree_.InsertDOMPart(token);
-}
-
 void HTMLTreeBuilder::ProcessCharacter(AtomicHTMLToken* token) {
   DCHECK_EQ(token->GetType(), HTMLToken::kCharacter);
   CharacterTokenBuffer buffer(token);
@@ -2834,10 +2846,10 @@ void HTMLTreeBuilder::ProcessTokenInForeignContent(AtomicHTMLToken* token) {
     case HTMLToken::kUninitialized:
       NOTREACHED();
     case HTMLToken::DOCTYPE:
-    // TODO(crbug.com/1453291) This needs to be expanded to properly handle
-    // foreign content (e.g. <svg>) inside an element with `parseparts`.
-    case HTMLToken::kDOMPart:
       ParseError(token);
+      break;
+    case HTMLToken::kProcessingInstruction:
+      tree_.InsertProcessingInstruction(token);
       break;
     case HTMLToken::kStartTag: {
       const HTMLTag tag = token->GetHTMLTag();

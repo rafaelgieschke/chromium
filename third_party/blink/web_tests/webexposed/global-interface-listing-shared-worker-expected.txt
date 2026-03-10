@@ -630,6 +630,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method destroy
 [Worker]     method getMappedRange
 [Worker]     method mapAsync
+[Worker]     method mapSync
 [Worker]     method unmap
 [Worker]     setter label
 [Worker] interface GPUCanvasContext
@@ -909,6 +910,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter label
 [Worker]     getter mipLevelCount
 [Worker]     getter sampleCount
+[Worker]     getter textureBindingViewDimension
 [Worker]     getter usage
 [Worker]     getter width
 [Worker]     method constructor
@@ -1677,6 +1679,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter headers
 [Worker]     getter integrity
 [Worker]     getter isHistoryNavigation
+[Worker]     getter isReloadNavigation
 [Worker]     getter keepalive
 [Worker]     getter method
 [Worker]     getter mode
@@ -1952,6 +1955,11 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     method constructor
 [Worker]     method toJSON
 [Worker]     method toString
+[Worker] interface TrustedParserOptions
+[Worker]     attribute @@toStringTag
+[Worker]     getter runScripts
+[Worker]     getter sanitizer
+[Worker]     method constructor
 [Worker] interface TrustedScript
 [Worker]     static method fromLiteral
 [Worker]     attribute @@toStringTag
@@ -1969,6 +1977,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     getter name
 [Worker]     method constructor
 [Worker]     method createHTML
+[Worker]     method createParserOptions
 [Worker]     method createScript
 [Worker]     method createScriptURL
 [Worker] interface TrustedTypePolicyFactory
@@ -3625,6 +3634,7 @@ Starting worker: resources/global-interface-listing-worker.js
 [Worker]     attribute RENDER_ATTACHMENT
 [Worker]     attribute STORAGE_BINDING
 [Worker]     attribute TEXTURE_BINDING
+[Worker]     attribute TRANSIENT_ATTACHMENT
 [Worker] namespace Temporal
 [Worker]     attribute @@toStringTag
 [Worker]     attribute Now

@@ -14,25 +14,42 @@
 
 namespace media {
 
-namespace {
+AudioOutputBufferParametersHelper::AudioOutputBufferParametersHelper() =
+    default;
+AudioOutputBufferParametersHelper::~AudioOutputBufferParametersHelper() =
+    default;
+AudioGlitchInfo
+AudioOutputBufferParametersHelper::GetGlitchIncrementSinceLastCall(
+    AudioOutputBufferParameters& params) {
+  base::TimeDelta current_glitch_duration = base::Microseconds(
+      std::atomic_ref<int64_t>(params.cumulative_glitch_duration_us)
+          .load(std::memory_order_relaxed));
+  uint64_t current_glitch_count =
+      std::atomic_ref<uint64_t>(params.cumulative_glitch_count)
+          .load(std::memory_order_relaxed);
 
-int ComputeChannelCount(ChannelLayout channel_layout, int channels) {
-  if (channel_layout == CHANNEL_LAYOUT_DISCRETE) {
-    CHECK_NE(0, channels);
-    return channels;
-  } else if (channel_layout == CHANNEL_LAYOUT_5_1_4_DOWNMIX && channels != 0) {
-    // For CHANNEL_LAYOUT_5_1_4_DOWNMIX we can set a custom number of channels,
-    // but we are not forced to.
-    return channels;
-  }
-  const int calculated_channel_count =
-      ChannelLayoutToChannelCount(channel_layout);
-  DCHECK(channel_layout == CHANNEL_LAYOUT_UNSUPPORTED ||
-         calculated_channel_count == channels);
-  return calculated_channel_count;
+  DCHECK_GE(current_glitch_duration, previous_glitch_duration_);
+  DCHECK_GE(current_glitch_count, previous_glitch_count_);
+
+  media::AudioGlitchInfo glitch_info{
+      .duration = current_glitch_duration - previous_glitch_duration_,
+      .count = base::saturated_cast<uint32_t>(current_glitch_count -
+                                              previous_glitch_count_)};
+  previous_glitch_duration_ = current_glitch_duration;
+  previous_glitch_count_ = current_glitch_count;
+  return glitch_info;
 }
 
-}  // namespace
+// static
+void AudioOutputBufferParametersHelper::AddGlitchIncrementToBuffer(
+    AudioOutputBufferParameters& params,
+    AudioGlitchInfo glitch_info) {
+  std::atomic_ref<int64_t>(params.cumulative_glitch_duration_us)
+      .fetch_add(glitch_info.duration.InMicroseconds(),
+                 std::memory_order_relaxed);
+  std::atomic_ref<uint64_t>(params.cumulative_glitch_count)
+      .fetch_add(glitch_info.count, std::memory_order_relaxed);
+}
 
 static_assert(AudioBus::kChannelAlignment == kParametersAlignment,
               "Audio buffer parameters struct alignment not same as AudioBus");
@@ -114,33 +131,6 @@ uint32_t ComputeAudioOutputBufferSize(int channels, int frames) {
       AudioBus::CalculateMemorySize(channels, frames);
   result += sizeof(media::AudioOutputBufferParameters);
   return result.ValueOrDie();
-}
-
-ChannelLayoutConfig::ChannelLayoutConfig(const ChannelLayoutConfig& other) =
-    default;
-ChannelLayoutConfig& ChannelLayoutConfig::operator=(
-    const ChannelLayoutConfig& other) = default;
-ChannelLayoutConfig::~ChannelLayoutConfig() = default;
-
-ChannelLayoutConfig::ChannelLayoutConfig()
-    : ChannelLayoutConfig(
-          ChannelLayoutConfig::FromLayout<CHANNEL_LAYOUT_NONE>()) {}
-
-ChannelLayoutConfig::ChannelLayoutConfig(ChannelLayout channel_layout,
-                                         int channels)
-    : channel_layout_(channel_layout),
-      channels_(ComputeChannelCount(channel_layout, channels)) {}
-
-ChannelLayoutConfig ChannelLayoutConfig::Mono() {
-  return FromLayout<CHANNEL_LAYOUT_MONO>();
-}
-
-ChannelLayoutConfig ChannelLayoutConfig::Stereo() {
-  return FromLayout<CHANNEL_LAYOUT_STEREO>();
-}
-
-ChannelLayoutConfig ChannelLayoutConfig::Guess(int channels) {
-  return ChannelLayoutConfig(GuessChannelLayout(channels), channels);
 }
 
 // static
@@ -308,15 +298,12 @@ std::string AudioParameters::AsHumanReadableString() const {
 }
 
 int AudioParameters::GetBytesPerBuffer(SampleFormat fmt) const {
-  return GetBytesPerFrame(fmt) * frames_per_buffer_;
+  return base::CheckMul(GetBytesPerFrame(fmt), frames_per_buffer_)
+      .ValueOrDie<int>();
 }
 
 int AudioParameters::GetBytesPerFrame(SampleFormat fmt) const {
   return channels() * SampleFormatToBytesPerChannel(fmt);
-}
-
-double AudioParameters::GetMicrosecondsPerFrame() const {
-  return static_cast<double>(base::Time::kMicrosecondsPerSecond) / sample_rate_;
 }
 
 base::TimeDelta AudioParameters::GetBufferDuration() const {

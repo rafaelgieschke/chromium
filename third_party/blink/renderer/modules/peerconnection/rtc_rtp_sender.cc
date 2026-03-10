@@ -481,13 +481,13 @@ ToRtpParameters(ExecutionContext* context,
 webrtc::RtpCodec ToWebrtcRtpCodec(const RTCRtpCodec* codec) {
   webrtc::RtpCodec webrtc_codec;
   std::string mime_type = codec->mimeType().Utf8();
-  auto slash_index = codec->mimeType().Find("/");
+  auto slash_index = codec->mimeType().find('/');
   if (slash_index == kNotFound) {
     webrtc_codec.kind = webrtc::MediaType::UNSUPPORTED;
     return webrtc_codec;
   }
-  webrtc_codec.name = codec->mimeType().Substring(slash_index + 1).Utf8();
-  String codec_type = codec->mimeType().Substring(0, slash_index);
+  webrtc_codec.name = codec->mimeType().substr(slash_index + 1).Utf8();
+  String codec_type = codec->mimeType().substr(0, slash_index);
 
   if (codec_type == "video") {
     webrtc_codec.kind = webrtc::MediaType::VIDEO;
@@ -503,11 +503,11 @@ webrtc::RtpCodec ToWebrtcRtpCodec(const RTCRtpCodec* codec) {
     webrtc_codec.num_channels = codec->channels();
   }
   if (codec->hasSdpFmtpLine()) {
-    Vector<String> fmtp_splits;
-    codec->sdpFmtpLine().Split(";", true, fmtp_splits);
+    String fmtp_line = codec->sdpFmtpLine();
+    Vector<StringView> fmtp_splits = StringView(fmtp_line).Split(';');
     for (const auto& fmtp_split : fmtp_splits) {
-      String parameter = fmtp_split.StripWhiteSpace();
-      auto equal_index = parameter.Find("=");
+      StringView parameter = fmtp_split.StripWhiteSpace();
+      auto equal_index = parameter.find('=');
       std::string name, value;
       if (equal_index == kNotFound) {
         // Handle parameters without any equal signs, such as RED "111/111"
@@ -515,8 +515,8 @@ webrtc::RtpCodec ToWebrtcRtpCodec(const RTCRtpCodec* codec) {
         value = parameter.Utf8();
       } else {
         // Handle parameters with an equal sign "foo=bar"
-        name = parameter.Substring(0, equal_index).Utf8();
-        value = parameter.Substring(equal_index + 1).Utf8();
+        name = parameter.substr(0, equal_index).Utf8();
+        value = parameter.substr(equal_index + 1).Utf8();
       }
       webrtc_codec.parameters[name] = value;
     }

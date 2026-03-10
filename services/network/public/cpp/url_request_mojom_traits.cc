@@ -87,6 +87,17 @@ bool StructTraits<network::mojom::TrustedUrlRequestParamsDataView,
       mojo::PendingRemote<network::mojom::AcceptCHFrameObserver>>();
   out->shared_dictionary_observer = data.TakeSharedDictionaryObserver<
       mojo::PendingRemote<network::mojom::SharedDictionaryAccessObserver>>();
+  mojo::ScopedDataPipeProducerHandle response_body_stream =
+      data.TakeResponseBodyStream();
+  if (response_body_stream.is_valid()) {
+    out->response_body_stream =
+        base::MakeRefCounted<network::SharedDataPipeProducerHandle>(
+            std::move(response_body_stream));
+  }
+  if (!data.ReadExpectedResponseHeadersForSyntheticResponse(
+          &out->expected_response_headers_for_synthetic_response)) {
+    return false;
+  }
   return true;
 }
 
@@ -193,6 +204,7 @@ bool StructTraits<
   out->do_not_prompt_for_login = data.do_not_prompt_for_login();
   out->is_outermost_main_frame = data.is_outermost_main_frame();
   out->transition_type = data.transition_type();
+  out->is_reload_navigation = data.is_reload_navigation();
   out->previews_state = data.previews_state();
   out->upgrade_if_insecure = data.upgrade_if_insecure();
   out->is_revalidating = data.is_revalidating();

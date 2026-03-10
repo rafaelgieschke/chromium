@@ -12,16 +12,19 @@ import android.view.MenuItem;
 
 import androidx.annotation.IntDef;
 import androidx.fragment.app.Fragment;
+import androidx.preference.Preference;
 
 import org.chromium.base.Callback;
 import org.chromium.base.ResettersForTesting;
-import org.chromium.base.supplier.ObservableSupplier;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.autofill.R;
+import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.settings.ChromeBaseSettingsFragment;
 import org.chromium.chrome.browser.settings.search.ChromeBaseSearchIndexProvider;
+import org.chromium.components.browser_ui.settings.ChromeSwitchPreference;
 import org.chromium.components.browser_ui.settings.SettingsFragment;
 import org.chromium.components.browser_ui.settings.SettingsUtils;
 import org.chromium.components.browser_ui.settings.TextMessagePreference;
@@ -40,6 +43,12 @@ public class AutofillOptionsFragment extends ChromeBaseSettingsFragment {
     public static final String AUTOFILL_OPTIONS_REFERRER = "autofill-options-referrer";
     public static final String PREF_AUTOFILL_THIRD_PARTY_FILLING = "autofill_third_party_filling";
     public static final String PREF_THIRD_PARTY_TOGGLE_HINT = "third_party_toggle_hint";
+    public static final String PREF_AUTOFILL_AI_SWITCH = "autofill_ai_switch";
+    public static final String PREF_AUTOFILL_AI_AUTHENTICATION_SWITCH =
+            "autofill_ai_authentication_switch";
+    public static final String PREF_AUTOFILL_AI_CATEGORY = "autofill_ai_category";
+    public static final String PREF_AUTOFILL_SERVICE_PROVIDER_CETEGORY =
+            "autofill_service_provider_category";
 
     private @AutofillOptionsReferrer int mReferrer;
 
@@ -73,7 +82,8 @@ public class AutofillOptionsFragment extends ChromeBaseSettingsFragment {
         int COUNT = 4;
     }
 
-    private final ObservableSupplierImpl<String> mPageTitle = new ObservableSupplierImpl<>();
+    private final SettableMonotonicObservableSupplier<String> mPageTitle =
+            ObservableSuppliers.createMonotonic();
 
     /** This default constructor is required to instantiate the fragment. */
     public AutofillOptionsFragment() {}
@@ -85,21 +95,41 @@ public class AutofillOptionsFragment extends ChromeBaseSettingsFragment {
         return thirdPartyFillingSwitch;
     }
 
+    ChromeSwitchPreference getAutofillAiSwitch() {
+        ChromeSwitchPreference autofillAiSwitch = findPreference(PREF_AUTOFILL_AI_SWITCH);
+        assert autofillAiSwitch != null;
+        return autofillAiSwitch;
+    }
+
+    ChromeSwitchPreference getAutofillAiAuthenticationSwitch() {
+        ChromeSwitchPreference autofillAiAuthenticationSwitch =
+                findPreference(PREF_AUTOFILL_AI_AUTHENTICATION_SWITCH);
+        assert autofillAiAuthenticationSwitch != null;
+        return autofillAiAuthenticationSwitch;
+    }
+
     TextMessagePreference getHint() {
         TextMessagePreference hint = findPreference(PREF_THIRD_PARTY_TOGGLE_HINT);
         assert hint != null;
         return hint;
     }
 
+    @Nullable Preference getAutofillAiCategory() {
+        return findPreference(PREF_AUTOFILL_AI_CATEGORY);
+    }
+
+    @Nullable Preference getAutofillServiceProviderCategory() {
+        return findPreference(PREF_AUTOFILL_SERVICE_PROVIDER_CETEGORY);
+    }
+
     @Override
     public void onCreatePreferences(@Nullable Bundle savedInstanceState, @Nullable String rootKey) {
-        mPageTitle.set(getString(R.string.autofill_options_title));
         setHasOptionsMenu(true);
         SettingsUtils.addPreferencesFromResource(this, R.xml.autofill_options_preferences);
     }
 
     @Override
-    public ObservableSupplier<String> getPageTitle() {
+    public SettableMonotonicObservableSupplier<String> getPageTitle() {
         return mPageTitle;
     }
 
@@ -178,6 +208,16 @@ public class AutofillOptionsFragment extends ChromeBaseSettingsFragment {
         return "autofill_options";
     }
 
+    static boolean isAutofillAiEnabled() {
+        // LINT.IfChange(AutofillEnabledCheckFragment)
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_AI_WITH_DATA_SCHEMA);
+        // LINT.ThenChange(:AddAddAddressButtonMediator)
+    }
+
+    static boolean isAutofillAiReauthEnabled() {
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.AUTOFILL_AI_REAUTH_REQUIRED);
+    }
+
     public static final ChromeBaseSearchIndexProvider SEARCH_INDEX_DATA_PROVIDER =
             new ChromeBaseSearchIndexProvider(
                     AutofillOptionsFragment.class.getName(), R.xml.autofill_options_preferences) {
@@ -189,6 +229,13 @@ public class AutofillOptionsFragment extends ChromeBaseSettingsFragment {
                 @Override
                 public void updateDynamicPreferences(Context context, SettingsIndexData indexData) {
                     indexData.removeEntry(getUniqueId(PREF_THIRD_PARTY_TOGGLE_HINT));
+                    if (!isAutofillAiEnabled()) {
+                        indexData.removeEntry(getUniqueId(PREF_AUTOFILL_AI_SWITCH));
+                        indexData.removeEntry(getUniqueId(PREF_AUTOFILL_AI_AUTHENTICATION_SWITCH));
+                        indexData.removeEntry(getUniqueId(PREF_AUTOFILL_SERVICE_PROVIDER_CETEGORY));
+                    } else if (!isAutofillAiReauthEnabled()) {
+                        indexData.removeEntry(getUniqueId(PREF_AUTOFILL_AI_AUTHENTICATION_SWITCH));
+                    }
                 }
             };
 }

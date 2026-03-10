@@ -37,7 +37,6 @@
 #include "chrome/browser/sync/test/integration/sync_test.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
@@ -89,7 +88,7 @@ enum AllowedBuckets {
 
 #if BUILDFLAG(IS_WIN)
 std::wstring GetRegistryPathForTestProfile() {
-  // Cleanup follow-up to http://crbug.com/721245 for the previous location of
+  // Cleanup follow-up to http://crbug.com/40520015 for the previous location of
   // this test key which had similar problems (to a lesser extent). It's
   // redundant but harmless to have multiple callers hit this on the same
   // machine. TODO(gab): remove this mid-june 2017.
@@ -171,7 +170,7 @@ base::FilePath GetProfileDir() {
   return profile_dir.AppendASCII(TestingProfile::kTestUserProfileDir);
 }
 
-std::optional<base::Value::Dict> ReadPrefsDictionary(
+std::optional<base::DictValue> ReadPrefsDictionary(
     const base::FilePath& pref_file) {
   JSONFileValueDeserializer deserializer(pref_file);
   int error_code = JSONFileValueDeserializer::JSON_NO_ERROR;
@@ -273,12 +272,12 @@ class PrefHashBrowserTestBase : public extensions::ExtensionBrowserTest {
     EXPECT_EQ(protection_level_ > PROTECTION_DISABLED_ON_PLATFORM,
               base::PathExists(protected_pref_file));
 
-    std::optional<base::Value::Dict> unprotected_preferences(
+    std::optional<base::DictValue> unprotected_preferences(
         ReadPrefsDictionary(unprotected_pref_file));
     if (!unprotected_preferences)
       return false;
 
-    std::optional<base::Value::Dict> protected_preferences;
+    std::optional<base::DictValue> protected_preferences;
     if (protection_level_ > PROTECTION_DISABLED_ON_PLATFORM) {
       protected_preferences = ReadPrefsDictionary(protected_pref_file);
       if (!protected_preferences)
@@ -442,8 +441,8 @@ class PrefHashBrowserTestBase : public extensions::ExtensionBrowserTest {
   // main test. |unprotected_preferences| is never NULL, |protected_preferences|
   // may be NULL if in PROTECTION_DISABLED_ON_PLATFORM mode.
   virtual void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) = 0;
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) = 0;
 
   // Called from the body of the main test. Overrides should use it to verify
   // that the browser had the desired reaction when faced when the attack
@@ -488,8 +487,8 @@ class PrefHashBrowserTestUnchangedDefault : public PrefHashBrowserTestBase {
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
     // No attack.
   }
 
@@ -584,9 +583,9 @@ class PrefHashBrowserTestClearedAtomic : public PrefHashBrowserTestBase {
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
-    base::Value::Dict* selected_prefs =
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
+    base::DictValue* selected_prefs =
         protection_level_ >= PROTECTION_ENABLED_BASIC ? protected_preferences
                                                       : unprotected_preferences;
     // |selected_prefs| should never be NULL under the protection level picking
@@ -678,8 +677,8 @@ class PrefHashBrowserTestUntrustedInitialized : public PrefHashBrowserTestBase {
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
     unprotected_preferences->RemoveByDottedPath("protection.macs");
     if (protected_preferences)
       protected_preferences->RemoveByDottedPath("protection.macs");
@@ -797,15 +796,15 @@ class PrefHashBrowserTestChangedAtomic : public PrefHashBrowserTestBase {
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
-    base::Value::Dict* selected_prefs =
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
+    base::DictValue* selected_prefs =
         protection_level_ >= PROTECTION_ENABLED_BASIC ? protected_preferences
                                                       : unprotected_preferences;
     // `selected_prefs` should never be NULL under the protection level picking
     // it.
     ASSERT_TRUE(selected_prefs);
-    base::Value::List* startup_urls =
+    base::ListValue* startup_urls =
         selected_prefs->FindListByDottedPath(prefs::kURLsToRestoreOnStartup);
     ASSERT_TRUE(startup_urls);
     EXPECT_EQ(1U, startup_urls->size());
@@ -884,21 +883,21 @@ class PrefHashBrowserTestChangedSplitPref : public PrefHashBrowserTestBase {
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
-    base::Value::Dict* selected_prefs =
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
+    base::DictValue* selected_prefs =
         protection_level_ >= PROTECTION_ENABLED_EXTENSIONS
             ? protected_preferences
             : unprotected_preferences;
     // |selected_prefs| should never be NULL under the protection level picking
     // it.
     EXPECT_TRUE(selected_prefs);
-    base::Value::Dict* extensions_dict = selected_prefs->FindDictByDottedPath(
+    base::DictValue* extensions_dict = selected_prefs->FindDictByDottedPath(
         extensions::pref_names::kExtensions);
     EXPECT_TRUE(extensions_dict);
 
     // Tamper with any installed setting for good.crx
-    base::Value::Dict* good_crx_dict = extensions_dict->FindDict(kGoodCrxId);
+    base::DictValue* good_crx_dict = extensions_dict->FindDict(kGoodCrxId);
     ASSERT_TRUE(good_crx_dict);
 
     std::optional<int> good_crx_incognito_access =
@@ -908,7 +907,7 @@ class PrefHashBrowserTestChangedSplitPref : public PrefHashBrowserTestBase {
 
     // Drop a fake extension (for the purpose of this test, dropped settings
     // don't need to be valid extension settings).
-    base::Value::Dict fake_extension;
+    base::DictValue fake_extension;
     fake_extension.Set("name", "foo");
     extensions_dict->Set(std::string(32, 'a'), std::move(fake_extension));
   }
@@ -976,7 +975,7 @@ PREF_HASH_BROWSER_TEST(PrefHashBrowserTestChangedSplitPref, ChangedSplitPref);
 // Verifies that adding a value to unprotected preferences for a key which is
 // still using the default (i.e. has no value stored in protected preferences)
 // doesn't allow that value to slip in with no valid MAC (regression test for
-// http://crbug.com/414554)
+// http://crbug.com/40384661)
 class PrefHashBrowserTestUntrustedAdditionToPrefs
     : public PrefHashBrowserTestBase {
  public:
@@ -987,8 +986,8 @@ class PrefHashBrowserTestUntrustedAdditionToPrefs
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
     unprotected_preferences->SetByDottedPath(
         prefs::kRestoreOnStartup, static_cast<int>(SessionStartupPref::LAST));
   }
@@ -1056,7 +1055,7 @@ PREF_HASH_BROWSER_TEST(PrefHashBrowserTestUntrustedAdditionToPrefs,
 
 // Verifies that adding a value to unprotected preferences while wiping a
 // user-selected value from protected preferences doesn't allow that value to
-// slip in with no valid MAC (regression test for http://crbug.com/414554).
+// slip in with no valid MAC (regression test for http://crbug.com/40384661).
 class PrefHashBrowserTestUntrustedAdditionToPrefsAfterWipe
     : public PrefHashBrowserTestBase {
  public:
@@ -1065,8 +1064,8 @@ class PrefHashBrowserTestUntrustedAdditionToPrefsAfterWipe
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
     // Set or change the value in Preferences to the attacker's choice.
     unprotected_preferences->Set(prefs::kHomePage, "http://example.net");
     // Clear the value in Secure Preferences, if any.
@@ -1147,8 +1146,8 @@ class PrefHashBrowserTestRegistryValidationFailure
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
     std::wstring registry_key =
         GetRegistryPathForTestProfile() + L"\\PreferenceMACs\\Default";
     base::win::RegKey key;
@@ -1215,8 +1214,8 @@ class PrefHashBrowserTestDefaultSearch : public PrefHashBrowserTestBase {
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
     static constexpr char default_search_provider_data[] = R"(
     {
       "default_search_provider_data" : {
@@ -1305,9 +1304,9 @@ class PrefHashBrowserTestExtensionDictTypeChanged
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
-    base::Value::Dict* const selected_prefs =
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
+    base::DictValue* const selected_prefs =
         protection_level_ >= PROTECTION_ENABLED_EXTENSIONS
             ? protected_preferences
             : unprotected_preferences;
@@ -1370,9 +1369,9 @@ class PrefHashBrowserTestAccountValueUntrustedAddition
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
-    base::Value::Dict* selected_prefs =
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
+    base::DictValue* selected_prefs =
         protection_level_ >= PROTECTION_ENABLED_BASIC ? protected_preferences
                                                       : unprotected_preferences;
     // `selected_prefs` should never be NULL under the protection level picking
@@ -1471,16 +1470,16 @@ class PrefHashBrowserTestEncryptedTampered
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
     // Attack the encrypted hash, leaving the legacy MAC intact.
-    base::Value::Dict* selected_prefs =
+    base::DictValue* selected_prefs =
         protection_level_ >= PROTECTION_ENABLED_BASIC ? protected_preferences
                                                       : unprotected_preferences;
     ASSERT_TRUE(selected_prefs);
 
     // Hashes are stored in the "protection.macs" dictionary.
-    base::Value::Dict* macs_dict =
+    base::DictValue* macs_dict =
         selected_prefs->FindDictByDottedPath("protection.macs");
     ASSERT_TRUE(macs_dict);
 
@@ -1553,14 +1552,14 @@ class PrefHashBrowserTestEncryptedFallbackAndGeneratingEH
 
   // Runs before the main test. Verifies the on-disk state.
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
     if (protection_level_ <= PROTECTION_DISABLED_ON_PLATFORM) {
       return;
     }
 
     // The 'macs' dict may be in either pref file depending on platform.
-    base::Value::Dict* macs_dict = nullptr;
+    base::DictValue* macs_dict = nullptr;
     if (protected_preferences) {
       macs_dict =
           protected_preferences->FindDictByDottedPath("protection.macs");
@@ -1606,9 +1605,9 @@ class PrefHashBrowserTestEncryptedFallbackAndGeneratingEH
     profile()->GetPrefs()->CommitPendingWrite(run_loop.QuitClosure());
     run_loop.Run();
 #if !BUILDFLAG(IS_CHROMEOS)
-    std::optional<base::Value::Dict> final_protected_prefs;
-    std::optional<base::Value::Dict> final_unprotected_prefs;
-    base::Value::Dict* final_macs_dict = nullptr;
+    std::optional<base::DictValue> final_protected_prefs;
+    std::optional<base::DictValue> final_unprotected_prefs;
+    base::DictValue* final_macs_dict = nullptr;
 
     {
       base::ScopedAllowBlockingForTesting allow_blocking;
@@ -1671,14 +1670,14 @@ class PrefHashBrowserTestEncryptedSplitPrefFallbackAndGeneratingEH
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
     if (protection_level_ <= PROTECTION_DISABLED_ON_PLATFORM) {
       pre_test_state_ok_ = true;
       return;
     }
 
-    base::Value::Dict* macs_dict = nullptr;
+    base::DictValue* macs_dict = nullptr;
     if (protected_preferences) {
       macs_dict =
           protected_preferences->FindDictByDottedPath("protection.macs");
@@ -1727,9 +1726,9 @@ class PrefHashBrowserTestEncryptedSplitPrefFallbackAndGeneratingEH
     profile()->GetPrefs()->CommitPendingWrite(run_loop.QuitClosure());
     run_loop.Run();
 #if !BUILDFLAG(IS_CHROMEOS)
-    std::optional<base::Value::Dict> final_protected_prefs;
-    std::optional<base::Value::Dict> final_unprotected_prefs;
-    base::Value::Dict* final_macs_dict = nullptr;
+    std::optional<base::DictValue> final_protected_prefs;
+    std::optional<base::DictValue> final_unprotected_prefs;
+    base::DictValue* final_macs_dict = nullptr;
     {
       base::ScopedAllowBlockingForTesting allow_blocking;
       final_protected_prefs = ReadPrefsDictionary(
@@ -1778,13 +1777,13 @@ class PrefHashBrowserTestEncryptedSplitPrefTampered
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
     if (protection_level_ <= PROTECTION_DISABLED_ON_PLATFORM) {
       return;
     }
 
-    base::Value::Dict* macs_dict = nullptr;
+    base::DictValue* macs_dict = nullptr;
     if (protected_preferences) {
       macs_dict =
           protected_preferences->FindDictByDottedPath("protection.macs");
@@ -1797,7 +1796,7 @@ class PrefHashBrowserTestEncryptedSplitPrefTampered
 
     const std::string encrypted_hash_key =
         std::string(extensions::pref_names::kExtensions) + kEncryptedHashSuffix;
-    base::Value::Dict* encrypted_split_hashes =
+    base::DictValue* encrypted_split_hashes =
         macs_dict->FindDict(encrypted_hash_key);
 
     if (encrypted_split_hashes) {
@@ -1859,13 +1858,13 @@ class PrefHashBrowserTestEncryptedHashIsAuthoritative
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
     if (protection_level_ <= PROTECTION_DISABLED_ON_PLATFORM) {
       return;
     }
 
-    base::Value::Dict* macs_dict = nullptr;
+    base::DictValue* macs_dict = nullptr;
     if (protected_preferences) {
       macs_dict =
           protected_preferences->FindDictByDottedPath("protection.macs");
@@ -1955,16 +1954,16 @@ class PrefHashBrowserTestEncryptedBypass
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
-    base::Value::Dict* selected_prefs =
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
+    base::DictValue* selected_prefs =
         protection_level_ >= PROTECTION_ENABLED_BASIC ? protected_preferences
                                                       : unprotected_preferences;
     // If protection is off, the test can't run. We are testing protected prefs.
     if (!selected_prefs) {
       return;
     }
-    base::Value::Dict* macs_dict =
+    base::DictValue* macs_dict =
         selected_prefs->FindDictByDottedPath("protection.macs");
     ASSERT_TRUE(macs_dict);
 
@@ -2036,9 +2035,9 @@ class PrefHashBrowserTestEnterpriseEncryptedHmacFallback
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
-    base::Value::Dict* const macs_dict =
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
+    base::DictValue* const macs_dict =
         protected_preferences->FindDictByDottedPath("protection.macs");
     ASSERT_TRUE(macs_dict);
 
@@ -2100,9 +2099,9 @@ class PrefHashBrowserTestEnterpriseEncryptedTampered
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
-    base::Value::Dict* const macs_dict =
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
+    base::DictValue* const macs_dict =
         protected_preferences->FindDictByDottedPath("protection.macs");
     ASSERT_TRUE(macs_dict);
 
@@ -2160,9 +2159,9 @@ class PrefHashBrowserTestEnterpriseFeatureDisabled
   }
 
   void AttackPreferencesOnDisk(
-      base::Value::Dict* unprotected_preferences,
-      base::Value::Dict* protected_preferences) override {
-    base::Value::Dict* macs_dict =
+      base::DictValue* unprotected_preferences,
+      base::DictValue* protected_preferences) override {
+    base::DictValue* macs_dict =
         protected_preferences->FindDictByDottedPath("protection.macs");
     if (!macs_dict) {
       macs_dict =

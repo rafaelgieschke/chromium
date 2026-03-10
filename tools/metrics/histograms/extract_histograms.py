@@ -16,11 +16,12 @@ import logging
 import os
 import re
 import sys
-from typing import TypedDict
+from typing import Optional, TypedDict
 import xml.dom.minidom
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'common'))
-import xml_utils
+import setup_modules
+
+import chromium_src.tools.metrics.common.xml_utils as xml_utils
 
 BASIC_EMAIL_REGEXP = r'^[\w\-\+\%\.]+\@[\w\-\+\%\.]+$'
 
@@ -84,7 +85,7 @@ class EnumDict(TypedDict, total=False):
   """A dict representing an enum."""
 
   name: str
-  type: str | None
+  type: Optional[str]
   buckets: list[_BucketDict]
   summary: str
 
@@ -108,7 +109,7 @@ def ExpandHistogramNameWithSuffixes(
     suffix_name: str,
     histogram_name: str,
     histogram_suffixes_node: xml.dom.minidom.Element,
-) -> tuple[str | None, ExtractionErrors]:
+) -> tuple[Optional[str], ExtractionErrors]:
   """Creates a new histogram name based on a histogram suffix.
 
   Args:
@@ -310,7 +311,7 @@ def _ExtractOwners(node: xml.dom.minidom.Element) -> tuple[list[str], bool]:
 
 def _ExtractImprovementDirection(
     histogram_node: xml.dom.minidom.Element,
-) -> tuple[str | None, ExtractionErrors]:
+) -> tuple[Optional[str], ExtractionErrors]:
   """Extracts improvement direction from the given histogram element, if any.
 
   Args:
@@ -644,7 +645,7 @@ def ExtractVariantsFromXmlTree(
   return variants_dict, errors
 
 
-def _GetObsoleteReason(node: xml.dom.minidom.Element) -> str | None:
+def _GetObsoleteReason(node: xml.dom.minidom.Element) -> Optional[str]:
   """If the node's histogram is obsolete, returns a string explanation.
 
   Otherwise, returns None.

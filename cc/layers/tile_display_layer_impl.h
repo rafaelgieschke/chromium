@@ -5,7 +5,6 @@
 #ifndef CC_LAYERS_TILE_DISPLAY_LAYER_IMPL_H_
 #define CC_LAYERS_TILE_DISPLAY_LAYER_IMPL_H_
 
-#include <map>
 #include <memory>
 #include <utility>
 #include <variant>
@@ -23,6 +22,7 @@
 #include "cc/tiles/tiling_set_coverage_iterator.h"
 #include "components/viz/common/resources/shared_image_format.h"
 #include "components/viz/common/resources/transferable_resource.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
 #include "ui/gfx/geometry/axis_transform2d.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
@@ -105,7 +105,7 @@ class CC_EXPORT TileDisplayLayerTile {
 class CC_EXPORT TileDisplayLayerTiling {
  public:
   using Tile = TileDisplayLayerTile;
-  using TileMap = std::map<TileIndex, std::unique_ptr<Tile>>;
+  using TileMap = absl::flat_hash_map<TileIndex, std::unique_ptr<Tile>>;
   using CoverageIterator = DisplayTilingCoverageIterator;
 
   explicit TileDisplayLayerTiling(TileDisplayLayerImpl& layer, float scale_key);
@@ -171,6 +171,7 @@ class CC_EXPORT TileDisplayLayerImpl
   }
   void SetRecordedBounds(const gfx::Rect& bounds) { recorded_bounds_ = bounds; }
   bool IsDirectlyCompositedImage() const override;
+  gfx::Rect RecordedBounds() const override;
   void SetProposedTilingScalesForDeletion(
       std::vector<float> proposed_tiling_scales) {
     proposed_tiling_scales_for_deletion_ = std::move(proposed_tiling_scales);
@@ -217,14 +218,7 @@ class CC_EXPORT TileDisplayLayerImpl
 
  private:
   // TileBasedLayerImpl:
-  void AppendQuadsSpecialization(const AppendQuadsContext& context,
-                                 viz::CompositorRenderPass* render_pass,
-                                 AppendQuadsData* append_quads_data,
-                                 viz::SharedQuadState* shared_quad_state,
-                                 const Occlusion& scaled_occlusion,
-                                 const gfx::Vector2d& quad_offset,
-                                 float max_contents_scale) override;
-  float GetMaximumContentsScaleForUseInAppendQuads() override;
+  float GetMaximumContentsScaleForUseInAppendQuads() const override;
   float GetIdealContentsScaleKey() const override;
   void AppendQuadsForResourcelessSoftwareDraw(
       const AppendQuadsContext& context,
@@ -238,6 +232,22 @@ class CC_EXPORT TileDisplayLayerImpl
       float ideal_contents_scale) override;
   TilingResolution GetTilingResolutionForDebugBorders(
       const TileDisplayLayerTiling* tiling) const override;
+  void ComputeCheckerboardedNeedsRecord(
+      AppendQuadsData* append_quads_data) override;
+
+  bool AppendQuadForTile(TilingSetCoverageIterator<TileDisplayLayerTiling> iter,
+                         const AppendQuadsContext& context,
+                         viz::CompositorRenderPass* render_pass,
+                         AppendQuadsData* append_quads_data,
+                         viz::SharedQuadState* shared_quad_state,
+                         const Occlusion& scaled_occlusion,
+                         const gfx::Rect& offset_geometry_rect,
+                         const gfx::Rect& offset_visible_geometry_rect,
+                         const gfx::Rect& visible_geometry_rect,
+                         bool needs_blending,
+                         const std::optional<gfx::Rect>& scaled_cull_rect,
+                         float max_contents_scale,
+                         AppendQuadsCustomSharedData* custom_data) override;
 
   bool is_directly_composited_image_ = false;
   bool nearest_neighbor_ = false;

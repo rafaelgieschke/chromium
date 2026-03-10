@@ -97,9 +97,11 @@ public class SendTabToSelfBottomSheetRenderTest {
                                             sActivity,
                                             JUnitTestGURLs.HTTP_URL.getSpec(),
                                             "Title",
+                                            /* pageContext= */ null,
                                             mBottomSheetController,
                                             devices,
-                                            mProfile);
+                                            mProfile,
+                                            () -> null);
                             sActivity.setContentView(sheetContent.getContentView());
                             return sheetContent.getContentView();
                         });
@@ -127,9 +129,11 @@ public class SendTabToSelfBottomSheetRenderTest {
                                     sActivity,
                                     JUnitTestGURLs.HTTP_URL.getSpec(),
                                     "Title",
+                                    /* pageContext= */ null,
                                     mBottomSheetController,
                                     devices,
-                                    mProfile);
+                                    mProfile,
+                                    () -> null);
                     sActivity.setContentView(sheetContent.getContentView());
                 });
         onView(withText(account.getEmail())).check(doesNotExist());
@@ -169,7 +173,7 @@ public class SendTabToSelfBottomSheetRenderTest {
     private void setUpAccountData(AccountInfo account) {
         // Set up account data to be shown by the UI.
         when(mIdentityManager.getPrimaryAccountInfo(ConsentLevel.SIGNIN)).thenReturn(account);
-        when(mIdentityManager.findExtendedAccountInfoByEmailAddress(account.getEmail()))
+        when(mIdentityManager.findExtendedAccountInfoByAccountId(account.getId()))
                 .thenReturn(account);
         when(mIdentityServicesProvider.getIdentityManager(mProfile)).thenReturn(mIdentityManager);
         IdentityServicesProvider.setInstanceForTests(mIdentityServicesProvider);

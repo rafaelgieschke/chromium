@@ -13,6 +13,7 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/enterprise/browser_management/management_identity.h"
 #include "chrome/browser/enterprise/util/managed_browser_utils.h"
 #include "chrome/browser/policy/chrome_browser_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
@@ -22,7 +23,8 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/signin_util.h"
-#include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/managed_ui.h"
 #include "chrome/browser/ui/signin/signin_view_controller.h"
 #include "chrome/browser/ui/ui_features.h"
@@ -52,8 +54,6 @@
 #include "chrome/browser/enterprise/profile_management/profile_management_features.h"
 #endif
 
-using signin::constants::kNoHostedDomainFound;
-
 namespace {
 const int kAvatarSize = 100;
 constexpr base::TimeDelta kLongProcessingThreshold = base::Seconds(5);
@@ -62,15 +62,13 @@ constexpr base::TimeDelta kLongProcessingThreshold = base::Seconds(5);
 std::string GetManagedAccountTitle(ProfileAttributesEntry* entry,
                                    const std::string& account_domain_name) {
   DCHECK(entry);
-  if (entry->GetHostedDomain() == kNoHostedDomainFound) {
+  std::optional<std::string> hosted_domain = entry->GetHostedDomain();
+  if (hosted_domain == std::string()) {
     return std::string();
   }
-  const std::string domain_name = entry->GetHostedDomain().empty()
-                                      ? account_domain_name
-                                      : entry->GetHostedDomain();
   return l10n_util::GetStringFUTF8(
       IDS_ENTERPRISE_PROFILE_WELCOME_ACCOUNT_MANAGED_BY,
-      base::UTF8ToUTF16(domain_name));
+      base::UTF8ToUTF16(hosted_domain.value_or(account_domain_name)));
 }
 
 std::string GetManagedDeviceTitle() {
@@ -137,14 +135,18 @@ ManagedUserProfileNoticeHandler::ManagedUserProfileNoticeHandler(
       browser_ ||
       (type_ !=
            ManagedUserProfileNoticeUI::ScreenType::kEnterpriseAccountCreation ||
+       // TODO(crbug.com/490053225): Clean this "||" up
        type_ == ManagedUserProfileNoticeUI::ScreenType::kProfilePicker));
-  BrowserList::AddObserver(this);
+  if (browser_) {
+    browser_did_close_subscription_ = browser_->RegisterBrowserDidClose(
+        base::BindRepeating(&ManagedUserProfileNoticeHandler::OnBrowserDidClose,
+                            base::Unretained(this)));
+  }
 }
 
 ManagedUserProfileNoticeHandler::~ManagedUserProfileNoticeHandler() {
-  BrowserList::RemoveObserver(this);
   if (!canceling_) {
-    HandleCancel(base::Value::List());
+    HandleCancel(base::ListValue());
   }
 }
 
@@ -189,10 +191,10 @@ void ManagedUserProfileNoticeHandler::OnProfileIsManagedChanged(
   UpdateProfileInfo(profile_path);
 }
 
-void ManagedUserProfileNoticeHandler::OnBrowserRemoved(Browser* browser) {
-  if (browser_ == browser) {
-    browser_ = nullptr;
-  }
+void ManagedUserProfileNoticeHandler::OnBrowserDidClose(
+    BrowserWindowInterface* browser) {
+  CHECK_EQ(browser_, browser);
+  browser_ = nullptr;
 }
 
 void ManagedUserProfileNoticeHandler::OnExtendedAccountInfoUpdated(
@@ -220,7 +222,7 @@ void ManagedUserProfileNoticeHandler::OnJavascriptDisallowed() {
 }
 
 void ManagedUserProfileNoticeHandler::HandleInitialized(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   CHECK_EQ(1u, args.size());
   AllowJavascript();
   const base::Value& callback_id = args[0];
@@ -228,7 +230,7 @@ void ManagedUserProfileNoticeHandler::HandleInitialized(
 }
 
 void ManagedUserProfileNoticeHandler::HandleInitializedWithSize(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   AllowJavascript();
 
   if (browser_) {
@@ -237,7 +239,7 @@ void ManagedUserProfileNoticeHandler::HandleInitializedWithSize(
 }
 
 void ManagedUserProfileNoticeHandler::HandleProceed(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   CHECK_EQ(2u, args.size());
   AllowJavascript();
   bool use_existing_profile = args[1].GetIfBool().value_or(false);
@@ -315,7 +317,7 @@ void ManagedUserProfileNoticeHandler::HandleProceed(
 }
 
 void ManagedUserProfileNoticeHandler::HandleCancel(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   canceling_ = true;
   if (IsJavascriptAllowed()) {
     DisallowJavascript();
@@ -394,20 +396,18 @@ std::string ManagedUserProfileNoticeHandler::GetManagedAccountTitleWithEmail(
   return l10n_util::GetStringFUTF8(
       IDS_ENTERPRISE_PROFILE_WELCOME_PROFILE_SEPARATION_DEVICE_MANAGED, email);
 #else
-  if (entry->GetHostedDomain() == kNoHostedDomainFound) {
+  std::optional<std::string> hosted_domain = entry->GetHostedDomain();
+  if (hosted_domain == std::string()) {
     return std::string();
   }
-  const std::string domain_name = entry->GetHostedDomain().empty()
-                                      ? account_domain_name
-                                      : entry->GetHostedDomain();
   return l10n_util::GetStringFUTF8(
       IDS_ENTERPRISE_PROFILE_WELCOME_ACCOUNT_EMAIL_MANAGED_BY, email,
-      base::UTF8ToUTF16(domain_name));
+      base::UTF8ToUTF16(hosted_domain.value_or(account_domain_name)));
 #endif  //  !BUILDFLAG(IS_CHROMEOS)
 }
 
-base::Value::Dict ManagedUserProfileNoticeHandler::GetProfileInfoValue() {
-  base::Value::Dict dict;
+base::DictValue ManagedUserProfileNoticeHandler::GetProfileInfoValue() {
+  base::DictValue dict;
   dict.Set("pictureUrl", GetPictureUrl());
 
   std::string title =
@@ -446,6 +446,8 @@ base::Value::Dict ManagedUserProfileNoticeHandler::GetProfileInfoValue() {
                        ? IDS_ENTERPRISE_PROFILE_WELCOME_CREATE_PROFILE_BUTTON
                        : IDS_APP_CONTINUE));
       break;
+    case ManagedUserProfileNoticeUI::ScreenType::kFirstRun:
+      // TODO(crbug.com/483637730): Specify the exact UI for the First Run case
     case ManagedUserProfileNoticeUI::ScreenType::kProfilePicker:
     case ManagedUserProfileNoticeUI::ScreenType::kEnterpriseAccountCreation:
       title = l10n_util::GetStringUTF8(
@@ -466,11 +468,13 @@ base::Value::Dict ManagedUserProfileNoticeHandler::GetProfileInfoValue() {
           IdentityManagerFactory::GetForProfile(Profile::FromWebUI(web_ui()))
               ->FindExtendedAccountInfoByAccountId(account_id_);
       CHECK(!account_info.IsEmpty());
-      dict.Set("continueAs", l10n_util::GetStringFUTF8(
-                                 IDS_PROFILES_DICE_WEB_ONLY_SIGNIN_BUTTON,
-                                 base::UTF8ToUTF16(account_info.given_name)));
+      dict.Set(
+          "continueAs",
+          l10n_util::GetStringFUTF8(
+              IDS_PROFILES_DICE_WEB_ONLY_SIGNIN_BUTTON,
+              base::UTF8ToUTF16(account_info.GetGivenName().value_or(""))));
       dict.Set("email", base::UTF16ToUTF8(email_));
-      dict.Set("accountName", account_info.full_name);
+      dict.Set("accountName", account_info.GetFullName().value_or(""));
 
 #if !BUILDFLAG(IS_CHROMEOS)
       // We apply the checkLinkDataCheckboxByDefault to true value only if the
@@ -516,10 +520,9 @@ std::string ManagedUserProfileNoticeHandler::GetPictureUrl() {
         IdentityManagerFactory::GetForProfile(Profile::FromWebUI(web_ui()))
             ->FindExtendedAccountInfoByAccountId(account_id_);
     DCHECK(!account_info.IsEmpty());
-    icon = account_info.account_image.IsEmpty()
-               ? ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-                     profiles::GetPlaceholderAvatarIconResourceID())
-               : account_info.account_image;
+    icon = account_info.GetAvatarImage().value_or(
+        ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+            profiles::GetPlaceholderAvatarIconResourceID()));
   } else if (type_ == ManagedUserProfileNoticeUI::ScreenType::kEnterpriseOIDC) {
     icon = ui::ResourceBundle::GetSharedInstance().GetImageNamed(
         profiles::GetPlaceholderAvatarIconResourceID());

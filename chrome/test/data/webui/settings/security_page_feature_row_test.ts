@@ -39,6 +39,7 @@ suite('securityPageFeatureRow', function() {
     securityPageFeatureRow =
         document.createElement('security-page-feature-row');
     securityPageFeatureRow.pref = settingsPrefs.get('prefs.test');
+    securityPageFeatureRow.icon = 'settings20:warning_outline';
 
     document.body.appendChild(securityPageFeatureRow);
     flush();
@@ -76,15 +77,19 @@ suite('securityPageFeatureRow', function() {
     await microtasksFinished();
     assertTrue(securityPageFeatureRow.expanded);
 
-    // Enable the feature.
+    // Click the toggle to enable the feature.
     getToggleButton()!.click();
     await microtasksFinished();
     assertTrue(securityPageFeatureRow.pref.value);
+
+    // Verify clicking the toggle did NOT collapsed the row.
+    assertTrue(securityPageFeatureRow.expanded);
 
     // Disable the feature again.
     getToggleButton()!.click();
     await microtasksFinished();
     assertFalse(securityPageFeatureRow.pref.value);
+    assertTrue(securityPageFeatureRow.expanded);
   });
 
   test('RowClickShowsAndHidesToggle', async function() {
@@ -221,5 +226,19 @@ suite('securityPageFeatureRow', function() {
     const hiddenStyle = getComputedStyle(icon);
     assertEquals('0', hiddenStyle.opacity);
     assertEquals('0px', hiddenStyle.width);
+  });
+
+  test('IconVisibility', async function() {
+    securityPageFeatureRow.iconVisible = true;
+    await flushTasks();
+    assertTrue(
+        isChildVisible(securityPageFeatureRow, '#icon'),
+        'Icon should be visible');
+
+    securityPageFeatureRow.iconVisible = false;
+    await flushTasks();
+    assertFalse(
+        isChildVisible(securityPageFeatureRow, '#icon'),
+        'Icon should not be visible');
   });
 });

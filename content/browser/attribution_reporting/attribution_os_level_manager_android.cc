@@ -113,7 +113,7 @@ void GetMeasurementApiStatus() {
 
 static void JNI_AttributionOsLevelManager_OnMeasurementStateReturned(
     JNIEnv* env,
-    jint state) {
+    int32_t state) {
   ApiState api_state = ConvertToApiState(state);
 
   if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
@@ -184,7 +184,9 @@ void AttributionOsLevelManagerAndroid::Register(
   std::vector<ScopedJavaLocalRef<jobject>> registration_urls = base::ToVector(
       registration.registration_items,
       [env](const attribution_reporting::OsRegistrationItem& item) {
-        return url::GURLAndroid::FromNativeGURL(env, item.url);
+        ScopedJavaLocalRef<jobject> ret =
+            url::GURLAndroid::FromNativeGURL(env, item.url);
+        return ret;
       });
   auto top_level_origin = url::GURLAndroid::FromNativeGURL(
       env, registration.top_level_origin.GetURL());
@@ -282,7 +284,9 @@ void AttributionOsLevelManagerAndroid::ClearData(
 
   std::vector<ScopedJavaLocalRef<jobject>> j_origins =
       base::ToVector(origins, [env](const url::Origin& origin) {
-        return url::GURLAndroid::FromNativeGURL(env, origin.GetURL());
+        ScopedJavaLocalRef<jobject> ret =
+            url::GURLAndroid::FromNativeGURL(env, origin.GetURL());
+        return ret;
       });
 
   int request_id = next_callback_id_++;
@@ -295,9 +299,10 @@ void AttributionOsLevelManagerAndroid::ClearData(
       GetMatchBehavior(mode));
 }
 
-void AttributionOsLevelManagerAndroid::OnRegistrationCompleted(JNIEnv* env,
-                                                               jint request_id,
-                                                               bool success) {
+void AttributionOsLevelManagerAndroid::OnRegistrationCompleted(
+    JNIEnv* env,
+    int32_t request_id,
+    bool success) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   auto it = pending_registration_callbacks_.find(request_id);
@@ -311,7 +316,7 @@ void AttributionOsLevelManagerAndroid::OnRegistrationCompleted(JNIEnv* env,
 
 void AttributionOsLevelManagerAndroid::OnDataDeletionCompleted(
     JNIEnv* env,
-    jint request_id) {
+    int32_t request_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   auto it = pending_data_deletion_callbacks_.find(request_id);

@@ -20,7 +20,6 @@
 #include "base/containers/flat_set.h"
 #include "base/containers/lru_cache.h"
 #include "base/functional/callback.h"
-#include "base/memory/memory_pressure_listener.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/raw_ptr_exclusion.h"
 #include "base/memory/shared_memory_mapping.h"
@@ -67,6 +66,7 @@
 #include "cc/trees/render_frame_metadata.h"
 #include "cc/trees/task_runner_provider.h"
 #include "cc/trees/throttle_decider.h"
+#include "cc/trees/tracked_element_bounds.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
 #include "components/viz/common/gpu/context_cache_controller.h"
 #include "components/viz/common/quads/compositor_render_pass.h"
@@ -79,6 +79,7 @@
 #include "components/viz/common/view_transition_element_resource_id.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/vector2d_f.h"
+#include "ui/latency/latency_info.h"
 
 namespace gfx {
 class PointF;
@@ -142,8 +143,7 @@ class CC_EXPORT LayerTreeHostImpl : public TileManagerClient,
                                     public MutatorHostClient,
                                     public ImageAnimationController::Client,
                                     public CompositorDelegateForInput,
-                                    public EventLatencyTracker,
-                                    public base::MemoryPressureListener {
+                                    public EventLatencyTracker {
  public:
   // A struct of data for a single UIResource, including the backing
   // pixels, and metadata about it.
@@ -268,6 +268,7 @@ class CC_EXPORT LayerTreeHostImpl : public TileManagerClient,
   void DidAnimateScrollOffset();
   void SetFullViewportDamage();
   void SetViewportDamage(const gfx::Rect& damage_rect);
+  void SetRootLayerDamageRect(const gfx::Rect& damage_rect);
 
   // Interface for InputHandler
   void BindToInputHandler(
@@ -445,7 +446,8 @@ class CC_EXPORT LayerTreeHostImpl : public TileManagerClient,
   void DidDrawAllLayers(const FrameData& frame);
 
   // Pushes differential updates to the display tree via a LayerContext.
-  base::TimeTicks UpdateDisplayTree(FrameData& frame);
+  base::TimeTicks UpdateDisplayTree(FrameData& frame,
+                                    std::vector<ui::LatencyInfo> latency_info);
 
   const LayerTreeSettings& settings() const { return settings_; }
 
@@ -753,6 +755,7 @@ class CC_EXPORT LayerTreeHostImpl : public TileManagerClient,
   void ScheduleMicroBenchmark(std::unique_ptr<MicroBenchmarkImpl> benchmark);
 
   viz::RegionCaptureBounds CollectRegionCaptureBounds();
+  TrackedElementBounds CollectTrackedElementBounds();
 
   viz::CompositorFrameMetadata MakeCompositorFrameMetadata();
   RenderFrameMetadata MakeRenderFrameMetadata(FrameData* frame);
@@ -917,14 +920,6 @@ class CC_EXPORT LayerTreeHostImpl : public TileManagerClient,
     is_handling_interaction_from_client_ = is_handling_interaction;
   }
 
-  // Returns a bitfield of debug information that indicates why HasDamage() is
-  // true.
-  uint32_t LastFrameHasDamageData() const {
-    return last_frame_has_damage_data_;
-  }
-
-  void AddDamageDataCrashKeys(uint32_t damage_data, bool is_viz);
-
  protected:
   LayerTreeHostImpl(
       const LayerTreeSettings& settings,
@@ -1052,8 +1047,6 @@ class CC_EXPORT LayerTreeHostImpl : public TileManagerClient,
   // active tree.
   void ActivateStateForImages();
 
-  void OnMemoryPressure(base::MemoryPressureLevel level) override;
-
   void AllocateLocalSurfaceId();
 
   // Log the AverageLag events from the frame identified by |frame_token| and
@@ -1113,8 +1106,6 @@ class CC_EXPORT LayerTreeHostImpl : public TileManagerClient,
   // expensiveness of this function.
   void MaybeFlashEnteredViewportScrollbars(ElementId element_id,
                                            const gfx::Vector2dF& scroll_delta);
-
-  uint32_t GetHasDamageData() const;
 
   // Once bound, this instance owns the InputHandler. However, an InputHandler
   // need not be bound so this should be null-checked before dereferencing.
@@ -1234,6 +1225,7 @@ class CC_EXPORT LayerTreeHostImpl : public TileManagerClient,
   bool resourceless_software_draw_ = false;
 
   gfx::Rect viewport_damage_rect_;
+  gfx::Rect root_layer_damage_rect_;
   std::optional<base::CheckedNumeric<uint32_t>> total_invalidated_area_ = 0;
 
   std::unique_ptr<MutatorHost> mutator_host_;
@@ -1291,6 +1283,10 @@ class CC_EXPORT LayerTreeHostImpl : public TileManagerClient,
   // <meta name="viewport" content="initial-scale=1.0">
   bool is_viewport_mobile_optimized_ = false;
 
+  // If true, forwards a request to viz/ to use ADPF's
+  // setPreferEfficientScheduling API on Android. No-op for other platforms.
+  bool prefer_efficient_scheduling_ = false;
+
   bool prefers_reduced_motion_ = false;
 
   bool may_throttle_if_undrawn_frames_ = true;
@@ -1329,9 +1325,6 @@ class CC_EXPORT LayerTreeHostImpl : public TileManagerClient,
   // once this value is updated, it will never return to |kNull|.
   viz::VerticalScrollDirection last_vertical_scroll_direction_ =
       viz::VerticalScrollDirection::kNull;
-
-  std::unique_ptr<base::AsyncMemoryPressureListenerRegistration>
-      memory_pressure_listener_registration_;
 
   PresentationTimeCallbackBuffer presentation_time_callbacks_;
 
@@ -1441,7 +1434,6 @@ class CC_EXPORT LayerTreeHostImpl : public TileManagerClient,
   bool dump_compositor_frame_ = false;
   uint32_t dump_compositor_frame_begin_ = 0;
   uint32_t dump_compositor_frame_end_ = 0;
-  uint32_t last_frame_has_damage_data_ = 0;
 
   // Must be the last member to ensure this is destroyed first in the
   // destruction order and invalidates all weak pointers.

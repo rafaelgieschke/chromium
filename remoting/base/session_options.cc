@@ -6,11 +6,11 @@
 
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/values.h"
 
 namespace remoting {
 
@@ -21,8 +21,7 @@ static constexpr char kKeyValueSeparator = ':';
 
 // Whether |value| is good to be added to SessionOptions as a value.
 bool ValueIsValid(const std::string& value) {
-  return !base::Contains(value, kSeparator) &&
-         !base::Contains(value, kKeyValueSeparator) &&
+  return !value.contains(kSeparator) && !value.contains(kKeyValueSeparator) &&
          base::IsStringASCII(value);
 }
 
@@ -39,6 +38,15 @@ SessionOptions::SessionOptions(SessionOptions&& other) = default;
 
 SessionOptions::SessionOptions(const std::string& parameter) {
   Import(parameter);
+}
+
+SessionOptions::SessionOptions(const base::DictValue& dict) {
+  for (auto [key, value] : dict) {
+    if (value.is_string() && KeyIsValid(key) &&
+        ValueIsValid(value.GetString())) {
+      Append(key, value.GetString());
+    }
+  }
 }
 
 SessionOptions::~SessionOptions() = default;

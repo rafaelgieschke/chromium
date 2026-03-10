@@ -8,6 +8,7 @@
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/extensions/extension_action_dispatcher.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_util.h"
@@ -389,7 +390,8 @@ IN_PROC_BROWSER_TEST_F(NativeBindingsApiTest, WebUIBindings) {
 }
 
 // Tests creating an API from a context that hasn't been initialized yet
-// by doing so in a parent frame. Regression test for https://crbug.com/819968.
+// by doing so in a parent frame. Regression test for
+// https://crbug.com/41375376.
 IN_PROC_BROWSER_TEST_F(NativeBindingsApiTest, APICreationFromNewContext) {
   embedded_test_server()->ServeFilesFromDirectory(test_data_dir_);
   ASSERT_TRUE(StartEmbeddedTestServer());
@@ -553,120 +555,11 @@ IN_PROC_BROWSER_TEST_F(NativeBindingsApiTest, PromiseBasedAPI) {
                    functions::HistogramValue::TABS_CREATE));
 }
 
-// Tests that calling an API which supports promises using an MV2 extension does
-// not get a promise based return and still needs to use callbacks when
-// required.
-IN_PROC_BROWSER_TEST_F(NativeBindingsApiTest, MV2PromisesNotSupported) {
-  base::HistogramTester histogram_tester;
-  ASSERT_TRUE(StartEmbeddedTestServer());
-
-  TestExtensionDir test_dir;
-  test_dir.WriteManifest(
-      R"({
-           "name": "Promises",
-           "manifest_version": 2,
-           "version": "0.1",
-           "background": {
-             "scripts": ["background.js"]
-           },
-           "permissions": ["tabs", "storage", "contentSettings", "privacy"]
-         })");
-  constexpr char kBackgroundJs[] =
-      R"(let tabIdGooge;
-
-         chrome.test.getConfig((config) => {
-           let exampleUrl = `https://example.com:${config.testServer.port}/`;
-           let googleUrl = `https://google.com:${config.testServer.port}/`
-
-           chrome.test.runTests([
-             function createNewTabPromise() {
-               let result = chrome.tabs.create({url: exampleUrl});
-               chrome.test.assertEq(undefined, result);
-               chrome.test.assertNoLastError();
-               chrome.test.succeed();
-             },
-             function queryTabPromise() {
-               let expectedError = 'Error in invocation of tabs.query(object ' +
-                   'queryInfo, function callback): No matching signature.';
-               chrome.test.assertThrows(chrome.tabs.query,
-                                        [{url: exampleUrl}],
-                                        expectedError);
-               chrome.test.succeed();
-             },
-             function storageAreaPromise() {
-               let expectedError = 'Error in invocation of storage.get(' +
-                   'optional [string|array|object] keys, function callback): ' +
-                   'No matching signature.';
-               chrome.test.assertThrows(chrome.storage.local.get,
-                                        chrome.storage.local,
-                                        ['foo'], expectedError);
-               chrome.test.succeed();
-             },
-             function contentSettingPromise() {
-               let expectedError = 'Error in invocation of contentSettings' +
-                   '.ContentSetting.get(object details, function callback): ' +
-                   'No matching signature.';
-               chrome.test.assertThrows(chrome.contentSettings.cookies.get,
-                                        chrome.contentSettings.cookies,
-                                        [{primaryUrl: exampleUrl}],
-                                        expectedError);
-               chrome.test.succeed();
-             },
-             function chromeSettingPromise() {
-               let expectedError = 'Error in invocation of types' +
-                   '.ChromeSetting.get(object details, function callback): ' +
-                   'No matching signature.';
-               chrome.test.assertThrows(
-                   chrome.privacy.websites.doNotTrackEnabled.get,
-                   chrome.privacy.websites.doNotTrackEnabled,
-                   [{}],
-                   expectedError);
-               chrome.test.succeed();
-             },
-             function createNewTabCallback() {
-               chrome.tabs.create({url: googleUrl}, (tab) => {
-                 let url = tab.pendingUrl;
-                 chrome.test.assertEq(googleUrl, url);
-                 tabIdGoogle = tab.id;
-                 chrome.test.assertNoLastError();
-                 chrome.test.succeed();
-               });
-             },
-             function queryTabCallback() {
-               chrome.tabs.query({url: googleUrl}, (tabs) => {
-                 chrome.test.assertTrue(tabs instanceof Array);
-                 chrome.test.assertEq(1, tabs.length);
-                 chrome.test.assertEq(tabIdGoogle, tabs[0].id);
-                 chrome.test.assertNoLastError();
-                 chrome.test.succeed();
-               });
-             }
-           ]);
-         });)";
-  test_dir.WriteFile(FILE_PATH_LITERAL("background.js"), kBackgroundJs);
-  ResultCatcher catcher;
-  ASSERT_TRUE(LoadExtension(test_dir.UnpackedPath()));
-  ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
-
-  // The above test makes 2 calls to chrome.tabs.create, so check that those
-  // have been logged in the histograms we expect, but not to the histograms
-  // specifically tracking service worker and MV3 calls.
-  EXPECT_EQ(2, histogram_tester.GetBucketCount(
-                   "Extensions.Functions.ExtensionCalls",
-                   functions::HistogramValue::TABS_CREATE));
-  EXPECT_EQ(0, histogram_tester.GetBucketCount(
-                   "Extensions.Functions.ExtensionServiceWorkerCalls",
-                   functions::HistogramValue::TABS_CREATE));
-  EXPECT_EQ(0, histogram_tester.GetBucketCount(
-                   "Extensions.Functions.ExtensionMV3Calls",
-                   functions::HistogramValue::TABS_CREATE));
-}
-
 class NativeBindingsBrowserNamespaceTest : public NativeBindingsApiTest {
  public:
   NativeBindingsBrowserNamespaceTest() {
     scoped_feature_list_.InitAndEnableFeature(
-        extensions_features::kExtensionBrowserNamespaceAlternative);
+        extensions_features::kExtensionBrowserNamespaceAndPolyfillSupport);
   }
 
   NativeBindingsBrowserNamespaceTest(
@@ -767,6 +660,311 @@ IN_PROC_BROWSER_TEST_F(NativeBindingsBrowserNamespaceTest,
 
   EXPECT_TRUE(ObjectIsDefined(web_contents, "chrome"));
   EXPECT_FALSE(ObjectIsDefined(web_contents, "browser"));
+}
+
+// Tests that standard APIs like `runtime` are distinct objects in the `chrome`
+// and `browser` namespaces, even if they point to the same underlying API.
+IN_PROC_BROWSER_TEST_F(NativeBindingsBrowserNamespaceTest,
+                       ChromeAndBrowserObjects_ApiAliasing) {
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(
+      R"({
+          "name": "Api Aliasing test",
+          "version": "0.1",
+          "manifest_version": 3,
+          "background": {"service_worker": "background.js"}
+        })");
+  test_dir.WriteFile(FILE_PATH_LITERAL("background.js"),
+                     R"(chrome.test.runTests([
+                        function checkApiAliasing() {
+                          // Standard APIs like runtime are independently
+                          // created for both chrome and browser namespaces.
+                          // They are not aliases of each other identity-wise,
+                          // but they provide the same functionality.
+
+                          // Try to modify chrome.runtime as representative of
+                          // most APIs since they use the same bindings
+                          // accessor. In a non-devtools-page context like this,
+                          // the API root on chrome is typically writable.
+                          let originalRuntimeApi = chrome.runtime;
+                          chrome.runtime = 'bar';
+                          chrome.test.assertEq('bar', chrome.runtime);
+
+                          // Verify that browser.runtime was not affected by
+                          // the change to chrome.runtime, confirming it's an
+                          // independent object instance.
+                          chrome.test.assertEq(originalRuntimeApi,
+                                               browser.runtime);
+
+                          // Revert modification for the following tests.
+                          chrome.runtime = originalRuntimeApi;
+                          chrome.test.assertEq(originalRuntimeApi,
+                                               chrome.runtime);
+
+                          // Modify a member of chrome.runtime and confirm
+                          // browser.runtime reflects that change, because
+                          // both independent binding objects point to the
+                          // same underlying API implementation.
+                          chrome.runtime.sendMessage = 'bar';
+                          chrome.test.assertEq('bar',
+                                               chrome.runtime.sendMessage);
+                          chrome.test.assertEq(chrome.runtime.sendMessage,
+                                               browser.runtime.sendMessage);
+
+                          chrome.test.succeed();
+                        }
+                      ]);)");
+
+  ResultCatcher catcher;
+  const Extension* extension = LoadExtension(test_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+  ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+// Tests that confirms where some contexts where the the devtools API should and
+// should not be defined for the chrome and browser namespaces.
+IN_PROC_BROWSER_TEST_F(NativeBindingsBrowserNamespaceTest,
+                       ChromeAndBrowserObjects_DevToolsVisibility) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(
+      R"({
+          "name": "DevTools Visibility test",
+          "version": "0.1",
+          "manifest_version": 3,
+          "background": {"service_worker": "background.js"},
+          "devtools_page": "devtools.html",
+          "content_scripts": [{
+            "matches": ["*://example.com/*"],
+            "js": ["content_script.js"]
+          }]
+        })");
+  test_dir.WriteFile(FILE_PATH_LITERAL("devtools.html"),
+                     "<script src='devtools.js'></script>");
+  test_dir.WriteFile(FILE_PATH_LITERAL("devtools.js"),
+                     R"(chrome.test.runTests([
+                          function checkDevTools() {
+                            chrome.test.assertTrue(
+                              chrome.hasOwnProperty('devtools'));
+                            chrome.test.assertNe(undefined, chrome.devtools);
+                            chrome.test.assertTrue(
+                              typeof browser === 'undefined');
+                            chrome.test.succeed();
+                          }
+                        ]);)");
+  constexpr char kCheckNoDevTools[] =
+      R"(chrome.test.runTests([
+           function checkNoDevTools() {
+             chrome.test.assertFalse(
+               chrome.hasOwnProperty('devtools'));
+             chrome.test.assertEq(undefined, chrome.devtools);
+             chrome.test.assertTrue(typeof browser === 'undefined');
+             chrome.test.succeed();
+           }
+         ]);)";
+  test_dir.WriteFile(FILE_PATH_LITERAL("background.js"), kCheckNoDevTools);
+  test_dir.WriteFile(FILE_PATH_LITERAL("page.html"),
+                     "<script src='page.js'></script>");
+  test_dir.WriteFile(FILE_PATH_LITERAL("page.js"), kCheckNoDevTools);
+  test_dir.WriteFile(FILE_PATH_LITERAL("content_script.js"), kCheckNoDevTools);
+
+  // Confirm the background page does not have chrome/browser.devtools defined.
+  ResultCatcher background_catcher;
+  const Extension* extension = LoadExtension(test_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+  ASSERT_TRUE(background_catcher.GetNextResult())
+      << background_catcher.message();
+
+  // Confirm that an extension page context does not have
+  // chrome/browser.devtools defined.
+  ResultCatcher extension_page_catcher;
+  // Navigate to the extension page to run devtools tests.
+  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(),
+                            extension->GetResourceURL("page.html")));
+  ASSERT_TRUE(extension_page_catcher.GetNextResult())
+      << extension_page_catcher.message();
+
+  // Confirm that a content script context does not have chrome/browser.devtools
+  // defined.
+  ResultCatcher content_script_catcher;
+  ASSERT_TRUE(NavigateToURL(
+      GetActiveWebContents(),
+      embedded_test_server()->GetURL("example.com", "/title1.html")));
+  ASSERT_TRUE(content_script_catcher.GetNextResult())
+      << content_script_catcher.message();
+
+  // Confirm that the main world of the web page does not have devtools defined.
+  EXPECT_EQ(false, content::EvalJs(GetActiveWebContents(),
+                                   "chrome.hasOwnProperty('devtools')"));
+  EXPECT_EQ(true, content::EvalJs(GetActiveWebContents(),
+                                  "typeof browser === 'undefined'"));
+
+  // Confirm that the devtools page *does* have chrome/browser.devtools defined.
+  ResultCatcher devtools_page_catcher;
+  DevToolsWindow::OpenDevToolsWindow(GetActiveWebContents(),
+                                     DevToolsToggleAction::Show(),
+                                     DevToolsOpenedByAction::kUnknown);
+
+  ASSERT_TRUE(devtools_page_catcher.GetNextResult())
+      << devtools_page_catcher.message();
+}
+
+// Tests the edge case where the devtools page is loaded outside of the devtools
+// frontend. browser.devtools should not be defined.
+IN_PROC_BROWSER_TEST_F(NativeBindingsBrowserNamespaceTest,
+                       ChromeAndBrowserObjects_DevToolsVisibility_External) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(
+      R"({
+          "name": "DevTools External Visibility test",
+          "version": "0.1",
+          "manifest_version": 3,
+          "devtools_page": "devtools.html"
+        })");
+  test_dir.WriteFile(FILE_PATH_LITERAL("devtools.html"),
+                     "<script src='devtools.js'></script>");
+  test_dir.WriteFile(FILE_PATH_LITERAL("devtools.js"),
+                     R"(chrome.test.runTests([
+                          function checkNoDevTools() {
+                            chrome.test.assertFalse(chrome.hasOwnProperty(
+                              'devtools'));
+                            chrome.test.assertTrue(
+                              typeof browser === 'undefined');
+                            chrome.test.succeed();
+                          }
+                        ]);)");
+
+  ResultCatcher catcher;
+  const Extension* extension = LoadExtension(test_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  // Manually navigate to the devtools page. In a manual navigation the devtools
+  // frontend isn't available to inject chrome.devtools so we shouldn't alias
+  // browser.devtools either.
+  ASSERT_TRUE(NavigateToURL(GetActiveWebContents(),
+                            extension->GetResourceURL("devtools.html")));
+  ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+// Tests the visibility of the devtools API for the chrome and browser
+// namespaces in iframes nested inside a devtools page.
+IN_PROC_BROWSER_TEST_F(
+    NativeBindingsBrowserNamespaceTest,
+    ChromeAndBrowserObjects_DevToolsVisibility_NestedIframe) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(
+      R"({
+          "name": "DevTools Nested Iframe test",
+          "version": "0.1",
+          "manifest_version": 3,
+          "devtools_page": "devtools.html"
+        })");
+  test_dir.WriteFile(FILE_PATH_LITERAL("devtools.html"),
+                     R"(<iframe src="child.html"></iframe>)");
+  test_dir.WriteFile(FILE_PATH_LITERAL("child.html"),
+                     "<script src='child.js'></script>");
+  test_dir.WriteFile(FILE_PATH_LITERAL("child.js"),
+                     R"(chrome.test.runTests([
+                          // It takes a bit of time for the devtools frontend to
+                          // inject the API since this is a iframe. So to avoid
+                          // test flakiness we wait for chrome.devtools to be
+                          // defined before proceeding with the test.
+                          async function waitForDevTools() {
+                            const start = Date.now();
+                            // 2 second timeout
+                            while (Date.now() - start < 2000) {
+                              if (chrome.devtools) {
+                                chrome.test.succeed();
+                                return;
+                              }
+                              await new Promise(r => setTimeout(r, 50));
+                            }
+                            chrome.test.fail('Timed out waiting for ' +
+                              'devtools frontend to define chrome.devtools.');
+                          },
+                          async function checkNestedFrameHasDevTools() {
+                            chrome.test.assertTrue(
+                              chrome.hasOwnProperty('devtools'));
+                            chrome.test.assertNe(undefined, chrome.devtools);
+                            chrome.test.assertTrue(
+                              typeof browser === 'undefined');
+                            chrome.test.succeed();
+                          }
+                        ]);)");
+
+  ResultCatcher catcher;
+  const Extension* extension = LoadExtension(test_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  DevToolsWindow::OpenDevToolsWindow(GetActiveWebContents(),
+                                     DevToolsToggleAction::Show(),
+                                     DevToolsOpenedByAction::kUnknown);
+
+  ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+// TODO(crbug.com/401226626): Re-enable once the devtools API is on browser
+// namespace.
+// Tests the `browser.devtools` aliasing behavior to `chrome.devtools` in a
+// devtools page. This is tested explicitly because `devtools` APIs are an
+// exception being injected by the devtools frontend rather than the standard
+// extension bindings system.
+IN_PROC_BROWSER_TEST_F(NativeBindingsBrowserNamespaceTest,
+                       DISABLED_ChromeAndBrowserObjects_DevToolsApiAliasing) {
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(
+      R"({
+          "name": "DevTools Aliasing test",
+          "version": "0.1",
+          "manifest_version": 3,
+          "devtools_page": "devtools.html"
+        })");
+  test_dir.WriteFile(FILE_PATH_LITERAL("devtools.html"),
+                     "<script src='devtools.js'></script>");
+  test_dir.WriteFile(FILE_PATH_LITERAL("devtools.js"),
+                     R"(chrome.test.runTests([
+                        function checkDevtoolsApiAliasing() {
+                          // Unlike other APIs, browser.devtools is a dynamic
+                          // alias (via a getter) to chrome.devtools. This is
+                          // necessary because devtools is injected by the
+                          // devtools frontend.
+
+                          // Attempts to overwrite the root chrome.devtools
+                          // object do not succeed though. In this context
+                          // (devtools page), it is non-writable/configurable.
+                          let originalDevtoolsApi = chrome.devtools;
+                          chrome.devtools = 'bar';
+                          chrome.test.assertEq(originalDevtoolsApi,
+                                               chrome.devtools);
+
+                          // Since browser.devtools is a getter that looks up
+                          // chrome.devtools, it still matches whatever is on
+                          // chrome.
+                          chrome.test.assertEq(chrome.devtools,
+                                               browser.devtools);
+
+                          // Modify a member of chrome.devtools and confirm
+                          // browser.devtools reflects that change, because
+                          // it is a direct dynamic alias to the same
+                          // underlying object.
+                          chrome.devtools.panels = 'bar';
+                          chrome.test.assertEq('bar', browser.devtools.panels);
+
+                          chrome.test.succeed();
+                        }
+                      ]);)");
+
+  ResultCatcher catcher;
+  const Extension* extension = LoadExtension(test_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  DevToolsWindow::OpenDevToolsWindow(GetActiveWebContents(),
+                                     DevToolsToggleAction::Show(),
+                                     DevToolsOpenedByAction::kUnknown);
+
+  ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
 // TODO(crbug.com/401226626): Test that the browser object also has dev mode

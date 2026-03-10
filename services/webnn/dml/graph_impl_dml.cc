@@ -4,11 +4,6 @@
 
 #include "services/webnn/dml/graph_impl_dml.h"
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/349653202): Remove this and spanify to fix the errors.
-#pragma allow_unsafe_buffers
-#endif
-
 #include <winerror.h>
 
 #include <algorithm>
@@ -20,6 +15,7 @@
 
 #include "base/bits.h"
 #include "base/check.h"
+#include "base/compiler_specific.h"
 #include "base/containers/fixed_flat_set.h"
 #include "base/containers/span.h"
 #include "base/feature_list.h"
@@ -326,9 +322,9 @@ UploadAndCreateConstantBufferBinding(
     // Copy the input data to the upload heap with byte offset
     const auto& d3d12_range =
         aligned_byte_length.key_to_d3d12_range_map.at(operand_id);
-    auto mapped_buffer_span =
+    auto mapped_buffer_span = UNSAFE_TODO(
         base::span(static_cast<uint8_t*>(mapped_buffer) + d3d12_range.Begin,
-                   constant_operand->descriptor().PackedByteLength());
+                   constant_operand->descriptor().PackedByteLength()));
     mapped_buffer_span.copy_from(constant_operand->ByteSpan());
     // Create the buffer binding for each constant/input and push back into the
     // DML_BUFFER_BINDING array.
@@ -2178,9 +2174,8 @@ CreateOperatorNodeForDequantizeOrQuantizeLinear(
               .Has(DmlDataTypeToOperand(input_tensor_desc.GetDataType())));
     CHECK(context_properties.data_type_limits.dequantize_linear_scale.data_types
               .Has(DmlDataTypeToOperand(scale_tensor_desc.GetDataType())));
-    CHECK(context_properties.data_type_limits.dequantize_linear_zero_point
-              .data_types.Has(
-                  DmlDataTypeToOperand(zero_point_tensor_desc.GetDataType())));
+    CHECK(context_properties.data_type_limits.dequantize_linear_input.data_types
+              .Has(DmlDataTypeToOperand(zero_point_tensor_desc.GetDataType())));
   } else /* `DequantizeOrQuantizeLinearPtr` is `mojom::QuantizeLinearPtr` */ {
     CHECK(context_properties.data_type_limits.quantize_linear_input.data_types
               .Has(DmlDataTypeToOperand(input_tensor_desc.GetDataType())));
@@ -3410,7 +3405,7 @@ base::expected<void, mojom::ErrorPtr> CreateOperatorNodeForGather(
                                     std::move(output_dimensions));
   }
 
-  auto expanded_axis = base::MakeCheckedNum(expanded_rank) - input_rank +
+  auto expanded_axis = base::CheckedNumeric(expanded_rank) - input_rank +
                        base::checked_cast<size_t>(axis);
   const std::string& label = gather->label;
   if (!expanded_axis.AssignIfValid<uint32_t>(&axis)) {
@@ -3945,7 +3940,7 @@ base::expected<void, mojom::ErrorPtr> CreateOperatorNodeForGru(
     uint32_t hidden_size = gru->hidden_size;
     // 3 * hidden_size has been verified.
     auto checked_three_times_hidden_size =
-        base::MakeCheckedNum(hidden_size) * 3;
+        base::CheckedNumeric(hidden_size) * 3;
     CHECK(checked_three_times_hidden_size.IsValid());
     // The half bias dimensions is [1, 1, num_directions, 3 * hidden_size] for
     // gru and [1, 1, 1, 3 * hidden_size] for gruCell.
@@ -3966,7 +3961,7 @@ base::expected<void, mojom::ErrorPtr> CreateOperatorNodeForGru(
     // hidden_size]. Ideally, 6 * hidden_size validation should be part of the
     // spec and validated for all backends. Spec issue tracked on
     // https://github.com/webmachinelearning/webnn/issues/625.
-    auto checked_six_times_hidden_size = base::MakeCheckedNum(hidden_size) * 6;
+    auto checked_six_times_hidden_size = base::CheckedNumeric(hidden_size) * 6;
     if (!checked_six_times_hidden_size.IsValid()) {
       return CreateUnexpectedError(
           mojom::Error::Code::kUnknownError,
@@ -4306,7 +4301,7 @@ CreateOperatorNodeForMeanVarianceNormalization(
   }
 
   std::string label = normalization->label;
-  if (!base::MakeCheckedNum(mean_variance_axes.size()).IsValid<uint32_t>()) {
+  if (!base::CheckedNumeric(mean_variance_axes.size()).IsValid<uint32_t>()) {
     return base::unexpected(CreateError(
         mojom::Error::Code::kUnknownError,
         OpTagToString(op) + ": The axes rank is too large.", label));
@@ -4694,7 +4689,7 @@ base::expected<void, mojom::ErrorPtr> CreateOperatorNodeForLstm(
   std::optional<TensorDesc> concatenated_bias_tensor_desc;
   if (bias && recurrent_bias) {
     auto checked_four_times_hidden_size =
-        base::MakeCheckedNum(lstm.hidden_size) * 4;
+        base::CheckedNumeric(lstm.hidden_size) * 4;
     // Four times hidden size should have already been validated.
     CHECK(checked_four_times_hidden_size.IsValid());
     const std::array<uint32_t, 4> bias_dimensions = {
@@ -5227,7 +5222,7 @@ base::expected<void, mojom::ErrorPtr> CreateOperatorNodeForSoftmax(
     } else {
       const std::vector<uint32_t>& axis_transposed_to_last_output_dims =
           axis_transposed_to_last_output->GetTensorDesc().GetDimensions();
-      auto reshaped_2d_dim_0 = base::MakeCheckedNum<uint32_t>(1);
+      auto reshaped_2d_dim_0 = base::CheckedNumeric<uint32_t>(1);
       for (uint32_t i = 0; i < axis_transposed_to_last_output_dims.size() - 1;
            i++) {
         reshaped_2d_dim_0 *= axis_transposed_to_last_output_dims[i];
@@ -5633,7 +5628,7 @@ base::expected<void, mojom::ErrorPtr> CreateOperatorNodeForTriangular(
 
   const auto mask_height = height;
   const auto checked_mask_width =
-      (base::MakeCheckedNum<uint32_t>(longest_dimension_length) +
+      (base::CheckedNumeric<uint32_t>(longest_dimension_length) +
        std::min(base::checked_cast<uint32_t>(std::abs(diagonal)),
                 longest_dimension_length)) *
       2;
@@ -5676,7 +5671,7 @@ base::expected<void, mojom::ErrorPtr> CreateOperatorNodeForTriangular(
   //   1, 1, 0, 0  =>     1, 1, 0, 0
   //   1, 1, 0, 0]          1, 1, 0, 0]
   const auto checked_slice_input_width =
-      base::MakeCheckedNum<uint32_t>(mask_width) * 2;
+      base::CheckedNumeric<uint32_t>(mask_width) * 2;
   if (!checked_slice_input_width.IsValid<uint32_t>()) {
     return base::unexpected(CreateError(
         mojom::Error::Code::kUnknownError,
@@ -5986,7 +5981,7 @@ GraphImplDml::AllocateGraphResources(Adapter* adapter,
 GraphImplDml::GraphImplDml(
     mojo::PendingAssociatedReceiver<mojom::WebNNGraph> receiver,
     scoped_refptr<Adapter> adapter,
-    base::WeakPtr<WebNNContextImpl> context,
+    WebNNContextImpl& context,
     std::unique_ptr<CommandRecorder> command_recorder,
     scoped_refptr<PersistentResource> persistent_resource,
     ComPtr<IDMLCompiledOperator> compiled_operator,
@@ -5995,7 +5990,7 @@ GraphImplDml::GraphImplDml(
     std::unique_ptr<GraphResources> graph_resources,
     std::vector<mojom::Device> devices)
     : WebNNGraphImpl(std::move(receiver),
-                     std::move(context),
+                     context,
                      std::move(compute_resource_info),
                      std::move(devices)),
       persistent_resource_(std::move(persistent_resource)),
@@ -6037,7 +6032,8 @@ void GraphImplDml::OnCompilationComplete(
     ComputeResourceInfo compute_resource_info,
     base::flat_map<OperandId, std::unique_ptr<WebNNConstantOperand>>
         constant_operands,
-    base::flat_map<OperandId, WebNNTensorImpl*> constant_tensor_operands,
+    base::flat_map<OperandId, scoped_refptr<WebNNTensorImpl>>
+        constant_tensor_operands,
     base::expected<ComPtr<IDMLCompiledOperator>, HRESULT> compilation_result) {
   TRACE_EVENT0("gpu", "dml::GraphImplDml::OnCompilationComplete");
 
@@ -6186,7 +6182,7 @@ void GraphImplDml::OnCompilationComplete(
   // and not during execution.
   for (auto& [constant_id, constant_tensor] : constant_tensor_operands) {
     TensorImplDml* constant_tensor_impl =
-        static_cast<TensorImplDml*>(constant_tensor);
+        static_cast<TensorImplDml*>(constant_tensor.get());
     // Get the graph input index with the constant id.
     const auto graph_input_index_iterator =
         constant_id_to_input_index_map.find(constant_id);
@@ -6350,7 +6346,7 @@ void GraphImplDml::CreateWebNNGraphImpl(
 
   // The receiver bound to GraphImplDml.
   std::move(callback).Run(base::MakeRefCounted<GraphImplDml>(
-      std::move(receiver), std::move(adapter), context->AsWeakPtr(),
+      std::move(receiver), std::move(adapter), *context,
       std::move(command_recorder_for_dispatch), std::move(persistent_resource),
       std::move(compiled_operator), std::move(compute_resource_info),
       std::move(graph_buffer_binding_info), std::move(graph_resources),
@@ -6399,7 +6395,8 @@ base::expected<void, mojom::ErrorPtr> GraphImplDml::CreateAndBuildInternal(
     mojom::GraphInfoPtr& graph_info,
     base::flat_map<OperandId, std::unique_ptr<WebNNConstantOperand>>&
         constant_operands,
-    const base::flat_map<OperandId, WebNNTensorImpl*>& constant_tensor_operands,
+    const base::flat_map<OperandId, scoped_refptr<WebNNTensorImpl>>&
+        constant_tensor_operands,
     GraphBuilderDml& graph_builder,
     absl::flat_hash_map<OperandId, uint32_t>& constant_id_to_input_index_map,
     GraphBufferBindingInfo& graph_buffer_binding_info) {
@@ -6873,7 +6870,8 @@ void GraphImplDml::CreateAndBuild(
     ComputeResourceInfo compute_resource_info,
     base::flat_map<OperandId, std::unique_ptr<WebNNConstantOperand>>
         constant_operands,
-    base::flat_map<OperandId, WebNNTensorImpl*> constant_tensor_operands,
+    base::flat_map<OperandId, scoped_refptr<WebNNTensorImpl>>
+        constant_tensor_operands,
     WebNNContextImpl::CreateGraphImplCallback callback,
     const bool disable_dml_meta_commands_for_gpu) {
   TRACE_EVENT0("gpu", "dml::GraphImplDml::CreateAndBuild");
@@ -6931,9 +6929,8 @@ void GraphImplDml::HandleDispatchFailure(std::string_view error_message,
   // only invoked while the context is alive. A CHECK is appropriate here
   // because DML does not currently support background tasks that outlive the
   // context.
-  CHECK(context_);
-  static_cast<ContextImplDml*>(context_.get())
-      ->HandleContextLostOrCrash(error_message, hr);
+  static_cast<ContextImplDml&>(context_.get())
+      .HandleContextLostOrCrash(error_message, hr);
 }
 
 GraphImplDml::IoBindings::IoBindings(

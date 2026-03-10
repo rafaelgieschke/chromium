@@ -4,12 +4,12 @@
 
 #include "device/fido/fido_discovery_factory.h"
 
-#include "base/containers/contains.h"
+#include <algorithm>
+
 #include "base/notreached.h"
 #include "build/build_config.h"
 #include "components/device_event_log/device_event_log.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
-#include "device/fido/cable/fido_cable_discovery.h"
 #include "device/fido/cable/pairing.h"
 #include "device/fido/cable/v2_discovery.h"
 #include "device/fido/enclave/enclave_discovery.h"
@@ -85,26 +85,21 @@ std::vector<std::unique_ptr<FidoDiscoveryBase>> FidoDiscoveryFactory::Create(
 #endif  // BUILDFLAG(IS_WIN)
       if (device::BluetoothAdapterFactory::Get()->IsLowEnergySupported() &&
           (cable_data_.has_value() || qr_generator_key_.has_value())) {
-        auto v1_discovery = std::make_unique<FidoCableDiscovery>(
-            cable_data_.value_or(std::vector<CableDiscoveryData>()));
 
         std::vector<std::unique_ptr<FidoDiscoveryBase>> ret;
         const bool have_v2_discovery_data =
             cable_data_.has_value() &&
-            base::Contains(*cable_data_, CableDiscoveryData::Version::V2,
-                           &CableDiscoveryData::version);
+            std::ranges::contains(*cable_data_, CableDiscoveryData::Version::V2,
+                                  &CableDiscoveryData::version);
         if (qr_generator_key_.has_value() || have_v2_discovery_data) {
           ret.emplace_back(std::make_unique<cablev2::Discovery>(
               request_type_.value(), network_context_factory_,
-              qr_generator_key_, v1_discovery->GetV2AdvertStream(),
-              std::move(contact_device_stream_),
+              qr_generator_key_, std::move(contact_device_stream_),
               cable_data_.value_or(std::vector<CableDiscoveryData>()),
               std::move(cable_pairing_callback_),
               std::move(cable_invalidated_pairing_callback_),
               std::move(cable_event_callback_), cable_must_support_ctap_));
         }
-
-        ret.emplace_back(std::move(v1_discovery));
         return ret;
       }
       return {};

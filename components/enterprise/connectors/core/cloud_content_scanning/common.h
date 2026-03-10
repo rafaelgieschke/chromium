@@ -7,7 +7,13 @@
 
 #include <string>
 
+#include "base/functional/callback.h"
+
 namespace enterprise_connectors {
+
+// Callback to be called when the hash of a file has been computed.
+using OnGotHashCallback = base::OnceCallback<void(std::string)>;
+
 // The result of uploading a scanning request to the WebProtect server.
 //
 // These values are persisted to logs. Entries should not be renumbered and
@@ -49,6 +55,22 @@ enum class ScanRequestUploadResult {
   kIncompleteResponse = 10,
 
   kMaxValue = kIncompleteResponse,
+};
+
+// File information used as an input to event report functions.
+struct FileInfo {
+  FileInfo();
+  FileInfo(FileInfo&& other);
+  ~FileInfo();
+
+  // Hex-encoded SHA256 hash for the given file.
+  std::string sha256;
+
+  // File size in bytes. 0 represents an unknown size.
+  uint64_t size = 0;
+
+  // File mime type.
+  std::string mime_type;
 };
 
 std::string ScanRequestUploadResultToString(ScanRequestUploadResult result);

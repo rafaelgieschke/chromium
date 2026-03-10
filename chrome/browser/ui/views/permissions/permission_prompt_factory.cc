@@ -19,7 +19,7 @@
 #include "chrome/browser/ui/views/permissions/permission_prompt_chip.h"
 #include "chrome/browser/ui/views/permissions/permission_prompt_quiet_icon.h"
 #include "chrome/browser/ui/web_applications/app_browser_controller.h"
-#include "chrome/common/chrome_features.h"
+#include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/common/webui_url_constants.h"
 #include "components/permissions/permission_request.h"
 #include "components/permissions/permission_uma_util.h"
@@ -50,15 +50,15 @@ bool IsFullScreenMode(Browser* browser) {
     return false;
   }
 
-  LocationBarView* location_bar = browser_view->GetLocationBarView();
+  LocationBar* location_bar = browser_view->GetLocationBar();
 
   return !location_bar || !location_bar->IsDrawn() ||
-         location_bar->GetWidget()->GetTopLevelWidget()->IsFullscreen();
+         location_bar->IsFullscreen();
 }
 
-LocationBarView* GetLocationBarView(Browser* browser) {
+LocationBar* GetLocationBar(Browser* browser) {
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
-  return browser_view ? browser_view->GetLocationBarView() : nullptr;
+  return browser_view ? browser_view->GetLocationBar() : nullptr;
 }
 
 // A permission request should be auto-ignored if:
@@ -74,13 +74,21 @@ bool ShouldIgnorePermissionRequest(
   DCHECK(web_contents);
   DCHECK(browser);
 
-  // In case of the NTP, `WebContents::GetVisibleURL()` is equal to
-  // `chrome://newtab/`, but the `LocationBarView` will be empty.
-  if (web_contents->GetVisibleURL() == GURL(chrome::kChromeUINewTabURL)) {
+  // Allow permission prompts for WebUI pages that should bypass the omnibox
+  // empty or editing state check:
+  // - NTP has an empty omnibox.
+  // - Contextual Tasks Tab has an empty omnibox.
+  // - Omnibox Popup is an embedded WebUI that itself may request permissions.
+  const GURL visible_url = web_contents->GetVisibleURL();
+  const GURL committed_url = web_contents->GetLastCommittedURL();
+  if (visible_url == GURL(chrome::kChromeUINewTabURL) ||
+      committed_url.host() == chrome::kChromeUIOmniboxPopupHost ||
+      committed_url.host() == chrome::kChromeUIContextualTasksHost) {
     return false;
   }
 
-  LocationBarView* location_bar = GetLocationBarView(browser);
+  // Suppress permission prompts if the omnibox is being edited or is empty.
+  LocationBar* location_bar = GetLocationBar(browser);
   bool can_display_prompt = !(location_bar && location_bar->IsEditingOrEmpty());
 
   LensOverlayController* lens_overlay_controller =
@@ -118,9 +126,8 @@ bool ShouldUseChip(permissions::PermissionPrompt::Delegate* delegate) {
 }
 
 bool IsLocationBarDisplayed(Browser* browser) {
-  LocationBarView* lbv = GetLocationBarView(browser);
-  return lbv && lbv->IsDrawn() &&
-         !lbv->GetWidget()->GetTopLevelWidget()->IsFullscreen();
+  LocationBar* lb = GetLocationBar(browser);
+  return lb && lb->IsDrawn() && !lb->IsFullscreen();
 }
 
 bool ShouldCurrentRequestUseQuietChip(
@@ -229,6 +236,15 @@ std::unique_ptr<permissions::PermissionPrompt> CreatePermissionPrompt(
     content::WebContents* web_contents,
     permissions::PermissionPrompt::Delegate* delegate) {
   Browser* browser = chrome::FindBrowserWithTab(web_contents);
+  if (!browser) {
+    // For embedded WebUIs (e.g., Omnibox Popup and Contextual Tasks), try
+    // getting the browser window that contains this WebContents.
+    BrowserWindowInterface* browser_window =
+        webui::GetBrowserWindowInterface(web_contents);
+    if (browser_window) {
+      browser = browser_window->GetBrowserForMigrationOnly();
+    }
+  }
   if (!browser) {
     DLOG(WARNING) << "Permission prompt suppressed because the WebContents is "
                      "not attached to any Browser window.";

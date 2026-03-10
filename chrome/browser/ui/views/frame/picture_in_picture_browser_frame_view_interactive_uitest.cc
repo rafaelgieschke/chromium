@@ -4,6 +4,7 @@
 
 #include <optional>
 
+#include "base/i18n/rtl.h"
 #include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/scoped_observation.h"
@@ -57,6 +58,11 @@
 #if BUILDFLAG(IS_OZONE)
 #include "ui/ozone/public/ozone_platform.h"
 #endif
+
+#if BUILDFLAG(IS_MAC)
+#include "chrome/browser/ui/browser_window/public/browser_window_features.h"
+#include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
+#endif  // BUILDFLAG(IS_MAC)
 
 namespace {
 
@@ -228,6 +234,42 @@ bool PlatformSupportsScreenCoordinates() {
   return true;
 #endif  // BUILDFLAG(IS_OZONE)
 }
+
+#if BUILDFLAG(IS_MAC)
+// Tracks and waits for actual window visibility on Mac.
+class PictureInPictureWidgetVisibilityTracker : public views::WidgetObserver {
+ public:
+  explicit PictureInPictureWidgetVisibilityTracker(views::Widget* widget) {
+    observation_.Observe(widget);
+    is_visible_on_screen_ = widget->IsVisibleOnScreen();
+  }
+
+  void WaitForVisibilityState(bool visible) {
+    if (is_visible_on_screen_ == visible) {
+      return;
+    }
+    expected_visiblity_ = visible;
+    wait_loop_ = std::make_unique<base::RunLoop>();
+    wait_loop_->Run();
+  }
+
+  // views::WidgetObserver:
+  void OnWidgetVisibilityOnScreenChanged(views::Widget* widget,
+                                         bool visible) override {
+    is_visible_on_screen_ = visible;
+    if (wait_loop_ && visible == expected_visiblity_) {
+      wait_loop_->Quit();
+    }
+  }
+
+ private:
+  bool is_visible_on_screen_;
+  base::ScopedObservation<views::Widget, views::WidgetObserver> observation_{
+      this};
+  std::unique_ptr<base::RunLoop> wait_loop_;
+  bool expected_visiblity_;
+};
+#endif  // BUILDFLAG(IS_MAC)
 
 class PictureInPictureBrowserFrameViewTest : public WebRtcTestBase,
                                              public AnimationTimingTest {
@@ -1084,6 +1126,45 @@ IN_PROC_BROWSER_TEST_F(PictureInPictureBrowserFrameViewTest,
                 ->GetWindowTitleForCurrentTab(
                     /*include_app_name=*/false));
 }
+
+IN_PROC_BROWSER_TEST_F(PictureInPictureBrowserFrameViewTest,
+                       WindowTitleHasCorrectDirectionality) {
+  ASSERT_NO_FATAL_FAILURE(SetUpDocumentPIP());
+  views::Label* window_title = pip_frame_view()->GetWindowTitleForTesting();
+  ASSERT_NE(nullptr, window_title);
+
+  // The directionality should be LTR to prevent spoofing.
+  EXPECT_EQ(base::i18n::LEFT_TO_RIGHT,
+            window_title->GetTextDirectionForTesting());
+
+  // Set the window title to a RTL string.
+  const char16_t kRtl[] = u"אבג";
+  pip_frame_view()->SetWindowTitleForTesting(kRtl);
+  EXPECT_EQ(kRtl, window_title->GetText());
+
+  // The directionality should still be LTR.
+  EXPECT_EQ(base::i18n::LEFT_TO_RIGHT,
+            window_title->GetTextDirectionForTesting());
+}
+
+#if BUILDFLAG(IS_MAC)
+// When a Chrome window goes into fullscreen while a document picture-in-picture
+// window is open, the document picture-in-picture window should show up on top
+// of the fullscreen Chrome window.
+IN_PROC_BROWSER_TEST_F(PictureInPictureBrowserFrameViewTest,
+                       WindowDisplaysOnFullscreenSpaces) {
+  ASSERT_NO_FATAL_FAILURE(SetUpDocumentPIP());
+
+  browser()
+      ->GetFeatures()
+      .exclusive_access_manager()
+      ->fullscreen_controller()
+      ->ToggleBrowserFullscreenMode(/*user_initiated=*/true);
+
+  PictureInPictureWidgetVisibilityTracker(pip_frame_view()->GetWidget())
+      .WaitForVisibilityState(true);
+}
+#endif  // BUILDFLAG(IS_MAC)
 
 #if BUILDFLAG(IS_LINUX)
 

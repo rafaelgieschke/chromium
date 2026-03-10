@@ -134,7 +134,7 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
 
   static scoped_refptr<Extension> Create(const base::FilePath& path,
                                          mojom::ManifestLocation location,
-                                         const base::Value::Dict& value,
+                                         const base::DictValue& value,
                                          int flags,
                                          std::u16string* error);
 
@@ -142,7 +142,7 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   // an explicit id. Most consumers should just use the other Create() method.
   static scoped_refptr<Extension> Create(const base::FilePath& path,
                                          mojom::ManifestLocation location,
-                                         const base::Value::Dict& value,
+                                         const base::DictValue& value,
                                          int flags,
                                          const ExtensionId& explicit_id,
                                          std::u16string* error);
@@ -292,8 +292,8 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   const extensions::Manifest* manifest() const { return manifest_.get(); }
   bool wants_file_access() const { return wants_file_access_; }
   // TODO(rdevlin.cronin): This is needed for ContentScriptsHandler, and should
-  // be moved out as part of crbug.com/159265. This should not be used anywhere
-  // else.
+  // be moved out as part of crbug.com/40293205. This should not be used
+  // anywhere else.
   void set_wants_file_access(bool wants_file_access) {
     wants_file_access_ = wants_file_access;
   }
@@ -346,17 +346,19 @@ class Extension final : public base::RefCountedThreadSafe<Extension> {
   // Initialize the extension from a parsed manifest.
   // TODO(aa): Rename to just Init()? There's no Value here anymore.
   // TODO(aa): It is really weird the way this class essentially contains a copy
-  // of the underlying base::Value::Dict in its members. We should decide to
-  // either wrap the base::Value::Dict and go with that only, or we should parse
+  // of the underlying base::DictValue in its members. We should decide to
+  // either wrap the base::DictValue and go with that only, or we should parse
   // into strong types and discard the value. But doing both is bad.
   bool InitFromValue(int flags, std::u16string* error);
 
   // The following are helpers for InitFromValue to load various features of the
   // extension from the manifest.
 
-  bool LoadRequiredFeatures(std::u16string* error);
+  bool LoadRequiredFeatures(std::vector<InstallWarning>* install_warnings,
+                            std::u16string* error);
   bool LoadName(std::u16string* error);
-  bool LoadVersion(std::u16string* error);
+  bool LoadVersion(std::vector<InstallWarning>* install_warnings,
+                   std::u16string* error);
 
   bool LoadAppFeatures(std::u16string* error);
   bool LoadExtent(const char* key,
@@ -467,7 +469,7 @@ using ExtensionList = std::vector<scoped_refptr<const Extension>>;
 
 // Handy struct to pass core extension info around.
 struct ExtensionInfo {
-  ExtensionInfo(const base::Value::Dict* manifest,
+  ExtensionInfo(const base::DictValue* manifest,
                 const ExtensionId& id,
                 const base::FilePath& path,
                 mojom::ManifestLocation location);
@@ -479,7 +481,7 @@ struct ExtensionInfo {
 
   // Note: This may be null (e.g. for unpacked extensions retrieved from the
   // Preferences file).
-  std::unique_ptr<base::Value::Dict> extension_manifest;
+  std::unique_ptr<base::DictValue> extension_manifest;
 
   ExtensionId extension_id;
   base::FilePath extension_path;

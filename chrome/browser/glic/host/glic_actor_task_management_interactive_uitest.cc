@@ -9,7 +9,6 @@
 #include "chrome/browser/glic/host/glic_actor_interactive_uitest_common.h"
 #include "chrome/browser/glic/host/glic_features.mojom-features.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/interaction/interactive_browser_test.h"
@@ -83,7 +82,7 @@ IN_PROC_BROWSER_TEST_F(GlicActorTaskManagementUiTest, StopActorTaskOnTabClose) {
     InitializeWithOpenGlicWindow(),
     StartActorTaskInNewTab(task_url, kNewActorTabId),
     CheckIsActingOnTab(kNewActorTabId, true),
-    PrepareForStopStateChange(),
+    PrepareForStopStateChange(task_id_),
     CloseTab(kNewActorTabId),
     WaitForActorTaskStateChangeToStopped());
   // clang-format on
@@ -378,7 +377,7 @@ IN_PROC_BROWSER_TEST_F(GlicActorTaskManagementUiTest, ForegroundActorTaskTab) {
 #if BUILDFLAG(IS_LINUX)
   // TODO(crbug.com/466748978): The test flakily times out when trying to focus
   // the other tab on linux-wayland-mutter.
-  if (ui::OzonePlatform::GetPlatformNameForTest() == "wayland") {
+  if (ui::OzonePlatform::RunningOnWaylandForTest()) {
     GTEST_SKIP() << "Flaky on wayland crbug.com/466748978";
   }
 #endif

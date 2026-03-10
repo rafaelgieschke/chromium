@@ -1,6 +1,7 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="sw">
+<translation id="1035560095760914532">Weka Chrome katika sehemu ya chini ili uifikie wakati wowote</translation>
 <translation id="1076643793026027628">Chrome hufungua kiotomatiki viungo vya Faraghani vya YouTube katika hali ya Faraghani.</translation>
 <translation id="1081114897601629648">Manenosiri yafuatayo hayakuhamishiwa kwenye Kidhibiti cha Manenosiri cha Google, kwa sababu hayatimizi masharti.</translation>
 <translation id="1086486568852410168">Tafuta ukitumia Lenzi ya Google</translation>
@@ -86,6 +87,10 @@ Jaribu kusubiri kwa dakika chache kabla ya kuondoka kwenye akaunti. Ukiondoka kw
 <translation id="2767464022270041271">Hakuna manenosiri yaliyohifadhiwa. Kidhibiti cha Manenosiri cha Google kinaweza kukagua manenosiri yako unapoyahifadhi.</translation>
 <translation id="2788811701191021538">Hufungua ukurasa wa mipangilio ya njia za kulipa kwenye Chrome.</translation>
 <translation id="2876628302275096482">Pata maelezo zaidi kuhusu <ph name="BEGIN_LINK" />jinsi Chrome inavyoweka data yako kuwa ya faragha<ph name="END_LINK" /></translation>
+<translation id="288992067439702510">Umefikia kikomo cha Google Chrome cha alamisho <ph name="LIMIT" />, kwa hivyo baadhi ya alamisho zako bado hazijahifadhiwa kwenye Akaunti yako ya Google.
+
+Huwezi kuhifadhi alamisho mpya kwenye akaunti yako hadi ufute baadhi ya alamisho. Ukiondoka kwenye akaunti sasa, alamisho ambazo hazijahifadhiwa zitafutwa.</translation>
+<translation id="2901621928549457170">Fungua Chrome papo hapo ukiwa kwenye iPad yako</translation>
 <translation id="2922914028977213693">Gusa hapa ili unufaike zaidi na Chrome kwenye iPad yako.</translation>
 <translation id="292371311537977079">Mipangilio ya Chrome</translation>
 <translation id="2923827943290349720">Funga vichupo Fiche unapofunga Chrome</translation>
@@ -170,6 +175,8 @@ Jaribu kusubiri kwa dakika chache kabla ya kuondoka kwenye akaunti. Ukiondoka kw
 <translation id="5119391094379141756">Chagua Chrome</translation>
 <translation id="5123188916260706415">Tafuta ukitumia sauti kwenye Chrome</translation>
 <translation id="5162467219239570114">Toleo hili la Chrome limepitwa na wakati. Iwapo hakuna sasisho kwenye <ph name="BEGIN_LINK" />App Store<ph name="END_LINK" />, kuna uwezekano kuwa kifaa chako hakitumii tena matoleo mapya ya Chrome.</translation>
+<translation id="5172049865623113551">Fungua Chrome papo hapo ukiwa kwenye iPhone yako</translation>
+<translation id="5179095426828744632">Fikia Chrome kwa haraka zaidi katika sehemu yako ya kupachika</translation>
 <translation id="5184329579814168207">Fungulia katika Chrome</translation>
 <translation id="5190139289262548459">Shirika lako, <ph name="DOMAIN" />, linasimamia akaunti uliyotumia kuingia na jinsi Chrome inavyotumika.</translation>
 <translation id="5209238444239954363">Chrome imeshindwa kuangalia iwapo kuna masasisho. Jaribu tena baadaye.</translation>
@@ -308,7 +315,6 @@ Kwa mipangilio zaidi inayotumia data kuboresha hali yako ya utumiaji wa Chrome, 
 <translation id="787226752901403048">Ingia katika akaunti ya Chrome ili uweze kuruhusu ufikiaji na ujiunge kwenye vikundi vya vichupo na kushirikiana kwenye mawazo</translation>
 <translation id="7897703007638178753">Angalia Vichupo vya Hivi Karibuni kwenye Chrome</translation>
 <translation id="7948283758957877064">Mapya katika Chrome</translation>
-<translation id="7996707498590516621">Buni picha ukitumia Gemini kwenye Chrome</translation>
 <translation id="8000174216052461231">Kidokezo cha Chrome: Pata ulinzi thabiti zaidi wa Chrome</translation>
 <translation id="8006014511203279255">Tumia Chrome wakati wowote unapogusa viungo kwenye ujumbe au programu zingine.</translation>
 <translation id="8014670471808569312">Chromium itakuomba kuhifadhi nenosiri lako.</translation>
@@ -320,6 +326,7 @@ Kwa mipangilio zaidi inayotumia data kuboresha hali yako ya utumiaji wa Chrome, 
 <translation id="8136856065410661948">Hii itatumika kuunda matukio kwenye Kalenda yako ya Apple kutoka kwenye Chrome na Lenzi ya Google.</translation>
 <translation id="8154120522323162874">Nufaika zaidi na Chrome kwa kuendelea kuweka mipangilio ya kivinjari chako.</translation>
 <translation id="8160472928944011082">Imeshindwa kusasisha Chrome</translation>
+<translation id="8213550501565480896">Weka Chrome iwe kivinjari chaguomsingi</translation>
 <translation id="8245080522851805544">Weka hali yako ya kuvinjari iwe ya faragha ukitumia uthibitishaji wa kifaa unapofunga Chrome</translation>
 <translation id="8248887045858762645">Kidokezo cha Chrome</translation>
 <translation id="8265730590513812063">Fungua menyu ya Chrome</translation>
@@ -351,6 +358,7 @@ Data yako ilisimbwa kwa njia fiche kwa kutumia kauli ya siri <ph name="TIME" />.
 <translation id="8788269841521769222">Hutahitaji kukumbuka nenosiri hili. Litahifadhiwa kwenye Kidhibiti cha Manenosiri cha Google kwa ajili ya <ph name="EMAIL" /></translation>
 <translation id="8796490717897731471"><ph name="EMAIL" />. Chrome inadhibitiwa.</translation>
 <translation id="880967149107462122">Nenda kwenye Mipangilio ya Chrome</translation>
+<translation id="8840947648682778034">Mandhari ya Chrome kwenye iPhone na iPad</translation>
 <translation id="8842132678697187091">Unaweza kufungua Lenzi ya Google hapa.</translation>
 <translation id="8850736900032787670">Ili upokee maudhui yaliyowekewa mapendeleo kulingana na mambo yanayokuvutia, ingia katika akaunti kwenye Chrome.</translation>
 <translation id="8855781063981781621">Ili kuzima Hali ya Kufunga katika Chrome, izime kwenye iPad yako.</translation>

@@ -230,13 +230,6 @@ void RecordWebPlatformSecurityMetrics(RenderFrameHostImpl* rfh,
         rfh->active_sandbox_flags() != network::mojom::WebSandboxFlags::kNone);
   }
 
-  // Webview tag guests do not follow regular process model decisions. They
-  // always stay in their original SiteInstance, regardless of COOP. Assumption
-  // made below about COOP:same-origin and unsafe-none never being in the same
-  // BrowsingInstance does not hold. See https://crbug.com/1243711.
-  if (rfh->GetSiteInstance()->IsGuest())
-    return;
-
   // Check if the navigation resulted in having same-origin documents in pages
   // with different COOP status inside the browsing context group.
   RenderFrameHostImpl* top_level_document =
@@ -532,8 +525,11 @@ void Navigator::DidNavigate(
   }
 #endif  // BUILDFLAG(IS_ANDROID)
 
+  // Run tasks that must execute just before the commit.
+  delegate_->DidNavigateAnyFramePreCommit(navigation_request.get(),
+                                          was_within_same_document);
+
   if (ui::PageTransitionIsMainFrame(params.transition)) {
-    // Run tasks that must execute just before the commit.
     delegate_->DidNavigateMainFramePreCommit(navigation_request.get(),
                                              was_within_same_document);
   }
@@ -595,13 +591,17 @@ void Navigator::DidNavigate(
       view_transition_commit_info(
           navigation_request->GetViewTransitionResources(),
           navigation_request->HasViewTransitionDelayLayerTreeViewDeletion());
+  const bool is_backward_navigation =
+      navigation_request->GetNavigationEntryOffset() < 0;
   frame_tree_node->render_manager()->DidNavigateFrame(
-      render_frame_host, navigation_request->common_params().has_user_gesture,
+      render_frame_host,
+      navigation_request->common_params().has_possibly_filtered_user_gesture,
       was_within_same_document,
       navigation_request->browsing_context_group_swap()
           .ShouldClearProxiesOnCommit(),
       navigation_request->commit_params().frame_policy, allow_paint_holding,
-      view_transition_commit_info, navigation_request->GetURL());
+      view_transition_commit_info, navigation_request->GetURL(),
+      is_backward_navigation);
 
   // Reset the old frame host's weak pointer to auction initiator page when it
   // is a cross-document navigation and the frame does not go into bfcache.
@@ -828,16 +828,14 @@ void Navigator::DidNavigate(
 
   delegate_->DidNavigateAnyFramePostCommit(render_frame_host, details);
 }
-
-// LINT.IfChange(InputStartPresence)
-enum class InputStartPresence {
-  kNone = 0,
-  kOnlyOld = 1,
-  kOnlyNew = 2,
-  kBoth = 3,
-  kMaxValue = kBoth,
+// LINT.IfChange(DuplicateNavsCookieStatus)
+enum class DuplicateNavsCookieStatus {
+  kNoListener = 0,
+  kCookiesChanged = 1,
+  kCookiesNotChanged = 2,
+  kMaxValue = kCookiesNotChanged,
 };
-// LINT.ThenChange(//tools/metrics/histograms/metadata/navigation/enums.xml:InputStartPresence)
+// LINT.ThenChange(//tools/metrics/histograms/metadata/navigation/enums.xml:DuplicateNavsCookieStatus)
 
 void Navigator::Navigate(std::unique_ptr<NavigationRequest> request,
                          ReloadType reload_type) {
@@ -866,11 +864,11 @@ void Navigator::Navigate(std::unique_ptr<NavigationRequest> request,
   NavigationRequest* ongoing_navigation_request =
       frame_tree_node->navigation_request();
   bool is_duplicate_navigation = false;
+  bool start_diff_under_threshold = false;
   base::TimeDelta nav_start_diff;
+  bool is_on_target_origin =
+      GetContentClient()->IsUrlInIgnoreDuplicateNavsOrigins(request->GetURL());
   if (ongoing_navigation_request &&
-      ongoing_navigation_request->HasCookieChangeListener() &&
-      !ongoing_navigation_request->DidCookiesChangeAfterStart(
-          /*exclude_http_only=*/false) &&
       ongoing_navigation_request->IsRendererInitiated() ==
           request->IsRendererInitiated() &&
       request->GetURL() == ongoing_navigation_request->GetURL() &&
@@ -880,8 +878,9 @@ void Navigator::Navigate(std::unique_ptr<NavigationRequest> request,
           ongoing_navigation_request->GetInitiatorFrameToken() &&
       request->common_params().initiator_origin ==
           ongoing_navigation_request->common_params().initiator_origin &&
-      request->common_params().has_user_gesture ==
-          ongoing_navigation_request->common_params().has_user_gesture &&
+      request->common_params().has_possibly_filtered_user_gesture ==
+          ongoing_navigation_request->common_params()
+              .has_possibly_filtered_user_gesture &&
       request->common_params().should_replace_current_entry ==
           ongoing_navigation_request->common_params()
               .should_replace_current_entry &&
@@ -894,51 +893,94 @@ void Navigator::Navigate(std::unique_ptr<NavigationRequest> request,
           ongoing_navigation_request->common_params().referrer &&
       request->common_params().transition ==
           ongoing_navigation_request->common_params().transition) {
-    is_duplicate_navigation = true;
+    DuplicateNavsCookieStatus cookie_status;
+    if (!ongoing_navigation_request->HasCookieChangeListener()) {
+      cookie_status = DuplicateNavsCookieStatus::kNoListener;
+      is_duplicate_navigation = true;
+    } else if (ongoing_navigation_request->DidCookiesChangeAfterStart(
+                   /*exclude_http_only=*/false)) {
+      cookie_status = DuplicateNavsCookieStatus::kCookiesChanged;
+    } else {
+      cookie_status = DuplicateNavsCookieStatus::kCookiesNotChanged;
+      is_duplicate_navigation = true;
+    }
+    base::UmaHistogramEnumeration(
+        "Navigation.BrowserInitiated.DuplicateNavCookieStatus", cookie_status);
     nav_start_diff =
         (request->common_params().navigation_start -
          ongoing_navigation_request->common_params().navigation_start);
+    start_diff_under_threshold =
+        nav_start_diff <= features::kDuplicateNavThreshold.Get();
+    if (start_diff_under_threshold) {
+      base::UmaHistogramEnumeration(
+          "Navigation.BrowserInitiated.DuplicateNavCookieStatus.UnderThreshold",
+          cookie_status);
+      if (is_on_target_origin) {
+        base::UmaHistogramEnumeration(
+            "Navigation.BrowserInitiated.DuplicateNavCookieStatus."
+            "UnderThreshold.OnTargetOrigins",
+            cookie_status);
+      }
+    }
   }
   base::UmaHistogramBoolean(
       "Navigation.BrowserInitiated.IsDuplicateWithoutThresholdCheck2",
       is_duplicate_navigation);
+  if (is_on_target_origin) {
+    base::UmaHistogramBoolean(
+        "Navigation.BrowserInitiated.IsDuplicateWithoutThresholdCheck2."
+        "OnTargetOrigins",
+        is_duplicate_navigation);
+  }
   if (is_duplicate_navigation) {
     // The navigation is similar to a previous navigation. Check if it's started
     // close enough to the start of the previous navigation, in which case we
     // can just ignore the new navigation and keep the previous navigation.
-    bool start_diff_under_threshold =
-        (nav_start_diff <= features::kDuplicateNavThreshold.Get());
     base::UmaHistogramBoolean(
         "Navigation.BrowserInitiated.DuplicateNavIsUnderThreshold2",
         start_diff_under_threshold);
     base::UmaHistogramTimes(
         "Navigation.BrowserInitiated.DuplicateNavStartTimeDiff2",
         nav_start_diff);
-    const auto& new_input_start = request->common_params().input_start;
-    const auto& old_input_start =
-        ongoing_navigation_request->common_params().input_start;
-    const std::string histogram_prefix = base::StrCat(
-        {"Navigation.", request->IsRendererInitiated() ? "Renderer" : "Browser",
-         "Initiated."});
-    InputStartPresence presence;
-    if (new_input_start.is_null() && old_input_start.is_null()) {
-      presence = InputStartPresence::kNone;
-    } else if (new_input_start.is_null()) {
-      presence = InputStartPresence::kOnlyOld;
-    } else if (old_input_start.is_null()) {
-      presence = InputStartPresence::kOnlyNew;
-    } else {
-      presence = InputStartPresence::kBoth;
-    }
-    base::UmaHistogramEnumeration(
-        base::StrCat(
-            {histogram_prefix, "DuplicateNavigationInputStartPresence"}),
-        presence);
-    if (presence == InputStartPresence::kBoth) {
-      const base::TimeDelta input_diff = new_input_start - old_input_start;
+    if (is_on_target_origin) {
+      base::UmaHistogramBoolean(
+          "Navigation.BrowserInitiated.DuplicateNavIsUnderThreshold2."
+          "OnTargetOrigins",
+          start_diff_under_threshold);
       base::UmaHistogramTimes(
-          base::StrCat({histogram_prefix, "DuplicateNavInputTimeDiff"}),
-          input_diff);
+          "Navigation.BrowserInitiated.DuplicateNavStartTimeDiff2."
+          "OnTargetOrigins",
+          nav_start_diff);
+    }
+    if (!request->IsRendererInitiated()) {
+      const auto& new_input_start = request->common_params().input_start;
+      const auto& old_input_start =
+          ongoing_navigation_request->common_params().input_start;
+      blink::InputStartPresence presence;
+      if (new_input_start.is_null() && old_input_start.is_null()) {
+        presence = blink::InputStartPresence::kNone;
+      } else if (new_input_start.is_null()) {
+        presence = blink::InputStartPresence::kOnlyOld;
+      } else if (old_input_start.is_null()) {
+        presence = blink::InputStartPresence::kOnlyNew;
+      } else {
+        presence = blink::InputStartPresence::kBoth;
+      }
+      base::UmaHistogramEnumeration(
+          "Navigation.BrowserInitiated.DuplicateNavigationInputStartPresence2",
+          presence);
+      if (presence == blink::InputStartPresence::kBoth) {
+        const base::TimeDelta input_diff = new_input_start - old_input_start;
+        base::UmaHistogramTimes(
+            "Navigation.BrowserInitiated.DuplicateNavInputTimeDiff2",
+            input_diff);
+        if (is_on_target_origin) {
+          base::UmaHistogramTimes(
+              "Navigation.BrowserInitiated.DuplicateNavInputTimeDiff2."
+              "OnTargetOrigins",
+              input_diff);
+        }
+      }
     }
     if (start_diff_under_threshold &&
         GetContentClient()->ShouldIgnoreDuplicateNavs(
@@ -1135,8 +1177,7 @@ void Navigator::NavigateFromFrameProxy(
     bool has_user_gesture,
     bool is_form_submission,
     const std::optional<blink::Impression>& impression,
-    blink::mojom::NavigationInitiatorActivationAndAdStatus
-        initiator_activation_and_ad_status,
+    bool started_by_ad,
     base::TimeTicks actual_navigation_start_time,
     base::TimeTicks navigation_start_time,
     bool is_embedder_initiated_fenced_frame_navigation,
@@ -1191,7 +1232,7 @@ void Navigator::NavigateFromFrameProxy(
       should_replace_current_entry, download_policy, method, post_body,
       extra_headers, std::move(source_location),
       std::move(blob_url_loader_factory), is_form_submission, impression,
-      initiator_activation_and_ad_status, actual_navigation_start_time,
+      has_user_gesture, started_by_ad, actual_navigation_start_time,
       navigation_start_time, is_embedder_initiated_fenced_frame_navigation,
       is_unfenced_top_navigation, force_new_browsing_instance,
       is_container_initiated, has_rel_opener, storage_access_api_status,
@@ -1264,7 +1305,9 @@ void Navigator::OnBeginNavigation(
         prefetched_signed_exchange_cache,
     int initiator_process_id,
     mojo::PendingReceiver<mojom::NavigationRendererCancellationListener>
-        renderer_cancellation_listener) {
+        renderer_cancellation_listener,
+    mojo::PendingReceiver<blink::mojom::NavigationResumeDeferredCommitListener>
+        deferred_commit_resume_listener) {
   TRACE_EVENT0("navigation", "Navigator::OnBeginNavigation");
 
   if (common_params->is_history_navigation_in_new_child_frame) {
@@ -1303,8 +1346,9 @@ void Navigator::OnBeginNavigation(
   }
 
   // Verify this navigation has precedence.
-  if (ShouldIgnoreIncomingRendererRequest(ongoing_navigation_request,
-                                          common_params->has_user_gesture)) {
+  if (ShouldIgnoreIncomingRendererRequest(
+          ongoing_navigation_request,
+          common_params->has_possibly_filtered_user_gesture)) {
     return;
   }
 
@@ -1324,7 +1368,8 @@ void Navigator::OnBeginNavigation(
           controller_.GetEntryCount(), override_user_agent,
           std::move(blob_url_loader_factory), std::move(navigation_client),
           std::move(prefetched_signed_exchange_cache),
-          std::move(renderer_cancellation_listener)));
+          std::move(renderer_cancellation_listener),
+          std::move(deferred_commit_resume_listener)));
   NavigationRequest* navigation_request = frame_tree_node->navigation_request();
 
   metrics_data_ = std::make_unique<NavigationMetricsData>(

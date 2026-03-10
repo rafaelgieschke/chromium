@@ -5,6 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_AUDIO_HANDLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_AUDIO_HANDLER_H_
 
+#include <array>
+
 #include "base/metrics/histogram_functions.h"
 #include "base/time/time.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_channel_count_mode.h"
@@ -294,7 +296,7 @@ class MODULES_EXPORT AudioHandler : public ThreadSafeRefCounted<AudioHandler> {
   void SetNodeType(NodeType);
 
   // https://chromium.googlesource.com/chromium/src/+/refs/heads/main/docs/media/capture/README.md#logs
-  void SendLogMessage(const char* const function_name, const String& message);
+  void SendLogMessage(const String& function_name, const String& message);
 
   bool is_initialized_ = false;
   NodeType node_type_ = NodeType::kNodeTypeUnknown;
@@ -326,7 +328,7 @@ class MODULES_EXPORT AudioHandler : public ThreadSafeRefCounted<AudioHandler> {
 
 #if DEBUG_AUDIONODE_REFERENCES
   static bool is_node_count_initialized_;
-  static int node_count_[static_cast<int>(NodeType::kNodeTypeEnd)];
+  static std::array<int, static_cast<int>(NodeType::kNodeTypeEnd)> node_count_;
 #endif
 
   V8ChannelCountMode::Enum channel_count_mode_;

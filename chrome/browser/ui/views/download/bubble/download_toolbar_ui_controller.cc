@@ -14,6 +14,7 @@
 #include "base/strings/strcat.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
+#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "cc/paint/paint_flags.h"
 #include "chrome/app/vector_icons/vector_icons.h"
@@ -28,6 +29,7 @@
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
@@ -445,7 +447,8 @@ DownloadToolbarUIController::DownloadToolbarUIController(
 
   bubble_controller_ = std::make_unique<DownloadBubbleUIController>(browser);
 
-  browser_list_observation_.Observe(BrowserList::GetInstance());
+  browser_collection_observation_.Observe(
+      ProfileBrowserCollection::GetForProfile(browser->profile()));
 }
 
 DownloadToolbarUIController::~DownloadToolbarUIController() {
@@ -780,11 +783,13 @@ DownloadToolbarUIController::GetWeakPtr() {
   return weak_factory_.GetWeakPtr();
 }
 
-void DownloadToolbarUIController::OnBrowserSetLastActive(Browser* browser) {
+void DownloadToolbarUIController::OnBrowserActivated(
+    BrowserWindowInterface* browser) {
   UpdateIconDormant();
 }
 
-void DownloadToolbarUIController::OnBrowserNoLongerActive(Browser* browser) {
+void DownloadToolbarUIController::OnBrowserDeactivated(
+    BrowserWindowInterface* browser) {
   UpdateIconDormant();
 }
 

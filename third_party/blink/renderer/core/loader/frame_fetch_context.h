@@ -98,6 +98,10 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext,
                          const AtomicString& initiator_type) override;
   bool AllowImage() const override;
 
+  void CheckGuardrailsPolicyForAssetSize(GuardrailPolicyAssetType asset_type,
+                                         size_t bytes,
+                                         const KURL& url) override;
+
   void CheckGuardrailsPolicyForRequest(
       ResourceType resource_type,
       mojom::blink::RequestContextType request_context,
@@ -136,13 +140,14 @@ class CORE_EXPORT FrameFetchContext final : public BaseFetchContext,
 
   void Trace(Visitor*) const override;
 
-  bool CalculateIfAdSubresource(
+  bool IsFrameContext() const override { return true; }
+
+  std::optional<AdProvenance> CalculateIfAdSubresource(
       const ResourceRequestHead& resource_request,
       base::optional_ref<const KURL> alias_url,
       ResourceType type,
       const FetchInitiatorInfo& initiator_info,
-      bool scan_stack_for_ads,
-      subresource_filter::ScopedRule* out_rule) override;
+      bool scan_stack_for_ads) override;
 
   // LoadingBehaviorObserver overrides:
   void DidObserveLoadingBehavior(LoadingBehaviorFlag) override;

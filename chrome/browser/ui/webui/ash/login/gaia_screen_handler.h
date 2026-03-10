@@ -23,6 +23,7 @@
 #include "chrome/browser/ui/webui/ash/login/network_state_informer.h"
 #include "chrome/browser/ui/webui/ash/login/online_login_utils.h"
 #include "chromeos/ash/components/http_auth_dialog/http_auth_dialog.h"
+#include "chromeos/ash/components/login/auth/auth_factor_editor.h"
 #include "chromeos/components/security_token_pin/constants.h"
 #include "components/user_manager/user_type.h"
 #include "net/base/net_errors.h"
@@ -236,12 +237,12 @@ class GaiaScreenHandler final
       const std::string& gaia_id,
       const std::string& email,
       const std::string& password,
-      const base::Value::List& scraped_saml_passwords_value,
+      const base::ListValue& scraped_saml_passwords_value,
       bool using_saml,
-      const base::Value::List& services_list,
+      const base::ListValue& services_list,
       bool services_provided,
-      const base::Value::Dict& password_attributes,
-      const base::Value::Dict& sync_trusted_vault_keys);
+      const base::DictValue& password_attributes,
+      const base::DictValue& sync_trusted_vault_keys);
 
   // Intermediate step when cookies are received. The cookies are added into
   // their final location within `OnlineSigninArtifacts` and then passed to
@@ -268,7 +269,7 @@ class GaiaScreenHandler final
                                      const std::string& url,
                                      const std::string& challenge);
   void HandleSamlChallengeMachineKeyResult(base::Value callback_id,
-                                           base::Value::Dict result);
+                                           base::DictValue result);
 
   void HandleGaiaUIReady();
 
@@ -283,7 +284,7 @@ class GaiaScreenHandler final
   // Called to deliver the result of the security token PIN request. Called with
   // an empty string when the request is canceled.
   void HandleSecurityTokenPinEntered(const std::string& user_input);
-  void HandleOnFatalError(int error_code, const base::Value::Dict& params);
+  void HandleOnFatalError(int error_code, const base::DictValue& params);
 
   // Called when the user is removed.
   void HandleUserRemoved(const std::string& email);
@@ -489,6 +490,8 @@ class GaiaScreenHandler final
   bool proxy_auth_dialog_need_reload_ = false;
 
   std::unique_ptr<ErrorScreensHistogramHelper> histogram_helper_;
+
+  std::unique_ptr<AuthFactorEditor> auth_factor_editor_;
 
   bool is_gaia_password_required_ = false;
 

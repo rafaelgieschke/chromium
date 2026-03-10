@@ -13,6 +13,8 @@
 #import "components/signin/public/identity_manager/account_capabilities_test_mutator.h"
 #import "components/signin/public/identity_manager/identity_test_environment.h"
 #import "ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_prefs.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/optimization_guide/model/optimization_guide_service.h"
 #import "ios/chrome/browser/optimization_guide/model/optimization_guide_service_factory.h"
@@ -35,6 +37,8 @@ class BwgServiceTest : public PlatformTest {
   void SetUp() override {
     PlatformTest::SetUp();
 
+    scoped_feature_list_.InitWithFeatures({kGeminiCopresence}, {});
+
     TestProfileIOS::Builder builder;
     builder.AddTestingFactory(
         AuthenticationServiceFactory::GetInstance(),
@@ -52,10 +56,12 @@ class BwgServiceTest : public PlatformTest {
     pref_service_ = std::make_unique<TestingPrefServiceSimple>();
     pref_service_->registry()->RegisterIntegerPref(
         prefs::kGeminiEnabledByPolicy, 0);
+    pref_service_->registry()->RegisterIntegerPref(prefs::kGenAiEnabledByPolicy,
+                                                   0);
     pref_service_->registry()->RegisterBooleanPref(
         prefs::kAIHubEligibilityTriggered, false);
 
-    bwg_service_ = std::make_unique<BwgService>(
+    gemini_service_ = std::make_unique<BwgService>(
         profile_.get(), auth_service_, identity_test_env_.identity_manager(),
         pref_service_.get(), optimization_guide_service_);
   }
@@ -63,21 +69,23 @@ class BwgServiceTest : public PlatformTest {
   void TearDown() override {
     // Shutdown the service to ensure it unregisters itself as an observer
     // from IdentityManager before IdentityManager is destroyed.
-    if (bwg_service_) {
-      bwg_service_->Shutdown();
+    if (gemini_service_) {
+      gemini_service_->Shutdown();
     }
     PlatformTest::TearDown();
   }
 
   // Signs in a user and sets their model execution capability.
-  void SignInAndSetCapability(bool capability) {
-    const std::string email = "test@example.com";
+  void SignInAndSetCapability(bool capability, bool workspaceEligible) {
+    gemini_service_->is_disabled_by_gemini_policy_ = !workspaceEligible;
 
+    const std::string email = "test@example.com";
     AccountInfo account_info = identity_test_env_.MakePrimaryAccountAvailable(
         email, signin::ConsentLevel::kSignin);
 
     AccountCapabilitiesTestMutator mutator(&account_info.capabilities);
     mutator.set_can_use_model_execution_features(capability);
+    mutator.set_can_use_gemini_in_chrome(capability);
 
     identity_test_env_.UpdateAccountInfoForAccount(account_info);
   }
@@ -86,11 +94,14 @@ class BwgServiceTest : public PlatformTest {
   IOSChromeScopedTestingLocalState scoped_testing_local_state_;
   web::WebTaskEnvironment task_environment_;
   signin::IdentityTestEnvironment identity_test_env_;
+  base::test::ScopedFeatureList scoped_feature_list_;
 
   // Profile and services that depend on the environment are declared next.
+  // Note: `pref_service_` must be declared before `gemini_service_` so that
+  // it is destroyed after `gemini_service_`, preventing a dangling pointer.
   std::unique_ptr<TestProfileIOS> profile_;
-  std::unique_ptr<BwgService> bwg_service_;
   std::unique_ptr<TestingPrefServiceSimple> pref_service_;
+  std::unique_ptr<BwgService> gemini_service_;
   raw_ptr<AuthenticationService> auth_service_;
   raw_ptr<OptimizationGuideService> optimization_guide_service_;
 
@@ -99,10 +110,11 @@ class BwgServiceTest : public PlatformTest {
 
 // Tests that a user is considered eligible if they are signed in and their
 // account has the `can_use_model_execution_features` capability.
-TEST_F(BwgServiceTest, IsProfileEligibleForBWG_WhenUserIsEligible) {
-  SignInAndSetCapability(true);
+TEST_F(BwgServiceTest, IsProfileEligibleForGemini_WhenUserIsEligible) {
+  SignInAndSetCapability(true, true);
 
-  EXPECT_TRUE(bwg_service_->IsProfileEligibleForBwg());
+  EXPECT_TRUE(gemini_service_->IsProfileEligibleForGemini());
+  histogram_tester_.ExpectTotalCount(kGeminiIneligibilityReasonHistogram, 0);
   histogram_tester_.ExpectUniqueSample(kEligibilityHistogram,
                                        /*sample=*/true,
                                        /*expected_count=*/1);
@@ -110,33 +122,83 @@ TEST_F(BwgServiceTest, IsProfileEligibleForBWG_WhenUserIsEligible) {
 
 // Tests that a user is ineligible if they are signed in but their account
 // capability is explicitly false.
-TEST_F(BwgServiceTest, IsProfileEligibleForBWG_IneligibleByCapability) {
-  SignInAndSetCapability(false);
-  pref_service_->SetInteger(prefs::kGeminiEnabledByPolicy, 0);
+TEST_F(BwgServiceTest, IsProfileEligibleForGemini_IneligibleByCapability) {
+  SignInAndSetCapability(false, true);
+  pref_service_->SetInteger(prefs::kGeminiEnabledByPolicy,
+                            static_cast<int>(gemini::SettingsPolicy::kAllowed));
 
-  EXPECT_FALSE(bwg_service_->IsProfileEligibleForBwg());
+  EXPECT_FALSE(gemini_service_->IsProfileEligibleForGemini());
+  histogram_tester_.ExpectUniqueSample(
+      kGeminiIneligibilityReasonHistogram,
+      IOSGeminiIneligibilityReason::kInsufficientAccountCapability, 1);
+  histogram_tester_.ExpectUniqueSample(kEligibilityHistogram,
+                                       /*sample=*/false,
+                                       /*expected_count=*/1);
+}
+
+// Tests that a user is ineligible if both of the Gemini policies are disabled.
+TEST_F(BwgServiceTest, IsProfileEligibleForGemini_IneligibleByBothPolicies) {
+  SignInAndSetCapability(true, true);
+  pref_service_->SetInteger(
+      prefs::kGeminiEnabledByPolicy,
+      static_cast<int>(gemini::SettingsPolicy::kNotAllowed));
+  pref_service_->SetInteger(
+      prefs::kGenAiEnabledByPolicy,
+      static_cast<int>(gemini::GenAiDefaultSettingsPolicy::kNotAllowed));
+
+  EXPECT_FALSE(gemini_service_->IsProfileEligibleForGemini());
+  histogram_tester_.ExpectUniqueSample(
+      kGeminiIneligibilityReasonHistogram,
+      IOSGeminiIneligibilityReason::kChromeEnterpriseDisabled, 1);
   histogram_tester_.ExpectUniqueSample(kEligibilityHistogram,
                                        /*sample=*/false,
                                        /*expected_count=*/1);
 }
 
 // Tests that a user is ineligible if the Gemini policy is disabled.
-TEST_F(BwgServiceTest, IsProfileEligibleForBWG_IneligibleByPolicy) {
-  SignInAndSetCapability(true);
-  pref_service_->SetInteger(prefs::kGeminiEnabledByPolicy, 1);
+TEST_F(BwgServiceTest, IsProfileEligibleForGemini_IneligibleByGeminiPolicy) {
+  SignInAndSetCapability(true, true);
+  pref_service_->SetInteger(
+      prefs::kGeminiEnabledByPolicy,
+      static_cast<int>(gemini::SettingsPolicy::kNotAllowed));
 
-  EXPECT_FALSE(bwg_service_->IsProfileEligibleForBwg());
+  EXPECT_FALSE(gemini_service_->IsProfileEligibleForGemini());
+  histogram_tester_.ExpectUniqueSample(
+      kGeminiIneligibilityReasonHistogram,
+      IOSGeminiIneligibilityReason::kChromeEnterpriseDisabled, 1);
   histogram_tester_.ExpectUniqueSample(kEligibilityHistogram,
                                        /*sample=*/false,
                                        /*expected_count=*/1);
 }
 
-// Tests that a user is eligible if the Gemini policy is enabled.
-TEST_F(BwgServiceTest, IsProfileEligibleForBWG_EligibleByPolicy) {
-  SignInAndSetCapability(true);
-  pref_service_->SetInteger(prefs::kGeminiEnabledByPolicy, 0);
+// Tests that a user is ineligible if the GenAI policy is disabled.
+TEST_F(BwgServiceTest, IsProfileEligibleForGemini_IneligibleByGenAIPolicy) {
+  SignInAndSetCapability(true, true);
+  pref_service_->SetInteger(
+      prefs::kGenAiEnabledByPolicy,
+      static_cast<int>(gemini::GenAiDefaultSettingsPolicy::kNotAllowed));
 
-  EXPECT_TRUE(bwg_service_->IsProfileEligibleForBwg());
+  EXPECT_FALSE(gemini_service_->IsProfileEligibleForGemini());
+  histogram_tester_.ExpectUniqueSample(
+      kGeminiIneligibilityReasonHistogram,
+      IOSGeminiIneligibilityReason::kChromeEnterpriseDisabled, 1);
+  histogram_tester_.ExpectUniqueSample(kEligibilityHistogram,
+                                       /*sample=*/false,
+                                       /*expected_count=*/1);
+}
+
+// Tests that a user is eligible if both of the Gemini policies are enabled.
+TEST_F(BwgServiceTest, IsProfileEligibleForGemini_EligibleByPolicy) {
+  SignInAndSetCapability(true, true);
+  pref_service_->SetInteger(prefs::kGeminiEnabledByPolicy,
+                            static_cast<int>(gemini::SettingsPolicy::kAllowed));
+  pref_service_->SetInteger(
+      prefs::kGenAiEnabledByPolicy,
+      static_cast<int>(
+          gemini::GenAiDefaultSettingsPolicy::kAllowedWithoutImprovingModels));
+
+  EXPECT_TRUE(gemini_service_->IsProfileEligibleForGemini());
+  histogram_tester_.ExpectTotalCount(kGeminiIneligibilityReasonHistogram, 0);
   histogram_tester_.ExpectUniqueSample(kEligibilityHistogram,
                                        /*sample=*/true,
                                        /*expected_count=*/1);
@@ -144,12 +206,15 @@ TEST_F(BwgServiceTest, IsProfileEligibleForBWG_EligibleByPolicy) {
 
 // Tests that a user is ineligible if they are not signed in to a primary
 // account.
-TEST_F(BwgServiceTest, IsProfileEligibleForBWG_IneligibleWhenSignedOut) {
+TEST_F(BwgServiceTest, IsProfileEligibleForGemini_IneligibleWhenSignedOut) {
   // The default state is signed out.
   EXPECT_FALSE(identity_test_env_.identity_manager()->HasPrimaryAccount(
       signin::ConsentLevel::kSignin));
 
-  EXPECT_FALSE(bwg_service_->IsProfileEligibleForBwg());
+  EXPECT_FALSE(gemini_service_->IsProfileEligibleForGemini());
+  histogram_tester_.ExpectBucketCount(
+      kGeminiIneligibilityReasonHistogram,
+      IOSGeminiIneligibilityReason::kAccountUnauthenticated, 1);
   histogram_tester_.ExpectUniqueSample(kEligibilityHistogram,
                                        /*sample=*/false,
                                        /*expected_count=*/1);
@@ -158,52 +223,31 @@ TEST_F(BwgServiceTest, IsProfileEligibleForBWG_IneligibleWhenSignedOut) {
 // Tests that a user is ineligible if they are signed in to a primary
 // account but their account capabilities are unknown.
 TEST_F(BwgServiceTest,
-       IsProfileEligibleForBWG_IneligibleWhenCapabilityIsUnknown) {
+       IsProfileEligibleForGemini_IneligibleWhenCapabilityIsUnknown) {
   // Sign in without setting any capabilities.
   identity_test_env_.MakePrimaryAccountAvailable("test@example.com",
                                                  signin::ConsentLevel::kSignin);
 
-  EXPECT_FALSE(bwg_service_->IsProfileEligibleForBwg());
+  EXPECT_FALSE(gemini_service_->IsProfileEligibleForGemini());
+  histogram_tester_.ExpectUniqueSample(
+      kGeminiIneligibilityReasonHistogram,
+      IOSGeminiIneligibilityReason::kInsufficientAccountCapability, 1);
   histogram_tester_.ExpectUniqueSample(kEligibilityHistogram,
                                        /*sample=*/false,
                                        /*expected_count=*/1);
 }
 
-// Tests that BWG is available for a web state when the user is eligible and
-// the web state is not off the record.
-TEST_F(BwgServiceTest, IsBwgAvailableForWebState_WhenUserIsEligible) {
-  SignInAndSetCapability(true);
-  auto web_state = std::make_unique<web::FakeWebState>();
-  web_state->SetBrowserState(profile_.get());
-  web_state->SetCurrentURL(GURL("https://www.google.com"));
-  web_state->SetContentsMimeType("text/html");
+// Tests that a user is ineligible if the Gemini workspace is restricted.
+TEST_F(BwgServiceTest,
+       IsProfileEligibleForGemini_IneligibleWithRestrictedWorkspace) {
+  // Sign in with workspace set to non eligible
+  SignInAndSetCapability(true, false);
 
-  EXPECT_TRUE(bwg_service_->IsBwgAvailableForWebState(web_state.get()));
-}
-
-// Tests that BWG is not available for a web state when the user is not
-// eligible.
-TEST_F(BwgServiceTest, IsBwgAvailableForWebState_WhenUserIsNotEligible) {
-  SignInAndSetCapability(false);
-  auto web_state = std::make_unique<web::FakeWebState>();
-  web_state->SetBrowserState(profile_.get());
-
-  EXPECT_FALSE(bwg_service_->IsBwgAvailableForWebState(web_state.get()));
-}
-
-// Tests that BWG is not available for a web state when the web state is off
-// the record.
-TEST_F(BwgServiceTest, IsBwgAvailableForWebState_WhenWebStateIsOffTheRecord) {
-  SignInAndSetCapability(true);
-  auto web_state = std::make_unique<web::FakeWebState>();
-  web_state->SetBrowserState(profile_->GetOffTheRecordProfile());
-
-  EXPECT_FALSE(bwg_service_->IsBwgAvailableForWebState(web_state.get()));
-}
-
-// Tests that BWG is not available for a web state when the web state is null.
-TEST_F(BwgServiceTest, IsBwgAvailableForWebState_WhenWebStateIsNull) {
-  SignInAndSetCapability(true);
-
-  EXPECT_FALSE(bwg_service_->IsBwgAvailableForWebState(nullptr));
+  EXPECT_FALSE(gemini_service_->IsProfileEligibleForGemini());
+  histogram_tester_.ExpectUniqueSample(
+      kGeminiIneligibilityReasonHistogram,
+      IOSGeminiIneligibilityReason::kWorkspaceRestricted, 1);
+  histogram_tester_.ExpectUniqueSample(kEligibilityHistogram,
+                                       /*sample=*/false,
+                                       /*expected_count=*/1);
 }

@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/no_destructor.h"
@@ -61,10 +60,18 @@ DevToolsMap& GetDevtoolsInstances() {
   return *instance;
 }
 
-base::ObserverList<DevToolsAgentHostObserver>::Unchecked&
+// TODO(crbug.com/484371187): Investigate if reentrancy can be removed.
+base::ObserverList<
+    DevToolsAgentHostObserver,
+    /*check_empty=*/false,
+    /*reentrancy=*/
+    base::ObserverListReentrancyPolicy::kAllowReentrancyUntriaged>::Unchecked&
 GetDevtoolsObservers() {
-  static base::NoDestructor<
-      base::ObserverList<DevToolsAgentHostObserver>::Unchecked>
+  static base::NoDestructor<base::ObserverList<
+      DevToolsAgentHostObserver,
+      /*check_empty=*/false,
+      /*reentrancy=*/
+      base::ObserverListReentrancyPolicy::kAllowReentrancyUntriaged>::Unchecked>
       instance;
   return *instance;
 }
@@ -153,7 +160,7 @@ const char DevToolsAgentHost::kTypeBrowserUI[] = "browser_ui";
 int DevToolsAgentHostImpl::s_force_creation_count_ = 0;
 
 // static
-std::string DevToolsAgentHost::GetProtocolVersion() {
+std::string_view DevToolsAgentHost::GetProtocolVersion() {
   // TODO(dgozman): generate this.
   return "1.3";
 }
@@ -199,7 +206,7 @@ DevToolsAgentHost::List DevToolsAgentHost::GetOrCreateAll() {
 #if DCHECK_IS_ON()
   for (auto it : result) {
     DevToolsAgentHostImpl* host = static_cast<DevToolsAgentHostImpl*>(it.get());
-    DCHECK(base::Contains(GetDevtoolsInstances(), host->id_));
+    DCHECK(GetDevtoolsInstances().contains(host->id_));
   }
 #endif
 
@@ -318,7 +325,7 @@ bool DevToolsAgentHostImpl::AttachInternal(
   }
   renderer_channel_.AttachSession(session);
   sessions_.push_back(session);
-  DCHECK(!base::Contains(session_by_client_, session->GetClient()));
+  DCHECK(!session_by_client_.contains(session->GetClient()));
   session_by_client_.emplace(session->GetClient(), std::move(session_owned));
   if (sessions_.size() == 1)
     NotifyAttached();
@@ -549,7 +556,7 @@ std::string DevToolsAgentHostImpl::GetSubtype() {
 }
 
 void DevToolsAgentHostImpl::NotifyCreated() {
-  DCHECK(!base::Contains(GetDevtoolsInstances(), id_));
+  DCHECK(!GetDevtoolsInstances().contains(id_));
   GetDevtoolsInstances()[id_] = this;
   for (auto& observer : GetDevtoolsObservers())
     observer.DevToolsAgentHostCreated(this);
@@ -576,7 +583,7 @@ void DevToolsAgentHostImpl::NotifyCrashed(base::TerminationStatus status) {
 }
 
 void DevToolsAgentHostImpl::NotifyDestroyed() {
-  DCHECK(base::Contains(GetDevtoolsInstances(), id_));
+  DCHECK(GetDevtoolsInstances().contains(id_));
   for (auto& observer : GetDevtoolsObservers())
     observer.DevToolsAgentHostDestroyed(this);
   GetDevtoolsInstances().erase(id_);

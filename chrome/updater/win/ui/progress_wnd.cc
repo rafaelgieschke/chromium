@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <typeinfo>
+#include <utility>
 
 #include "base/check_op.h"
 #include "base/debug/dump_without_crashing.h"
@@ -309,6 +310,7 @@ void ProgressWnd::OnWaitingToDownload(const std::string& app_id,
     return;
   }
   cur_state_ = States::STATE_WAITING_TO_DOWNLOAD;
+  SetMarqueeMode(true);
   SetDlgItemText(IDC_INSTALLER_STATE_TEXT, L"");
   ChangeControlState();
 }
@@ -376,6 +378,7 @@ void ProgressWnd::OnWaitingRetryDownload(const std::string& app_id,
   }
 
   cur_state_ = States::STATE_WAITING_TO_DOWNLOAD;
+  SetMarqueeMode(true);
   SetDlgItemText(IDC_INSTALLER_STATE_TEXT, L"");
   ChangeControlState();
 }
@@ -389,6 +392,7 @@ void ProgressWnd::OnWaitingToInstall(const std::string& app_id,
 
   if (States::STATE_WAITING_TO_INSTALL != cur_state_) {
     cur_state_ = States::STATE_WAITING_TO_INSTALL;
+    SetMarqueeMode(true);
     SetDlgItemText(
         IDC_INSTALLER_STATE_TEXT,
         GetLocalizedString(IDS_WAITING_TO_INSTALL_BASE, lang()).c_str());
@@ -604,7 +608,7 @@ void ProgressWnd::OnComplete(const ObserverCompletionInfo& observer_info) {
 
 HRESULT ProgressWnd::ChangeControlState() {
   for (const ControlState& ctl : ctls_) {
-    const size_t i = static_cast<size_t>(cur_state_);
+    const size_t i = std::to_underlying(cur_state_);
     CHECK_LE(i, std::size(ctl.attr));
     SetControlAttributes(ctl.id, ctl.attr[i]);
   }

@@ -15,12 +15,10 @@ import static org.chromium.base.ThreadUtils.runOnUiThreadBlocking;
 import static org.chromium.chrome.test.util.ChromeTabUtils.getTabCountOnUiThread;
 
 import android.content.Context;
-import android.content.Intent;
 import android.os.Build;
 
 import androidx.test.filters.LargeTest;
 import androidx.test.platform.app.InstrumentationRegistry;
-import androidx.test.runner.lifecycle.Stage;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -30,13 +28,12 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
-import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.Token;
-import org.chromium.base.test.util.ApplicationTestUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Criteria;
 import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.DisableIf;
 import org.chromium.base.test.util.DoNotBatch;
 import org.chromium.base.test.util.ImportantFormFactors;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
@@ -45,8 +42,7 @@ import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.media.MediaCaptureDevicesDispatcherAndroid;
 import org.chromium.chrome.browser.media.MediaCaptureDevicesDispatcherAndroidJni;
-import org.chromium.chrome.browser.multiwindow.MultiInstanceManager.NewWindowAppSource;
-import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
+import org.chromium.chrome.browser.multiwindow.MultiWindowTestHelper;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.ui.browser_window.ChromeAndroidTaskTrackerFactory;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -121,6 +117,7 @@ public class TabModelMultiWindowTest {
     }
 
     @Test
+    @DisableIf.Device(DeviceFormFactor.DESKTOP) // https://crbug.com/481443908
     @LargeTest
     public void testMoveTabGroupToWindow() {
         ChromeTabbedActivity activity1 = mActivityTestRule.getActivity();
@@ -155,7 +152,8 @@ public class TabModelMultiWindowTest {
                 () -> {
                     var taskTracker = ChromeAndroidTaskTrackerFactory.getInstance();
                     var chromeTask = taskTracker.get(activity.getTaskId());
-                    return chromeTask.getOrCreateNativeBrowserWindowPtr();
+                    var profile = activity.getTabModelSelector().getCurrentModel().getProfile();
+                    return chromeTask.getOrCreateNativeBrowserWindowPtr(profile);
                 });
     }
 
@@ -181,19 +179,8 @@ public class TabModelMultiWindowTest {
     }
 
     private ChromeTabbedActivity createNewWindow(Context context) {
-        Intent intent =
-                MultiWindowUtils.createNewWindowIntent(
-                        context,
-                        /* instanceId= */ -1,
-                        /* preferNew= */ true,
-                        /* openAdjacently= */ false,
-                        /* addTrustedIntentExtras= */ true,
-                        NewWindowAppSource.OTHER);
         ChromeTabbedActivity activity =
-                ApplicationTestUtils.waitForActivityWithClass(
-                        ChromeTabbedActivity.class,
-                        Stage.RESUMED,
-                        () -> ContextUtils.getApplicationContext().startActivity(intent));
+                MultiWindowTestHelper.createNewChromeTabbedActivity(context);
         CriteriaHelper.pollUiThread(
                 () ->
                         Criteria.checkThat(

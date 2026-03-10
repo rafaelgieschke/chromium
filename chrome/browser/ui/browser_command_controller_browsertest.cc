@@ -4,16 +4,19 @@
 
 #include "chrome/browser/ui/browser_command_controller.h"
 
+#include <algorithm>
 #include <string_view>
 
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/glic/glic_pref_names.h"
+#include "chrome/browser/glic/public/glic_keyed_service.h"
+#include "chrome/browser/glic/public/glic_keyed_service_factory.h"
 #include "chrome/browser/glic/test_support/glic_test_environment.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_window.h"
@@ -31,18 +34,21 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/profiles/profile_picker.h"
 #include "chrome/browser/ui/profiles/profile_ui_test_utils.h"
+#include "chrome/browser/ui/side_panel/side_panel_entry_key.h"
+#include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
 #include "chrome/browser/ui/tab_modal_confirm_dialog_browsertest.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/ui_features.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_entry_key.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
+#include "chrome/common/chrome_features.h"
+#include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_profile_manager.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/autofill/core/common/autofill_features.h"
-#include "components/commerce/core/commerce_feature_list.h"
+#include "components/prefs/pref_service.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/sessions/core/tab_restore_service_observer.h"
@@ -61,6 +67,7 @@
 #if BUILDFLAG(IS_CHROMEOS)
 #include "ash/constants/ash_switches.h"
 #include "ash/wm/window_pin_util.h"
+#include "chrome/browser/ash/boca/on_task/on_task_locked_controller.h"
 #include "chrome/browser/ash/login/test/guest_session_mixin.h"
 #include "chrome/test/base/mixin_based_in_process_browser_test.h"
 #include "ui/aura/window.h"
@@ -70,14 +77,6 @@
 #include "chrome/common/chrome_features.h"
 #endif  // BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 
-#if BUILDFLAG(ENABLE_GLIC)
-#include "chrome/browser/glic/glic_pref_names.h"
-#include "chrome/browser/glic/public/glic_keyed_service.h"
-#include "chrome/browser/glic/public/glic_keyed_service_factory.h"
-#include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
-#include "components/prefs/pref_service.h"
-#endif
 
 namespace chrome {
 
@@ -276,7 +275,8 @@ class BrowserCommandControllerBrowserTestLockedFullscreen
 
 IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestLockedFullscreen,
                        WhenNotLockedForOnTask) {
-  browser()->SetLockedForOnTask(false);
+  ash::boca::OnTaskLockedController::From(browser())->set_locked_for_on_task(
+      false);
   CommandUpdaterImpl* const command_updater = GetCommandUpdater();
 
   // IDC_EXIT is always enabled in regular mode so it's a perfect candidate for
@@ -291,7 +291,7 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestLockedFullscreen,
   // Go through all the command ids and ensure only allowlisted commands are
   // enabled.
   for (int id : command_updater->GetAllIds()) {
-    bool is_command_allowlisted = base::Contains(kAllowlistedIds, id);
+    bool is_command_allowlisted = std::ranges::contains(kAllowlistedIds, id);
     EXPECT_EQ(command_updater->IsCommandEnabled(id), is_command_allowlisted)
         << "Command " << id << " failed to meet enabled state expectation";
   }
@@ -303,7 +303,8 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestLockedFullscreen,
 
 IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestLockedFullscreen,
                        WhenLockedForOnTask) {
-  browser()->SetLockedForOnTask(true);
+  ash::boca::OnTaskLockedController::From(browser())->set_locked_for_on_task(
+      true);
   CommandUpdaterImpl* const command_updater = GetCommandUpdater();
 
   // IDC_EXIT is always enabled in regular mode so it's a perfect candidate for
@@ -330,7 +331,7 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestLockedFullscreen,
   // Go through all the command ids and ensure only allowlisted commands are
   // enabled.
   for (int id : command_updater->GetAllIds()) {
-    bool is_command_allowlisted = base::Contains(kAllowlistedIds, id);
+    bool is_command_allowlisted = std::ranges::contains(kAllowlistedIds, id);
     EXPECT_EQ(command_updater->IsCommandEnabled(id), is_command_allowlisted)
         << "Command " << id << " failed to meet enabled state expectation";
   }
@@ -609,51 +610,6 @@ IN_PROC_BROWSER_TEST_F(CreateShortcutBrowserCommandControllerNavTest,
 
 #endif  // BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
 
-// Tests for comparison table submenu.
-class BrowserCommandControllerBrowserTestCompare
-    : public BrowserCommandControllerBrowserTest {
- public:
-  BrowserCommandControllerBrowserTestCompare() {
-    scoped_feature_list_.InitAndEnableFeature(commerce::kProductSpecifications);
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-};
-
-IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestCompare,
-                       AddToTableMenu_UrlSchemeHttp) {
-  GURL url = GURL("http://example.com");
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
-
-  browser()->command_controller()->TabStateChanged();
-
-  EXPECT_TRUE(browser()->command_controller()->IsCommandEnabled(
-      IDC_ADD_TO_COMPARISON_TABLE_MENU));
-}
-
-IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestCompare,
-                       AddToTableMenu_UrlSchemeHttps) {
-  GURL url = GURL("https://example.com");
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
-
-  browser()->command_controller()->TabStateChanged();
-
-  EXPECT_TRUE(browser()->command_controller()->IsCommandEnabled(
-      IDC_ADD_TO_COMPARISON_TABLE_MENU));
-}
-
-IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestCompare,
-                       AddToTableMenu_UrlSchemeNotHttpOrHttps) {
-  GURL url = GURL("chrome://history");
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
-
-  browser()->command_controller()->TabStateChanged();
-
-  EXPECT_FALSE(browser()->command_controller()->IsCommandEnabled(
-      IDC_ADD_TO_COMPARISON_TABLE_MENU));
-}
-
 // Tests for Your saved info submenu.
 class BrowserCommandControllerBrowserTestYourSavedInfo
     : public BrowserCommandControllerBrowserTest {
@@ -682,7 +638,6 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestYourSavedInfo,
             "chrome://settings/travel");
 }
 
-#if BUILDFLAG(ENABLE_GLIC)
 class BrowserCommandControllerBrowserTestGlic
     : public BrowserCommandControllerBrowserTest {
  public:
@@ -763,8 +718,7 @@ class BrowserCommandControllerBrowserTestGlicChromeOSGuest
     : public MixinBasedInProcessBrowserTest {
  public:
   BrowserCommandControllerBrowserTestGlicChromeOSGuest() {
-    scoped_feature_list_.InitWithFeatures(
-        {features::kGlic, features::kTabstripComboButton}, {});
+    scoped_feature_list_.InitWithFeatures({features::kGlic}, {});
   }
 
   BrowserCommandControllerBrowserTestGlicChromeOSGuest(
@@ -794,6 +748,5 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTestGlicChromeOSGuest,
   EXPECT_FALSE(chrome::IsCommandEnabled(browser(), IDC_GLIC_TOGGLE_PIN));
 }
 #endif  // BUILDFLAG(IS_CHROMEOS)
-#endif  // BUILDFLAG(ENABLE_GLIC)
 
 }  // namespace chrome

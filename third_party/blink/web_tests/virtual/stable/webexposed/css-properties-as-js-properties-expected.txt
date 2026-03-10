@@ -24,6 +24,7 @@ animationRangeEnd
 animationRangeStart
 animationTimeline
 animationTimingFunction
+animationTrigger
 appRegion
 appearance
 ascentOverride
@@ -96,6 +97,7 @@ borderRight
 borderRightColor
 borderRightStyle
 borderRightWidth
+borderShape
 borderSpacing
 borderStartEndRadius
 borderStartStartRadius
@@ -500,6 +502,15 @@ textWrap
 textWrapMode
 textWrapStyle
 timelineScope
+timelineTrigger
+timelineTriggerActivationRange
+timelineTriggerActivationRangeEnd
+timelineTriggerActivationRangeStart
+timelineTriggerActiveRange
+timelineTriggerActiveRangeEnd
+timelineTriggerActiveRangeStart
+timelineTriggerName
+timelineTriggerSource
 top
 touchAction
 transform
@@ -513,6 +524,7 @@ transitionDuration
 transitionProperty
 transitionTimingFunction
 translate
+triggerScope
 types
 unicodeBidi
 unicodeRange
@@ -526,6 +538,7 @@ viewTimelineName
 viewTransitionClass
 viewTransitionGroup
 viewTransitionName
+viewTransitionScope
 visibility
 webkitAlignContent
 webkitAlignItems

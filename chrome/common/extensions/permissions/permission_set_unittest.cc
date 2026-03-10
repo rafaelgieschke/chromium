@@ -346,7 +346,7 @@ TEST(PermissionsTest, CreateUnion) {
   std::unique_ptr<APIPermission> permission =
       permission_info->CreateAPIPermission();
   {
-    base::Value::List list;
+    base::ListValue list;
     list.Append("tcp-connect:*.example.com:80");
     list.Append("udp-bind::8080");
     list.Append("udp-send-to::8888");
@@ -392,7 +392,7 @@ TEST(PermissionsTest, CreateUnion) {
 
   permission = permission_info->CreateAPIPermission();
   {
-    base::Value::List list;
+    base::ListValue list;
     list.Append("tcp-connect:*.example.com:80");
     list.Append("udp-send-to::8899");
     base::Value value(std::move(list));
@@ -406,7 +406,7 @@ TEST(PermissionsTest, CreateUnion) {
 
   permission = permission_info->CreateAPIPermission();
   {
-    base::Value::List list;
+    base::ListValue list;
     list.Append("tcp-connect:*.example.com:80");
     list.Append("udp-bind::8080");
     list.Append("udp-send-to::8888");
@@ -473,7 +473,7 @@ TEST(PermissionsTest, CreateIntersection) {
   std::unique_ptr<APIPermission> permission =
       permission_info->CreateAPIPermission();
   {
-    base::Value::List list;
+    base::ListValue list;
     list.Append("tcp-connect:*.example.com:80");
     list.Append("udp-bind::8080");
     list.Append("udp-send-to::8888");
@@ -511,7 +511,7 @@ TEST(PermissionsTest, CreateIntersection) {
   apis2.insert(APIPermissionID::kClipboardWrite);
   permission = permission_info->CreateAPIPermission();
   {
-    base::Value::List list;
+    base::ListValue list;
     list.Append("udp-bind::8080");
     list.Append("udp-send-to::8888");
     list.Append("udp-send-to::8899");
@@ -523,7 +523,7 @@ TEST(PermissionsTest, CreateIntersection) {
   expected_apis.insert(APIPermissionID::kTab);
   permission = permission_info->CreateAPIPermission();
   {
-    base::Value::List list;
+    base::ListValue list;
     list.Append("udp-bind::8080");
     list.Append("udp-send-to::8888");
     base::Value value(std::move(list));
@@ -587,7 +587,7 @@ TEST(PermissionsTest, CreateDifference) {
   std::unique_ptr<APIPermission> permission =
       permission_info->CreateAPIPermission();
   {
-    base::Value::List list;
+    base::ListValue list;
     list.Append("tcp-connect:*.example.com:80");
     list.Append("udp-bind::8080");
     list.Append("udp-send-to::8888");
@@ -614,7 +614,7 @@ TEST(PermissionsTest, CreateDifference) {
   apis2.insert(APIPermissionID::kClipboardWrite);
   permission = permission_info->CreateAPIPermission();
   {
-    base::Value::List list;
+    base::ListValue list;
     list.Append("tcp-connect:*.example.com:80");
     list.Append("udp-send-to::8899");
     base::Value value(std::move(list));
@@ -625,7 +625,7 @@ TEST(PermissionsTest, CreateDifference) {
   expected_apis.insert(APIPermissionID::kBackground);
   permission = permission_info->CreateAPIPermission();
   {
-    base::Value::List list;
+    base::ListValue list;
     list.Append("udp-bind::8080");
     list.Append("udp-send-to::8888");
     base::Value value(std::move(list));
@@ -737,7 +737,7 @@ TEST(PermissionsTest, IsPrivilegeIncrease) {
 
 // Tests that swapping out a permission for a less powerful one is not
 // considered a privilege increase.
-// Regression test for https://crbug.com/841938.
+// Regression test for https://crbug.com/40575861.
 TEST(PermissionsTest,
      IsNotPrivilegeIncreaseWhenSwitchingForLowerPrivilegePermission) {
   APIPermissionSet apis1;
@@ -879,6 +879,7 @@ TEST(PermissionsTest, PermissionMessages) {
   skip.insert(APIPermissionID::kMediaPerceptionPrivate);
   skip.insert(APIPermissionID::kMetricsPrivate);
   skip.insert(APIPermissionID::kPdfViewerPrivate);
+  skip.insert(APIPermissionID::kProxyOverrideRulesPrivate);
   skip.insert(APIPermissionID::kImageWriterPrivate);
   skip.insert(APIPermissionID::kResourcesPrivate);
   skip.insert(APIPermissionID::kSafeBrowsingPrivate);
@@ -1271,7 +1272,8 @@ TEST(PermissionsTest, GetWarningMessages_DeclarativeWebRequest) {
 #endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 #if BUILDFLAG(ENABLE_PLATFORM_APPS)
-// "serial" is a platform app API.
+#if BUILDFLAG(IS_CHROMEOS)
+// "serial" is a platform app API only available on ChromeOS.
 TEST(PermissionsTest, GetWarningMessages_Serial) {
   scoped_refptr<Extension> extension =
       LoadManifest("permissions", "serial.json");
@@ -1282,6 +1284,7 @@ TEST(PermissionsTest, GetWarningMessages_Serial) {
   EXPECT_TRUE(VerifyOnePermissionMessage(extension->permissions_data(),
                                          "Access your serial devices"));
 }
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 // "socket" is a platform app API.
 TEST(PermissionsTest, GetWarningMessages_Socket_AnyHost) {
@@ -1342,7 +1345,7 @@ TEST(PermissionsTest, GetWarningMessages_Socket_TwoDomainsOneHostname) {
 
 // Since platform apps always use isolated storage, they can't (silently)
 // access user data on other domains, so there's no need to prompt about host
-// permissions. See crbug.com/255229.
+// permissions. See crbug.com/40323545.
 TEST(PermissionsTest, GetWarningMessages_PlatformAppHosts) {
   scoped_refptr<Extension> extension =
       LoadManifest("permissions", "platform_app_hosts.json");

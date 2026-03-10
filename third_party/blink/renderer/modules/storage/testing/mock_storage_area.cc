@@ -49,7 +49,7 @@ void MockStorageArea::Delete(
     const String& source,
     DeleteCallback callback) {
   observed_deletes_.push_back(ObservedDelete{key, source});
-  std::move(callback).Run(true);
+  std::move(callback).Run();
 }
 
 void MockStorageArea::DeleteAll(
@@ -58,11 +58,7 @@ void MockStorageArea::DeleteAll(
     DeleteAllCallback callback) {
   observed_delete_alls_.push_back(source);
   ++observer_count_;
-  std::move(callback).Run(true);
-}
-
-void MockStorageArea::Get(const Vector<uint8_t>& key, GetCallback callback) {
-  NOTREACHED();
+  std::move(callback).Run();
 }
 
 void MockStorageArea::GetAll(

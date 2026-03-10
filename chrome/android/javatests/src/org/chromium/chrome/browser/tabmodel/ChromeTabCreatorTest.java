@@ -11,7 +11,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
-import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_LOW_END_DEVICE;
 import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE;
 import static org.chromium.chrome.test.util.ChromeTabUtils.getTabCountOnUiThread;
 
@@ -31,6 +30,8 @@ import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.CriteriaHelper;
+import org.chromium.base.test.util.DisableIf;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RequiresRestart;
 import org.chromium.base.test.util.Restriction;
@@ -51,6 +52,7 @@ import org.chromium.chrome.test.transit.page.WebPageStation;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.net.test.EmbeddedTestServer;
+import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.url.GURL;
 
 import java.util.concurrent.TimeUnit;
@@ -81,9 +83,9 @@ public class ChromeTabCreatorTest {
 
     /** Verify that tabs opened in background on low-end are loaded lazily. */
     @Test
-    @Restriction(RESTRICTION_TYPE_LOW_END_DEVICE)
     @MediumTest
     @Feature({"Browser"})
+    @DisabledTest(message = "Was restricted to low end devices, crbug.com/489156901")
     public void testCreateNewTabInBackgroundLowEnd() {
         final Tab fgTab = mPage.loadedTabElement.value();
         final Tab bgTab =
@@ -121,6 +123,7 @@ public class ChromeTabCreatorTest {
     @Restriction(RESTRICTION_TYPE_NON_LOW_END_DEVICE)
     @MediumTest
     @Feature({"Browser"})
+    @DisableIf.Device(DeviceFormFactor.DESKTOP) // crbug.com/376371633
     public void testCreateNewTabInBackground() {
         final Tab fgTab = mPage.loadedTabElement.value();
         Tab bgTab =

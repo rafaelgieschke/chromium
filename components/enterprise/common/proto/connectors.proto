@@ -105,6 +105,9 @@ message ContentMetaData {
   // The parent URL chain of the frame from which the action was triggered,
   // ordered from current frame URL to tab URL, inclusive.
   repeated string frame_url_chain = 16;
+
+  // File size in bytes. Only populated for file scanning events.
+  optional uint64 file_size = 18;
 }
 
 message ClientMetadata {
@@ -224,13 +227,7 @@ message ContentAnalysisRequest {
   // Indicates whether request is blocking until verdict given.
   optional bool blocking = 20;
 
-  // Indicates whether the request requires a metadata verdict (applicable to
-  // resumable metadata request only).
-  //
-  // The field is set to true when Chrome sends the metadata of files larger
-  // than 50MB or encrypted, because it expects a block or allow verdict from
-  // WebProtect right away, and cannot upload full content.
-  optional bool require_metadata_verdict = 21;
+  reserved 21;
 
   // Local IP addresses of the device.
   repeated string local_ips = 22;
@@ -327,6 +324,7 @@ message ContentAnalysisResponse {
       enum ForceSaveToCloudDestination {
         UNSPECIFIED = 0;
         CORP_G_DRIVE = 1;
+        CORP_ONEDRIVE = 2;
       }
 
       optional ForceSaveToCloudDestination force_save_to_cloud_destination = 7;

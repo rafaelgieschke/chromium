@@ -133,6 +133,10 @@ class TabStatsTracker :
     // The name of the histogram that records each window's width, in DIPs.
     static const char kWindowWidthHistogramName[];
 
+    // The name of the histogram that records if a window's vertical tab strip
+    // is collapsed.
+    static const char kVerticalTabStripCollapseStateHistogramName[];
+
     // The names of the histograms that record daily discard/reload counts
     // caused for each discard reason.
     static const char kDailyDiscardsExternalHistogramName[];
@@ -184,6 +188,12 @@ class TabStatsTracker :
     // URL apart from trailing fragments as duplicates, otherwise will only
     // treat exact URL matches as duplicates.
     void ReportTabDuplicateMetrics(bool exclude_fragments);
+
+#if !BUILDFLAG(IS_ANDROID)
+    // Calculate and report metrics on the number of split tabs within the tab
+    // strips.
+    void ReportSplitTabMetrics();
+#endif
 
    protected:
     // Checks if Chrome is running in background with no visible windows,
@@ -360,6 +370,11 @@ class TabStatsTracker::TabStripInterface {
 
   // Returns the count of tabs in this tab strip.
   size_t GetTabCount() const;
+
+#if !BUILDFLAG(IS_ANDROID)
+  // Returns the count of tabs within Split Views in this tab strip.
+  size_t GetSplitTabCount() const;
+#endif
 
   // Returns the active tab for this tab strip. On Android this may return
   // nullptr if the tab's WebContents isn't initialized yet.

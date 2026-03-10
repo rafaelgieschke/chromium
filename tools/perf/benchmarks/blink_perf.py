@@ -749,11 +749,6 @@ class BlinkPerfWebGL(_BlinkPerfBenchmark):
 class BlinkPerfWebGPU(_BlinkPerfBenchmark):
   # Run the WebGPU perf tests ONLY on core-capable adapters.
   SUBDIR = 'webgpu'
-  SUPPORTED_PLATFORMS = [
-      story.expectations.WIN_10,
-      story.expectations.ALL_MAC,
-      story.expectations.ALL_ANDROID,
-  ]
 
   @classmethod
   def Name(cls):
@@ -788,8 +783,6 @@ class BlinkPerfWebGPUCompat(_BlinkPerfBenchmark):
   # Currently, Android is the only production target platform for WebGPU
   # Compat's core-incapable backend(s). Enable other Compat configs as needed.
   SUPPORTED_PLATFORMS = [story.expectations.ALL_ANDROID]
-  # TODO(crbug.com/443111618): Schedule this benchmark.
-  SCHEDULED = False
 
   @classmethod
   def Name(cls):

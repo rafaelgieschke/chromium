@@ -4,6 +4,7 @@
 
 #include "components/page_content_annotations/core/page_content_annotations_service.h"
 
+#include <algorithm>
 #include <array>
 
 #include "base/strings/utf_string_conversions.h"
@@ -171,8 +172,6 @@ class PageContentAnnotationsServiceTest : public testing::Test {
         /*database_dir=*/base::FilePath(),
         /*optimization_guide_logger=*/nullptr,
         optimization_guide_decider_.get(),
-        /*embedder_metadata_provider=*/nullptr,
-        /*embedder_=*/nullptr,
         /*background_task_runner=*/nullptr);
 
 #if BUILDFLAG(BUILD_WITH_TFLITE_LIB)
@@ -420,10 +419,10 @@ TEST_F(PageContentAnnotationsServiceTest, RegistersType) {
   std::vector<optimization_guide::proto::OptimizationType>
       registered_optimization_types =
           optimization_guide_decider()->registered_optimization_types();
-  EXPECT_TRUE(base::Contains(registered_optimization_types,
-                             optimization_guide::proto::PAGE_ENTITIES));
-  EXPECT_TRUE(base::Contains(registered_optimization_types,
-                             optimization_guide::proto::SALIENT_IMAGE));
+  EXPECT_TRUE(std::ranges::contains(registered_optimization_types,
+                                    optimization_guide::proto::PAGE_ENTITIES));
+  EXPECT_TRUE(std::ranges::contains(registered_optimization_types,
+                                    optimization_guide::proto::SALIENT_IMAGE));
 }
 
 TEST_F(PageContentAnnotationsServiceTest, DoesNotPersistIfServerHasNoData) {

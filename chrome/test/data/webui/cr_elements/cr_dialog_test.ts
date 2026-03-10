@@ -404,7 +404,9 @@ suite('cr-dialog', function() {
     const borderTopValue = '1px solid rgb(0, 255, 0)';
     dialog.style.setProperty('--cr-dialog-body-border-top', borderTopValue);
     assertTrue(isVisible(scrollableTop), 'border is now visible');
-    assertEquals(borderTopValue, getComputedStyle(scrollableTop).borderTop);
+    const style = getComputedStyle(scrollableTop);
+    assertEquals('solid', style.borderTopStyle);
+    assertEquals('rgb(0, 255, 0)', style.borderTopColor);
   });
 
   test(
@@ -431,29 +433,22 @@ suite('cr-dialog', function() {
         assertFalse(dialog.hasAttribute('open'));
       });
 
-  test('dialog cannot be cancelled when `no-cancel` is set', function() {
+  test('`no-cancel` sets the correct closedby attribute', async () => {
     document.body.innerHTML = getTrustedHTML`
       <cr-dialog no-cancel>
         <div slot="title">title</div>
       </cr-dialog>`;
+    await microtasksFinished();
 
-    const dialog = document.body.querySelector('cr-dialog')!;
-    assertTrue(dialog.noCancel);
-    dialog.showModal();
+    const crDialog = document.body.querySelector('cr-dialog')!;
+    assertTrue(crDialog.noCancel);
+    const nativeDialog = crDialog.getNative();
+    assertEquals('none', nativeDialog.getAttribute('closedby'));
 
-    assertNull(dialog.shadowRoot.querySelector('#close'));
-
-    // Hitting escape fires a 'cancel' event. Cancelling that event prevents the
-    // dialog from closing.
-    let e = new CustomEvent('cancel', {cancelable: true});
-    dialog.getNative().dispatchEvent(e);
-    assertTrue(e.defaultPrevented);
-
-    dialog.noCancel = false;
-
-    e = new CustomEvent('cancel', {cancelable: true});
-    dialog.getNative().dispatchEvent(e);
-    assertFalse(e.defaultPrevented);
+    crDialog.noCancel = false;
+    await microtasksFinished();
+    assertFalse(crDialog.noCancel);
+    assertFalse(nativeDialog.hasAttribute('closedby'));
   });
 
   test('dialog close button shown when showCloseButton is true', function() {

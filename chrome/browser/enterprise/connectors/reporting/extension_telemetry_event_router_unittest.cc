@@ -47,6 +47,10 @@ using RemoteHostContactedInfo = safe_browsing::
     ExtensionTelemetryReportRequest_SignalInfo_RemoteHostContactedInfo;
 using TabsApiInfo =
     safe_browsing::ExtensionTelemetryReportRequest_SignalInfo_TabsApiInfo;
+using DOMAccessInfo =
+    safe_browsing::ExtensionTelemetryReportRequest_SignalInfo_DOMAccessInfo;
+using ScriptInjectionInfo = safe_browsing::
+    ExtensionTelemetryReportRequest_SignalInfo_ScriptInjectionInfo;
 
 constexpr const char kFakeProfileUsername[] = "fake-profile";
 constexpr const char kFakeExtensionId[] = "fake-extension-id";
@@ -61,6 +65,11 @@ constexpr const char kCookieURL[] = "www.example1.com/";
 constexpr const char kRemoteHostContactedURL[] = "www.youtube.com/";
 constexpr const char kTabsNewURL[] = "www.gogle.com/";
 constexpr const char kTabsCurrentURL[] = "www.google.com/";
+constexpr const char kDOMAccessApiName[] = "dom-api";
+constexpr const char kDOMAccessURL[] = "www.dom.com/";
+constexpr const char kScriptInjectionApiName[] = "script-api";
+constexpr const char kScriptInjectionURL[] = "www.script.com/";
+constexpr const char kScriptInjectionArgUrl[] = "www.arg.com/";
 
 }  // namespace
 
@@ -121,6 +130,7 @@ class ExtensionTelemetryEventRouterTest : public testing::Test {
     extension_info->set_name(kFakeExtensionName);
     extension_info->set_version(kFakeExtensionVersion);
     extension_info->set_install_location(install_location);
+    extension_info->set_is_from_store(false);
     if (install_location == ExtensionInfo::UNPACKED) {
       extension_info->add_file_infos();
     }
@@ -173,6 +183,31 @@ class ExtensionTelemetryEventRouterTest : public testing::Test {
     call_details->set_current_url(kTabsCurrentURL);
     call_details->set_count(4);
 
+    // DOM Access signal
+    safe_browsing::ExtensionTelemetryReportRequest_SignalInfo*
+        dom_access_signal = telemetry_report->add_signals();
+    DOMAccessInfo::DOMAccess* dom_access =
+        dom_access_signal->mutable_dom_access_info()->add_dom_accesses();
+    dom_access->set_api_name(kDOMAccessApiName);
+    dom_access->set_url(kDOMAccessURL);
+    dom_access->set_access_type(DOMAccessInfo::DOMAccess::READ);
+    dom_access->set_count(5);
+    dom_access->set_timestamp_ms(1718811019088);
+
+    // Script Injection signal
+    safe_browsing::ExtensionTelemetryReportRequest_SignalInfo*
+        script_injection_signal = telemetry_report->add_signals();
+    ScriptInjectionInfo::ScriptInjection* script_injection =
+        script_injection_signal->mutable_script_injection_info()
+            ->add_script_injections();
+    script_injection->set_api_name(kScriptInjectionApiName);
+    script_injection->set_url(kScriptInjectionURL);
+    script_injection->set_count(6);
+    script_injection->set_timestamp_ms(1718811019088);
+    script_injection->add_args_list("arg1");
+    script_injection->add_args_list("arg2");
+    script_injection->set_arg_url(kScriptInjectionArgUrl);
+
     return telemetry_report_request;
   }
 
@@ -204,7 +239,7 @@ TEST_P(ExtensionTelemetryEventInstallLocationTest,
        CheckTelemetryEventReported) {
   // Initialize the dictionary outside of the if/else block below, so that the
   // variable won't be destroyed by the time the `EXPECT_CALL` is executed.
-  base::Value::Dict expected_event;
+  base::DictValue expected_event;
 
   if (use_proto_format()) {
     scoped_feature_list_.InitAndEnableFeature(
@@ -274,13 +309,32 @@ TEST_P(ExtensionTelemetryEventInstallLocationTest,
                 "current_url": "www.google.com/",
                 "method": "UPDATE"
             } ]
+          },
+          "dom_access_info": {
+            "dom_accesses": [ {
+              "api_name": "dom-api",
+              "url": "www.dom.com/",
+              "access_type": "READ",
+              "count": 5,
+              "timestamp_ms": "1718811019088"
+            } ]
+          },
+          "script_injection_info": {
+            "script_injections": [ {
+              "api_name": "script-api",
+              "url": "www.script.com/",
+              "count": 6,
+              "timestamp_ms": "1718811019088",
+              "args_list": [ "arg1", "arg2" ],
+              "arg_url": "www.arg.com/"
+            } ]
           }
         }
       }]
     }
   })",
         install_location_ == ExtensionInfo::UNPACKED ? R"(
-        "file_info": [ {
+        "file_infos": [ {
           "hash": "",
           "name": ""
         } ],

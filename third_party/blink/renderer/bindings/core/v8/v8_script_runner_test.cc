@@ -56,7 +56,7 @@ class V8ScriptRunnerTest : public testing::Test {
   String DifferentCode() const {
     return String::Format("a = function() { 1 + 12; } // %01000d\n", counter_);
   }
-  KURL Url() const { return KURL(url_ + String::Number(counter_)); }
+  KURL Url() const { return KURL(StrCat({url_, String::Number(counter_)})); }
   unsigned TagForCodeCache(CachedMetadataHandler* cache_handler) const {
     return V8CodeCache::TagForCodeCache(cache_handler);
   }
@@ -129,7 +129,7 @@ class V8ScriptRunnerTest : public testing::Test {
 
   ScriptResource* CreateEmptyResource(v8::Isolate* isolate) {
     ScriptResource* resource =
-        ScriptResource::CreateForTest(isolate, NullURL(), Utf8Encoding());
+        ScriptResource::CreateForTest(isolate, NullUrl(), Utf8Encoding());
     return resource;
   }
 
@@ -191,9 +191,7 @@ class V8ScriptRunnerTest : public testing::Test {
     // Copy the serialized data to return it at an independent vector.
     base::span<const uint8_t> serialized_data_view =
         cached_metadata->SerializedData();
-    Vector<uint8_t> ret;
-    ret.AppendRange(serialized_data_view.begin(), serialized_data_view.end());
-    return ret;
+    return Vector<uint8_t>(serialized_data_view);
   }
 
   // TODO(leszeks): Change this from needing an explicit quit callback to

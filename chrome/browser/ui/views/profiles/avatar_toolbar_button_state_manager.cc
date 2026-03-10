@@ -95,8 +95,10 @@ std::optional<base::TimeDelta> g_show_name_duration_for_testing;
 constexpr base::TimeDelta kShowSigninPendingTextDelay = base::Minutes(50);
 std::optional<base::TimeDelta> g_show_signin_pending_text_delay_for_testing;
 
-constexpr base::TimeDelta kHistorySyncOptinDuration = base::Seconds(20);
-std::optional<base::TimeDelta> g_history_sync_optin_duration_for_testing;
+constexpr base::TimeDelta kPromoDuration = base::Seconds(20);
+std::optional<base::TimeDelta> g_promo_duration_for_testing;
+
+std::optional<base::TimeDelta> g_signed_out_promo_trigger_delay_for_testing;
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 
 constexpr base::TimeDelta kOnSigninDuration = base::Seconds(20);
@@ -134,13 +136,15 @@ std::u16string GetShortProfileName(Profile& profile) {
   return signin_ui_util::GetShortProfileIdentityToDisplay(*entry, &profile);
 }
 
-gfx::Image GetProfileAvatarImage(Profile& profile,
-                                 const ui::ColorProvider& color_provider,
-                                 int preferred_size) {
+std::pair<gfx::Image, AvatarIconType> GetProfileAvatarImage(
+    Profile& profile,
+    const ui::ColorProvider& color_provider,
+    int preferred_size) {
   ProfileAttributesEntry* entry = GetProfileAttributesEntry(profile);
   if (!entry) {  // This can happen if the user deletes the current profile.
-    return ui::ResourceBundle::GetSharedInstance().GetImageNamed(
-        profiles::GetPlaceholderAvatarIconResourceID());
+    return {ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+                profiles::GetPlaceholderAvatarIconResourceID()),
+            AvatarIconType::kPlaceholder};
   }
 
   // TODO(crbug.com/40102223): it should suffice to call entry->GetAvatarIcon().
@@ -148,8 +152,10 @@ gfx::Image GetProfileAvatarImage(Profile& profile,
   // instead of (or on top of) IdentityManager. Only then we can rely on |entry|
   // being up to date (as the storage also observes IdentityManager so there's
   // no guarantee on the order of notifications).
+  // Early-return here (rather than relying on GetAvatarIconWithType()) to avoid
+  // using a potentially stale |entry| for the GAIA picture check.
   if (entry->IsUsingGAIAPicture() && entry->GetGAIAPicture()) {
-    return *entry->GetGAIAPicture();
+    return {*entry->GetGAIAPicture(), AvatarIconType::kNonPlaceholder};
   }
 
   // Show |user_identity_image| when the following conditions are satisfied:
@@ -162,10 +168,13 @@ gfx::Image GetProfileAvatarImage(Profile& profile,
       !IdentityManagerFactory::GetForProfile(&profile)->HasPrimaryAccount(
           signin::ConsentLevel::kSync) &&
       entry->IsUsingDefaultAvatar()) {
-    return gaia_account_image;
+    return {gaia_account_image, AvatarIconType::kNonPlaceholder};
   }
 
-  return entry->GetAvatarIcon(
+  // At this point, no GAIA picture or account image overrides the avatar,
+  // so the icon type is determined by
+  // ProfileAttributesEntry::GetAvatarIconWithType().
+  return entry->GetAvatarIconWithType(
       preferred_size, /*use_high_res_file=*/true,
       GetPlaceholderAvatarIconParamsDependingOnTheme(
           ThemeServiceFactory::GetForProfile(&profile),
@@ -179,7 +188,7 @@ ui::ImageModel GetAvatarImageWithDottedRing(
   // Square image with a dotted ring.
   gfx::ImageSkia image_with_ring = profiles::GetAvatarWithDottedRing(
       ui::ImageModel::FromImage(
-          GetProfileAvatarImage(profile, color_provider, icon_size)),
+          GetProfileAvatarImage(profile, color_provider, icon_size).first),
       icon_size,
       /*has_padding=*/false, /*has_background=*/false, color_provider);
   // Crop to a circle.
@@ -252,11 +261,12 @@ class GuestStateProvider : public PrivateBaseStateProvider {
     return color_provider.GetColor(kColorAvatarButtonHighlightGuestForeground);
   }
 
-  ui::ImageModel GetAvatarIcon(
+  std::pair<ui::ImageModel, AvatarIconType> GetAvatarIcon(
       int icon_size,
       SkColor /*icon_color*/,
       const ui::ColorProvider& /*color_provider*/) const override {
-    return profiles::GetGuestAvatar(icon_size);
+    return {profiles::GetGuestAvatar(icon_size),
+            AvatarIconType::kNonPlaceholder};
   }
 
   std::u16string GetAvatarTooltipText() const override {
@@ -293,12 +303,13 @@ class IncognitoStateProvider : public PrivateBaseStateProvider {
         kColorAvatarButtonHighlightIncognitoForeground);
   }
 
-  ui::ImageModel GetAvatarIcon(
+  std::pair<ui::ImageModel, AvatarIconType> GetAvatarIcon(
       int icon_size,
       SkColor icon_color,
       const ui::ColorProvider& /*color_provider*/) const override {
-    return ui::ImageModel::FromVectorIcon(kIncognitoRefreshMenuIcon, icon_color,
-                                          icon_size);
+    return {ui::ImageModel::FromVectorIcon(kIncognitoRefreshMenuIcon,
+                                           icon_color, icon_size),
+            AvatarIconType::kNonPlaceholder};
   }
 
   std::u16string GetAvatarTooltipText() const override {
@@ -819,22 +830,57 @@ class ShowIdentityNameStateProvider : public StateProvider,
 };
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
-class HistorySyncOptinCoordinator
+class PromoStateProviderCoordinator
     : public base::SupportsUserData::Data,
       public AvatarToolbarButtonStateManager::Observer,
       public signin::IdentityManager::Observer,
       public syncer::SyncServiceObserver {
  public:
-  static HistorySyncOptinCoordinator& GetOrCreateForProfile(Profile& profile) {
-    HistorySyncOptinCoordinator* coordinator =
-        static_cast<HistorySyncOptinCoordinator*>(
-            profile.GetUserData(kHistorySyncOptinCoordinatorKey));
+  static PromoStateProviderCoordinator& GetOrCreateForProfile(
+      Profile& profile) {
+    PromoStateProviderCoordinator* coordinator =
+        static_cast<PromoStateProviderCoordinator*>(
+            profile.GetUserData(kPromoStateProviderCoordinatorKey));
     if (!coordinator) {
-      coordinator = new HistorySyncOptinCoordinator(profile);
-      profile.SetUserData(kHistorySyncOptinCoordinatorKey,
+      coordinator = new PromoStateProviderCoordinator(profile);
+      profile.SetUserData(kPromoStateProviderCoordinatorKey,
                           base::WrapUnique(coordinator));
     }
     return *coordinator;
+  }
+
+  // `Init()` will only have an effect on the first call - subsequent browser
+  // opening will just be a no-op.
+  void Init() {
+    if (initialzed_) {
+      return;
+    }
+    initialzed_ = true;
+
+    identity_manager_observation_.Observe(identity_manager_);
+    if (syncer::SyncService* sync_service =
+            SyncServiceFactory::GetForProfile(&profile_.get())) {
+      sync_service_observation_.Observe(sync_service);
+    }
+
+    if (identity_manager_->AreRefreshTokensLoaded()) {
+      OnRefreshTokensLoaded();
+    }
+  }
+
+  void MaybeStartSignedOutTriggerTimer() {
+    CHECK(base::FeatureList::IsEnabled(switches::kSigninPromoOnAvatarPill));
+    CHECK(identity_manager_->AreRefreshTokensLoaded());
+
+    // Start a delayed timer to trigger the promo for signed out profiles.
+    if (!IsSignedIn() && !signed_out_trigger_delay_timer_.IsRunning()) {
+      signed_out_trigger_delay_timer_.Start(
+          FROM_HERE,
+          g_signed_out_promo_trigger_delay_for_testing.value_or(
+              switches::kSigninPromoOnAvatarPillStartupDelayForPromoShow.Get()),
+          base::BindOnce(&PromoStateProviderCoordinator::Trigger,
+                         base::Unretained(this)));
+    }
   }
 
   std::optional<signin::ProfileMenuAvatarButtonPromoInfo::Type> promo_type()
@@ -842,9 +888,9 @@ class HistorySyncOptinCoordinator
     return promo_type_;
   }
 
-  base::CallbackListSubscription AddStateChangedCallback(
+  base::CallbackListSubscription AddPromoTypeChangedCallback(
       base::RepeatingClosure callback) {
-    return state_changed_callbacks.Add(std::move(callback));
+    return promo_type_changed_callbacks_.Add(std::move(callback));
   }
 
   void PromoUsed() {
@@ -853,7 +899,8 @@ class HistorySyncOptinCoordinator
                                   before_promo_used_elapsed_timer_->Elapsed());
 
     CHECK(promo_type_.has_value());
-    sync_promo_identity_pill_manager_.RecordPromoUsed(promo_type_.value());
+    last_gaia_id_promo_used_ =
+        promo_manager_.RecordPromoUsed(promo_type_.value());
     Collapse();
   }
 
@@ -861,11 +908,22 @@ class HistorySyncOptinCoordinator
 
   void ForceShowingPromoForTesting() { Trigger(); }
 
+  // Returns whether the delay timer was running or not.
+  bool GetStateAndFireSignedOutTriggerDelayTimerForTesting() {
+    CHECK(base::FeatureList::IsEnabled(switches::kSigninPromoOnAvatarPill));
+    bool is_running = signed_out_trigger_delay_timer_.IsRunning();
+    if (is_running) {
+      signed_out_trigger_delay_timer_.FireNow();
+      signed_out_trigger_delay_timer_.Stop();
+    }
+    return is_running;
+  }
+
   // AvatarToolbarButtonStateManager::Observer:
   void OnButtonStateChanged(std::optional<ButtonState> old_state,
                             ButtonState new_state) override {
     switch (new_state) {
-      case ButtonState::kHistorySyncOptin:
+      case ButtonState::kPromo:
         PromoShown();
         return;
       case ButtonState::kUpgradeClientError:
@@ -893,8 +951,7 @@ class HistorySyncOptinCoordinator
     }
     switch (*old_state) {
       case ButtonState::kShowIdentityName:
-        // `ShowIdentityName` state should be followed by `HistorySyncOptin`
-        // state.
+        // `kShowIdentityName` state should be followed by the `kPromo` state.
         Trigger();
         break;
       case ButtonState::kPasskeysLockedError:
@@ -903,7 +960,7 @@ class HistorySyncOptinCoordinator
       case ButtonState::kGuestSession:
       case ButtonState::kNormal:
       case ButtonState::kExplicitTextShowing:
-      case ButtonState::kHistorySyncOptin:
+      case ButtonState::kPromo:
       case ButtonState::kSyncError:
       case ButtonState::kManagement:
       case ButtonState::kSigninPending:
@@ -915,48 +972,111 @@ class HistorySyncOptinCoordinator
     }
   }
 
-  // IdentityManager::Observer:
+  // signin::IdentityManager::Observer:
   void OnPrimaryAccountChanged(
-      const signin::PrimaryAccountChangeEvent& /*event*/) override {
-    if (signin_util::ShouldShowHistorySyncOptinScreen(profile_.get()) !=
-        signin_util::ShouldShowHistorySyncOptinResult::kShow) {
-      // Needed to prevent the promo from showing when it is already triggered
-      // and the user sign out or turns on sync without dismissing the promo.
+      const signin::PrimaryAccountChangeEvent& event_details) override {
+    for (signin::ConsentLevel consent_level :
+         {signin::ConsentLevel::kSignin, signin::ConsentLevel::kSync}) {
+      switch (event_details.GetEventTypeFor(consent_level)) {
+        case signin::PrimaryAccountChangeEvent::Type::kSet: {
+          // Setting any consent level should remove any promo that is showing.
+          Collapse();
+          if (signed_out_trigger_delay_timer_.IsRunning()) {
+            signed_out_trigger_delay_timer_.Stop();
+          }
+
+          std::optional<signin_metrics::AccessPoint> access_point =
+              event_details.GetSetPrimaryAccountAccessPoint();
+          CHECK(access_point.has_value());
+          if (access_point ==
+              signin_metrics::AccessPoint::kAvatarPillExpandPromo) {
+            CHECK(base::FeatureList::IsEnabled(
+                switches::kSigninPromoOnAvatarPill));
+            // Enabling sync through this access point is not possible - so this
+            // cannot double record. Also
+            // `syncer::kReplaceSyncPromosWithSignInPromos` should be enabled,
+            // which does not allow turning on Sync.
+            CHECK(base::FeatureList::IsEnabled(
+                syncer::kReplaceSyncPromosWithSignInPromos));
+            // We need to use `last_gaia_id_promo_used_` here because since the
+            // user is now signed in, we can no longer differentiate whether the
+            // user was signed out or web signed in at the time of using the
+            // promo.
+            signin::RecordAvatarButtonPromoAcceptedAtPromoShownCount(
+                signin::ProfileMenuAvatarButtonPromoInfo::Type::kSigninPromo,
+                last_gaia_id_promo_used_, *profile_->GetPrefs());
+          }
+          break;
+        }
+        case signin::PrimaryAccountChangeEvent::Type::kCleared:
+          // Clearing any consent level should remove any promo that is showing.
+          Collapse();
+          if (signed_out_trigger_delay_timer_.IsRunning()) {
+            signed_out_trigger_delay_timer_.Stop();
+          }
+          break;
+        case signin::PrimaryAccountChangeEvent::Type::kNone:
+          break;
+      }
+    }
+  }
+
+  void OnErrorStateOfRefreshTokenUpdatedForAccount(
+      const CoreAccountInfo& account_info,
+      const GoogleServiceAuthError& error,
+      signin_metrics::SourceForRefreshTokenOperation token_operation_source)
+      override {
+    if (error.IsPersistentError() &&
+        identity_manager_->GetPrimaryAccountInfo(
+            signin::ConsentLevel::kSignin) == account_info) {
       Collapse();
     }
   }
 
-  void OnIdentityManagerShutdown(signin::IdentityManager*) override {
+  void OnRefreshTokensLoaded() override {
+    if (base::FeatureList::IsEnabled(switches::kSigninPromoOnAvatarPill)) {
+      MaybeStartSignedOutTriggerTimer();
+    }
+  }
+
+  void OnIdentityManagerShutdown(
+      signin::IdentityManager* identity_manager) override {
+    identity_manager_ = nullptr;
     identity_manager_observation_.Reset();
   }
 
   // syncer::SyncServiceObserver
   void OnStateChanged(syncer::SyncService* sync_service) override {
-    if (sync_service->GetTransportState() ==
+    if (sync_service->GetTransportState() !=
         syncer::SyncService::TransportState::ACTIVE) {
-      sync_service_observation_.Reset();
-      TriggerWithSyncServiceTransportStateActive();
+      return;
+    }
+
+    if (waiting_sync_active_for_promo_computation_) {
+      CHECK(!promo_type_.has_value());
+      StartComputePromoType();
+      return;
+    }
+
+    if (promo_type_.has_value()) {
+      // Trigger validity checks when the `SyncService` gets changes while a
+      // promo is showing.
+      ValidateCurrentPromoComputation();
     }
   }
 
   void OnSyncShutdown(syncer::SyncService* sync_service) override {
-    if (sync_service_observation_.IsObserving()) {
-      sync_service_observation_.Reset();
-    }
+    sync_service_observation_.Reset();
   }
 
  private:
-  constexpr static const void* const kHistorySyncOptinCoordinatorKey =
-      &kHistorySyncOptinCoordinatorKey;
+  constexpr static const void* const kPromoStateProviderCoordinatorKey =
+      &kPromoStateProviderCoordinatorKey;
 
-  explicit HistorySyncOptinCoordinator(Profile& profile)
+  explicit PromoStateProviderCoordinator(Profile& profile)
       : profile_(profile),
-        sync_promo_identity_pill_manager_(
-            IdentityManagerFactory::GetForProfile(&profile),
-            profile.GetPrefs()) {
-    identity_manager_observation_.Observe(
-        IdentityManagerFactory::GetForProfile(&profile));
-  }
+        identity_manager_(IdentityManagerFactory::GetForProfile(&profile)),
+        promo_manager_(identity_manager_, profile.GetPrefs()) {}
 
   void Trigger() {
     if (promo_type_.has_value()) {
@@ -969,29 +1089,36 @@ class HistorySyncOptinCoordinator
       return;
     }
 
+    // Signed out profiles do not depend on the SyncService state.
+    if (!IsSignedIn()) {
+      StartComputePromoType();
+      return;
+    }
+
     // TODO(crbug.com/448615704): Refactor this condition to be part of
     // `BatchUploadService` return value directly; e.g. returning std::nullopt
     // instead of 0 (no local data) when the `syncer::SyncService` transport
     // state is not active.
     if (sync_service->GetTransportState() !=
         syncer::SyncService::TransportState::ACTIVE) {
-      if (!sync_service_observation_.IsObserving()) {
-        sync_service_observation_.Observe(sync_service);
-      }
+      waiting_sync_active_for_promo_computation_ = true;
       return;
     }
 
-    TriggerWithSyncServiceTransportStateActive();
+    StartComputePromoType();
   }
 
-  void TriggerWithSyncServiceTransportStateActive() {
-    CHECK_EQ(
-        SyncServiceFactory::GetForProfile(&profile_.get())->GetTransportState(),
-        syncer::SyncService::TransportState::ACTIVE);
+  void StartComputePromoType() {
+    if (IsSignedIn()) {
+      CHECK_EQ(SyncServiceFactory::GetForProfile(&profile_.get())
+                   ->GetTransportState(),
+               syncer::SyncService::TransportState::ACTIVE);
+      waiting_sync_active_for_promo_computation_ = false;
+    }
 
     signin::ComputeProfileMenuAvatarButtonPromoInfo(
         profile_.get(),
-        base::BindOnce(&HistorySyncOptinCoordinator::OnPromoTypeResult,
+        base::BindOnce(&PromoStateProviderCoordinator::OnPromoTypeResult,
                        base::Unretained(this)));
   }
 
@@ -1000,12 +1127,11 @@ class HistorySyncOptinCoordinator
     if (!promo_info.type.has_value()) {
       return;
     }
-    if (!sync_promo_identity_pill_manager_.ShouldShowPromo(
-            promo_info.type.value())) {
+    if (!promo_manager_.ShouldShowPromo(promo_info.type.value())) {
       return;
     }
     promo_type_ = promo_info.type;
-    state_changed_callbacks.Notify();
+    promo_type_changed_callbacks_.Notify();
   }
 
   void Collapse() {
@@ -1015,34 +1141,69 @@ class HistorySyncOptinCoordinator
     if (collapse_timer_.IsRunning()) {
       collapse_timer_.Stop();
     }
-    promo_type_.reset();
     before_promo_used_elapsed_timer_.reset();
-    state_changed_callbacks.Notify();
+    promo_type_.reset();
+    promo_type_changed_callbacks_.Notify();
   }
 
   void PromoShown() {
     if (collapse_timer_.IsRunning()) {
       // This prevents starting a new timer when the button state changes to
-      // `HistorySyncOptin` in the next browser window(s).
+      // `kPromo` in the next browser window(s).
       return;
     }
     before_promo_used_elapsed_timer_.emplace();
     has_been_shown_since_startup_ = true;
 
     CHECK(promo_type_.has_value());
-    sync_promo_identity_pill_manager_.RecordPromoShown(promo_type_.value());
+    promo_manager_.RecordPromoShown(promo_type_.value());
     base::UmaHistogramEnumeration("Signin.AvatarPillPromo.Shown",
                                   promo_type_.value());
 
-    collapse_timer_.Start(FROM_HERE,
-                          g_history_sync_optin_duration_for_testing.value_or(
-                              kHistorySyncOptinDuration),
-                          base::BindOnce(&HistorySyncOptinCoordinator::Collapse,
-                                         // This is safe because
-                                         // `HistorySyncOptinStateProvider`
-                                         // owns `clear_timer_`.
-                                         base::Unretained(this)));
+    collapse_timer_.Start(
+        FROM_HERE, g_promo_duration_for_testing.value_or(kPromoDuration),
+        base::BindOnce(&PromoStateProviderCoordinator::Collapse,
+                       // This is safe because `PromoStateProviderCoordinator`
+                       // owns `collapse_timer_`.
+                       base::Unretained(this)));
   }
+
+  void ValidateCurrentPromoComputation() {
+    CHECK(promo_type_.has_value());
+
+    // A promo is showing; ensure that the promo should still be shown despite
+    // state changes that occurred. This would allow to have a better
+    // consistency between the promo showing and the subsequent ProfileMenu
+    // opening in case of state changes that lead to a different promo result.
+    signin::ComputeProfileMenuAvatarButtonPromoInfo(
+        profile_.get(),
+        base::BindOnce(
+            &PromoStateProviderCoordinator::MaybeCollapsePromoAfterValidation,
+            base::Unretained(this)));
+  }
+
+  // Callback to the validation promo calculation.
+  void MaybeCollapsePromoAfterValidation(
+      signin::ProfileMenuAvatarButtonPromoInfo computed_promo_info) {
+    // Current promo is not showing anymore.
+    if (!promo_type_.has_value()) {
+      return;
+    }
+
+    // If the new computed promo does not match with the currently showing
+    // promo, collapse.
+    if (promo_type_.value() != computed_promo_info.type) {
+      Collapse();
+    }
+  }
+
+  bool IsSignedIn() const {
+    return identity_manager_->HasPrimaryAccount(signin::ConsentLevel::kSignin);
+  }
+
+  const raw_ref<Profile> profile_;
+  raw_ptr<signin::IdentityManager> identity_manager_;
+  signin::AvatarButtonPromoManager promo_manager_;
 
   // Type of the promo currently showing - std::nullopt if no promo.
   std::optional<signin::ProfileMenuAvatarButtonPromoInfo::Type> promo_type_;
@@ -1052,13 +1213,13 @@ class HistorySyncOptinCoordinator
   // Timer to measure the time between the promo being shown and used (clicked).
   std::optional<base::ElapsedTimer> before_promo_used_elapsed_timer_;
 
-  const raw_ref<Profile> profile_;
+  bool initialzed_ = false;
+  base::OneShotTimer signed_out_trigger_delay_timer_;
+  bool waiting_sync_active_for_promo_computation_ = false;
+  GaiaId last_gaia_id_promo_used_;
 
-  signin::SyncPromoIdentityPillManager sync_promo_identity_pill_manager_;
-
-  // Callbacks to be triggered when the history sync opt-in state (`triggered_`)
-  // changes.
-  base::RepeatingCallbackList<void()> state_changed_callbacks;
+  // Callbacks to be triggered when `promo_type_` changes.
+  base::RepeatingCallbackList<void()> promo_type_changed_callbacks_;
 
   base::ScopedObservation<signin::IdentityManager,
                           signin::IdentityManager::Observer>
@@ -1069,18 +1230,16 @@ class HistorySyncOptinCoordinator
 
 // Check `signin::ComputeProfileMenuAvatarButtonPromoType()` for promo priority
 // computation.
-// TODO(crbug.com/448609234): Rename this class (and all related classes). This
-// now takes care of all promo types in
-// `signin::ProfileMenuAvatarButtonPromoInfo::Type`, and not only HistorySync.
-class HistorySyncOptinStateProvider : public StateProvider {
+// This takes care of all promo types in
+// `signin::ProfileMenuAvatarButtonPromoInfo::Type`.
+class PromoStateProvider : public StateProvider {
  public:
-  explicit HistorySyncOptinStateProvider(Browser* browser,
-                                         StateObserver* state_observer)
+  explicit PromoStateProvider(Browser* browser, StateObserver* state_observer)
       : StateProvider(browser->profile(), state_observer),
-        coordinator_(HistorySyncOptinCoordinator::GetOrCreateForProfile(
+        coordinator_(PromoStateProviderCoordinator::GetOrCreateForProfile(
             *browser->profile())),
         browser_(*browser) {}
-  ~HistorySyncOptinStateProvider() override = default;
+  ~PromoStateProvider() override = default;
 
   // StateProvider:
   bool IsActive() const override {
@@ -1106,14 +1265,17 @@ class HistorySyncOptinStateProvider : public StateProvider {
       case signin::ProfileMenuAvatarButtonPromoInfo::Type::kSyncPromo:
         CHECK(switches::IsAvatarSyncPromoFeatureEnabled());
         return l10n_util::GetStringUTF16(IDS_AVATAR_BUTTON_SYNC_PROMO);
+      case signin::ProfileMenuAvatarButtonPromoInfo::Type::kSigninPromo:
+        return l10n_util::GetStringUTF16(IDS_AVATAR_BUTTON_SIGNIN_PROMO);
     }
   }
 
   void Init() override {
-    state_changed_callback_subscription_ =
-        coordinator_->AddStateChangedCallback(
-            base::BindRepeating(&HistorySyncOptinStateProvider::RequestUpdate,
-                                base::Unretained(this)));
+    coordinator_->Init();
+
+    promo_type_changed_callback_subscription_ =
+        coordinator_->AddPromoTypeChangedCallback(base::BindRepeating(
+            &PromoStateProvider::RequestUpdate, base::Unretained(this)));
     if (IsActive()) {
       RequestUpdate();
     }
@@ -1122,7 +1284,7 @@ class HistorySyncOptinStateProvider : public StateProvider {
   std::optional<base::RepeatingCallback<void(bool)>> GetButtonActionOverride()
       override {
     return base::BindRepeating(
-        &HistorySyncOptinStateProvider::OnButtonClick,
+        &PromoStateProvider::OnButtonClick,
         // This is safe because `AvatarToolbarButtonStateManager`
         // owning all the providers owns the callback.
         base::Unretained(this));
@@ -1130,8 +1292,8 @@ class HistorySyncOptinStateProvider : public StateProvider {
 
   void ClearForTesting() override { coordinator_->ClearForTesting(); }
 
-  void ForceShowingPromoForTesting() {
-    coordinator_->ForceShowingPromoForTesting();
+  PromoStateProviderCoordinator& GetCoordinatorForTesting() {
+    return *coordinator_;
   }
 
  private:
@@ -1141,12 +1303,11 @@ class HistorySyncOptinStateProvider : public StateProvider {
     coordinator_->PromoUsed();
   }
 
-  // History sync opt-in coordinator state change callback subscription.
-  // The callbacks are used to notify the state provider(s) when the history
-  // sync opt-in state changes.
-  base::CallbackListSubscription state_changed_callback_subscription_;
+  // The callbacks are used to notify the state provider(s) when the promo type
+  // that is showing has changed.
+  base::CallbackListSubscription promo_type_changed_callback_subscription_;
 
-  raw_ref<HistorySyncOptinCoordinator> coordinator_;
+  raw_ref<PromoStateProviderCoordinator> coordinator_;
 
   // This is needed to delay the creation of `ProfileMenuCoordinator`.
   const raw_ref<Browser> browser_;
@@ -1179,11 +1340,12 @@ class PasskeyStateProvider : public StateProvider,
     return color_provider.GetColor(kColorAvatarButtonHighlightPasskeysLocked);
   }
 
-  ui::ImageModel GetAvatarIcon(
+  std::pair<ui::ImageModel, AvatarIconType> GetAvatarIcon(
       int icon_size,
       SkColor /*icon_color*/,
       const ui::ColorProvider& color_provider) const override {
-    return GetAvatarImageWithDottedRing(profile(), color_provider, icon_size);
+    return {GetAvatarImageWithDottedRing(profile(), color_provider, icon_size),
+            AvatarIconType::kNonPlaceholder};
   }
 
   std::u16string GetAvatarTooltipText() const final {
@@ -1201,7 +1363,7 @@ class PasskeyStateProvider : public StateProvider,
   }
 
  private:
-  void OnPasskeyUnlockManagerStateChanged() final { RequestUpdate(); }
+  void OnPasskeyErrorUiStateChanged() final { RequestUpdate(); }
 
   void OnPasskeyUnlockManagerShuttingDown() final {
     passkey_manager_observation_.Reset();
@@ -1300,11 +1462,12 @@ class SyncErrorBaseStateProvider : public StateProvider,
     return color_provider.GetColor(kColorAvatarButtonHighlightSyncPaused);
   }
 
-  ui::ImageModel GetAvatarIcon(
+  std::pair<ui::ImageModel, AvatarIconType> GetAvatarIcon(
       int icon_size,
       SkColor /*icon_color*/,
       const ui::ColorProvider& color_provider) const override {
-    return GetAvatarImageWithDottedRing(profile(), color_provider, icon_size);
+    return {GetAvatarImageWithDottedRing(profile(), color_provider, icon_size),
+            AvatarIconType::kNonPlaceholder};
   }
 
   std::u16string GetAvatarTooltipText() const final {
@@ -1414,7 +1577,7 @@ class SyncPausedStateProvider : public SyncErrorBaseStateProvider {
     return l10n_util::GetStringUTF16(IDS_AVATAR_BUTTON_SYNC_PAUSED);
   }
 
-  ui::ImageModel GetAvatarIcon(
+  std::pair<ui::ImageModel, AvatarIconType> GetAvatarIcon(
       int icon_size,
       SkColor icon_color,
       const ui::ColorProvider& color_provider) const override {
@@ -1450,10 +1613,10 @@ class PassphraseErrorStateProvider : public SyncErrorBaseStateProvider {
 
 class BookmarksLimitExceededStateProvider : public SyncErrorBaseStateProvider {
  public:
-  explicit BookmarksLimitExceededStateProvider(Profile* profile,
+  explicit BookmarksLimitExceededStateProvider(Browser* browser,
                                                StateObserver* state_observer)
       : SyncErrorBaseStateProvider(
-            profile,
+            browser->profile(),
             state_observer,
             syncer::SyncService::UserActionableError::kBookmarksLimitExceeded) {
   }
@@ -1511,7 +1674,7 @@ class GenericSyncErrorStateProvider : public SyncErrorBaseStateProvider {
     return SyncErrorBaseStateProvider::GetHighlightTextColor(color_provider);
   }
 
-  ui::ImageModel GetAvatarIcon(
+  std::pair<ui::ImageModel, AvatarIconType> GetAvatarIcon(
       int icon_size,
       SkColor icon_color,
       const ui::ColorProvider& color_provider) const override {
@@ -1618,11 +1781,12 @@ class SigninPendingStateProvider : public StateProvider,
     return color_provider.GetColor(kColorAvatarButtonHighlightSigninPaused);
   }
 
-  ui::ImageModel GetAvatarIcon(
+  std::pair<ui::ImageModel, AvatarIconType> GetAvatarIcon(
       int icon_size,
       SkColor /*icon_color*/,
       const ui::ColorProvider& color_provider) const override {
-    return GetAvatarImageWithDottedRing(profile(), color_provider, icon_size);
+    return {GetAvatarImageWithDottedRing(profile(), color_provider, icon_size),
+            AvatarIconType::kNonPlaceholder};
   }
 
   std::optional<std::u16string> GetAccessibilityLabel() const override {
@@ -1830,13 +1994,15 @@ std::optional<SkColor> StateProvider::GetHighlightTextColor(
   return color_provider.GetColor(kColorAvatarButtonHighlightDefaultForeground);
 }
 
-ui::ImageModel StateProvider::GetAvatarIcon(
+std::pair<ui::ImageModel, AvatarIconType> StateProvider::GetAvatarIcon(
     int icon_size,
     SkColor /*icon_color*/,
     const ui::ColorProvider& color_provider) const {
-  return ui::ImageModel::FromImage(profiles::GetSizedAvatarIcon(
-      GetProfileAvatarImage(profile(), color_provider, icon_size), icon_size,
-      icon_size, profiles::SHAPE_CIRCLE));
+  auto [image, icon_type] =
+      GetProfileAvatarImage(profile(), color_provider, icon_size);
+  return {ui::ImageModel::FromImage(profiles::GetSizedAvatarIcon(
+              image, icon_size, icon_size, profiles::SHAPE_CIRCLE)),
+          icon_type};
 }
 
 std::u16string StateProvider::GetAvatarTooltipText() const {
@@ -1979,7 +2145,7 @@ void AvatarToolbarButtonStateManager::CreateStatesAndListeners(
 
     states_[ButtonState::kBookmarksLimitExceeded] =
         std::make_unique<BookmarksLimitExceededStateProvider>(
-            profile, /*state_observer=*/this);
+            browser, /*state_observer=*/this);
 
     if (AccountConsistencyModeManager::IsDiceEnabledForProfile(profile)) {
       states_[ButtonState::kSyncPaused] =
@@ -1998,14 +2164,12 @@ void AvatarToolbarButtonStateManager::CreateStatesAndListeners(
     if (base::FeatureList::IsEnabled(
             syncer::kReplaceSyncPromosWithSignInPromos) ||
         switches::IsAvatarSyncPromoFeatureEnabled()) {
-      auto history_sync_optin_state_provider =
-          std::make_unique<HistorySyncOptinStateProvider>(
-              browser,
-              /*state_observer=*/this);
+      auto promo_state_provider =
+          std::make_unique<PromoStateProvider>(browser,
+                                               /*state_observer=*/this);
       state_manager_observers_.emplace_back(
-          HistorySyncOptinCoordinator::GetOrCreateForProfile(*profile));
-      states_[ButtonState::kHistorySyncOptin] =
-          std::move(history_sync_optin_state_provider);
+          PromoStateProviderCoordinator::GetOrCreateForProfile(*profile));
+      states_[ButtonState::kPromo] = std::move(promo_state_provider);
     }
 
     // Contains both Work and School.
@@ -2179,9 +2343,14 @@ AvatarToolbarButtonStateManager::CreateScopedInfiniteDelayOverrideForTesting(
       return base::AutoReset<std::optional<base::TimeDelta>>(
           &g_show_signin_pending_text_delay_for_testing,
           kInfiniteTimeForTesting);
-    case AvatarDelayType::kHistorySyncOptin:
+    case AvatarDelayType::kPromo:
       return base::AutoReset<std::optional<base::TimeDelta>>(
-          &g_history_sync_optin_duration_for_testing, kInfiniteTimeForTesting);
+          &g_promo_duration_for_testing, kInfiniteTimeForTesting);
+    case AvatarDelayType::kSignedOutPromo:
+      return base::AutoReset<std::optional<base::TimeDelta>>(
+          &g_signed_out_promo_trigger_delay_for_testing,
+          kInfiniteTimeForTesting);
+
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
   }
 }
@@ -2195,10 +2364,18 @@ AvatarToolbarButtonStateManager::
 }
 
 void AvatarToolbarButtonStateManager::ForceShowingPromoForTesting() {
-  HistorySyncOptinStateProvider* history_sync_optin_state_provider =
-      static_cast<HistorySyncOptinStateProvider*>(
-          states_[ButtonState::kHistorySyncOptin].get());
-  history_sync_optin_state_provider->ForceShowingPromoForTesting();
+  PromoStateProvider* promo_state_provider =
+      static_cast<PromoStateProvider*>(states_[ButtonState::kPromo].get());
+  promo_state_provider->GetCoordinatorForTesting()
+      .ForceShowingPromoForTesting();
+}
+
+bool AvatarToolbarButtonStateManager::
+    GetStateAndFireSignedOutTriggerDelayTimerForTesting() {
+  PromoStateProvider* promo_state_provider =
+      static_cast<PromoStateProvider*>(states_[ButtonState::kPromo].get());
+  return promo_state_provider->GetCoordinatorForTesting()
+      .GetStateAndFireSignedOutTriggerDelayTimerForTesting();
 }
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 

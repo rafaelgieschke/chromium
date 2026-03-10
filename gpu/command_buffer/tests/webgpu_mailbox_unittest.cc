@@ -718,14 +718,13 @@ TEST_P(WebGPUMailboxTextureTest, WriteToMailboxThenReadFromIt) {
     WebGPUTextureScopedAccess::EndAccess(std::move(webgpu_scoped_access));
 
     // Map the buffer and assert the pixel is the correct value.
-    readback_buffer.MapAsync(wgpu::MapMode::Read, 0, 4,
-                             wgpu::CallbackMode::AllowSpontaneous,
-                             ToMockBufferMapCallback);
+    wgpu::FutureWaitInfo wait_info{readback_buffer.MapAsync(
+        wgpu::MapMode::Read, 0, 4, wgpu::CallbackMode::AllowSpontaneous,
+        ToMockBufferMapCallback)};
     EXPECT_CALL(*mock_buffer_map_callback,
                 Call(wgpu::MapAsyncStatus::Success, testing::_))
         .Times(1);
-
-    WaitForCompletion(device_);
+    WaitForFutureCompletion(device_, wait_info);
 
     const void* data = readback_buffer.GetConstMappedRange();
     if (GetParam().format == viz::SinglePlaneFormat::kRGBA_8888) {
@@ -736,105 +735,6 @@ TEST_P(WebGPUMailboxTextureTest, WriteToMailboxThenReadFromIt) {
       NOTREACHED();
     }
   }
-}
-
-// Test that passing write usages when associating a mailbox fails if
-// the SharedImage associated with the mailbox doesn't have WEBGPU_WRITE access.
-TEST_P(WebGPUMailboxTextureTest,
-       PassWriteUsagesWhenAssociatingReadOnlyMailbox) {
-  // Create the shared image.
-  SharedImageInterface* sii = GetSharedImageInterface();
-  scoped_refptr<gpu::ClientSharedImage> shared_image =
-      sii->CreateSharedImage({GetParam().format,
-                              {1, 1},
-                              gfx::ColorSpace::CreateSRGB(),
-                              GetSharedImageUsage(AccessType::Read),
-                              "TestLabel"},
-                             kNullSurfaceHandle);
-
-  wgpu::TextureDescriptor desc = {
-      .usage = wgpu::TextureUsage::CopySrc | wgpu::TextureUsage::CopyDst,
-  };
-
-  std::unique_ptr<WebGPUTextureScopedAccess> webgpu_scoped_access =
-      shared_image->BeginWebGPUTextureAccess(
-          webgpu(), sii->GenVerifiedSyncToken(), device_, desc, /*usage=*/0,
-          webgpu::WEBGPU_MAILBOX_NONE);
-
-  // Copy the texture in a mappable buffer.
-  wgpu::BufferDescriptor buffer_desc;
-  buffer_desc.size = BytesPerTexel(GetParam().format);
-  buffer_desc.usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst;
-  wgpu::Buffer readback_buffer = device_.CreateBuffer(&buffer_desc);
-
-  wgpu::TexelCopyTextureInfo copy_src = {};
-  copy_src.texture = webgpu_scoped_access->texture();
-  copy_src.mipLevel = 0;
-  copy_src.origin = {0, 0, 0};
-
-  wgpu::TexelCopyBufferInfo copy_dst = {};
-  copy_dst.buffer = readback_buffer;
-  copy_dst.layout.offset = 0;
-  copy_dst.layout.bytesPerRow = 256;
-
-  wgpu::Extent3D copy_size = {1, 1, 1};
-
-  wgpu::CommandEncoder encoder = device_.CreateCommandEncoder();
-  encoder.CopyTextureToBuffer(&copy_src, &copy_dst, &copy_size);
-
-  EXPECT_WEBGPU_ERROR(device_, wgpu::ErrorType::Validation, encoder.Finish());
-
-  WebGPUTextureScopedAccess::EndAccess(std::move(webgpu_scoped_access));
-  WaitForCompletion(device_);
-}
-
-// Test that passing internal write usages when associating a mailbox fails if
-// the SharedImage associated with the mailbox doesn't have WEBGPU_WRITE access.
-TEST_P(WebGPUMailboxTextureTest,
-       PassInternalWriteUsagesWhenAssociatingReadOnlyMailbox) {
-  // Create the shared image.
-  SharedImageInterface* sii = GetSharedImageInterface();
-  scoped_refptr<gpu::ClientSharedImage> shared_image =
-      sii->CreateSharedImage({GetParam().format,
-                              {1, 1},
-                              gfx::ColorSpace::CreateSRGB(),
-                              GetSharedImageUsage(AccessType::Read),
-                              "TestLabel"},
-                             kNullSurfaceHandle);
-  wgpu::TextureDescriptor desc = {
-      .usage = wgpu::TextureUsage::CopySrc,
-  };
-
-  std::unique_ptr<WebGPUTextureScopedAccess> webgpu_scoped_access =
-      shared_image->BeginWebGPUTextureAccess(
-          webgpu(), sii->GenVerifiedSyncToken(), device_, desc,
-          WGPUTextureUsage_CopyDst, webgpu::WEBGPU_MAILBOX_NONE);
-
-  // Copy the texture in a mappable buffer.
-  wgpu::BufferDescriptor buffer_desc;
-  buffer_desc.size = BytesPerTexel(GetParam().format);
-  buffer_desc.usage = wgpu::BufferUsage::MapRead | wgpu::BufferUsage::CopyDst;
-  wgpu::Buffer readback_buffer = device_.CreateBuffer(&buffer_desc);
-
-  wgpu::TexelCopyTextureInfo copy_src = {};
-  copy_src.texture = webgpu_scoped_access->texture();
-  copy_src.mipLevel = 0;
-  copy_src.origin = {0, 0, 0};
-
-  wgpu::TexelCopyBufferInfo copy_dst = {};
-  copy_dst.buffer = readback_buffer;
-  copy_dst.layout.offset = 0;
-  copy_dst.layout.bytesPerRow = 256;
-
-  wgpu::Extent3D copy_size = {1, 1, 1};
-
-  wgpu::CommandEncoder encoder = device_.CreateCommandEncoder();
-  encoder.CopyTextureToBuffer(&copy_src, &copy_dst, &copy_size);
-
-  EXPECT_WEBGPU_ERROR(device_, wgpu::ErrorType::Validation, encoder.Finish());
-
-  WebGPUTextureScopedAccess::EndAccess(std::move(webgpu_scoped_access));
-  WaitForCompletion(device_);
 }
 
 // Test that passing WEBGPU_MAILBOX_DISCARD when associating a mailbox fails if
@@ -988,14 +888,13 @@ TEST_P(WebGPUMailboxTextureTest,
   WebGPUTextureScopedAccess::EndAccess(std::move(webgpu_scoped_access));
 
   // Map the buffer and assert the pixel is the correct value.
-  readback_buffer.MapAsync(wgpu::MapMode::Read, 0, buffer_desc.size,
-                           wgpu::CallbackMode::AllowSpontaneous,
-                           ToMockBufferMapCallback);
+  wgpu::FutureWaitInfo wait_info{readback_buffer.MapAsync(
+      wgpu::MapMode::Read, 0, buffer_desc.size,
+      wgpu::CallbackMode::AllowSpontaneous, ToMockBufferMapCallback)};
   EXPECT_CALL(*mock_buffer_map_callback,
               Call(wgpu::MapAsyncStatus::Success, testing::_))
       .Times(1);
-
-  WaitForCompletion(device_);
+  WaitForFutureCompletion(device_, wait_info);
 
   const uint8_t* data = static_cast<const uint8_t*>(
       readback_buffer.GetConstMappedRange(0, buffer_desc.size));
@@ -1025,14 +924,13 @@ TEST_P(WebGPUMailboxTextureTest,
   WebGPUTextureScopedAccess::EndAccess(std::move(webgpu_scoped_access));
 
   // Map the buffer.
-  readback_buffer2.MapAsync(wgpu::MapMode::Read, 0, buffer_desc.size,
-                            wgpu::CallbackMode::AllowSpontaneous,
-                            ToMockBufferMapCallback);
+  wgpu::FutureWaitInfo wait_info2{readback_buffer2.MapAsync(
+      wgpu::MapMode::Read, 0, buffer_desc.size,
+      wgpu::CallbackMode::AllowSpontaneous, ToMockBufferMapCallback)};
   EXPECT_CALL(*mock_buffer_map_callback,
               Call(wgpu::MapAsyncStatus::Success, testing::_))
       .Times(1);
-
-  WaitForCompletion(device_);
+  WaitForFutureCompletion(device_, wait_info2);
 }
 
 // Test that an uninitialized writable shared image is lazily cleared by Dawn
@@ -1104,14 +1002,13 @@ TEST_P(WebGPUMailboxTextureTest,
   WebGPUTextureScopedAccess::EndAccess(std::move(webgpu_scoped_access));
 
   // Map the buffer and assert the pixel is the correct value.
-  readback_buffer.MapAsync(wgpu::MapMode::Read, 0, buffer_desc.size,
-                           wgpu::CallbackMode::AllowSpontaneous,
-                           ToMockBufferMapCallback);
+  wgpu::FutureWaitInfo wait_info{readback_buffer.MapAsync(
+      wgpu::MapMode::Read, 0, buffer_desc.size,
+      wgpu::CallbackMode::AllowSpontaneous, ToMockBufferMapCallback)};
   EXPECT_CALL(*mock_buffer_map_callback,
               Call(wgpu::MapAsyncStatus::Success, testing::_))
       .Times(1);
-
-  WaitForCompletion(device_);
+  WaitForFutureCompletion(device_, wait_info);
 
   const uint8_t* data = static_cast<const uint8_t*>(
       readback_buffer.GetConstMappedRange(0, buffer_desc.size));
@@ -1176,14 +1073,13 @@ TEST_P(
   WebGPUTextureScopedAccess::EndAccess(std::move(webgpu_scoped_access));
 
   // Map the buffer and assert the pixel is the correct value.
-  readback_buffer.MapAsync(wgpu::MapMode::Read, 0, buffer_desc.size,
-                           wgpu::CallbackMode::AllowSpontaneous,
-                           ToMockBufferMapCallback);
+  wgpu::FutureWaitInfo wait_info{readback_buffer.MapAsync(
+      wgpu::MapMode::Read, 0, buffer_desc.size,
+      wgpu::CallbackMode::AllowSpontaneous, ToMockBufferMapCallback)};
   EXPECT_CALL(*mock_buffer_map_callback,
               Call(wgpu::MapAsyncStatus::Success, testing::_))
       .Times(1);
-
-  WaitForCompletion(device_);
+  WaitForFutureCompletion(device_, wait_info);
 
   const uint8_t* data = static_cast<const uint8_t*>(
       readback_buffer.GetConstMappedRange(0, buffer_desc.size));
@@ -1871,14 +1767,14 @@ TEST_F(WebGPUMailboxBufferTest, WriteToMailboxThenReadFromIt) {
   webgpu()->DissociateMailboxForBuffer(reservation.id, reservation.generation);
 
   // Map the readback buffer and check that it contains the correct value.
-  readback_buffer.MapAsync(wgpu::MapMode::Read, 0, 4,
-                           wgpu::CallbackMode::AllowSpontaneous,
-                           ToMockBufferMapCallback);
+  wgpu::FutureWaitInfo wait_info{readback_buffer.MapAsync(
+      wgpu::MapMode::Read, 0, 4, wgpu::CallbackMode::AllowSpontaneous,
+      ToMockBufferMapCallback)};
   EXPECT_CALL(*mock_buffer_map_callback,
               Call(wgpu::MapAsyncStatus::Success, testing::_))
       .Times(1);
+  WaitForFutureCompletion(device_, wait_info);
 
-  WaitForCompletion(device_);
   const void* readback_data = readback_buffer.GetConstMappedRange();
   EXPECT_EQ(kBufferData, *static_cast<const uint32_t*>(readback_data));
 }

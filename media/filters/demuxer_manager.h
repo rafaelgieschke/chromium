@@ -142,6 +142,7 @@ class MEDIA_EXPORT DemuxerManager {
   bool DataSourceFullyBuffered() const;
   bool IsStreaming() const;
   bool IsLiveContent() const;
+  bool IsManifestDemuxerURL() const;
 
  private:
   // Demuxer creation and helper methods
@@ -174,7 +175,7 @@ class MEDIA_EXPORT DemuxerManager {
   void DemuxerRequestsSeek(base::TimeDelta time);
 
   // This is usually just the WebMediaPlayerImpl.
-  raw_ptr<Client, DanglingUntriaged> client_;
+  raw_ptr<Client> client_ = nullptr;
 
   // The demuxers need access the the media task runner and media log.
   const scoped_refptr<base::SequencedTaskRunner> media_task_runner_;
@@ -203,7 +204,9 @@ class MEDIA_EXPORT DemuxerManager {
   // which becomes the default demuxer to use.
   std::unique_ptr<Demuxer> demuxer_override_;
 
+#if BUILDFLAG(ENABLE_HLS_DEMUXER)
   bool hls_fallback_ = false;
+#endif  // BUILDFLAG(ENABLE_HLS_DEMUXER)
 
   // Are we allowed to switch demuxer mid-stream when fallback error codes
   // are encountered

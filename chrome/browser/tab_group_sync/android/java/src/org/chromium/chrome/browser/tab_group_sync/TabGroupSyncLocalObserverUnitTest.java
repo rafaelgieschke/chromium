@@ -20,6 +20,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import static org.chromium.chrome.browser.tabmodel.TabGroupTitleUtils.UNSET_TAB_GROUP_TITLE;
+
 import androidx.annotation.Nullable;
 
 import org.junit.After;
@@ -34,11 +36,11 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.Token;
 import org.chromium.base.supplier.LazyOneshotSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.UserActionTester;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tab.Tab;
@@ -397,7 +399,7 @@ public class TabGroupSyncLocalObserverUnitTest {
         modelObserver.tabClosureUndone(mTab2);
         assertFalse(mLocalObserver.hasAnyPendingTabGroupClosuresForTesting());
 
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mLocalTabGroupMutationHelper).updateTabGroup(savedTabGroup);
         verify(mTabGroupSyncService, never()).addGroup(any());
         verify(mTabGroupSyncService, never()).removeLocalTabGroupMapping(any(), anyInt());
@@ -437,7 +439,7 @@ public class TabGroupSyncLocalObserverUnitTest {
         assertFalse(mLocalObserver.hasAnyPendingTabGroupClosuresForTesting());
 
         // This should no-op since restoring could cause issues as the group was deleted remotely.
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mLocalTabGroupMutationHelper, never()).updateTabGroup(any());
         verify(mTabGroupSyncService, never()).addGroup(any());
         verify(mTabGroupSyncService, never()).removeLocalTabGroupMapping(any(), anyInt());
@@ -473,7 +475,7 @@ public class TabGroupSyncLocalObserverUnitTest {
         verify(mTabGroupSyncService)
                 .removeLocalTabGroupMapping(LOCAL_TAB_GROUP_ID_1, ClosingSource.CLOSED_BY_USER);
 
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mLocalTabGroupMutationHelper, never()).updateTabGroup(any());
     }
 
@@ -510,7 +512,7 @@ public class TabGroupSyncLocalObserverUnitTest {
         assertFalse(mLocalObserver.hasAnyPendingTabGroupClosuresForTesting());
 
         // Group is recreated not reconciled.
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mTabGroupSyncService).addGroup(any());
         verify(mLocalTabGroupMutationHelper, never()).updateTabGroup(any());
     }
@@ -546,7 +548,7 @@ public class TabGroupSyncLocalObserverUnitTest {
         groupObserver.committedTabGroupClosure(TOKEN_1, hiding);
         assertFalse(mLocalObserver.hasAnyPendingTabGroupClosuresForTesting());
 
-        ShadowLooper.runUiThreadTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(mTabGroupSyncService, never()).addGroup(any());
         verify(mLocalTabGroupMutationHelper, never()).updateTabGroup(any());
     }
@@ -603,11 +605,13 @@ public class TabGroupSyncLocalObserverUnitTest {
         verify(mTabGroupSyncService, times(1))
                 .updateVisualData(eq(LOCAL_TAB_GROUP_ID_1), eq(TITLE_1), anyInt());
 
-        // Null title.
-        when(mTabGroupModelFilter.getTabGroupTitle(TOKEN_1)).thenReturn(null);
-        mTabGroupModelFilterObserverCaptor.getValue().didChangeTabGroupTitle(TOKEN_1, null);
+        // Unset title.
+        when(mTabGroupModelFilter.getTabGroupTitle(TOKEN_1)).thenReturn(UNSET_TAB_GROUP_TITLE);
+        mTabGroupModelFilterObserverCaptor
+                .getValue()
+                .didChangeTabGroupTitle(TOKEN_1, UNSET_TAB_GROUP_TITLE);
         verify(mTabGroupSyncService, times(1))
-                .updateVisualData(eq(LOCAL_TAB_GROUP_ID_1), eq(new String()), anyInt());
+                .updateVisualData(eq(LOCAL_TAB_GROUP_ID_1), eq(UNSET_TAB_GROUP_TITLE), anyInt());
     }
 
     @Test

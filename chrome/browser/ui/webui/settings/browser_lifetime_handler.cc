@@ -13,9 +13,9 @@
 #include "components/policy/core/common/management/management_service.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
+#include "ash/constants/ash_pref_names.h"
 #include "chrome/browser/ash/tpm/tpm_firmware_update.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/user_manager.h"
 #include "ui/webui/webui_util.h"
@@ -48,8 +48,8 @@ void TriggerTPMFirmwareUpdate(
     // Save a TPM firmware update request in local state, which
     // will trigger the reset screen to appear on reboot.
     PrefService* prefs = g_browser_process->local_state();
-    prefs->SetBoolean(prefs::kFactoryResetRequested, true);
-    prefs->SetInteger(prefs::kFactoryResetTPMFirmwareUpdateMode,
+    prefs->SetBoolean(ash::prefs::kFactoryResetRequested, true);
+    prefs->SetInteger(ash::prefs::kFactoryResetTPMFirmwareUpdateMode,
                       static_cast<int>(mode));
     prefs->CommitPendingWrite();
     chrome::AttemptRelaunch();
@@ -96,21 +96,21 @@ void BrowserLifetimeHandler::RegisterMessages() {
 #endif
 }
 
-void BrowserLifetimeHandler::HandleRestart(const base::Value::List& args) {
+void BrowserLifetimeHandler::HandleRestart(const base::ListValue& args) {
   chrome::AttemptRestart();
 }
 
-void BrowserLifetimeHandler::HandleRelaunch(const base::Value::List& args) {
+void BrowserLifetimeHandler::HandleRelaunch(const base::ListValue& args) {
   chrome::AttemptRelaunch();
 }
 
 #if BUILDFLAG(IS_CHROMEOS)
 void BrowserLifetimeHandler::HandleSignOutAndRestart(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   chrome::AttemptUserExit();
 }
 
-void BrowserLifetimeHandler::HandleFactoryReset(const base::Value::List& args) {
+void BrowserLifetimeHandler::HandleFactoryReset(const base::ListValue& args) {
   CHECK_EQ(1U, args.size());
   bool tpm_firmware_update_requested = args[0].GetBool();
 
@@ -131,7 +131,7 @@ void BrowserLifetimeHandler::HandleFactoryReset(const base::Value::List& args) {
   }
 
   PrefService* prefs = g_browser_process->local_state();
-  prefs->SetBoolean(prefs::kFactoryResetRequested, true);
+  prefs->SetBoolean(ash::prefs::kFactoryResetRequested, true);
   prefs->CommitPendingWrite();
 
   // Perform sign out. Current chrome process will then terminate, new one will
@@ -142,7 +142,7 @@ void BrowserLifetimeHandler::HandleFactoryReset(const base::Value::List& args) {
 
 #if !BUILDFLAG(IS_CHROMEOS)
 void BrowserLifetimeHandler::HandleGetRelaunchConfirmationDialogDescription(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   AllowJavascript();
   CHECK_EQ(2U, args.size());
   const base::Value& callback_id = args[0];
@@ -170,7 +170,7 @@ void BrowserLifetimeHandler::HandleGetRelaunchConfirmationDialogDescription(
 }
 
 void BrowserLifetimeHandler::HandleShouldShowRelaunchConfirmationDialog(
-    const base::Value::List& args) {
+    const base::ListValue& args) {
   AllowJavascript();
   CHECK_EQ(2U, args.size());
   const base::Value& callback_id = args[0];

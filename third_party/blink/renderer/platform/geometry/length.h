@@ -124,9 +124,6 @@ class PLATFORM_EXPORT Length {
     kFitContent,
     kCalculated,
     kFlex,
-    kExtendToZoom,
-    kDeviceWidth,
-    kDeviceHeight,
     kNone,    // only valid for max-width, max-height, or contain-intrinsic-size
     kContent  // only valid for flex-basis
   };
@@ -202,10 +199,6 @@ class PLATFORM_EXPORT Length {
   static Length Fixed() { return Length(kFixed); }
   static Length None() { return Length(kNone); }
 
-  static Length ExtendToZoom() { return Length(kExtendToZoom); }
-  static Length DeviceWidth() { return Length(kDeviceWidth); }
-  static Length DeviceHeight() { return Length(kDeviceHeight); }
-
   template <typename NUMBER_TYPE>
   static Length Fixed(NUMBER_TYPE number) {
     return Length(number, kFixed);
@@ -215,14 +208,6 @@ class PLATFORM_EXPORT Length {
     return Length(number, kPercent);
   }
   static Length Flex(float value) { return Length(value, kFlex); }
-
-  int IntValue() const {
-    if (IsCalculated()) {
-      NOTREACHED();
-    }
-    DCHECK(!IsNone());
-    return static_cast<int>(value_);
-  }
 
   float Pixels() const {
     DCHECK_EQ(GetType(), kFixed);
@@ -347,9 +332,6 @@ class PLATFORM_EXPORT Length {
     return GetType() == kPercent || GetType() == kCalculated;
   }
   bool IsFlex() const { return GetType() == kFlex; }
-  bool IsExtendToZoom() const { return GetType() == kExtendToZoom; }
-  bool IsDeviceWidth() const { return GetType() == kDeviceWidth; }
-  bool IsDeviceHeight() const { return GetType() == kDeviceHeight; }
 
   Length Blend(const Length& from, double progress, ValueRange range) const {
     DCHECK(CanConvertToCalculation());
@@ -380,6 +362,10 @@ class PLATFORM_EXPORT Length {
   Length Add(const Length& other) const;
 
   Length Zoom(double factor) const;
+
+  // Multiply the value by the factor, also percentages. If the value is
+  // kCalculated, it will be resolved to kFixed and then multiplied.
+  Length Multiplied(float max_value, double factor) const;
 
   unsigned GetCalculatedCountForTest() const;
 

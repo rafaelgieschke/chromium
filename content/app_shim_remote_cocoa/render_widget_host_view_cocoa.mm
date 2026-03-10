@@ -15,7 +15,6 @@
 
 #import "base/apple/foundation_util.h"
 #include "base/apple/owned_objc.h"
-#include "base/containers/contains.h"
 #include "base/debug/crash_logging.h"
 #import "base/mac/mac_util.h"
 #include "base/memory/raw_ptr.h"
@@ -126,6 +125,19 @@ constexpr int kWrapAroundDistance = 10000;
 // Whether a keyboard event has been reserved by macOS.
 BOOL EventIsReservedBySystem(NSEvent* event) {
   return content::GetSystemHotkeyMap()->IsEventReserved(event);
+}
+
+NSEvent* CreateContextMenuKeyDownEvent(NSEvent* source_event) {
+  return [NSEvent keyEventWithType:NSEventTypeKeyDown
+                          location:source_event.locationInWindow
+                     modifierFlags:0
+                         timestamp:source_event.timestamp
+                      windowNumber:source_event.windowNumber
+                           context:nil
+                        characters:@""
+       charactersIgnoringModifiers:@""
+                         isARepeat:source_event.isARepeat
+                           keyCode:kVK_ContextualMenu];
 }
 
 // Extract underline information from an attributed string. Inspired by
@@ -1164,7 +1176,7 @@ static NSWindow* __weak _deferredResignKeyWindow;
   // to exit fullscreen and we don't want to prevent them from exiting.
   ui::DomCode domCode = ui::KeycodeConverter::NativeKeycodeToDomCode(keyCode);
   return _keyboardLockActive && domCode != ui::DomCode::ESCAPE &&
-         (!_lockedKeys || base::Contains(_lockedKeys.value(), domCode));
+         (!_lockedKeys || _lockedKeys.value().contains(domCode));
 }
 
 - (BOOL)performKeyEquivalent:(NSEvent*)theEvent {
@@ -1212,6 +1224,22 @@ static NSWindow* __weak _deferredResignKeyWindow;
   // equivalent that Cocoa uses for toggling the input language. In this case,
   // that's actually a good thing, though -- see http://crbug.com/26115 .)
   return YES;
+}
+
+- (void)contextMenuKeyDown:(NSEvent*)event {
+  // Preserve existing Ctrl+Return behavior while typing in inputs.
+  if (_textInputType == ui::TEXT_INPUT_TYPE_NONE) {
+    NSEvent* context_menu_event = CreateContextMenuKeyDownEvent(event);
+
+    if (context_menu_event) {
+      [self keyEvent:context_menu_event wasKeyEquivalent:NO];
+      return;
+    }
+  }
+
+  if (@available(macOS 15.0, *)) {
+    [super contextMenuKeyDown:event];
+  }
 }
 
 - (EventHandled)keyEvent:(NSEvent*)theEvent {
@@ -1767,8 +1795,16 @@ static NSWindow* __weak _deferredResignKeyWindow;
 }
 
 - (BOOL)canBecomeKeyView {
-  if ([self hostIsDisconnected])
+  if ([self hostIsDisconnected]) {
     return NO;
+  }
+
+  if (_responderDelegate &&
+      [_responderDelegate
+          respondsToSelector:@selector(shouldRefuseBecomingKeyView)] &&
+      [_responderDelegate shouldRefuseBecomingKeyView]) {
+    return NO;
+  }
 
   return _canBeKeyView;
 }

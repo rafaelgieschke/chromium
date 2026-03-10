@@ -28,12 +28,14 @@ import org.chromium.build.annotations.MonotonicNonNull;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
+import org.chromium.chrome.browser.magic_stack.ModuleRegistry;
 import org.chromium.chrome.browser.ntp_customization.feed.FeedSettingsCoordinator;
 import org.chromium.chrome.browser.ntp_customization.most_visited_tiles.MvtSettingsCoordinator;
 import org.chromium.chrome.browser.ntp_customization.ntp_cards.NtpCardsCoordinator;
 import org.chromium.chrome.browser.ntp_customization.theme.NtpThemeCoordinator;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.browser_ui.bottomsheet.BottomSheetController;
+import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.modelutil.PropertyKey;
 import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
@@ -54,6 +56,7 @@ public class NtpCustomizationCoordinator {
     private final Context mContext;
     private final BottomSheetController mBottomSheetController;
     private final Supplier<@Nullable Profile> mProfileSupplier;
+    private final @Nullable ModuleRegistry mModuleRegistry;
     private final int mBottomSheetType;
     private NtpCustomizationMediator mMediator;
     private @Nullable MvtSettingsCoordinator mMvtSettingCoordinator;
@@ -120,16 +123,21 @@ public class NtpCustomizationCoordinator {
      * @param bottomSheetType The bottom sheet type to display independently. If set to `MAIN`, the
      *     main bottom sheet will be shown instead, enabling its full navigation flow, otherwise the
      *     bottom sheet of the bottomSheetType will show by itself.
+     * @param moduleRegistry The instance of {@link ModuleRegistry}.
      */
     NtpCustomizationCoordinator(
             Context context,
             BottomSheetController bottomSheetController,
             Supplier<@Nullable Profile> profileSupplier,
-            @BottomSheetType int bottomSheetType) {
+            @BottomSheetType int bottomSheetType,
+            WindowAndroid windowAndroid,
+            @Nullable ModuleRegistry moduleRegistry) {
         mContext = context;
         mBottomSheetController = bottomSheetController;
         mProfileSupplier = profileSupplier;
         mBottomSheetType = bottomSheetType;
+        mModuleRegistry = moduleRegistry;
+
         View contentView =
                 LayoutInflater.from(mContext)
                         .inflate(R.layout.ntp_customization_bottom_sheet, /* root= */ null);
@@ -172,7 +180,8 @@ public class NtpCustomizationCoordinator {
                         bottomSheetContent,
                         viewFlipperPropertyModel,
                         containerPropertyModel,
-                        mProfileSupplier);
+                        mProfileSupplier,
+                        windowAndroid);
         mMediator.registerBottomSheetLayout(MAIN);
 
         mDelegate = createBottomSheetDelegate();
@@ -186,7 +195,9 @@ public class NtpCustomizationCoordinator {
             }
             mMediator.registerClickListener(NTP_CARDS, getOptionClickListener(NTP_CARDS));
             mMediator.registerClickListener(FEED, getOptionClickListener(FEED));
-            mMediator.registerClickListener(THEME, getOptionClickListener(THEME));
+            if (NtpCustomizationUtils.isNtpThemeCustomizationEnabled()) {
+                mMediator.registerClickListener(THEME, getOptionClickListener(THEME));
+            }
             mMediator.renderListContent();
         }
     }
@@ -230,7 +241,8 @@ public class NtpCustomizationCoordinator {
 
     private void showNtpCardsBottomSheet() {
         if (mNtpCardsCoordinator == null) {
-            mNtpCardsCoordinator = new NtpCardsCoordinator(mContext, mDelegate, mProfileSupplier);
+            mNtpCardsCoordinator =
+                    new NtpCardsCoordinator(mContext, mDelegate, mProfileSupplier, mModuleRegistry);
         }
         mMediator.showBottomSheet(NTP_CARDS);
     }

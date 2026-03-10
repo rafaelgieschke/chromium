@@ -184,14 +184,14 @@ HTMLFencedFrameElement::ConstructContainerPolicy() const {
   }
 
   scoped_refptr<const SecurityOrigin> src_origin =
-      GetOriginForPermissionsPolicy();
-  scoped_refptr<const SecurityOrigin> self_origin =
+      MakeOriginForPermissionsPolicy();
+  const SecurityOrigin* self_origin =
       GetExecutionContext()->GetSecurityOrigin();
 
   PolicyParserMessageBuffer logger;
 
   network::ParsedPermissionsPolicy container_policy =
-      PermissionsPolicyParser::ParseAttribute(allow_, self_origin, src_origin,
+      PermissionsPolicyParser::ParseAttribute(allow_, *self_origin, *src_origin,
                                               logger, GetExecutionContext());
 
   for (const auto& message : logger.GetMessages()) {
@@ -241,7 +241,7 @@ void HTMLFencedFrameElement::setConfig(FencedFrameConfig* config) {
   if (config_) {
     NavigateToConfig();
   } else {
-    Navigate(BlankURL());
+    Navigate(BlankUrl());
   }
 }
 

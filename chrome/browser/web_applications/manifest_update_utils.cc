@@ -10,6 +10,7 @@
 #include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/web_applications/proto/web_app.equal.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/browser/web_applications/web_app_constants.h"
 #include "chrome/browser/web_applications/web_app_install_utils.h"
@@ -281,10 +282,6 @@ ManifestDataChanges GetManifestDataChanges(
     if (existing_web_app.launch_handler() != new_install_info.launch_handler) {
       return true;
     }
-    if (existing_web_app.permissions_policy() !=
-        new_install_info.permissions_policy) {
-      return true;
-    }
     if (existing_shortcuts_menu_icon_bitmaps &&
         *existing_shortcuts_menu_icon_bitmaps !=
             new_install_info.shortcuts_menu_icon_bitmaps) {
@@ -304,6 +301,10 @@ ManifestDataChanges GetManifestDataChanges(
     }
     if (existing_web_app.related_applications() !=
         new_install_info.related_applications) {
+      return true;
+    }
+    if (existing_web_app.unvalidated_migration_sources() !=
+        new_install_info.migration_sources) {
       return true;
     }
     // TODO(crbug.com/40611449): Check more manifest fields.

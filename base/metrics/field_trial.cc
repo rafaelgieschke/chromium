@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/390223051): Remove C-library calls to fix the errors.
-#pragma allow_unsafe_libc_calls
-#endif
-
 #include "base/metrics/field_trial.h"
 
 #include <algorithm>
@@ -15,6 +10,7 @@
 
 #include "base/base_switches.h"
 #include "base/command_line.h"
+#include "base/compiler_specific.h"
 #include "base/containers/span.h"
 #include "base/debug/crash_logging.h"
 #include "base/logging.h"
@@ -42,18 +38,6 @@
 #if BUILDFLAG(USE_BLINK)
 #include "base/memory/shared_memory_switch.h"
 #include "base/process/launch.h"
-#endif
-
-#if BUILDFLAG(IS_APPLE) && BUILDFLAG(USE_BLINK) && !BUILDFLAG(IS_IOS_TVOS)
-#include "base/apple/mach_port_rendezvous.h"
-#endif
-
-#if BUILDFLAG(IS_POSIX) && BUILDFLAG(USE_BLINK)
-#include <unistd.h>  // For getppid().
-
-#include "base/threading/platform_thread.h"
-// On POSIX, the fd is shared using the mapping in GlobalDescriptors.
-#include "base/posix/global_descriptors.h"
 #endif
 
 #if BUILDFLAG(IS_WIN)
@@ -95,11 +79,6 @@ const char kAllocatorName[] = "FieldTrialAllocator";
 // child processes, leading to an inconsistent view between browser and child
 // processes and possibly causing crashes (see crbug.com/661617).
 const size_t kFieldTrialAllocationSize = 256 << 10;  // 256 KiB
-
-#if BUILDFLAG(IS_APPLE) && BUILDFLAG(USE_BLINK)
-using shared_memory::SharedMemoryMachPortRendezvousKey;
-constexpr SharedMemoryMachPortRendezvousKey kFieldTrialRendezvousKey = 'fldt';
-#endif
 
 // Writes out string1 and then string2 to pickle.
 void WriteStringPair(Pickle* pickle,
@@ -694,10 +673,7 @@ void FieldTrialList::ApplyFeatureOverridesInChildProcess(
 #if BUILDFLAG(USE_BLINK)
 // static
 void FieldTrialList::PopulateLaunchOptionsWithFieldTrialState(
-#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE)
-    GlobalDescriptors::Key descriptor_key,
-    ScopedFD& descriptor_to_share,
-#endif
+    shared_memory::SharedMemorySwitch* shared_memory_switch,
     CommandLine* command_line,
     LaunchOptions* launch_options) {
   CHECK(command_line);
@@ -709,14 +685,8 @@ void FieldTrialList::PopulateLaunchOptionsWithFieldTrialState(
   CHECK(global_->readonly_allocator_region_.IsValid());
 
   global_->field_trial_allocator_->UpdateTrackingHistograms();
-  shared_memory::AddToLaunchParameters(switches::kFieldTrialHandle,
-                                       global_->readonly_allocator_region_,
-#if BUILDFLAG(IS_APPLE)
-                                       kFieldTrialRendezvousKey,
-#elif BUILDFLAG(IS_POSIX)
-                                       descriptor_key, descriptor_to_share,
-#endif
-                                       command_line, launch_options);
+  shared_memory_switch->AddToLaunchParameters(
+      global_->readonly_allocator_region_, command_line, launch_options);
 
   // Append --enable-features and --disable-features switches corresponding
   // to the features enabled on the command-line, so that child and browser
@@ -936,9 +906,7 @@ void FieldTrialList::ClearParamsFromSharedMemoryForTesting() {
     pickle.WriteString(group_name);
     pickle.WriteBool(is_overridden);
 
-    if (prev_entry->pickle_size == pickle.size() &&
-        memcmp(prev_entry->GetPickledDataPtr(), pickle.data(), pickle.size()) ==
-            0) {
+    if (prev_entry->GetPickledDataAsSpan() == base::span(pickle)) {
       // If the new entry is going to be the exact same as the existing one,
       // then simply keep the existing one to avoid taking extra space in the
       // allocator. This should mean that this trial has no params.
@@ -960,8 +928,8 @@ void FieldTrialList::ClearParamsFromSharedMemoryForTesting() {
     new_entry->pickle_size = pickle.size();
 
     // TODO(lawrencewu): Modify base::Pickle to be able to write over a section
-    // in memory, so we can avoid this memcpy.
-    memcpy(new_entry->GetPickledDataPtr(), pickle.data(), pickle.size());
+    // in memory, so we can avoid this copy.
+    new_entry->GetPickledDataAsSpan().copy_from(pickle);
 
     // Update the ref on the field trial and add it to the list to be made
     // iterable.
@@ -1158,8 +1126,8 @@ void FieldTrialList::AddToAllocatorWhileLocked(
   entry->pickle_size = pickle.size();
 
   // TODO(lawrencewu): Modify base::Pickle to be able to write over a section in
-  // memory, so we can avoid this memcpy.
-  memcpy(entry->GetPickledDataPtr(), pickle.data(), pickle.size());
+  // memory, so we can avoid this copy.
+  entry->GetPickledDataAsSpan().copy_from(pickle);
 
   allocator->MakeIterable(ref);
   field_trial->ref_ = ref;

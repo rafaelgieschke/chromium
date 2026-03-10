@@ -12,7 +12,6 @@
 #include "base/functional/callback_helpers.h"
 #include "base/json/json_reader.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "build/branding_buildflags.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/ui/android/autofill/autofill_save_card_delegate_android.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
@@ -55,7 +54,7 @@ class AutofillSaveCardInfoBarDelegateMobileTest
     std::u16string confirm_text;
     std::u16string cancel_text;
     std::u16string description_text;
-    bool is_google_pay_branding_enabled = false;
+    bool is_chrome_branding_enabled = false;
   };
 
   AutofillSaveCardInfoBarDelegateMobileTest();
@@ -151,8 +150,7 @@ AutofillSaveCardInfoBarDelegateMobileTest::CreateDelegate(
   ui_info.confirm_text = options.confirm_text;
   ui_info.cancel_text = options.cancel_text;
   ui_info.description_text = options.description_text;
-  ui_info.is_google_pay_branding_enabled =
-      options.is_google_pay_branding_enabled;
+  ui_info.is_chrome_branding_enabled = options.is_chrome_branding_enabled;
 #if BUILDFLAG(IS_ANDROID)
   auto save_card_delegate = std::make_unique<AutofillSaveCardDelegateAndroid>(
       (payments::PaymentsAutofillClient::LocalSaveCardPromptCallback)
@@ -205,7 +203,8 @@ AutofillSaveCardInfoBarDelegateMobileTest::
 
   credit_card_to_save_ = credit_card;
   std::variant<payments::PaymentsAutofillClient::LocalSaveCardPromptCallback,
-               payments::PaymentsAutofillClient::UploadSaveCardPromptCallback>
+               payments::PaymentsAutofillClient::UploadSaveCardPromptCallback,
+               payments::PaymentsAutofillClient::CardSaveAndFillDialogCallback>
       save_card_callback;
   AutofillSaveCardUiInfo ui_info;
   if (is_uploading) {
@@ -657,13 +656,13 @@ TEST_F(AutofillSaveCardInfoBarDelegateMobileTest, LocalCardHasNoNickname) {
   EXPECT_EQ(delegate->card_label(), card.NetworkAndLastFourDigits());
 }
 
-TEST_F(AutofillSaveCardInfoBarDelegateMobileTest, IsGooglePayBrandingEnabled) {
+TEST_F(AutofillSaveCardInfoBarDelegateMobileTest, IsChromeBrandingEnabled) {
   for (bool param : {true, false}) {
     auto delegate = CreateDelegate({
-        .is_google_pay_branding_enabled = param,
+        .is_chrome_branding_enabled = param,
     });
 
-    EXPECT_EQ(delegate->IsGooglePayBrandingEnabled(), param);
+    EXPECT_EQ(delegate->IsChromeBrandingEnabled(), param);
   }
 }
 

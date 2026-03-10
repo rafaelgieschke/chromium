@@ -553,7 +553,9 @@ targets.bundle(
     },
 )
 
-# Android desktop tests that run on a Linux host.
+# Android desktop tests that run on a Linux host. These are necessary for now
+# as some junit tests are behind desktop GN args, e.g. gated on
+# enable_extensions_core.
 targets.bundle(
     name = "android_desktop_junit_tests",
     targets = [
@@ -565,6 +567,13 @@ targets.bundle(
         "linux-jammy",
         "x86-64",
     ],
+    per_test_modifications = {
+        "chrome_junit_tests": targets.mixin(
+            swarming = targets.swarming(
+                shards = 10,
+            ),
+        ),
+    },
 )
 
 targets.bundle(
@@ -1041,7 +1050,7 @@ targets.bundle(
         "bf_cache_android_browsertests",
         "bfcache_generic_gtests",
         "webview_instrumentation_test_apk_bfcache_mutations",
-        "webview_cts_tests_bfcache_mutations",
+        "webview_64_cts_tests_bfcache_mutations",
     ],
     per_test_modifications = {
         "bf_cache_android_browsertests": targets.mixin(
@@ -1049,7 +1058,7 @@ targets.bundle(
                 shards = 2,
             ),
         ),
-        "webview_cts_tests_bfcache_mutations": targets.mixin(
+        "webview_64_cts_tests_bfcache_mutations": targets.mixin(
             args = [
                 "--store-tombstones",
             ],
@@ -1886,6 +1895,14 @@ targets.bundle(
                 "10-x86-emulator",
                 "16-x64-emulator",
             ],
+            mixins = [
+                targets.mixin(
+                    ci_only = True,
+                    swarming = targets.swarming(
+                        shards = 10,
+                    ),
+                ),
+            ],
         ),
         "components_junit_tests": targets.per_test_modification(
             remove_mixins = [
@@ -2142,16 +2159,6 @@ targets.bundle(
         "non_android_and_cast_and_chromeos_chromium_gtests",
         "non_android_chromium_gtests_no_nacl",
         "vr_platform_specific_chromium_gtests",
-    ],
-)
-
-# Use this for targets for which we only need the bare minimum coverage on
-# Linux.
-targets.bundle(
-    name = "chromium_linux_gtests_once",
-    targets = [
-        "trees_in_viz_blink_platform_unittests",
-        "trees_in_viz_cc_unittests",
     ],
 )
 
@@ -2561,7 +2568,6 @@ targets.bundle(
         "cronet_smoketests_missing_native_library_instrumentation_apk",
         "cronet_smoketests_platform_only_instrumentation_apk",
         "cronet_test_instrumentation_apk",
-        "cronet_tests_android",
         "cronet_unittests_android",
         "net_unittests",
     ],
@@ -2582,7 +2588,6 @@ targets.bundle(
         "cronet_smoketests_missing_native_library_instrumentation_apk",
         "cronet_smoketests_platform_only_instrumentation_apk",
         "cronet_test_instrumentation_apk",
-        "cronet_tests_android",
         "cronet_unittests_android",
         "net_unittests",
     ],
@@ -2599,6 +2604,18 @@ targets.bundle(
             swarming = targets.swarming(
                 shards = 4,
             ),
+        ),
+    },
+)
+
+targets.bundle(
+    name = "cronet_python_unittest",
+    targets = ["cronet_python_unittests"],
+    per_test_modifications = {
+        "cronet_python_unittests": targets.per_test_modification(
+            remove_mixins = [
+                "16-x64-emulator",
+            ],
         ),
     },
 )
@@ -2665,6 +2682,18 @@ targets.bundle(
         "gpu_dawn_common_isolated_scripts",
         "gpu_dawn_webgpu_blink_web_tests",
         "gpu_dawn_webgpu_blink_web_tests_force_swiftshader",
+    ],
+)
+
+# This compiles tests which are run on Dawn standalone builders, which allows
+# us to keep compile coverage of all tests in gpu_dawn_integration_gtests_passthrough
+# and gpu_dawn_isolated_scripts even if we use gpu_common_gtests_passthrough
+# and gpu_dawn_telemetry_tests for testing.
+targets.bundle(
+    name = "dawn_standalone_tests_compile_only",
+    additional_compile_targets = [
+        "dawn_end2end_tests",
+        "dawn_perf_tests",
     ],
 )
 
@@ -2858,7 +2887,7 @@ targets.bundle(
         "browser_tests_no_field_trial": targets.mixin(
             ci_only = True,
             swarming = targets.swarming(
-                shards = 10,
+                shards = 20,
             ),
         ),
         "components_browsertests_no_field_trial": targets.mixin(
@@ -2880,6 +2909,7 @@ targets.bundle(
     name = "fieldtrial_browser_tests_mac",
     targets = [
         "accessibility_unittests_no_field_trial",
+        "browser_tests_no_field_trial",
         "components_browsertests_no_field_trial",
         "content_browsertests_no_field_trial",
         "interactive_ui_tests_no_field_trial",
@@ -2888,6 +2918,12 @@ targets.bundle(
     per_test_modifications = {
         "accessibility_unittests_no_field_trial": targets.mixin(
             ci_only = True,
+        ),
+        "browser_tests_no_field_trial": targets.mixin(
+            ci_only = True,
+            swarming = targets.swarming(
+                shards = 10,
+            ),
         ),
         "components_browsertests_no_field_trial": targets.mixin(
             ci_only = True,
@@ -3181,46 +3217,46 @@ targets.bundle(
         "upload_inv_extended_properties",
     ],
     per_test_modifications = {
-        "blink_web_tests": [
+        "blink_web_tests": targets.per_test_modification(
             # TODO(crbug.com/337058844): uploading invocations is not supported
             # by blink_web_tests yet.
-            "has_native_resultdb_integration",
-        ],
-        "blink_wpt_tests": [
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
+        "blink_wpt_tests": targets.per_test_modification(
             # TODO(crbug.com/337058844): uploading invocations is not supported
             # by blink_wpt_tests yet.
-            "has_native_resultdb_integration",
-        ],
-        "context_lost_passthrough_tests": [
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
+        "context_lost_passthrough_tests": targets.per_test_modification(
             # TODO(crbug.com/337058844): Merging upload_inv_extended_properties
             # with has_native_resultdb_integration is not supported yet.
-            "has_native_resultdb_integration",
-        ],
-        "expected_color_pixel_passthrough_test": [
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
+        "expected_color_pixel_passthrough_test": targets.per_test_modification(
             # TODO(crbug.com/337058844): Merging upload_inv_extended_properties
             # with has_native_resultdb_integration is not supported yet.
-            "has_native_resultdb_integration",
-        ],
-        "gpu_process_launch_tests": [
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
+        "gpu_process_launch_tests": targets.per_test_modification(
             # TODO(crbug.com/337058844): Merging upload_inv_extended_properties
             # with has_native_resultdb_integration is not supported yet.
-            "has_native_resultdb_integration",
-        ],
-        "hardware_accelerated_feature_tests": [
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
+        "hardware_accelerated_feature_tests": targets.per_test_modification(
             # TODO(crbug.com/337058844): Merging upload_inv_extended_properties
             # with has_native_resultdb_integration is not supported yet.
-            "has_native_resultdb_integration",
-        ],
-        "pixel_skia_gold_passthrough_test": [
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
+        "pixel_skia_gold_passthrough_test": targets.per_test_modification(
             # TODO(crbug.com/337058844): Merging upload_inv_extended_properties
             # with has_native_resultdb_integration is not supported yet.
-            "has_native_resultdb_integration",
-        ],
-        "screenshot_sync_passthrough_tests": [
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
+        "screenshot_sync_passthrough_tests": targets.per_test_modification(
             # TODO(crbug.com/337058844): Merging upload_inv_extended_properties
             # with has_native_resultdb_integration is not supported yet.
-            "has_native_resultdb_integration",
-        ],
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
     },
 )
 
@@ -3238,46 +3274,46 @@ targets.bundle(
         "upload_inv_extended_properties",
     ],
     per_test_modifications = {
-        "blink_web_tests": [
+        "blink_web_tests": targets.per_test_modification(
             # TODO(crbug.com/337058844): uploading invocations is not supported
             # by blink_web_tests yet.
-            "has_native_resultdb_integration",
-        ],
-        "blink_wpt_tests": [
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
+        "blink_wpt_tests": targets.per_test_modification(
             # TODO(crbug.com/337058844): uploading invocations is not supported
             # by blink_wpt_tests yet.
-            "has_native_resultdb_integration",
-        ],
-        "context_lost_validating_tests": [
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
+        "context_lost_validating_tests": targets.per_test_modification(
             # TODO(crbug.com/337058844): Merging upload_inv_extended_properties
             # with has_native_resultdb_integration is not supported yet.
-            "has_native_resultdb_integration",
-        ],
-        "expected_color_pixel_validating_test": [
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
+        "expected_color_pixel_validating_test": targets.per_test_modification(
             # TODO(crbug.com/337058844): Merging upload_inv_extended_properties
             # with has_native_resultdb_integration is not supported yet.
-            "has_native_resultdb_integration",
-        ],
-        "gpu_process_launch_tests": [
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
+        "gpu_process_launch_tests": targets.per_test_modification(
             # TODO(crbug.com/337058844): Merging upload_inv_extended_properties
             # with has_native_resultdb_integration is not supported yet.
-            "has_native_resultdb_integration",
-        ],
-        "hardware_accelerated_feature_tests": [
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
+        "hardware_accelerated_feature_tests": targets.per_test_modification(
             # TODO(crbug.com/337058844): Merging upload_inv_extended_properties
             # with has_native_resultdb_integration is not supported yet.
-            "has_native_resultdb_integration",
-        ],
-        "pixel_skia_gold_validating_test": [
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
+        "pixel_skia_gold_validating_test": targets.per_test_modification(
             # TODO(crbug.com/337058844): Merging upload_inv_extended_properties
             # with has_native_resultdb_integration is not supported yet.
-            "has_native_resultdb_integration",
-        ],
-        "screenshot_sync_validating_tests": [
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
+        "screenshot_sync_validating_tests": targets.per_test_modification(
             # TODO(crbug.com/337058844): Merging upload_inv_extended_properties
             # with has_native_resultdb_integration is not supported yet.
-            "has_native_resultdb_integration",
-        ],
+            remove_mixins = ["upload_inv_extended_properties"],
+        ),
     },
 )
 
@@ -3340,14 +3376,12 @@ targets.bundle(
         targets.bundle(
             targets = "gpu_angle_ios_end2end_gtests",
             variants = [
-                "SIM_IPHONE_14_17_5",
                 "SIM_IPHONE_14_18_2",
             ],
         ),
         targets.bundle(
             targets = "gpu_angle_ios_white_box_gtests",
             variants = [
-                "SIM_IPHONE_14_17_5",
                 "SIM_IPHONE_14_18_2",
             ],
         ),
@@ -4698,7 +4732,7 @@ targets.bundle(
         "webcodecs_tests": [
             targets.mixin(
                 args = [
-                    "--extra-browser-args=--use-cmd-decoder=validating --disable-features=SkiaGraphite",
+                    "--extra-browser-args=--use-cmd-decoder=validating --disable-skia-graphite",
                 ],
             ),
         ],
@@ -4850,7 +4884,7 @@ targets.bundle(
         "webrtc_tests": [
             targets.mixin(
                 args = [
-                    "--extra-browser-args=--use-cmd-decoder=validating --disable-features=SkiaGraphite",
+                    "--extra-browser-args=--use-cmd-decoder=validating --disable-skia-graphite",
                 ],
             ),
         ],
@@ -4880,7 +4914,14 @@ targets.bundle(
     name = "gtests_once",
     targets = [
         "layer_list_mode_cc_unittests",
+        "trees_in_viz_blink_platform_unittests",
+        "trees_in_viz_cc_unittests",
     ],
+    per_test_modifications = {
+        "trees_in_viz_blink_platform_unittests": [
+            "skia_gold_test",
+        ],
+    },
 )
 
 targets.bundle(
@@ -4957,6 +4998,16 @@ targets.bundle(
                 "SIM_IPHONE_15_PRO_MAX_18_5",
             ],
         ),
+        targets.bundle(
+            targets = "ios_swift_interop_xcuitests",
+            mixins = [
+                "xcodebuild_sim_runner",
+            ],
+            variants = [
+                "SIM_IPAD_PRO_7TH_GEN_18_5",
+                "SIM_IPHONE_15_18_5",
+            ],
+        ),
     ],
 )
 
@@ -4966,7 +5017,6 @@ targets.bundle(
         targets.bundle(
             targets = "ios_common_tests",
             variants = [
-                "SIM_IPHONE_14_17_5",
                 "SIM_IPHONE_15_18_5",
             ],
         ),
@@ -4976,7 +5026,6 @@ targets.bundle(
                 "xcodebuild_sim_runner",
             ],
             variants = [
-                "SIM_IPHONE_14_17_5",
                 "SIM_IPHONE_15_18_5",
             ],
         ),
@@ -4988,7 +5037,6 @@ targets.bundle(
             ],
             variants = [
                 "SIM_IPAD_PRO_7TH_GEN_18_5",
-                "SIM_IPHONE_14_17_5",
                 "SIM_IPHONE_15_18_5",
             ],
         ),
@@ -5000,7 +5048,6 @@ targets.bundle(
             ],
             variants = [
                 "SIM_IPAD_PRO_7TH_GEN_18_5",
-                "SIM_IPHONE_14_17_5",
                 "SIM_IPHONE_15_18_5",
             ],
         ),
@@ -5013,6 +5060,16 @@ targets.bundle(
                 "SIM_IPHONE_SE_3RD_GEN_18_5",
             ],
         ),
+        targets.bundle(
+            targets = "ios_swift_interop_xcuitests",
+            mixins = [
+                "xcodebuild_sim_runner",
+            ],
+            variants = [
+                "SIM_IPAD_PRO_7TH_GEN_18_5",
+                "SIM_IPHONE_15_18_5",
+            ],
+        ),
     ],
 )
 
@@ -5022,8 +5079,8 @@ targets.bundle(
         targets.bundle(
             targets = "ios_common_tests",
             variants = [
-                "SIM_IPAD_AIR_6TH_GEN_26_2",
-                "SIM_IPHONE_16_26_2",
+                "SIM_IPAD_AIR_6TH_GEN_26_4",
+                "SIM_IPHONE_16_26_4",
             ],
         ),
         targets.bundle(
@@ -5032,8 +5089,8 @@ targets.bundle(
                 "xcodebuild_sim_runner",
             ],
             variants = [
-                "SIM_IPAD_AIR_6TH_GEN_26_2",
-                "SIM_IPHONE_16_26_2",
+                "SIM_IPAD_AIR_6TH_GEN_26_4",
+                "SIM_IPHONE_16_26_4",
             ],
         ),
         targets.bundle(
@@ -5043,8 +5100,8 @@ targets.bundle(
                 "record_failed_tests",
             ],
             variants = [
-                "SIM_IPAD_AIR_6TH_GEN_26_2",
-                "SIM_IPHONE_16_26_2",
+                "SIM_IPAD_AIR_6TH_GEN_26_4",
+                "SIM_IPHONE_16_26_4",
             ],
         ),
         targets.bundle(
@@ -5054,16 +5111,26 @@ targets.bundle(
                 "record_failed_tests",
             ],
             variants = [
-                "SIM_IPAD_AIR_6TH_GEN_26_2",
-                "SIM_IPHONE_16_26_2",
+                "SIM_IPAD_AIR_6TH_GEN_26_4",
+                "SIM_IPHONE_16_26_4",
             ],
         ),
         targets.bundle(
             targets = "ios_screen_size_dependent_tests",
             variants = [
-                "SIM_IPAD_AIR_6TH_GEN_26_2",
-                "SIM_IPHONE_16_26_2",
-                "SIM_IPHONE_SE_3RD_GEN_26_2",
+                "SIM_IPAD_AIR_6TH_GEN_26_4",
+                "SIM_IPHONE_16_26_4",
+                "SIM_IPHONE_SE_3RD_GEN_26_4",
+            ],
+        ),
+        targets.bundle(
+            targets = "ios_swift_interop_xcuitests",
+            mixins = [
+                "xcodebuild_sim_runner",
+            ],
+            variants = [
+                "SIM_IPAD_AIR_6TH_GEN_26_4",
+                "SIM_IPHONE_16_26_4",
             ],
         ),
     ],
@@ -5075,8 +5142,8 @@ targets.bundle(
         targets.bundle(
             targets = "ios_common_tests",
             variants = [
-                "SIM_IPAD_AIR_6TH_GEN_26_2",
-                "SIM_IPHONE_16_26_2",
+                "SIM_IPAD_AIR_6TH_GEN_26_4",
+                "SIM_IPHONE_16_26_4",
             ],
         ),
         targets.bundle(
@@ -5085,8 +5152,8 @@ targets.bundle(
                 "xcodebuild_sim_runner",
             ],
             variants = [
-                "SIM_IPAD_AIR_6TH_GEN_26_2",
-                "SIM_IPHONE_16_26_2",
+                "SIM_IPAD_AIR_6TH_GEN_26_4",
+                "SIM_IPHONE_16_26_4",
             ],
         ),
         targets.bundle(
@@ -5095,16 +5162,26 @@ targets.bundle(
                 "xcodebuild_sim_runner",
             ],
             variants = [
-                "SIM_IPAD_AIR_6TH_GEN_26_2",
-                "SIM_IPHONE_16_26_2",
+                "SIM_IPAD_AIR_6TH_GEN_26_4",
+                "SIM_IPHONE_16_26_4",
             ],
         ),
         targets.bundle(
             targets = "ios_screen_size_dependent_tests",
             variants = [
-                "SIM_IPAD_AIR_6TH_GEN_26_2",
-                "SIM_IPHONE_16_26_2",
-                "SIM_IPHONE_SE_3RD_GEN_26_2",
+                "SIM_IPAD_AIR_6TH_GEN_26_4",
+                "SIM_IPHONE_16_26_4",
+                "SIM_IPHONE_SE_3RD_GEN_26_4",
+            ],
+        ),
+        targets.bundle(
+            targets = "ios_swift_interop_xcuitests",
+            mixins = [
+                "xcodebuild_sim_runner",
+            ],
+            variants = [
+                "SIM_IPAD_AIR_6TH_GEN_26_4",
+                "SIM_IPHONE_16_26_4",
             ],
         ),
     ],
@@ -5133,9 +5210,7 @@ targets.bundle(
                 "xcodebuild_sim_runner",
             ],
             variants = [
-                "SIM_IPAD_AIR_5TH_GEN_17_5",
                 "SIM_IPAD_AIR_6TH_GEN_18_2",
-                "SIM_IPHONE_14_17_5",
                 "SIM_IPHONE_15_18_2",
             ],
         ),
@@ -5145,9 +5220,7 @@ targets.bundle(
                 "xcodebuild_sim_runner",
             ],
             variants = [
-                "SIM_IPAD_AIR_5TH_GEN_17_5",
                 "SIM_IPAD_AIR_6TH_GEN_18_2",
-                "SIM_IPHONE_14_17_5",
                 "SIM_IPHONE_15_18_2",
             ],
         ),
@@ -5160,7 +5233,7 @@ targets.bundle(
         targets.bundle(
             targets = "ios_blink_tests",
             variants = [
-                "SIM_IPHONE_15_26_2",
+                "SIM_IPHONE_15_26_4",
             ],
         ),
     ],
@@ -5205,7 +5278,6 @@ targets.bundle(
         "liburlpattern_unittests",
         "media_unittests",
         "media_unittests_skia_graphite_dawn",
-        "media_unittests_skia_graphite_metal",
         "midi_unittests",
         "mojo_unittests",
         "native_theme_unittests",
@@ -5306,12 +5378,6 @@ targets.bundle(
                 "--test-launcher-filter-file=testing/buildbot/filters/ios.media_unittests.filter",
             ],
         ),
-        "media_unittests_skia_graphite_metal": targets.mixin(
-            args = [
-                "--test-launcher-bot-mode",
-                "--test-launcher-filter-file=testing/buildbot/filters/ios.media_unittests.filter",
-            ],
-        ),
         "mojo_unittests": targets.mixin(
             args = [
                 "--test-launcher-bot-mode",
@@ -5371,7 +5437,6 @@ targets.bundle(
         targets.bundle(
             targets = "ios_common_tests",
             variants = [
-                "SIM_IPHONE_14_17_5",
                 "SIM_IPHONE_15_18_2",
                 #"SIM_IPHONE_16_26_0",
             ],
@@ -5382,10 +5447,8 @@ targets.bundle(
                 "xcodebuild_sim_runner",
             ],
             variants = [
-                "SIM_IPAD_PRO_6TH_GEN_17_5",
                 "SIM_IPAD_PRO_7TH_GEN_18_2",
                 #"SIM_IPAD_PRO_7TH_GEN_26_0",
-                "SIM_IPHONE_14_17_5",
                 "SIM_IPHONE_15_18_2",
                 #"SIM_IPHONE_16_26_0",
             ],
@@ -5396,10 +5459,8 @@ targets.bundle(
                 "xcodebuild_sim_runner",
             ],
             variants = [
-                "SIM_IPAD_PRO_6TH_GEN_17_5",
                 "SIM_IPAD_PRO_7TH_GEN_18_2",
                 #"SIM_IPAD_PRO_7TH_GEN_26_0",
-                "SIM_IPHONE_14_17_5",
                 "SIM_IPHONE_15_18_2",
                 #"SIM_IPHONE_16_26_0",
             ],
@@ -5407,10 +5468,8 @@ targets.bundle(
         targets.bundle(
             targets = "ios_screen_size_dependent_tests",
             variants = [
-                "SIM_IPAD_PRO_6TH_GEN_17_5",
                 "SIM_IPAD_PRO_7TH_GEN_18_2",
                 #"SIM_IPAD_PRO_7TH_GEN_26_0",
-                "SIM_IPHONE_14_17_5",
                 "SIM_IPHONE_15_18_2",
                 #"SIM_IPHONE_16_26_0",
             ],
@@ -5564,7 +5623,6 @@ targets.bundle(
             ],
             variants = [
                 "SIM_IPAD_PRO_7TH_GEN_18_2",
-                "SIM_IPHONE_14_17_5",
                 "SIM_IPHONE_15_18_2",
             ],
         ),
@@ -5629,7 +5687,6 @@ targets.bundle(
                 "xcodebuild_sim_runner",
             ],
             variants = [
-                "SIM_IPHONE_SE_3RD_GEN_17_5",
                 "SIM_IPHONE_SE_3RD_GEN_18_2",
                 "SIM_IPHONE_SE_3RD_GEN_26_0",
             ],
@@ -5642,7 +5699,6 @@ targets.bundle(
                 "mac_15_vm_optional",
             ],
             variants = [
-                "SIM_IPAD_AIR_5TH_GEN_17_5",
                 "SIM_IPAD_AIR_6TH_GEN_18_2",
             ],
         ),
@@ -5663,7 +5719,6 @@ targets.bundle(
                 "record_failed_tests",
             ],
             variants = [
-                "SIM_IPAD_PRO_6TH_GEN_17_5",
                 "SIM_IPAD_PRO_7TH_GEN_18_2",
                 "SIM_IPAD_PRO_7TH_GEN_26_0",
             ],
@@ -5740,6 +5795,13 @@ targets.bundle(
                 "SIM_IPHONE_16_26_0",
             ],
         ),
+    ],
+)
+
+targets.bundle(
+    name = "ios_swift_interop_xcuitests",
+    targets = [
+        "ios_swift_interop_xcuitests_module",
     ],
 )
 
@@ -6021,6 +6083,16 @@ targets.bundle(
     ],
 )
 
+# Last MacOS supported on intel
+# Run select tests to ensure minimum coverage
+targets.bundle(
+    name = "mac26_x86_tests",
+    targets = [
+        "telemetry_gpu_unittests",
+        "gpu_unittests",
+    ],
+)
+
 # TODO(crbug.com/40223516): Remove this set of test suites when LSan can be
 # enabled Mac ASan bots. This list will be gradually filled with more tests
 # until the bot has parity with ASan bots, and the ASan bot can then enable
@@ -6039,7 +6111,6 @@ targets.bundle(
         "components_unittests",
         "content_unittests",
         "crashpad_tests",
-        "cronet_unittests",
         "device_unittests",
         "net_unittests",
         # TODO(crbug.com/40274401): Enable this.
@@ -6253,8 +6324,6 @@ targets.bundle(
 targets.bundle(
     name = "non_android_and_cast_and_chromeos_chromium_gtests",
     targets = [
-        "cronet_tests",
-        "cronet_unittests",
         "headless_browsertests",
         "headless_unittests",
     ],
@@ -6286,7 +6355,7 @@ targets.bundle(
     per_test_modifications = {
         "browser_tests": targets.mixin(
             swarming = targets.swarming(
-                shards = 10,
+                shards = 15,
             ),
         ),
         "interactive_ui_tests": targets.mixin(
@@ -6736,6 +6805,92 @@ targets.bundle(
     name = "test_traffic_annotation_auditor_script",
     targets = [
         "test_traffic_annotation_auditor",
+    ],
+)
+
+targets.bundle(
+    name = "trees_in_viz_disabled_tests",
+    targets = [
+        "cc_unittests",
+        "viz_unittests",
+        "blink_web_tests",
+        "content_browsertests",
+        "browser_tests",
+    ],
+    per_test_modifications = {
+        "cc_unittests": targets.mixin(
+            args = ["--disable-features=TreesInViz"],
+        ),
+        "viz_unittests": targets.mixin(
+            args = ["--disable-features=TreesInViz"],
+        ),
+        "blink_web_tests": targets.mixin(
+            args = ["--additional-driver-flag=--disable-features=TreesInViz"],
+        ),
+        "content_browsertests": targets.mixin(
+            args = ["--disable-features=TreesInViz"],
+        ),
+        "browser_tests": targets.mixin(
+            args = ["--disable-features=TreesInViz"],
+        ),
+    },
+)
+
+targets.bundle(
+    name = "trees_in_viz_enabled_tests",
+    targets = [
+        "cc_unittests",
+        "viz_unittests",
+        "blink_web_tests",
+        "content_browsertests",
+        "browser_tests",
+    ],
+    per_test_modifications = {
+        "cc_unittests": targets.mixin(
+            args = ["--enable-features=TreesInViz"],
+        ),
+        "viz_unittests": targets.mixin(
+            args = ["--enable-features=TreesInViz"],
+        ),
+        "blink_web_tests": targets.mixin(
+            args = ["--additional-driver-flag=--enable-features=TreesInViz"],
+        ),
+        "content_browsertests": targets.mixin(
+            args = ["--enable-features=TreesInViz"],
+        ),
+        "browser_tests": targets.mixin(
+            args = ["--enable-features=TreesInViz"],
+        ),
+    },
+)
+
+targets.bundle(
+    name = "trees_in_viz_enabled_tests_android",
+    targets = [
+        "cc_unittests",
+        "viz_unittests",
+        "content_browsertests",
+        "android_browsertests",
+    ],
+    mixins = [
+        targets.mixin(
+            args = ["--enable-features=TreesInViz"],
+        ),
+    ],
+)
+
+targets.bundle(
+    name = "trees_in_viz_enabled_tests_chromeos",
+    targets = [
+        "cc_unittests",
+        "viz_unittests",
+        "content_browsertests",
+        "browser_tests",
+    ],
+    mixins = [
+        targets.mixin(
+            args = ["--enable-features=TreesInViz"],
+        ),
     ],
 )
 

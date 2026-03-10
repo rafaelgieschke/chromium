@@ -33,6 +33,9 @@
 #include "net/base/net_errors.h"
 #include "net/http/http_status_code.h"
 
+using bookmarks_helper::GetBookmarkBarNode;
+using bookmarks_helper::StoreType;
+
 namespace {
 
 bool HasUserPrefValue(const PrefService* pref_service,
@@ -111,6 +114,12 @@ class SyncAuthTestBase : public SyncTest {
     // (in terms of retries).
     signin::DisableAccessTokenFetchRetries(
         IdentityManagerFactory::GetForProfile(GetProfile(0)));
+  }
+
+  StoreType GetStoreType() {
+    return GetSetupSyncMode() == SyncTest::SetupSyncMode::kSyncTransportOnly
+               ? StoreType::kAccountStore
+               : StoreType::kLocalOrSyncableStore;
   }
 
  private:
@@ -369,7 +378,13 @@ IN_PROC_BROWSER_TEST_P(SyncAuthTest, RetryInitialSetupWithTransientError) {
 }
 
 // Verify that SyncServiceImpl fetches a new token when an old token expires.
-IN_PROC_BROWSER_TEST_P(SyncAuthTest, TokenExpiry) {
+// TODO(crbug.com/490065002): Test is flaky on Mac, Linux, Windows.
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+#define MAYBE_TokenExpiry DISABLED_TokenExpiry
+#else
+#define MAYBE_TokenExpiry TokenExpiry
+#endif
+IN_PROC_BROWSER_TEST_P(SyncAuthTest, MAYBE_TokenExpiry) {
   // Initial sync succeeds with a short lived OAuth2 Token.
   ASSERT_TRUE(SetupClients());
   GetFakeServer()->ClearHttpError();
@@ -473,12 +488,7 @@ IN_PROC_BROWSER_TEST_P(SyncAuthTest, ShouldTrackDeletionsInSyncPausedState) {
   PrefService* pref_service = GetProfile(0)->GetPrefs();
 
   // Create a bookmark...
-  bookmarks::BookmarkModel* bookmark_model =
-      bookmarks_helper::GetBookmarkModel(0);
-  const bookmarks::BookmarkNode* bar =
-      (GetSetupSyncMode() == SetupSyncMode::kSyncTheFeature)
-          ? bookmark_model->bookmark_bar_node()
-          : bookmark_model->account_bookmark_bar_node();
+  const bookmarks::BookmarkNode* bar = GetBookmarkBarNode(0, GetStoreType());
   ASSERT_FALSE(bookmarks_helper::HasNodeWithURL(0, kTestURL));
   const bookmarks::BookmarkNode* bookmark = bookmarks_helper::AddURL(
       0, bar, bar->children().size(), kTestTitle, kTestURL);

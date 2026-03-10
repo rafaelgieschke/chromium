@@ -24,7 +24,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lens/core/mojom/geometry.mojom.h"
 #include "chrome/browser/lens/core/mojom/overlay_object.mojom-forward.h"
-#include "chrome/browser/lens/core/mojom/text.mojom-forward.h"
 #include "chrome/browser/lens/core/mojom/text.mojom.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/lens/lens_overlay_gen204_controller.h"
@@ -236,9 +235,14 @@ LenOverlayEntryPointFromInvocationSource(
     case lens::LensOverlayInvocationSource::kFindInPage:
       return lens::LensOverlayClientLogs::FIND_IN_PAGE;
     case lens::LensOverlayInvocationSource::kContextualTasksComposebox:
+    case lens::LensOverlayInvocationSource::kCobrowseToolbarButton:
       // TODO(crbug.com/469463485): This should be contextual tasks specific,
       // not unknown.
       return lens::LensOverlayClientLogs::UNKNOWN_ENTRY_POINT;
+    case lens::LensOverlayInvocationSource::kOmniboxContextualQuery:
+      // TODO(crbug.com/475330679): This should be an entry point that
+      // corresponds to the omnibox contextual query.
+      return lens::LensOverlayClientLogs::OMNIBOX_CONTEXTUAL_SUGGESTION;
     case lens::LensOverlayInvocationSource::kLVFShutterButton:
     case lens::LensOverlayInvocationSource::kLVFGallery:
     case lens::LensOverlayInvocationSource::kContextMenu:
@@ -249,8 +253,6 @@ LenOverlayEntryPointFromInvocationSource(
     // used by the Lens overlay query controller, which is not used by those
     // flows, it is not necessary.
     case lens::LensOverlayInvocationSource::kNtpContextualQuery:
-    case lens::LensOverlayInvocationSource::kOmniboxContextualQuery:
-      NOTREACHED() << "Invocation source not supported.";
   }
   return lens::LensOverlayClientLogs::UNKNOWN_ENTRY_POINT;
 }
@@ -592,7 +594,9 @@ void LensOverlayQueryController::SendContextualTextQuery(
         &LensOverlayQueryController::SendContextualTextQuery,
         weak_ptr_factory_.GetWeakPtr(), query_start_time, query_text,
         lens_selection_type, additional_search_query_params);
-    if (lens::features::IsLensOverlayNonBlockingPrivacyNoticeEnabled() &&
+    if ((lens::features::IsLensOverlayNonBlockingPrivacyNoticeEnabled() ||
+         invocation_source_ ==
+             lens::LensOverlayInvocationSource::kOmniboxContextualQuery) &&
         !cluster_info_.has_value()) {
       // If the cluster info is expired, restart a new query flow so the pending
       // interaction request will be sent once the cluster info is available.
@@ -703,6 +707,8 @@ std::unique_ptr<lens::LensOverlayRequestId>
 LensOverlayQueryController::GetNextRequestId(
     RequestIdUpdateMode update_mode,
     lens::LensOverlayRequestId::MediaType media_type) {
+  // LensOverlay uploads are all considered implicit uploads.
+  request_id_generator_->SetIsImplicitUpload(true);
   std::unique_ptr<lens::LensOverlayRequestId> request_id =
       request_id_generator_->GetNextRequestId(update_mode, media_type);
   latest_request_id_ = *request_id.get();
@@ -803,6 +809,8 @@ LensOverlayQueryController::LensServerFetchRequest::~LensServerFetchRequest() =
     default;
 
 std::string LensOverlayQueryController::GetVsridForNewTab() {
+  // LensOverlay search urls are all considered to use implicit uploads.
+  request_id_generator_->SetIsImplicitUpload(true);
   std::unique_ptr<lens::LensOverlayRequestId> request_id =
       request_id_generator_->GetNextRequestId(
           RequestIdUpdateMode::kOpenInNewTab,
@@ -953,7 +961,7 @@ void LensOverlayQueryController::PrepareAndFetchFullImageRequest() {
   // cluster info handshake.
   if (!cluster_info_ &&
       (lens::features::IsLensOverlayClusterInfoOptimizationEnabled() ||
-       lens::IsLensOverlayContextualSearchboxEnabled())) {
+       lens::IsLensOverlayContextualSearchboxEnabled(profile_))) {
     FetchClusterInfoRequest();
     return;
   }
@@ -2022,7 +2030,7 @@ void LensOverlayQueryController::InteractionFetchResponseHandler(
       std::make_optional(encoded_analytics_id),
       *latest_interaction_request_data_->request_id_.get());
 
-  if (!(lens::IsLensOverlayContextualSearchboxEnabled() &&
+  if (!(lens::IsLensOverlayContextualSearchboxEnabled(profile_) &&
         !lens::features::GetLensOverlaySendImageSignalsForLensSuggest())) {
     // Always include the image signals unless the contextual searchbox is
     // enabled and the image signals feature flag is disabled.
@@ -2463,6 +2471,6 @@ void LensOverlayQueryController::GrantPermissionForSession() {
 
 bool LensOverlayQueryController::HasPermissionForSession() {
   return has_permission_for_session_ ||
-         DidUserGrantLensOverlayNeededPermissions(profile_->GetPrefs());
+         DidUserGrantLensOverlayNeededPermissions(profile_);
 }
 }  // namespace lens

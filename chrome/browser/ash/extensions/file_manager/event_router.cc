@@ -17,7 +17,6 @@
 #include "ash/webui/file_manager/file_manager_ui.h"
 #include "base/command_line.h"
 #include "base/containers/adapters.h"
-#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -120,7 +119,7 @@ bool DoFilesSwaWindowsExist(Profile* profile) {
 }
 
 // Checks if the Recovery Tool is running. This is a temporary solution.
-// TODO(mtomasz): Replace with crbug.com/341902 solution.
+// TODO(mtomasz): Replace with crbug.com/41088567 solution.
 bool IsRecoveryToolRunning(Profile* profile) {
   extensions::ExtensionPrefs* extension_prefs =
       extensions::ExtensionPrefs::Get(profile);
@@ -146,7 +145,7 @@ bool IsRecoveryToolRunning(Profile* profile) {
 void BroadcastEvent(Profile* profile,
                     extensions::events::HistogramValue histogram_value,
                     const std::string& event_name,
-                    base::Value::List event_args) {
+                    base::ListValue event_args) {
   extensions::EventRouter::Get(profile)->BroadcastEvent(
       std::make_unique<extensions::Event>(histogram_value, event_name,
                                           std::move(event_args)));
@@ -159,7 +158,7 @@ void DispatchEventToExtension(
     const std::string& extension_id,
     extensions::events::HistogramValue histogram_value,
     const std::string& event_name,
-    base::Value::List event_args) {
+    base::ListValue event_args) {
   extensions::EventRouter::Get(profile)->DispatchEventToExtension(
       extension_id, std::make_unique<extensions::Event>(
                         histogram_value, event_name, std::move(event_args)));
@@ -442,12 +441,12 @@ class DriveFsEventRouterImpl : public DriveFsEventRouter {
         DriveIntegrationServiceFactory::FindForProfile(profile_)
             ->GetMountPointPath();
     return base::FilePath("/").AppendRelativePath(path, &absolute_path) &&
-           base::Contains(*file_watchers_, absolute_path);
+           file_watchers_->contains(absolute_path);
   }
 
   void BroadcastEvent(extensions::events::HistogramValue histogram_value,
                       const std::string& event_name,
-                      base::Value::List event_args,
+                      base::ListValue event_args,
                       bool dispatch_to_system_notification = true) override {
     std::unique_ptr<extensions::Event> event =
         std::make_unique<extensions::Event>(histogram_value, event_name,
@@ -729,19 +728,19 @@ void EventRouter::ObserveEvents() {
     pref_change_registrar_->Add(drive::prefs::kDisableDrive, cb);
     pref_change_registrar_->Add(ash::prefs::kFilesAppTrashEnabled, cb);
     pref_change_registrar_->Add(prefs::kSearchSuggestEnabled, cb);
-    pref_change_registrar_->Add(prefs::kUse24HourClock, cb);
+    pref_change_registrar_->Add(ash::prefs::kUse24HourClock, cb);
     pref_change_registrar_->Add(arc::prefs::kArcEnabled, cb);
     pref_change_registrar_->Add(arc::prefs::kArcHasAccessToRemovableMedia, cb);
     pref_change_registrar_->Add(ash::prefs::kFilesAppFolderShortcuts, cb);
-    pref_change_registrar_->Add(prefs::kOfficeFileMovedToOneDrive, cb);
-    pref_change_registrar_->Add(prefs::kOfficeFileMovedToGoogleDrive, cb);
+    pref_change_registrar_->Add(ash::prefs::kOfficeFileMovedToOneDrive, cb);
+    pref_change_registrar_->Add(ash::prefs::kOfficeFileMovedToGoogleDrive, cb);
   }
 
   {
     const base::RepeatingClosure cb = base::BindRepeating(
         &EventRouter::BroadcastOnAppsUpdatedEvent, weak_factory_.GetWeakPtr());
-    pref_change_registrar_->Add(prefs::kDefaultTasksByMimeType, cb);
-    pref_change_registrar_->Add(prefs::kDefaultTasksBySuffix, cb);
+    pref_change_registrar_->Add(ash::prefs::kDefaultTasksByMimeType, cb);
+    pref_change_registrar_->Add(ash::prefs::kDefaultTasksBySuffix, cb);
   }
 
   ash::system::TimezoneSettings::GetInstance()->AddObserver(this);
@@ -1559,7 +1558,7 @@ void EventRouter::OnAppRegistryCacheWillBeDestroyed(
 }
 
 void EventRouter::OnConnectionChanged(
-    const network::mojom::ConnectionType type) {
+    const net::NetworkChangeNotifier::ConnectionType type) {
   fmp::DeviceConnectionState result =
       content::GetNetworkConnectionTracker()->IsOffline()
           ? fmp::DeviceConnectionState::kOffline

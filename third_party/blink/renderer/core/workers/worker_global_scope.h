@@ -32,11 +32,11 @@
 #include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "services/network/public/mojom/fetch_api.mojom-blink-forward.h"
+#include "third_party/blink/public/common/permissions_policy/document_policy.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
 #include "third_party/blink/public/mojom/loader/code_cache.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/script/script_type.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/browser_interface_broker_proxy.h"
-#include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/frame_request_callback_collection.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -81,7 +81,6 @@ class CORE_EXPORT WorkerGlobalScope
     : public WorkerOrWorkletGlobalScope,
       public WindowOrWorkerGlobalScope,
       public UniversalGlobalScope,
-      public ActiveScriptWrappable<WorkerGlobalScope>,
       public Supplementable<WorkerGlobalScope>,
       public DOMOriginUtils {
   DEFINE_WRAPPERTYPEINFO();
@@ -177,6 +176,7 @@ class CORE_EXPORT WorkerGlobalScope
       const KURL& response_url,
       network::mojom::ReferrerPolicy response_referrer_policy,
       Vector<network::mojom::blink::ContentSecurityPolicyPtr> response_csp,
+      DocumentPolicy::DocumentPolicyBundle response_document_policy,
       const Vector<String>* response_origin_trial_tokens) = 0;
 
   // These methods should be called in the scope of a pausable
@@ -231,9 +231,6 @@ class CORE_EXPORT WorkerGlobalScope
 
   void Trace(Visitor*) const override;
 
-  // ActiveScriptWrappable.
-  bool HasPendingActivity() const override;
-
   virtual InstalledScriptsManager* GetInstalledScriptsManager() {
     return nullptr;
   }
@@ -260,6 +257,10 @@ class CORE_EXPORT WorkerGlobalScope
   virtual WorkerToken GetWorkerToken() const = 0;
 
   bool IsUrlValid() { return url_.IsValid(); }
+
+  bool HasRunWorkerScript() {
+    return script_eval_state_ == ScriptEvalState::kEvaluated;
+  }
 
   void SetMainResoureIdentifier(uint64_t identifier) {
     DCHECK(!main_resource_identifier_.has_value());

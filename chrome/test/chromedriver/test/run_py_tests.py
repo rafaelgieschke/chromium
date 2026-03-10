@@ -100,6 +100,8 @@ _NEGATIVE_FILTER = [
     'BidiTest.testFocusInFirstTab',
     # crbug.com/372153090. The feature is not yet supported.
     'ChromeDriverTest.testCreateWindowFromScript',
+    # Flaky crbug.com/481485821
+    'ChromeDriverTest.testWebviewDetactedDuringClick',
 ]
 
 
@@ -173,8 +175,6 @@ _BROWSER_SPECIFIC_FILTER['chrome-headless-shell'] = [
     'ChromeDriverTest.testSetRPHResgistrationMode',
     # The test is only intended for the headless mode of Chrome.
     'ChromeDriverTest.testBrowserNameHeadlessMode',
-    # chrome-headless-shell does not support Browser.executeBrowserCommand
-    'ChromeDriverTest.testWebviewDetactedDuringClick',
 ]
 
 _BROWSER_AND_PLATFORM_SPECIFIC_FILTER = {
@@ -533,6 +533,8 @@ class ChromeDriverBaseTest(unittest.TestCase):
 
   def CreateDriver(self, server_url=None, server_pid=None,
                    download_dir=None, browser_name=None, **kwargs):
+    kwargs.setdefault('chrome_switches', []).append(
+        '--force-device-scale-factor=1')
     if server_url is None:
       server_url = _CHROMEDRIVER_SERVER_URL
     if server_pid is None:
@@ -3352,6 +3354,25 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
      self.assertTrue(
          self._driver.ExecuteScript('return arguments[0].checked', checkbox))
 
+  def testSendKeysToSelectlist(self):
+    # Regression test for crbug.com/333423933. SendKeys to an interactable
+    # <selectlist> shouldn't fail.
+    self._driver.Load('about:blank')
+    self._driver.ExecuteScript(
+        "document.body.innerHTML = '<selectlist tabindex=0><option>1</option></selectlist>';")
+    selectlist = self._driver.FindElement('tag name', 'selectlist')
+    selectlist.SendKeys('\uE00C')  # ESC
+
+  def testSendKeysToSelectlistWithoutTabindexShouldFail(self):
+    # Regression test for crbug.com/333423933. SendKeys to a non-interactable
+    # <selectlist> should fail.
+    self._driver.Load('about:blank')
+    self._driver.ExecuteScript(
+        "document.body.innerHTML = '<selectlist><option>1</option></selectlist>';")
+    selectlist = self._driver.FindElement('tag name', 'selectlist')
+    with self.assertRaises(chromedriver.ElementNotInteractable):
+      selectlist.SendKeys('\uE00C')  # ESC
+
   def testElementReference(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/element_ref.html'))
     element = self._driver.FindElement('css selector', '#link')
@@ -4221,6 +4242,78 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
       except chromedriver.NoSuchElement:
         pass
 
+  def testCloseWindowWhileExecutingCommands(self):
+    def spamWithRequests(driver, stop_event):
+      # Make repeated requests to the target window until stop_event is set
+      while not stop_event.is_set():
+        try:
+            driver.ExecuteScript("return !!window.test;")
+        except Exception:
+            # when window is closed this will eventually result in an error
+            break
+
+    def closeWindowWhileSpammingWithRequests(driver, childWindow, baseWindow):
+      # Close window after timeout while making repeated requests
+      stop_event = threading.Event()
+
+      driver.SwitchToWindow(childWindow)
+
+      # Start thread to make repeated requests to the child window
+      request_thread = threading.Thread(
+          target=spamWithRequests,
+          args=(driver, stop_event),
+          daemon=True
+      )
+
+      try:
+          # Navigate the window before closing
+          driver.Load(self.GetHttpUrlForFile("/chromedriver/empty.html"))
+          # Navigate the window
+          driver.ExecuteScript(
+            'setTimeout(function() { window.close(); }, 200);')
+          request_thread.start()
+          time.sleep(0.25)
+      finally:
+          # Ensure request thread stops
+          stop_event.set()
+          if request_thread.is_alive():
+              request_thread.join(timeout=1.0)
+          driver.SwitchToWindow(baseWindow)
+
+    self._driver.Load("data:text/html,"
+        "<!doctype html><meta charset='utf-8'><title>repro</title>"
+        "<button id='btn'>open and maybe close</button>"
+        "<script>"
+        "const btn=document.getElementById('btn');"
+        "btn.onclick=()=>{"
+        "const w=window.open("
+          "'about:blank',"
+          "'_blank',"
+          "'width=400,height=300,left=100,top=100,resizable=yes,"
+            "scrollbars=yes,status=yes,menubar=no,"
+            "toolbar=no,location=no');};"
+        "</script>")
+
+    # the crash doesn't consistently reproduce
+    # it generally happens within 10 iterations
+    for i in range(10):
+        print(f"Test iteration {i+1}/10")
+
+        self._driver.FindElement("css selector", "#btn").Click()
+
+        # Switch to the newest window
+        handles = self._driver.GetWindowHandles()
+        base = handles[0]
+        if len(handles) < 2:
+            raise RuntimeError("Second window did not open")
+        child = handles[-1]
+
+        # Close with timeout mechanism
+        closeWindowWhileSpammingWithRequests(self._driver, child, base)
+
+        time.sleep(0.3)
+    pass
+
   def testSerializeWindowProxy(self):
     self._driver.Load(self.GetHttpUrlForFile(
         '/chromedriver/outer.html'))
@@ -4361,6 +4454,29 @@ class ChromeDriverTest(ChromeDriverBaseTestWithWebServer):
     self.assertTrue(
         self.WaitForCondition(
             lambda: len(self._driver.GetWindowHandles()) == 1))
+
+  # Regression test for https://crbug.com/478783560.
+  def testWebSocketConnectionFromRemoteOriginFails(self):
+    driver = self.CreateDriver(
+        chrome_switches=['--host-resolver-rules=MAP * 127.0.0.1'])
+    server_url = urllib.parse.urlparse(_CHROMEDRIVER_SERVER_URL)
+    ws_url = f'ws://127.0.0.1:{server_url.port}/session'
+    driver.Load(self._http_server.GetUrl('example.com') +
+                '/chromedriver/empty.html')
+    script = """
+      let ws_url = arguments[0];
+      let done = arguments[1];
+      let ws = new WebSocket(ws_url);
+      ws.onopen = function() {
+        ws.close();
+        done('UNEXPECTEDLY_OPEN');
+      };
+      ws.onclose = function() {
+        done('CORRECTLY_CLOSED');
+      };
+    """
+    result = driver.ExecuteAsyncScript(script, ws_url)
+    self.assertEqual('CORRECTLY_CLOSED', result)
 
 class ChromeDriverPdfTest(ChromeDriverBaseTestWithWebServer):
   """ Regression test for crbug.com/396611138 """
@@ -5967,6 +6083,62 @@ class ChromeDriverSiteIsolation(ChromeDriverBaseTestWithWebServer):
     frame_url = self._driver.ExecuteScript('return window.location.href')
     self.assertTrue(frame_url.endswith('#two'))
 
+  def testClickOnOverlayOverCrossOriginIframe(self):
+    """Regression test for crbug.com/42321834 and duplicate 42322220."""
+    # When an element is visually on top of an out-of-process, cross-origin
+    # iframe, ChromeDriver must not "silently miss" it (i.e., report success
+    # but not actually dispatch a click to the overlay).
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/click_over_cross_origin_iframe.html'))
+
+    if not self.WaitForCondition(
+        lambda: 'complete' ==
+                self._driver.ExecuteScript('return document.readyState')):
+      self.fail('Timed out waiting for the test page to finish loading.')
+
+    if not self.WaitForCondition(
+        lambda: 1 == self._driver.ExecuteScript(
+            'return window.getState().iframeReadyCount')):
+      self.fail('Timed out waiting for iframe readiness. State: %s' %
+                self._driver.ExecuteScript('return window.getState()'))
+
+    self.assertTrue(self._driver.ExecuteScript('''
+      const xframe = document.getElementById('xframe');
+      return new URL(xframe.src).hostname !== location.hostname;
+    '''))
+
+    overlay = self._driver.FindElement('css selector', '#overlay')
+    self.assertTrue(overlay.IsDisplayed())
+    self.assertFalse(overlay.GetProperty('disabled'))
+
+    self.assertTrue(self._driver.ExecuteScript(
+        'return window.getHitTestDebug().overlayCenterWithinIframeRect'),
+        msg='overlay center must overlap iframe for this test to be valid')
+    self.assertTrue(self._driver.ExecuteScript(
+        'return window.assertOverlayIsHitTestTarget()'),
+        msg='overlay must be the hit-test target at its center point')
+
+    state = self._driver.ExecuteScript('return window.getState()')
+    self.assertEqual(0, state['overlayClickCount'])
+    self.assertEqual(0, state['iframeClickCount'])
+    self.assertEqual('NOT_CLICKED', state['overlayMarkerText'])
+
+    for expected_overlay_click_count in (1, 2):
+      overlay.Click()
+
+      if not self.WaitForCondition(
+          lambda: expected_overlay_click_count ==
+                  self._driver.ExecuteScript(
+                      'return window.getState().overlayClickCount')):
+        self.fail('Timed out waiting for overlay click. State: %s' %
+                  self._driver.ExecuteScript('return window.getState()'))
+
+      state = self._driver.ExecuteScript('return window.getState()')
+      self.assertEqual(expected_overlay_click_count, state['overlayClickCount'],
+                       state)
+      self.assertEqual('OVERLAY_CLICKED', state['overlayMarkerText'], state)
+      self.assertEqual(0, state['iframeClickCount'], state)
+
   def testScriptNavigateLocalToLocal(self):
     """Test that user can switch into a local frame
     and perform a same domain navigation.
@@ -7405,15 +7577,15 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTestWithWebServer):
     driver = self.CreateDriver(
         mobile_emulation = {'deviceName': 'iPhone X'})
     driver.Load(self._http_server.GetUrl() + '/userAgent')
-    self.assertEqual('', driver.ExecuteScript(
+    self.assertEqual('iOS', driver.ExecuteScript(
         'return navigator.userAgentData.platform'))
     self.assertEqual(True, driver.ExecuteScript(
         'return navigator.userAgentData.mobile'))
     hints = self.getHighEntropyClientHints(driver)
     self.assertEqual('', hints['architecture'])
     self.assertEqual('', hints['bitness'])
-    self.assertEqual('', hints['model'])
-    self.assertEqual('', hints['platformVersion'])
+    self.assertEqual('iPhone', hints['model'])
+    self.assertEqual('13.2.3', hints['platformVersion'])
     self.assertEqual(False, hints['wow64'])
     expected_ua = ''.join(('Mozilla/5.0 ',
                            '(iPhone; CPU iPhone OS 13_2_3 like Mac OS X) ',
@@ -7427,15 +7599,15 @@ class MobileEmulationCapabilityTest(ChromeDriverBaseTestWithWebServer):
     driver = self.CreateDriver(
         mobile_emulation = {'deviceName': 'iPad'})
     driver.Load(self._http_server.GetUrl() + '/userAgent')
-    self.assertEqual('', driver.ExecuteScript(
+    self.assertEqual('iOS', driver.ExecuteScript(
         'return navigator.userAgentData.platform'))
-    self.assertEqual(False, driver.ExecuteScript(
+    self.assertEqual(True, driver.ExecuteScript(
         'return navigator.userAgentData.mobile'))
     hints = self.getHighEntropyClientHints(driver)
     self.assertEqual('', hints['architecture'])
     self.assertEqual('', hints['bitness'])
-    self.assertEqual('', hints['model'])
-    self.assertEqual('', hints['platformVersion'])
+    self.assertEqual('iPad', hints['model'])
+    self.assertEqual('11.0', hints['platformVersion'])
     self.assertEqual(False, hints['wow64'])
     expected_ua = ''.join(('Mozilla/5.0 (iPad; CPU OS 11_0 like Mac OS X) ',
                            'AppleWebKit/604.1.34 (KHTML, like Gecko) ',

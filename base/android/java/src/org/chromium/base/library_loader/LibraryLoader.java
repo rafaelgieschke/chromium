@@ -481,11 +481,7 @@ public class LibraryLoader {
     /**
      * Returns the singleton Linker instance.
      *
-     * On N, O and P Monochrome is selected by Play Store. With Monochrome this code is not used,
-     * instead Chrome asks the WebView to provide the library (and the shared RELRO). If the WebView
-     * fails to provide the library, the system linker is used as a fallback.
-     *
-     * More: docs/android_native_libraries.md
+     * <p>More: docs/android_native_libraries.md.
      *
      * @return the Linker implementation instance.
      */
@@ -672,11 +668,13 @@ public class LibraryLoader {
     protected void loadMainDexAlreadyLocked(ApplicationInfo appInfo, boolean inZygote) {
         try (TraceEvent te = TraceEvent.scoped("LibraryLoader.loadMainDexAlreadyLocked")) {
             if (mLoadState >= LoadState.MAIN_DEX_LOADED) {
-                if (sEnableStateForTesting && mLoadStateForTesting == LoadState.NOT_LOADED) {
+                if (sEnableStateForTesting) {
                     if (sOverrideNativeLibraryCannotBeLoadedForTesting) {
                         throw new UnsatisfiedLinkError();
                     }
-                    mLoadStateForTesting = LoadState.MAIN_DEX_LOADED;
+                    if (mLoadStateForTesting == LoadState.NOT_LOADED) {
+                        mLoadStateForTesting = LoadState.MAIN_DEX_LOADED;
+                    }
                 }
                 return;
             }

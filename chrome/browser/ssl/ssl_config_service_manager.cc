@@ -49,10 +49,9 @@ const char kPrefStringValueCnsa2[] = "cnsa2";
 // National Security Algorithm Suite versions 1.0 and 2.0 (CNSA 1.0 and 2.0).
 const char kPrefStringValueCnsa[] = "cnsa";
 
-// Converts a `base::Value::List` of StringValues into a vector of strings. Any
+// Converts a `base::ListValue` of StringValues into a vector of strings. Any
 // values which cannot be converted will be skipped.
-std::vector<std::string> ValueListToStringVector(
-    const base::Value::List& list) {
+std::vector<std::string> ValueListToStringVector(const base::ListValue& list) {
   std::vector<std::string> results;
   results.reserve(list.size());
   for (const auto& entry : list) {
@@ -138,13 +137,6 @@ SSLConfigServiceManager::SSLConfigServiceManager(PrefService* local_state) {
                         local_state_callback);
   h2_client_cert_coalescing_host_patterns_.Init(
       prefs::kH2ClientCertCoalescingHosts, local_state, local_state_callback);
-  post_quantum_enabled_.Init(prefs::kPostQuantumKeyAgreementEnabled,
-                             local_state, local_state_callback);
-#if BUILDFLAG(IS_CHROMEOS)
-  device_post_quantum_enabled_.Init(
-      prefs::kDevicePostQuantumKeyAgreementEnabled, local_state,
-      local_state_callback);
-#endif
   ech_enabled_.Init(prefs::kEncryptedClientHelloEnabled, local_state,
                     local_state_callback);
   key_exchange_compliance_.Init(prefs::kPreferSlowKexAlgorithms, local_state,
@@ -182,14 +174,6 @@ void SSLConfigServiceManager::RegisterPrefs(PrefRegistrySimple* registry) {
   // in certain Profiles. Their value is only used if managed.
   registry->RegisterStringPref(prefs::kPreferSlowKexAlgorithms, std::string());
   registry->RegisterStringPref(prefs::kPreferSlowCiphers, std::string());
-
-  // Default value for these prefs don't matter since they are only used when
-  // managed.
-  registry->RegisterBooleanPref(prefs::kPostQuantumKeyAgreementEnabled, false);
-#if BUILDFLAG(IS_CHROMEOS)
-  registry->RegisterBooleanPref(prefs::kDevicePostQuantumKeyAgreementEnabled,
-                                true);
-#endif
 }
 
 void SSLConfigServiceManager::AddToNetworkContextParams(
@@ -203,9 +187,11 @@ void SSLConfigServiceManager::AddToNetworkContextParams(
 
 void SSLConfigServiceManager::UpdateTrustAnchorIDs(
     std::vector<std::vector<uint8_t>> trust_anchor_ids,
-    std::vector<std::vector<uint8_t>> mtc_trust_anchor_ids) {
+    std::vector<std::vector<uint8_t>> mtc_trust_anchor_ids,
+    int64_t mtc_update_time_seconds) {
   trust_anchor_ids_ = std::move(trust_anchor_ids);
   mtc_trust_anchor_ids_ = std::move(mtc_trust_anchor_ids);
+  mtc_update_time_seconds_ = mtc_update_time_seconds;
   network::mojom::SSLConfigPtr new_config = GetNewSSLConfig();
   network::mojom::SSLConfig* raw_config = new_config.get();
 
@@ -267,23 +253,13 @@ network::mojom::SSLConfigPtr SSLConfigServiceManager::GetNewSSLConfig() const {
 
   config->ech_enabled = ech_enabled_.GetValue();
 
-  if (post_quantum_enabled_.IsManaged()) {
-    config->post_quantum_key_agreement_enabled =
-        post_quantum_enabled_.GetValue();
-  }
-#if BUILDFLAG(IS_CHROMEOS)
-  if (device_post_quantum_enabled_.IsManaged()) {
-    config->post_quantum_key_agreement_enabled =
-        device_post_quantum_enabled_.GetValue();
-  }
-#endif
-
 #if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
   config->trust_anchor_ids =
       trust_anchor_ids_.has_value()
           ? trust_anchor_ids_.value()
           : net::TrustStoreChrome::GetTrustAnchorIDsFromCompiledInRootStore();
   config->mtc_trust_anchor_ids = mtc_trust_anchor_ids_;
+  config->mtc_update_time_seconds = mtc_update_time_seconds_;
 #endif
 
   ConfigureSSLComplianceSettings(key_exchange_compliance_,
@@ -294,7 +270,7 @@ network::mojom::SSLConfigPtr SSLConfigServiceManager::GetNewSSLConfig() const {
 
 void SSLConfigServiceManager::OnDisabledCipherSuitesChange(
     PrefService* local_state) {
-  const base::Value::List& list =
+  const base::ListValue& list =
       local_state->GetList(prefs::kCipherSuiteBlacklist);
   disabled_cipher_suites_ = ParseCipherSuites(ValueListToStringVector(list));
 }

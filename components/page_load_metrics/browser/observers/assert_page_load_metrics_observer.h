@@ -138,10 +138,11 @@ class AssertPageLoadMetricsObserver final
   void OnUserInput(
       const blink::WebInputEvent& event,
       const page_load_metrics::mojom::PageLoadTiming& timing) override;
-  void OnPageInputTimingUpdate(uint64_t num_interactions) override;
-  void OnInputTimingUpdate(
+  void OnPageEventTimingUpdate(uint64_t num_interactions) override;
+  void OnEventTimingUpdate(
       content::RenderFrameHost* subframe_rfh,
-      const page_load_metrics::mojom::InputTiming& input_timing_delta) override;
+      const std::vector<page_load_metrics::mojom::EventTimingPtr>&
+          event_timings) override;
 
   // Page render data update
   void OnPageRenderDataUpdate(
@@ -165,8 +166,8 @@ class AssertPageLoadMetricsObserver final
   void OnRestoreFromBackForwardCache(
       const page_load_metrics::mojom::PageLoadTiming& timing,
       content::NavigationHandle* navigation_handle) override {}
-  void OnSoftNavigationUpdated(
-      const page_load_metrics::mojom::SoftNavigationMetrics&) override {}
+  void OnSoftNavigation() override {}
+  void OnSoftNavigationLargestContentfulPaint(uint64_t num_soft_lcps) override {}
   void OnCpuTimingUpdate(
       content::RenderFrameHost* subframe_rfh,
       const page_load_metrics::mojom::CpuTiming& timing) override {}

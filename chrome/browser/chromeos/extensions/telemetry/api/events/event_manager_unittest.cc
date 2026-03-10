@@ -16,6 +16,7 @@
 #include "chrome/browser/chromeos/extensions/telemetry/api/events/fake_events_service_factory.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_navigator.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/web_applications/test/isolated_web_app_test_utils.h"
@@ -100,16 +101,16 @@ class TelemetryExtensionEventManagerTest : public BrowserWithTestWindowTest {
   scoped_refptr<const extensions::Extension> CreateExtension(
       const std::string& extension_id,
       const std::vector<std::string> external_connectables) {
-    base::Value::List matches;
+    base::ListValue matches;
     for (const auto& match : external_connectables) {
       matches.Append(match);
     }
     auto extension =
         extensions::ExtensionBuilder("Test ChromeOS System Extension")
-            .SetManifestKey("chromeos_system_extension", base::Value::Dict())
+            .SetManifestKey("chromeos_system_extension", base::DictValue())
             .SetManifestKey(
                 "externally_connectable",
-                base::Value::Dict().Set("matches", std::move(matches)))
+                base::DictValue().Set("matches", std::move(matches)))
             .SetID(extension_id)
             .SetLocation(extensions::mojom::ManifestLocation::kInternal)
             .Build();
@@ -128,6 +129,20 @@ class TelemetryExtensionEventManagerTest : public BrowserWithTestWindowTest {
       event_manager()->app_ui_observers_[extension_id]->OnWebContentsLostFocus(
           nullptr);
     }
+  }
+
+  // TODO(crbug.com/480103891): We should not be faking browser activation state
+  // via indirect means (such as direct calls to `DidBecomeActive()`). We should
+  // instead convert this to an interactive browser test and directly activate
+  // the browser's backing ui::BaseWindow.
+  void ActivateBrowser(BrowserWindowInterface* browser) {
+    // We must fake deactivation the previously activated browser first.
+    GetLastActiveBrowserWindowInterfaceWithAnyProfile()
+        ->GetBrowserForMigrationOnly()
+        ->DidBecomeInactive();
+
+    // Simulate activation of `browser`.
+    browser->GetBrowserForMigrationOnly()->DidBecomeActive();
   }
 
   EventManager* event_manager() { return EventManager::Get(profile()); }
@@ -209,7 +224,7 @@ TEST_F(TelemetryExtensionEventManagerTest,
                                           /*cert_status=*/net::OK);
   auto new_browser =
       CreateBrowser(GetProfile(), Browser::Type::TYPE_NORMAL, false);
-  BrowserList::SetLastActive(new_browser.get());
+  ActivateBrowser(new_browser.get());
 
   EXPECT_EQ(
       EventManager::kSuccess,
@@ -258,7 +273,7 @@ TEST_F(TelemetryExtensionEventManagerTest,
                                           /*cert_status=*/net::OK);
   auto new_browser =
       CreateBrowser(GetProfile(), Browser::Type::TYPE_NORMAL, false);
-  BrowserList::SetLastActive(new_browser.get());
+  ActivateBrowser(new_browser.get());
 
   EXPECT_EQ(EventManager::kAppUiNotFocused,
             event_manager()->RegisterExtensionForEvent(

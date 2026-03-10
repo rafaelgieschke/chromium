@@ -6,6 +6,7 @@
 #define DEVICE_VR_OPENXR_OPENXR_UTIL_H_
 
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "device/vr/public/mojom/pose.h"
 #include "device/vr/public/mojom/vr_service.mojom-forward.h"
 #include "device/vr/public/mojom/xr_session.mojom-forward.h"
@@ -60,6 +61,7 @@ XrPosef PoseIdentity();
 gfx::Transform XrPoseToGfxTransform(const XrPosef& pose);
 device::Pose XrPoseToDevicePose(const XrPosef& pose);
 device::Pose ZNormalXrPoseToYNormalDevicePose(const XrPosef& pose);
+gfx::Point3F ZNormalPositionToYNormalPosition(const gfx::Point3F& point);
 XrPosef GfxTransformToXrPose(const gfx::Transform& transform);
 XrQuaternionf GfxQuaternionToXrQuaternion(const gfx::Quaternion& quaternion);
 mojom::VRFieldOfViewPtr XrFovToMojomFov(const XrFovf& xr_fov);
@@ -67,6 +69,34 @@ bool IsPoseValid(XrSpaceLocationFlags locationFlags);
 
 bool IsFeatureSupportedForMode(device::mojom::XRSessionFeature feature,
                                device::mojom::XRSessionMode mode);
+
+// Define a concept for a struct to help validate that it can be safely cast to
+// an XrBaseOutStructure.
+template <typename XrStruct>
+concept ChainableOpenXrStruct =
+    offsetof(XrStruct, type) == offsetof(XrBaseOutStructure, type) &&
+    offsetof(XrStruct, next) == offsetof(XrBaseOutStructure, next);
+
+// A helper type used to build a next chain of extension structs for OpenXr.
+class XrNextChainBuilder {
+ public:
+  template <ChainableOpenXrStruct XrStruct>
+  explicit XrNextChainBuilder(XrStruct* head)
+      : head(reinterpret_cast<XrBaseOutStructure*>(head)) {}
+
+  // Add the provided struct to the current next chain. Note that this expects
+  // the struct to not currently have any item in it's next chain.
+  template <ChainableOpenXrStruct XrStruct>
+  void Add(XrStruct* xr_struct) {
+    auto* base_struct = reinterpret_cast<XrBaseOutStructure*>(xr_struct);
+    CHECK_EQ(base_struct->next, nullptr);
+    base_struct->next = head->next;
+    head->next = base_struct;
+  }
+
+ private:
+  raw_ptr<XrBaseOutStructure> head;
+};
 
 }  // namespace device
 

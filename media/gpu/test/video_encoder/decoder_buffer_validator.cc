@@ -7,7 +7,6 @@
 #include <set>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/numerics/safe_conversions.h"
@@ -364,6 +363,16 @@ bool H264Validator::Validate(const DecoderBuffer* buffer,
           LOG(ERROR) << "Prefix NALU should be generated only if temproal "
                         "layer encoding";
           return false;
+        }
+
+        bool vaapi_video_encoder = false;
+#if BUILDFLAG(USE_VAAPI)
+        vaapi_video_encoder = true;
+#endif
+        if (!vaapi_video_encoder) {
+          // Skip Prefix NALU check: Trogdor's v4l2 video encoder produces an
+          // invalid prefix NALU. (b/477359926)
+          break;
         }
 
         std::optional<H264PrefixNALU> prefix_nalu = ParseH264Prefix(nalu);
@@ -902,7 +911,7 @@ bool VP9Validator::ValidateSVCStream(const DecoderBuffer& decoder_buffer,
                    << static_cast<int>(ref_frame_index);
         return false;
       }
-      if (base::Contains(used_indices, ref_frame_index)) {
+      if (used_indices.contains(ref_frame_index)) {
         // |header.ref_frame_index| might have the same indices because an
         // encoder fills the same index if the actually used ref frames is less
         // than |kVp9NumRefsPerFrame|.
@@ -1074,7 +1083,7 @@ bool VP9Validator::ValidateSmodeStream(const DecoderBuffer& decoder_buffer,
                    << static_cast<int>(ref_frame_index);
         return false;
       }
-      if (base::Contains(used_indices, ref_frame_index)) {
+      if (used_indices.contains(ref_frame_index)) {
         // |header.ref_frame_index| might have the same indices because an
         // encoder fills the same index if the actually used ref frames is less
         // than |kVp9NumRefsPerFrame|.
@@ -1268,7 +1277,7 @@ bool AV1Validator::ValidateTemporalSVCStream(
                    << static_cast<int>(ref_frame_index);
         return false;
       }
-      if (base::Contains(used_indices, ref_frame_index)) {
+      if (used_indices.contains(ref_frame_index)) {
         // |header.ref_frame_index| might have the same indices because an
         // encoder fills the same index if the actually used ref frames is less
         // than |kNumReferenceFrameTypes|.

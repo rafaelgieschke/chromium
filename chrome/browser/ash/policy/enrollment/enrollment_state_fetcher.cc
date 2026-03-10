@@ -534,7 +534,7 @@ class StateKeys {
 class EnrollmentState {
  public:
   struct Result {
-    base::Value::Dict dict;
+    base::DictValue dict;
     AutoEnrollmentState state;
   };
   using CompletionCallback = base::OnceCallback<void(Result)>;
@@ -647,6 +647,11 @@ class EnrollmentState {
     if (state_response.has_disabled_state()) {
       result.dict.Set(kDeviceStateDisabledMessage,
                       state_response.disabled_state().message());
+      if (state_response.disabled_state().has_location_tracking_enabled()) {
+        result.dict.Set(
+            kDeviceStateLocationTrackingEnabled,
+            state_response.disabled_state().location_tracking_enabled());
+      }
     }
 
     LOG(WARNING) << "Initial enrollment mode = '" << mode << "', "
@@ -680,6 +685,11 @@ class EnrollmentState {
     if (state_response.has_disabled_state()) {
       result.dict.Set(kDeviceStateDisabledMessage,
                       state_response.disabled_state().message());
+      if (state_response.disabled_state().has_location_tracking_enabled()) {
+        result.dict.Set(
+            kDeviceStateLocationTrackingEnabled,
+            state_response.disabled_state().location_tracking_enabled());
+      }
     }
 
     if (state_response.has_license_type()) {
@@ -696,7 +706,7 @@ class EnrollmentState {
     return std::move(completion_callback).Run(std::move(result));
   }
 
-  void StoreResponse(PrefService* local_state, const base::Value::Dict& dict) {
+  void StoreResponse(PrefService* local_state, const base::DictValue& dict) {
     LOG(WARNING) << "ServerBackedDeviceState pref: " << dict;
     local_state->SetDict(prefs::kServerBackedDeviceState, dict.Clone());
   }

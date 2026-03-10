@@ -40,7 +40,7 @@ IN_PROC_BROWSER_TEST_F(PreservedWindowPlacement, PRE_Test) {
 }
 
 // Fails on Chrome OS as the browser thinks it is restarting after a crash, see
-// http://crbug.com/168044
+// http://crbug.com/40297793
 #if BUILDFLAG(IS_CHROMEOS)
 #define MAYBE_Test DISABLED_Test
 #else
@@ -105,7 +105,7 @@ IN_PROC_BROWSER_TEST_F(PreferenceServiceTest, Test) {
 
   ASSERT_TRUE(root.get());
   ASSERT_TRUE(root->is_dict());
-  base::Value::Dict& root_dict = root->GetDict();
+  base::DictValue& root_dict = root->GetDict();
 
   // Retrieve the screen rect for the launched window
   gfx::Rect bounds = browser()->window()->GetRestoredBounds();

@@ -12,6 +12,7 @@
 
 #include "base/functional/callback.h"
 #include "base/values.h"
+#include "content/browser/webid/identity_registry.h"
 #include "content/browser/webid/network_request_manager.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/frame_tree_node_id.h"
@@ -21,6 +22,7 @@
 #include "services/data_decoder/public/cpp/data_decoder.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/mojom/client_security_state.mojom-forward.h"
+#include "third_party/blink/public/mojom/webid/federated_auth_request.mojom-forward.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -141,6 +143,30 @@ class CONTENT_EXPORT IdpNetworkRequestManager : public NetworkRequestManager {
     std::optional<IdentityCredentialTokenError> error;
   };
 
+  struct CONTENT_EXPORT AccountsResponse {
+    AccountsResponse();
+    ~AccountsResponse();
+    AccountsResponse(const AccountsResponse&);
+    AccountsResponse(AccountsResponse&&);
+    AccountsResponse& operator=(const AccountsResponse&);
+
+    // Returns potentially sign-in accounts on a given website based on the
+    // website's eTLD+1. e.g. for an origin https://login.website.example, we
+    // check if the user has any sign-in accounts from this IdP on the site
+    // "website.example".
+    std::vector<IdentityRequestAccountPtr> PotentialAccountsForSite(
+        const std::string& site) const;
+
+    // The list of all accounts to be shown in the UI.
+    std::vector<IdentityRequestAccountPtr> accounts;
+    // A salt used to compute hashes of the RP site (eTLD+1) to check against
+    // potentially_approved_site_hashes in each account. This allows the browser
+    // to filter accounts based on whether they have been used on the current
+    // site before, without the IdP knowing the current site until an account is
+    // selected.
+    std::string site_salt;
+  };
+
   enum class DisconnectResponse {
     kSuccess,
     kError,
@@ -205,10 +231,9 @@ class CONTENT_EXPORT IdpNetworkRequestManager : public NetworkRequestManager {
   // LINT.ThenChange(//tools/metrics/histograms/metadata/blink/enums.xml:FedCmErrorUrlType)
 
   using AccountsRequestCallback =
-      base::OnceCallback<void(FetchStatus,
-                              std::vector<IdentityRequestAccountPtr>)>;
+      base::OnceCallback<void(FetchStatus, AccountsResponse)>;
   using FetchAccountPicturesAndBrandIconsCallback =
-      base::OnceCallback<void(std::vector<IdentityRequestAccountPtr>,
+      base::OnceCallback<void(AccountsResponse,
                               std::unique_ptr<IdentityProviderInfo>,
                               const gfx::Image&)>;
   using FetchIdpBrandIconCallback =
@@ -225,6 +250,11 @@ class CONTENT_EXPORT IdpNetworkRequestManager : public NetworkRequestManager {
   using TokenRequestCallback =
       base::OnceCallback<void(FetchStatus, TokenResult&&)>;
   using ContinueOnCallback = base::OnceCallback<void(FetchStatus, const GURL&)>;
+  using RedirectToCallback =
+      base::OnceCallback<void(FetchStatus,
+                              blink::mojom::FedCmRedirectMethod,
+                              const GURL&,
+                              const std::string& request_body)>;
   using RecordErrorMetricsCallback =
       base::OnceCallback<void(FedCmTokenResponseType,
                               std::optional<FedCmErrorDialogType>,
@@ -254,7 +284,6 @@ class CONTENT_EXPORT IdpNetworkRequestManager : public NetworkRequestManager {
 
   // Attempt to fetch the IDP's FedCM parameters from the config file.
   virtual void FetchConfig(const GURL& provider,
-                           blink::mojom::RpMode rp_mode,
                            int idp_brand_icon_ideal_size,
                            int idp_brand_icon_minimum_size,
                            FetchConfigCallback);
@@ -285,6 +314,7 @@ class CONTENT_EXPORT IdpNetworkRequestManager : public NetworkRequestManager {
       bool idp_blindness,
       TokenRequestCallback callback,
       ContinueOnCallback continue_on,
+      RedirectToCallback redirect_to,
       RecordErrorMetricsCallback record_error_metrics_callback);
 
   // Sends metrics to metrics endpoint after a token was successfully generated.
@@ -314,7 +344,7 @@ class CONTENT_EXPORT IdpNetworkRequestManager : public NetworkRequestManager {
   virtual void DownloadAndDecodeImage(const GURL& url, ImageCallback callback);
 
   void FetchAccountPicturesAndBrandIcons(
-      const std::vector<IdentityRequestAccountPtr>& accounts,
+      const AccountsResponse& accounts,
       std::unique_ptr<IdentityProviderInfo> idp_info,
       const GURL& rp_brand_icon_url,
       FetchAccountPicturesAndBrandIconsCallback callback);
@@ -350,7 +380,7 @@ class CONTENT_EXPORT IdpNetworkRequestManager : public NetworkRequestManager {
   void OnAllAccountPicturesAndBrandIconUrlReceived(
       FetchAccountPicturesAndBrandIconsCallback callback,
       std::unique_ptr<IdentityProviderInfo> idp_info,
-      std::vector<IdentityRequestAccountPtr>&& accounts,
+      AccountsResponse&& accounts,
       const GURL& rp_brand_icon_url);
   void OnIdpBrandIconReceived(std::unique_ptr<IdentityProviderInfo> idp_info,
                               FetchIdpBrandIconCallback callback);

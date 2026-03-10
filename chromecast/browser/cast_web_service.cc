@@ -4,11 +4,11 @@
 
 #include "chromecast/browser/cast_web_service.h"
 
+#include <algorithm>
 #include <memory>
 #include <utility>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
@@ -109,7 +109,6 @@ void CastWebService::ClearLocalStorage(ClearLocalStorageCallback callback) {
             network::mojom::CookieDeletionSessionControl::IGNORE_CONTROL;
         partition->ClearData(
             remove_data_mask,
-            content::StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL,
             /*filter_builder=*/nullptr,
             content::StoragePartition::StorageKeyPolicyMatcherFunction(),
             std::move(cookie_delete_filter), /*perform_cleanup=*/true,
@@ -118,7 +117,7 @@ void CastWebService::ClearLocalStorage(ClearLocalStorageCallback callback) {
 }
 
 bool CastWebService::IsCastWebUIOrigin(const url::Origin& origin) {
-  return base::Contains(cast_webui_hosts_, origin.host());
+  return std::ranges::contains(cast_webui_hosts_, origin.host());
 }
 
 void CastWebService::RegisterWebUiClient(
@@ -148,7 +147,8 @@ void CastWebService::OwnerDestroyed(CastWebView* web_view) {
     content::MediaSession::Get(web_contents)
         ->Suspend(content::MediaSession::SuspendType::kSystem);
   }
-  if (!base::Contains(web_views_, web_view, &std::unique_ptr<CastWebView>::get))
+  if (!std::ranges::contains(web_views_, web_view,
+                             &std::unique_ptr<CastWebView>::get))
     web_views_.emplace(web_view);
   auto delay = web_view->shutdown_delay();
   if (delay <= base::TimeDelta() || immediately_delete_webviews_) {

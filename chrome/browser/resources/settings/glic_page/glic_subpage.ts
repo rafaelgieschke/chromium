@@ -11,6 +11,7 @@ import 'chrome://resources/cr_elements/cr_expand_button/cr_expand_button.js';
 import 'chrome://resources/cr_elements/cr_icon/cr_icon.js';
 import '../icons.html.js';
 import '../settings_page/settings_subpage.js';
+import './glic_login_permissions_page.js';
 // <if expr="_google_chrome">
 import '../internal/icons.html.js';
 
@@ -31,6 +32,8 @@ import {AiPageActions} from '../ai_page/constants.js';
 import type {SettingsToggleButtonElement} from '../controls/settings_toggle_button.js';
 import type {MetricsBrowserProxy} from '../metrics_browser_proxy.js';
 import {MetricsBrowserProxyImpl} from '../metrics_browser_proxy.js';
+import {routes} from '../route.js';
+import {Router} from '../router.js';
 import {SettingsViewMixin} from '../settings_page/settings_view_mixin.js';
 
 import type {GlicBrowserProxy} from './glic_browser_proxy.js';
@@ -108,10 +111,10 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
         },
       },
 
-      closedCaptionsFeatureEnabled_: {
+      closedCaptionsToggleEnabled_: {
         type: Boolean,
         value: () => {
-          return loadTimeData.getBoolean('glicClosedCaptionsFeatureEnabled');
+          return loadTimeData.getBoolean('glicCanUseLive');
         },
       },
 
@@ -167,6 +170,13 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
         type: String,
         computed: `computeMicrophoneSubLabel_(prefs.${
             SettingsGlicPageFeaturePrefName.USER_STATUS}.value)`,
+      },
+
+      microphoneToggleEnabled_: {
+        type: Boolean,
+        value: () => {
+          return loadTimeData.getBoolean('glicCanUseLive');
+        },
       },
 
       tabAccessSubLabel_: {
@@ -252,7 +262,12 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
         type: String,
         computed: `computeWebActuationLearnMoreUrl_(prefs.${
             SettingsGlicPageFeaturePrefName.USER_STATUS}.value)`,
+      },
 
+      actorLoginFederatedLoginSupportEnabled_: {
+        type: Boolean,
+        value: () =>
+            loadTimeData.getBoolean('actorLoginFederatedLoginSupportEnabled'),
       },
     };
   }
@@ -284,7 +299,7 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
       MetricsBrowserProxyImpl.getInstance();
   declare private tabAccessToggleExpanded_: boolean;
   declare private defaultTabAccessToggleExpanded_: boolean;
-  declare private closedCaptionsFeatureEnabled_: boolean;
+  declare private closedCaptionsToggleEnabled_: boolean;
   declare private glicExtensionsFeatureEnabled_: boolean;
   declare private glicUserStatusCheckFeatureEnabled_: boolean;
   declare private showGlicDefaultTabContextSetting_: boolean;
@@ -294,6 +309,7 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
   declare private locationSubLabel_: string;
   declare private locationLearnMoreUrl_: string;
   declare private microphoneSubLabel_: string;
+  declare private microphoneToggleEnabled_: boolean;
   declare private tabAccessSubLabel_: string;
   declare private tabAccessLearnMoreUrl_: string;
   declare private defaultTabAccessSubLabel_: string;
@@ -307,6 +323,7 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
   declare private webActuationDisabledForEnterprisePref_:
       chrome.settingsPrivate.PrefObject<boolean>;
   declare private webActuationEnabledExpanded_: boolean;
+  declare private actorLoginFederatedLoginSupportEnabled_: boolean;
 
   override async connectedCallback() {
     super.connectedCallback();
@@ -369,10 +386,10 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
 
   private async onShortcutUpdated_(event: CustomEvent<string>) {
     this.shortcutInput_ = event.detail;
-    await this.browserProxy_.setGlicShortcut(this.shortcutInput_);
     if (this.removedShortcut_ === null) {
       this.removedShortcut_ = this.registeredShortcut_;
     }
+    await this.browserProxy_.setGlicShortcut(this.shortcutInput_);
     this.registeredShortcut_ = await this.browserProxy_.getGlicShortcut();
     // Records true if the shortcut string is defined and not empty.
     this.metricsBrowserProxy_.recordBooleanHistogram(
@@ -472,6 +489,10 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
   private onActivityRowClick_() {
     OpenWindowProxyImpl.getInstance().openUrl(
         this.i18n('glicActivityButtonUrl'));
+  }
+
+  private onActorLoginPermissionsRowClick_() {
+    Router.getInstance().navigateTo(routes.GEMINI_LOGIN);
   }
 
   private onExtensionsRowClick_() {
@@ -597,6 +618,15 @@ export class SettingsGlicSubpageElement extends SettingsGlicSubpageElementBase {
   // SettingsViewMixin implementation.
   override focusBackButton() {
     this.shadowRoot!.querySelector('settings-subpage')!.focusBackButton();
+  }
+
+  // SettingsViewMixin implementation.
+  override getAssociatedControlFor(childViewId: string): HTMLElement {
+    assert(childViewId === 'geminiLoginPermissions');
+    const element = this.shadowRoot!.querySelector<HTMLElement>(
+        '#actorLoginPermissionsButton');
+    assert(element);
+    return element;
   }
 
   private onWebActuationToggleChange_(event: CustomEvent) {

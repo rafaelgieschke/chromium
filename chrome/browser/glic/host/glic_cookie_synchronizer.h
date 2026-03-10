@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/functional/callback_forward.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
@@ -58,17 +59,24 @@ class GlicCookieSynchronizer
       signin::IdentityManager* identity_manager) override;
 
  protected:
+  FRIEND_TEST_ALL_PREFIXES(GlicCookieSynchronizerTest,
+                           UnifiedFreUsesGlicPartitionWithBugfixFeature);
+  FRIEND_TEST_ALL_PREFIXES(GlicCookieSynchronizerTest,
+                           StandaloneFreUsesFrePartition);
+
   // Returns storage partition for this authentication request.
   // visible for testing.
   virtual content::StoragePartition* GetStoragePartition();
 
  private:
   class SyncCookiesForDevelopmentTask;
+  class ClearCookiesTask;
   base::WeakPtr<GlicCookieSynchronizer> GetWeakPtr() {
     return weak_ptr_factory_.GetWeakPtr();
   }
 
   void SyncCookiesForDevelopmentComplete(bool success);
+  void ClearCookiesComplete();
   void BeginCookieSync();
 
   // signin::AccountsCookieMutator::PartitionDelegate:
@@ -86,19 +94,21 @@ class GlicCookieSynchronizer
   void CompleteAuth(bool is_success);
   void OnTimeout();
 
+  bool has_cleared_cookies_ = false;
   const raw_ptr<content::BrowserContext> context_;
   const raw_ptr<signin::IdentityManager> identity_manager_;
   base::ScopedObservation<signin::IdentityManager,
                           signin::IdentityManager::Observer>
       observation_{this};
 
-  // Whether to configure the storage partiion for use by the glic FRE webview.
+  // Whether to configure the storage partition for use by the glic FRE webview.
   bool use_for_fre_ = false;
 
   std::vector<base::OnceCallback<void(bool)>> callbacks_;
   base::OneShotTimer timeout_;
   std::unique_ptr<signin::AccountsCookieMutator::SetAccountsInCookieTask>
       cookie_loader_;
+  std::unique_ptr<ClearCookiesTask> clear_cookies_task_;
   std::unique_ptr<SyncCookiesForDevelopmentTask>
       sync_cookies_for_development_task_;
   base::WeakPtrFactory<GlicCookieSynchronizer> weak_ptr_factory_{this};

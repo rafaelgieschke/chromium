@@ -8,15 +8,20 @@
 #include "base/notreached.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
+#include "chrome/browser/ui/tab_ui_helper.h"
 #include "chrome/browser/ui/tabs/alert/tab_alert.h"
 #include "chrome/browser/ui/tabs/alert/tab_alert_controller.h"
+#include "chrome/browser/ui/tabs/tab_network_state.h"
+#include "components/split_tabs/split_tab_visual_data.h"
 #include "components/tab_groups/tab_group_visual_data.h"
 #include "components/tabs/public/split_tab_collection.h"
 #include "components/tabs/public/split_tab_data.h"
-#include "components/tabs/public/split_tab_visual_data.h"
 #include "components/tabs/public/tab_group.h"
 #include "components/tabs/public/tab_group_tab_collection.h"
 #include "components/tabs/public/tab_interface.h"
+#include "content/public/browser/web_contents.h"
+#include "ui/base/l10n/time_format.h"
 
 namespace tabs_api::converters {
 
@@ -84,26 +89,40 @@ std::vector<mojom::AlertState> ToMojo(
   return result;
 }
 
-tabs_api::mojom::TabPtr BuildMojoTab(tabs::TabHandle handle,
-                                     const TabRendererData& data,
+tabs_api::mojom::TabPtr BuildMojoTab(tabs::TabInterface* tab,
                                      const ui::ColorProvider& color_provider,
                                      const TabStates& states) {
   auto result = tabs_api::mojom::Tab::New();
+  TabUIHelper* tab_ui_helper = TabUIHelper::From(tab);
+  CHECK(tab_ui_helper);
 
-  result->id = tabs_api::NodeId(tabs_api::NodeId::Type::kContent,
-                               base::NumberToString(handle.raw_value()));
-  result->title = base::UTF16ToUTF8(data.title);
-  result->favicon = data.favicon.Rasterize(&color_provider);
-  result->url = data.visible_url;
-  result->network_state = ToMojo(data.network_state);
-  if (handle.Get() != nullptr) {
-    result->alert_states = ToMojo(
-        tabs::TabAlertController::From(handle.Get())->GetAllActiveAlerts());
+  result->id =
+      tabs_api::NodeId(tabs_api::NodeId::Type::kContent,
+                       base::NumberToString(tab->GetHandle().raw_value()));
+  result->title = base::UTF16ToUTF8(tab_ui_helper->GetTitle());
+  result->favicon = tab_ui_helper->GetFavicon().Rasterize(&color_provider);
+  result->url = tab_ui_helper->GetVisibleURL();
+  result->network_state = ToMojo(tab_ui_helper->GetTabNetworkState());
+  if (tab->GetHandle().Get() != nullptr) {
+    result->alert_states =
+        ToMojo(tabs::TabAlertController::From(tab->GetHandle().Get())
+                   ->GetAllActiveAlerts());
   }
 
   result->is_active = states.is_active;
   result->is_selected = states.is_selected;
-  result->is_blocked = data.blocked;
+  result->is_blocked = tab->IsBlocked();
+  content::WebContents* contents = tab->GetContents();
+  result->last_active_time_ticks =
+      std::max(contents->GetLastInteractionTimeTicks(),
+               contents->GetLastActiveTimeTicks());
+  result->last_active_elapsed_text = base::UTF16ToUTF8(ui::TimeFormat::Simple(
+      ui::TimeFormat::FORMAT_ELAPSED, ui::TimeFormat::LENGTH_SHORT,
+      base::TimeTicks::Now() - result->last_active_time_ticks));
+
+  result->last_active_time_ticks =
+      std::max(contents->GetLastInteractionTimeTicks(),
+               contents->GetLastActiveTimeTicks());
 
   return result;
 }

@@ -213,14 +213,21 @@ bool CSSPaintValue::ParseInputArguments(const Document& document) {
     DCHECK_EQ(SecureContextMode::kSecureContext,
               document.GetExecutionContext()->GetSecureContextMode());
     DCHECK(!argument_variable_data_[i]->NeedsVariableResolution());
+    //  TODO(crbug.com/475807587): We use CSSParserLocalContext without a
+    //  property because parsed_value is converted to a CSSStyleValue, which
+    //  does not yet support the random() function. Revisit when CSSOM is
+    //  updated.
+    CSSParserLocalContext local_context =
+        CSSParserLocalContext::CreateWithoutPropertyForCSSOM();
     const CSSValue* parsed_value = argument_variable_data_[i]->ParseForSyntax(
-        input_argument_types[i], SecureContextMode::kSecureContext);
+        input_argument_types[i], SecureContextMode::kSecureContext,
+        local_context);
     if (!parsed_value) {
       input_arguments_invalid_ = true;
       parsed_input_arguments_ = nullptr;
       return false;
     }
-    parsed_input_arguments_->AppendVector(
+    parsed_input_arguments_->append_range(
         StyleValueFactory::CssValueToStyleValueVector(*parsed_value));
   }
   return true;
@@ -249,6 +256,10 @@ bool CSSPaintValue::KnownToBeOpaque(const Document& document,
 bool CSSPaintValue::Equals(const CSSPaintValue& other) const {
   return GetName() == other.GetName() &&
          CustomCSSText() == other.CustomCSSText();
+}
+
+bool CSSPaintValue::HasRandomFunctions() const {
+  return name_ && name_->HasRandomFunctions();
 }
 
 void CSSPaintValue::TraceAfterDispatch(blink::Visitor* visitor) const {

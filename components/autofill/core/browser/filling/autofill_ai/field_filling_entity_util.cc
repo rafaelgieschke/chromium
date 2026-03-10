@@ -12,6 +12,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_ai_form_rationalization.h"
 #include "components/autofill/core/browser/autofill_field.h"
+#include "components/autofill/core/browser/autofill_format_string.h"
 #include "components/autofill/core/browser/data_manager/autofill_ai/entity_data_manager.h"
 #include "components/autofill/core/browser/data_model/autofill_ai/entity_instance.h"
 #include "components/autofill/core/browser/data_quality/addresses/address_normalizer.h"
@@ -25,8 +26,10 @@
 #include "components/autofill/core/browser/permissions/autofill_ai/autofill_ai_permission_utils.h"
 #include "components/autofill/core/browser/proto/server.pb.h"
 #include "components/autofill/core/common/autofill_features.h"
+#include "components/autofill/core/common/autofill_prefs.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/autofill/core/common/mojom/autofill_types.mojom-shared.h"
+#include "components/prefs/pref_service.h"
 
 namespace autofill {
 
@@ -82,7 +85,7 @@ std::u16string MaybeStripPrefix(const std::u16string& value,
 }
 
 // Looks for the day, month, or year from `attribute` to fill into `field`.
-std::optional<std::u16string> GetValueForDateSelect(
+std::optional<SelectOption> GetValueForDateSelect(
     const AttributeInstance& attribute,
     const AutofillField& field,
     const std::string& app_locale) {
@@ -106,15 +109,15 @@ std::optional<std::u16string> GetValueForDateSelect(
 
   if (base::optional_ref<const SelectOption> match =
           GetDayRange(field.options()).get_by_value(get_part(u"D", 1, 31))) {
-    return match->value;
+    return match.CopyAsOptional();
   }
   if (base::optional_ref<const SelectOption> match =
           GetMonthRange(field.options()).get_by_value(get_part(u"M", 1, 12))) {
-    return match->value;
+    return match.CopyAsOptional();
   }
   if (base::optional_ref<const SelectOption> match =
           GetYearRange(field.options()).get_by_value(get_part(u"YYYY"))) {
-    return match->value;
+    return match.CopyAsOptional();
   }
   return std::nullopt;
 }
@@ -150,35 +153,35 @@ std::u16string GetValueForInput(const AttributeInstance& attribute,
   }
 }
 
-std::u16string GetValueForSelect(const AttributeInstance& attribute,
-                                 const AutofillField& field,
-                                 const std::string& app_locale,
-                                 AddressNormalizer* address_normalizer) {
+std::optional<SelectOption> GetOptionForSelect(
+    const AttributeInstance& attribute,
+    const AutofillField& field,
+    const std::string& app_locale,
+    AddressNormalizer* address_normalizer) {
   const FieldType type =
       field.Type().GetAutofillAiType(attribute.type().entity_type());
   if (IsDateFieldType(type)) {
-    return GetValueForDateSelect(attribute, field, app_locale).value_or(u"");
+    return GetValueForDateSelect(attribute, field, app_locale);
   }
   std::u16string fill_value = GetValueForInput(attribute, field, app_locale);
   if (fill_value.empty()) {
-    return u"";
+    return std::nullopt;
   }
 
   switch (type) {
     case PASSPORT_ISSUING_COUNTRY:
-      return GetCountrySelectControlValue(fill_value, field.options(),
-                                          /*failure_to_fill=*/nullptr);
+      return GetCountrySelectControlOption(fill_value, field.options(),
+                                           /*failure_to_fill=*/nullptr);
     case DRIVERS_LICENSE_REGION:
     case VEHICLE_PLATE_STATE:
       // TODO(crbug.com/389625753): Support countries other than the US.
-      return GetStateSelectControlValue(fill_value, field.options(),
-                                        /*country_code=*/"US",
-                                        address_normalizer,
-                                        /*failure_to_fill=*/nullptr);
+      return GetStateSelectControlOption(fill_value, field.options(),
+                                         /*country_code=*/"US",
+                                         address_normalizer,
+                                         /*failure_to_fill=*/nullptr);
     default:
-      return GetSelectControlValue(fill_value, field.options(),
-                                   /*failure_to_fill=*/nullptr)
-          .value_or(u"");
+      return GetSelectControlOption(fill_value, field.options(),
+                                    /*failure_to_fill=*/nullptr);
   }
 }
 
@@ -243,7 +246,7 @@ base::flat_set<FieldGlobalId> GetFieldsFillableByAutofillAi(
   return fillable_fields;
 }
 
-std::u16string GetFillValueForEntity(
+FillingValueAndType GetFillingValueAndTypeForEntity(
     const EntityInstance& entity,
     base::span<const AutofillFieldWithAttributeType> fields_and_types,
     const AutofillField& field,
@@ -265,46 +268,48 @@ std::u16string GetFillValueForEntity(
     return entity.attribute(it->type);
   }();
 
+  FieldType field_type = field.Type().GetAutofillAiType(entity.type());
   if (!attribute) {
-    return u"";
+    return FillingValueAndType(u"", field_type);
   }
 
-  std::u16string fill_value =
-      field.IsSelectElement()
-          ? GetValueForSelect(*attribute, field, app_locale, address_normalizer)
-          : GetValueForInput(*attribute, field, app_locale);
+  if (field.IsSelectElement()) {
+    std::optional<SelectOption> select_control_option =
+        GetOptionForSelect(*attribute, field, app_locale, address_normalizer);
+    return FillingValueAndType(
+        select_control_option ? std::move(select_control_option->value) : u"",
+        select_control_option ? std::move(select_control_option->text) : u"",
+        field_type);
+  } else {
+    std::u16string fill_value = GetValueForInput(*attribute, field, app_locale);
 
-  const bool should_obfuscate =
-      action_persistence != mojom::ActionPersistence::kFill &&
-      !field.IsSelectElement() && attribute->type().is_obfuscated();
+    const bool should_obfuscate =
+        action_persistence != mojom::ActionPersistence::kFill &&
+        attribute->type().is_obfuscated();
 
-  // TODO(crbug.com/394011769): Investigate whether the obfuscation should
-  // should include some of the attribute's value, e.g. the last x characters.
-  return should_obfuscate ? GetObfuscatedValue(fill_value) : fill_value;
+    return FillingValueAndType(should_obfuscate ? GetObfuscatedValue(fill_value)
+                                                : std::move(fill_value),
+                               field_type);
+  }
 }
 
-bool ShouldReauthBeforeFilling(
-    const EntityInstance& entity,
-    base::span<const AutofillFieldWithAttributeType> fields,
-    const std::string& app_locale) {
+bool WillFillSensitiveAttributes(const EntityInstance& entity,
+                                 const FormStructure& form,
+                                 const Section& section,
+                                 std::string_view app_locale) {
   return std::ranges::any_of(
-      fields, [&](const AutofillFieldWithAttributeType& f) {
-        return ShouldFieldBeObfuscated(entity, f, app_locale);
+      RationalizeAndDetermineAttributeTypes(form.fields(), section,
+                                            entity.type()),
+      [&entity, app_locale](const AutofillFieldWithAttributeType& f) {
+        base::optional_ref<const AttributeInstance> attribute =
+            entity.attribute(f.type);
+        return entity.type() == f.type.entity_type() && attribute &&
+               attribute->type().is_obfuscated() &&
+               !attribute
+                    ->GetInfo(f.field->Type().GetAutofillAiType(entity.type()),
+                              app_locale, f.field->format_string())
+                    .empty();
       });
-}
-
-bool ShouldFieldBeObfuscated(const EntityInstance& entity,
-                             const AutofillFieldWithAttributeType& f,
-                             const std::string& app_locale) {
-  base::optional_ref<const AttributeInstance> attribute =
-      entity.attribute(f.type);
-  return entity.type() == f.type.entity_type() && attribute &&
-         attribute->type().is_obfuscated() &&
-         !attribute
-              ->GetInfo(f.field->Type().GetAutofillAiType(entity.type()),
-                        app_locale, f.field->format_string())
-              .empty() &&
-         base::FeatureList::IsEnabled(features::kAutofillAiReauthRequired);
 }
 
 }  // namespace autofill

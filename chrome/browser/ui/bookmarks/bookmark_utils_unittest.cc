@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 
 #include "base/files/file_path.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/bookmarks/bookmark_merged_surface_service.h"
 #include "chrome/browser/bookmarks/bookmark_merged_surface_service_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
@@ -15,6 +16,7 @@
 #include "components/bookmarks/common/bookmark_pref_names.h"
 #include "components/bookmarks/managed/managed_bookmark_service.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
+#include "components/saved_tab_groups/public/features.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/browser_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -42,8 +44,8 @@ class BookmarkUtilsGetBookmarkDropOperationTest : public testing::Test {
 
     profile_->GetTestingPrefService()->SetManagedPref(
         bookmarks::prefs::kManagedBookmarks,
-        base::Value(base::Value::List().Append(
-            base::Value::Dict()
+        base::Value(base::ListValue().Append(
+            base::DictValue()
                 .Set("name", "managed_bookmark")
                 .Set("url", GURL("http://google.com/").spec()))));
     model()->LoadEmptyForTest();
@@ -227,4 +229,47 @@ TEST_F(BookmarkUtilsGetBookmarkDropOperationTest, DropManagedNode) {
             ui::mojom::DragOperation::kCopy);
 }
 
+TEST_F(BookmarkUtilsGetBookmarkDropOperationTest, DropWhenNodeDeleted) {
+  AddNodesToBookmarkBarFromModelString("1 f1:[ 2 ]");
+  EXPECT_EQ(model()->bookmark_bar_node()->children().size(), 2u);
+
+  ui::OSExchangeData os_drag_data;
+  {
+    bookmarks::BookmarkNodeData drag_data(
+        model()->bookmark_bar_node()->children()[1].get());
+    drag_data.Write(profile()->GetPath(), &os_drag_data);
+  }
+
+  bookmarks::BookmarkNodeData drag_data;
+  drag_data.Read(os_drag_data);
+
+  ui::DropTargetEvent target_event(os_drag_data, gfx::PointF(), gfx::PointF(),
+                                   ui::DragDropTypes::DRAG_MOVE);
+
+  EXPECT_EQ(chrome::GetBookmarkDropOperation(
+                profile(), target_event, drag_data,
+                BookmarkParentFolder::BookmarkBarFolder(), 0),
+            ui::mojom::DragOperation::kMove);
+
+  // Delete bookmark node during drag-and-drop.
+  // This usually isn’t something the user does on purpose, but APIs like
+  // `chrome.bookmarks.removeTree()` can cause this to happen.
+  // See https://issues.chromium.org/issues/472376579
+  model()->Remove(model()->bookmark_bar_node()->children()[1].get(),
+                  bookmarks::metrics::BookmarkEditSource::kOther, FROM_HERE);
+  EXPECT_EQ(model()->bookmark_bar_node()->children().size(), 1u);
+
+  // Drop operation should be none after bookmark node is deleted.
+  EXPECT_EQ(chrome::GetBookmarkDropOperation(
+                profile(), target_event, drag_data,
+                BookmarkParentFolder::BookmarkBarFolder(), 0),
+            ui::mojom::DragOperation::kNone);
+}
+
+TEST_F(BookmarkUtilsGetBookmarkDropOperationTest,
+       ShouldHideBookmarksWhenProjectsPanelEnabled) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(tab_groups::kProjectsPanel);
+  EXPECT_FALSE(chrome::ShouldShowTabGroupsInBookmarkBar(profile()));
+}
 }  // namespace

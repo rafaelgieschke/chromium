@@ -20,6 +20,7 @@
 
 namespace blink {
 
+class ClipPaintPropertyNode;
 class ClipPaintPropertyNodeOrAlias;
 class PropertyTreeState;
 class TransformPaintPropertyNodeOrAlias;
@@ -101,6 +102,23 @@ class PLATFORM_EXPORT EffectPaintPropertyNode final
     USING_FAST_MALLOC(BackdropFilterInfo);
   };
 
+  // Used to associate this effect with a direct child of a canvas element for
+  // DrawElementImage.
+  struct PLATFORM_EXPORT CanvasChildState {
+    DISALLOW_NEW();
+
+   public:
+    bool operator==(const CanvasChildState&) const = default;
+
+    DOMNodeId id = kInvalidDOMNodeId;
+    gfx::SizeF box_size;
+    float effective_zoom = 1.f;
+    Member<const EffectPaintPropertyNodeOrAlias> content_effect;
+    Member<const ClipPaintPropertyNodeOrAlias> content_clip;
+
+    void Trace(Visitor*) const;
+  };
+
   // To make it less verbose and more readable to construct and update a node,
   // a struct with default values is used to represent the state.
   struct PLATFORM_EXPORT State {
@@ -134,6 +152,8 @@ class PLATFORM_EXPORT EffectPaintPropertyNode final
 
     // Used to associate this effect node with its originating Element.
     RestrictionTargetId restriction_target_id;
+
+    CanvasChildState canvas_child_state;
 
     // When set, the affected elements should avoid doing clipping for
     // optimization purposes (like off-screen clipping). This is set by view
@@ -268,6 +288,9 @@ class PLATFORM_EXPORT EffectPaintPropertyNode final
     return state_.direct_compositing_reasons &
            CompositingReason::kBackdropFilterMask;
   }
+  bool RequiresCompositingForCanvasChild() const {
+    return state_.direct_compositing_reasons & CompositingReason::kCanvasChild;
+  }
 
   bool FlattensAtLeafOf3DScene() const {
     return state_.direct_compositing_reasons &
@@ -356,6 +379,23 @@ class PLATFORM_EXPORT EffectPaintPropertyNode final
   const RestrictionTargetId& ElementCaptureId() const {
     return state_.restriction_target_id;
   }
+
+  bool HasCanvasChildState() const {
+    return state_.canvas_child_state.id != kInvalidDOMNodeId;
+  }
+
+  DOMNodeId CanvasChildId() const { return state_.canvas_child_state.id; }
+
+  gfx::SizeF CanvasChildBoxSize() const {
+    return state_.canvas_child_state.box_size;
+  }
+
+  float CanvasChildEffectiveZoom() const {
+    return state_.canvas_child_state.effective_zoom;
+  }
+
+  const EffectPaintPropertyNode& CanvasChildContentEffect() const;
+  const ClipPaintPropertyNode& CanvasChildContentClip() const;
 
   bool SelfOrAncestorParticipatesInViewTransition() const {
     return state_.self_or_ancestor_participates_in_view_transition;

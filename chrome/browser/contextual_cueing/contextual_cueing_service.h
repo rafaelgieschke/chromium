@@ -17,8 +17,8 @@
 #include "base/time/time.h"
 #include "chrome/browser/contextual_cueing/contextual_cueing_enums.h"
 #include "chrome/browser/contextual_cueing/nudge_cap_tracker.h"
-#include "chrome/browser/page_content_annotations/page_content_extraction_service.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/page_content_annotations/content/page_content_extraction_service.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -120,8 +120,9 @@ class ContextualCueingService
   // page_content_annotations::PageContentExtractionService::Observer:
   void OnPageContentExtracted(
       content::Page& page,
-      const optimization_guide::proto::AnnotatedPageContent& page_content)
-      override;
+      scoped_refptr<
+          const page_content_annotations::RefCountedAnnotatedPageContent>
+          page_content) override;
 
   // Returns true if nudge should not be shown due to the backoff rule.
   bool IsNudgeBlockedByBackoffRule() const;

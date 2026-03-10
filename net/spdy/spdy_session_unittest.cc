@@ -12,7 +12,6 @@
 #include <utility>
 
 #include "base/base64.h"
-#include "base/containers/contains.h"
 #include "base/containers/heap_array.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
@@ -193,7 +192,10 @@ class SpdySessionTest : public PlatformTest, public WithTaskEnvironment {
              NetworkAnonymizationKey(),
              SecureDnsPolicy::kAllow,
              /*disable_cert_verification_network_fetches=*/false),
-        ssl_(SYNCHRONOUS, OK) {}
+        ssl_(SYNCHRONOUS, OK) {
+    feature_list_.InitAndDisableFeature(
+        features::kTcpSocketPoolLimitRandomization);
+  }
 
   ~SpdySessionTest() override {
     // Important to restore the per-pool limit first, since the pool limit must
@@ -373,6 +375,7 @@ class SpdySessionTest : public PlatformTest, public WithTaskEnvironment {
   const url::SchemeHostPort test_server_;
   SpdySessionKey key_;
   SSLSocketDataProvider ssl_;
+  base::test::ScopedFeatureList feature_list_;
 };
 
 class SpdySessionTestWithMockTime : public SpdySessionTest {
@@ -1923,9 +1926,9 @@ TEST_F(SpdySessionTest, ChangeStreamRequestPriority) {
 // Attempts to extract a NetLogSource from a set of event parameters.  Returns
 // true and writes the result to |source| on success.  Returns false and
 // makes |source| an invalid source on failure.
-bool NetLogSourceFromEventParameters(const base::Value::Dict* event_params,
+bool NetLogSourceFromEventParameters(const base::DictValue* event_params,
                                      NetLogSource* source) {
-  const base::Value::Dict* source_dict = nullptr;
+  const base::DictValue* source_dict = nullptr;
   int source_id = -1;
   int source_type = static_cast<int>(NetLogSourceType::COUNT);
   if (!event_params) {
@@ -1988,6 +1991,97 @@ TEST_F(SpdySessionTest, Initialize) {
       NetLogSourceFromEventParameters(&entries[pos].params, &socket_source));
   EXPECT_TRUE(socket_source.IsValid());
   EXPECT_NE(net_log_with_source_.source().id, socket_source.id);
+}
+
+namespace {
+
+class FailingGetPeerAddressSocket : public MockTCPClientSocket {
+ public:
+  FailingGetPeerAddressSocket(const AddressList& addresses,
+                              net::NetLog* net_log,
+                              SocketDataProvider* socket)
+      : MockTCPClientSocket(addresses, net_log, socket) {}
+
+  int GetPeerAddress(IPEndPoint* address) const override {
+    return ERR_SOCKET_NOT_CONNECTED;
+  }
+};
+
+class FailingSocketFactory : public MockClientSocketFactory {
+ public:
+  FailingSocketFactory() = default;
+  ~FailingSocketFactory() override = default;
+
+  std::unique_ptr<TransportClientSocket> CreateTransportClientSocket(
+      const AddressList& addresses,
+      std::unique_ptr<SocketPerformanceWatcher> socket_performance_watcher,
+      NetworkQualityEstimator* network_quality_estimator,
+      NetLog* net_log,
+      const NetLogSource& source) override {
+    SocketDataProvider* data_provider = mock_data().GetNext();
+    auto socket = std::make_unique<FailingGetPeerAddressSocket>(
+        addresses, net_log, data_provider);
+    return std::move(socket);
+  }
+};
+
+class SpdySessionParametrizedTest : public SpdySessionTest,
+                                    public testing::WithParamInterface<bool> {
+ public:
+  SpdySessionParametrizedTest() {
+    if (GetParam()) {
+      feature_list_.InitAndEnableFeature(
+          features::kDrainSpdySessionSynchronouslyOnRemoteEndpointDisconnect);
+    } else {
+      feature_list_.InitAndDisableFeature(
+          features::kDrainSpdySessionSynchronouslyOnRemoteEndpointDisconnect);
+    }
+  }
+
+ private:
+  base::test::ScopedFeatureList feature_list_;
+};
+
+}  // namespace
+
+INSTANTIATE_TEST_SUITE_P(All,
+                         SpdySessionParametrizedTest,
+                         testing::Values(false, true));
+
+// Regression test for https://crbug.com/482074640.
+TEST_P(SpdySessionParametrizedTest,
+       GetRemoteEndpointDisconnectedDrainsSessionSynchronously) {
+  MockRead reads[] = {MockRead(ASYNC, ERR_IO_PENDING, 0)};
+  StaticSocketDataProvider data(reads, base::span<MockWrite>());
+
+  auto failing_factory = std::make_unique<FailingSocketFactory>();
+  failing_factory->AddSocketDataProvider(&data);
+
+  SSLSocketDataProvider ssl_data(ASYNC, OK);
+  failing_factory->AddSSLSocketDataProvider(&ssl_data);
+
+  // Replace the default socket factory with our failing one.
+  session_deps_.socket_factory = std::move(failing_factory);
+
+  http_session_ = SpdySessionDependencies::SpdyCreateSession(&session_deps_);
+  spdy_session_pool_ = http_session_->spdy_session_pool();
+
+  CreateSpdySession();
+  EXPECT_TRUE(HasSpdySession(spdy_session_pool_, key_));
+
+  // GetRemoteEndpoint() should detect the disconnected socket and drain the
+  // session only if the feature is enabled.
+  IPEndPoint endpoint;
+  EXPECT_THAT(session_->GetRemoteEndpoint(&endpoint),
+              IsError(ERR_SOCKET_NOT_CONNECTED));
+
+  if (GetParam()) {
+    // The session should be removed from the pool synchronously.
+    EXPECT_FALSE(HasSpdySession(spdy_session_pool_, key_));
+  } else {
+    // The session should remain in the pool.
+    EXPECT_TRUE(HasSpdySession(spdy_session_pool_, key_));
+  }
 }
 
 TEST_F(SpdySessionTest, NetLogOnSessionGoaway) {
@@ -3343,8 +3437,7 @@ TEST_F(SpdySessionTest, CloseOneIdleConnection) {
           ClientSocketPool::SocketParams::CreateForHttpForTesting(),
           std::nullopt /* proxy_annotation_tag */, DEFAULT_PRIORITY,
           SocketTag(), ClientSocketPool::RespectLimits::ENABLED,
-          callback2.callback(), ClientSocketPool::ProxyAuthCallback(),
-          /*fail_if_alias_requires_proxy_override=*/false, pool,
+          callback2.callback(), ClientSocketPool::ProxyAuthCallback(), pool,
           NetLogWithSource()));
   EXPECT_TRUE(pool->IsStalled());
 
@@ -3451,8 +3544,7 @@ TEST_F(SpdySessionTest, CloseOneIdleConnectionWithAlias) {
           ClientSocketPool::SocketParams::CreateForHttpForTesting(),
           std::nullopt /* proxy_annotation_tag */, DEFAULT_PRIORITY,
           SocketTag(), ClientSocketPool::RespectLimits::ENABLED,
-          callback3.callback(), ClientSocketPool::ProxyAuthCallback(),
-          /*fail_if_alias_requires_proxy_override=*/false, pool,
+          callback3.callback(), ClientSocketPool::ProxyAuthCallback(), pool,
           NetLogWithSource()));
   EXPECT_TRUE(pool->IsStalled());
 
@@ -3539,8 +3631,7 @@ TEST_F(SpdySessionTest, CloseSessionOnIdleWhenPoolStalled) {
           ClientSocketPool::SocketParams::CreateForHttpForTesting(),
           std::nullopt /* proxy_annotation_tag */, DEFAULT_PRIORITY,
           SocketTag(), ClientSocketPool::RespectLimits::ENABLED,
-          callback2.callback(), ClientSocketPool::ProxyAuthCallback(),
-          /*fail_if_alias_requires_proxy_override=*/false, pool,
+          callback2.callback(), ClientSocketPool::ProxyAuthCallback(), pool,
           NetLogWithSource()));
   EXPECT_TRUE(pool->IsStalled());
 
@@ -6151,7 +6242,7 @@ class TestSSLConfigService : public SSLConfigService {
   // implementation than the production implementation in SSLConfigServiceMojo.
   bool CanShareConnectionWithClientCerts(
       std::string_view hostname) const override {
-    return base::Contains(domains_for_pooling_, hostname);
+    return std::ranges::contains(domains_for_pooling_, hostname);
   }
 
   void SetDomainsForPooling(const std::vector<std::string>& domains) {

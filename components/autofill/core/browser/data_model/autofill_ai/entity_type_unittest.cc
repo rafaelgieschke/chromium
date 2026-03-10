@@ -7,17 +7,59 @@
 #include "base/test/scoped_feature_list.h"
 #include "components/autofill/core/browser/country_type.h"
 #include "components/autofill/core/browser/data_model/autofill_ai/entity_type_names.h"
+#include "components/autofill/core/browser/data_model/autofill_ai/entity_type_test_api.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
 
 namespace autofill {
 namespace {
 
+using ::testing::AnyOf;
+using ::testing::Contains;
+using ::testing::Each;
 using ::testing::ElementsAre;
+using ::testing::Eq;
+using ::testing::IsSubsetOf;
+using ::testing::ResultOf;
 using ::testing::UnorderedElementsAre;
+using ::testing::ValuesIn;
 
-TEST(AutofillAttributeTypeTest, Relationships) {
+class AutofillAttributeTypeTest_FieldTypeRelations
+    : public testing::TestWithParam<AttributeType> {};
+
+INSTANTIATE_TEST_SUITE_P(,
+                         AutofillAttributeTypeTest_FieldTypeRelations,
+                         ValuesIn(DenseSet<AttributeType>::all()));
+
+// Tests the co-domain of AttributeType::field_type().
+TEST_P(AutofillAttributeTypeTest_FieldTypeRelations, FieldType) {
+  AttributeType at = GetParam();
+  EXPECT_THAT(at.field_type(), AnyOf(ResultOf(&GroupTypeOfFieldType,
+                                              FieldTypeGroup::kAutofillAi),
+                                     Eq(NAME_FULL)));
+}
+
+// Tests the co-domain of AttributeType::field_subtypes().
+TEST_P(AutofillAttributeTypeTest_FieldTypeRelations, FieldSubtypes) {
+  AttributeType at = GetParam();
+  EXPECT_THAT(
+      at.field_subtypes(),
+      AnyOf(Each(ResultOf(&GroupTypeOfFieldType, FieldTypeGroup::kAutofillAi)),
+            Each(ResultOf(&GroupTypeOfFieldType, FieldTypeGroup::kName))));
+  EXPECT_THAT(at.field_subtypes(), Contains(at.field_type()));
+}
+
+// Tests the co-domain of AttributeType::storable_field_types().
+TEST_P(AutofillAttributeTypeTest_FieldTypeRelations, StorableFieldTypes) {
+  AttributeType at = GetParam();
+  EXPECT_THAT(test_api(at).storable_field_types(),
+              IsSubsetOf(at.field_subtypes()));
+  EXPECT_THAT(test_api(at).storable_field_types(), Contains(at.field_type()));
+}
+
+TEST(AutofillAttributeTypeTest, Relationships_PassportName) {
   AttributeType a = AttributeType(AttributeTypeName::kPassportName);
   EXPECT_EQ(a.entity_type(), EntityType(EntityTypeName::kPassport));
   EXPECT_THAT(a.field_subtypes(),
@@ -96,21 +138,9 @@ TEST(AutofillEntityTypeTest, Disabled) {
   EXPECT_TRUE(EntityType(kVehicle).enabled());
 }
 
-// Tests that specifying an "excluded geo-ip" disabled the entity in countries
-// with that geo ip.
-TEST(AutofillEntityTypeTest, Enabled) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndDisableFeature(features::kAutofillAiNationalIdCard);
-  EntityType e = EntityType(EntityTypeName::kNationalIdCard);
-  EXPECT_FALSE(e.enabled());
-  EXPECT_FALSE(e.enabled(GeoIpCountryCode("US")));
-}
-
-// Tests that specifying an "excluded geo-ip" disabled the entity in countries
+// Tests that specifying an "excluded geo-ip" disables the entity in countries
 // with that geo ip.
 TEST(AutofillEntityTypeTest, EnabledWithCountryCode) {
-  base::test::ScopedFeatureList feature_list{
-      features::kAutofillAiNationalIdCard};
   EntityType e = EntityType(EntityTypeName::kNationalIdCard);
   EXPECT_TRUE(e.enabled(GeoIpCountryCode("US")));
   EXPECT_TRUE(e.enabled(GeoIpCountryCode("DE")));
@@ -153,6 +183,20 @@ TEST(AutofillEntityTypeTest, ReadOnly) {
   using enum EntityTypeName;
   EXPECT_FALSE(EntityType(kPassport).read_only());
   EXPECT_TRUE(EntityType(kFlightReservation).read_only());
+}
+
+// Tests that `EntityType` and `AttributeType` can be used in
+// `absl::flat_hash_map`.
+TEST(AutofillEntityTypeTest, CanBeUsedInAbslFlatHashMap) {
+  absl::flat_hash_map<EntityType, int> entity_type_map;
+  auto passport = EntityType(EntityTypeName::kPassport);
+  entity_type_map[passport] = 1;
+  EXPECT_EQ(entity_type_map[passport], 1);
+
+  absl::flat_hash_map<AttributeType, int> attribute_type_map;
+  auto passport_name = AttributeType(AttributeTypeName::kPassportName);
+  attribute_type_map[passport_name] = 2;
+  EXPECT_EQ(attribute_type_map[passport_name], 2);
 }
 
 }  // namespace

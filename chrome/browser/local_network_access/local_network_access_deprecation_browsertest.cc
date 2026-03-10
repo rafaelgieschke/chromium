@@ -84,7 +84,9 @@ IN_PROC_BROWSER_TEST_F(LocalNetworkAccessDeprecationBrowserTest,
             0);
 }
 
-#if BUILDFLAG(IS_LINUX) && defined(ADDRESS_SANITIZER) && defined(LEAK_SANITIZER)
+#if BUILDFLAG(IS_LINUX) &&                                    \
+    (defined(ADDRESS_SANITIZER) && defined(LEAK_SANITIZER) || \
+     defined(UNDEFINED_SANITIZER))
 #define MAYBE_DeprecationTrialAllowsForLNAOnNonSecureSite \
   DISABLED_DeprecationTrialAllowsForLNAOnNonSecureSite
 #else
@@ -117,7 +119,9 @@ IN_PROC_BROWSER_TEST_F(LocalNetworkAccessDeprecationBrowserTest,
                                    https_server().GetURL("b.com", kLnaPath))));
 }
 
-#if BUILDFLAG(IS_LINUX) && defined(ADDRESS_SANITIZER) && defined(LEAK_SANITIZER)
+#if BUILDFLAG(IS_LINUX) &&                                    \
+    (defined(ADDRESS_SANITIZER) && defined(LEAK_SANITIZER) || \
+     defined(UNDEFINED_SANITIZER))
 #define MAYBE_DeprecationTrialIframe DISABLED_DeprecationTrialIframe
 #else
 #define MAYBE_DeprecationTrialIframe DeprecationTrialIframe
@@ -184,7 +188,7 @@ IN_PROC_BROWSER_TEST_F(LocalNetworkAccessDeprecationBrowserTest,
                        DeprecationTrialSharedWorker) {
   // Use enterprise policy to allow LNA requests
   policy::PolicyMap policies;
-  base::Value::List allowlist;
+  base::ListValue allowlist;
   allowlist.Append(base::Value("*"));
   SetPolicy(&policies, policy::key::kLocalNetworkAccessAllowedForUrls,
             base::Value(std::move(allowlist)));

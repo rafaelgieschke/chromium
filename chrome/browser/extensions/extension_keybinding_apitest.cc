@@ -5,21 +5,14 @@
 // This file contains UI interactive tests for the extensions commands API.
 // For non-UI interactive tests, see extension_keybinding_browsertest.cc.
 
-#include "base/containers/contains.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/commands/command_service.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_model.h"
-#include "chrome/browser/ui/views/extensions/extensions_toolbar_container.h"
-#include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/test/base/interactive_test_utils.h"
-#include "chrome/test/base/ui_test_utils.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
@@ -39,6 +32,15 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "third_party/blink/public/common/switches.h"
 
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/views/extensions/extensions_toolbar_desktop.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
+#include "chrome/test/base/ui_test_utils.h"
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
+
 using content::WebContents;
 
 namespace extensions {
@@ -46,7 +48,9 @@ namespace extensions {
 namespace {
 
 // Name of the command for the "basics" test extension.
-const char kBasicsShortcutCommandName[] = "toggle-feature";
+constexpr char kBasicsShortcutCommandName[] = "toggle-feature";
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 
 #if BUILDFLAG(IS_MAC)
 const char kBookmarkKeybinding[] = "Command+D";
@@ -214,7 +218,7 @@ void SendKeyPressToAction(Browser* browser,
   base::RunLoop().RunUntilIdle();
   // Check that the event was dispatched if and only if we expected it to be.
   EXPECT_EQ(expect_dispatch,
-            base::Contains(event_tracker.dispatched_events(), event_name));
+            event_tracker.dispatched_events().contains(event_name));
 
   // Do a round-trip to the extension renderer. This serves as a pseudo-
   // RunUntilIdle()-type of method for the extension renderer itself, since
@@ -252,6 +256,8 @@ const char* GetCommandKeyForActionType(ActionInfo::Type action_type) {
 
   return command_key;
 }
+
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 }  // namespace
 
@@ -304,6 +310,7 @@ class CommandsApiTest : public ExtensionApiTest {
     return found_command && active;
   }
 
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // Navigates to a test URL and return the ID of the navigated tab.
   int NavigateToTestURLAndReturnTabId() {
     EXPECT_TRUE(ui_test_utils::NavigateToURL(
@@ -313,6 +320,7 @@ class CommandsApiTest : public ExtensionApiTest {
         ->session_id()
         .id();
   }
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 };
 
 class IncognitoCommandsApiTest : public CommandsApiTest,
@@ -341,13 +349,16 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, Basic) {
   // immaterial to this test).
   ASSERT_TRUE(RunExtensionTest("keybinding/conflicting")) << message_;
 
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // Test that there are two browser actions in the toolbar.
-  ExtensionsToolbarContainer* extensions_container =
+  ExtensionsToolbarDesktop* extensions_container =
       browser()->GetBrowserView().toolbar()->extensions_container();
   ASSERT_EQ(2, extensions_container->GetNumberOfActionsForTesting());
+#endif
 
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(
-      browser(), embedded_test_server()->GetURL("/extensions/test_file.txt")));
+  ASSERT_TRUE(NavigateToURL(
+      GetActiveWebContents(),
+      embedded_test_server()->GetURL("/extensions/test_file.txt")));
 
   // activeTab shouldn't have been granted yet.
   WebContents* tab = GetActiveWebContents();
@@ -356,23 +367,32 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, Basic) {
   EXPECT_FALSE(IsGrantedForTab(extension, tab));
 
   ExtensionTestMessageListener test_listener;  // Won't reply.
+
+  // TODO(crbug.com/483194547): Enable the following part for Android.
+  // Currently triggering browser action for the extension which is not
+  // pinned is not supported.
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // Activate the browser action shortcut (Ctrl+Shift+F).
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
-      browser(), ui::VKEY_F, true, true, false, false));
+      browser_window_interface(), ui::VKEY_F,
+      /*control=*/true, /*shift=*/true, /*alt=*/false, /*command=*/false));
   EXPECT_TRUE(test_listener.WaitUntilSatisfied());
   // activeTab should now be granted.
   EXPECT_TRUE(IsGrantedForTab(extension, tab));
   // Verify the command worked.
   EXPECT_EQ(std::string("basics browser action"), test_listener.message());
+#endif
 
   test_listener.Reset();
   // Activate the command shortcut (Ctrl+Shift+Y).
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(
-      browser(), ui::VKEY_Y, true, true, false, false));
+      browser_window_interface(), ui::VKEY_Y,
+      /*control=*/true, /*shift=*/true, /*alt=*/false, /*command=*/false));
   EXPECT_TRUE(test_listener.WaitUntilSatisfied());
   EXPECT_EQ(std::string(kBasicsShortcutCommandName), test_listener.message());
 }
 
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 IN_PROC_BROWSER_TEST_F(CommandsApiTest, InactivePageActionDoesntTrigger) {
   ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_TRUE(RunExtensionTest("keybinding/page_action")) << message_;
@@ -410,7 +430,7 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, UnpinnedPageActionTriggers) {
   // initial hidden/disabled state.
   DisableActionGlobally(profile(), *extension);
 
-  ExtensionsToolbarContainer* extensions_container =
+  ExtensionsToolbarDesktop* extensions_container =
       browser()->GetBrowserView().toolbar()->extensions_container();
   RunScheduledLayouts();
   EXPECT_FALSE(extensions_container->IsActionVisibleOnToolbar(extension->id()));
@@ -568,7 +588,7 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, MAYBE_AllowDuplicatedMediaKeys) {
 }
 
 #if BUILDFLAG(IS_CHROMEOS) && !defined(NDEBUG)
-// TODO(dtseng): Test times out on Chrome OS debug. See http://crbug.com/412456.
+// TODO(dtseng): Test times out on Chrome OS debug. See crbug.com/40383617.
 #define MAYBE_ContinuePropagation DISABLED_ContinuePropagation
 #else
 #define MAYBE_ContinuePropagation ContinuePropagation
@@ -629,21 +649,27 @@ IN_PROC_BROWSER_TEST_F(CommandsApiTest, ChromeOSConversions) {
 }
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
+
 // Validate parameters sent along with an extension event, in response to
 // command being triggered.
 IN_PROC_BROWSER_TEST_F(CommandsApiTest, TabParameter) {
   ASSERT_TRUE(embedded_test_server()->Start());
   ASSERT_TRUE(RunExtensionTest("keybinding/tab_parameter")) << message_;
-  ASSERT_TRUE(ui_test_utils::NavigateToURL(
-      browser(), embedded_test_server()->GetURL("/extensions/test_file.txt")));
+  ASSERT_TRUE(NavigateToURL(
+      GetActiveWebContents(),
+      embedded_test_server()->GetURL("/extensions/test_file.txt")));
   const Extension* extension = GetSingleLoadedExtension();
   ASSERT_TRUE(extension) << message_;
   ResultCatcher catcher;
   EXPECT_TRUE(content::WaitForLoadStop(GetActiveWebContents()));
-  ASSERT_TRUE(ui_test_utils::SendKeyPressSync(browser(), ui::VKEY_Y, true, true,
-                                              false, false));  // Ctrl+Shift+Y
+  ASSERT_TRUE(ui_test_utils::SendKeyPressSync(browser_window_interface(),
+                                              ui::VKEY_Y, true, true, false,
+                                              false));  // Ctrl+Shift+Y
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 
 // Test Keybinding in incognito mode.
 IN_PROC_BROWSER_TEST_P(IncognitoCommandsApiTest, IncognitoMode) {
@@ -675,9 +701,8 @@ IN_PROC_BROWSER_TEST_P(IncognitoCommandsApiTest, IncognitoMode) {
   } else {
     base::RunLoop().RunUntilIdle();
   }
-  EXPECT_EQ(
-      is_incognito_enabled,
-      base::Contains(test_observer.dispatched_events(), "action.onClicked"));
+  EXPECT_EQ(is_incognito_enabled,
+            test_observer.dispatched_events().contains("action.onClicked"));
 
   test_observer.ClearEvents();
 
@@ -691,9 +716,8 @@ IN_PROC_BROWSER_TEST_P(IncognitoCommandsApiTest, IncognitoMode) {
     base::RunLoop().RunUntilIdle();
   }
   base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(
-      is_incognito_enabled,
-      base::Contains(test_observer.dispatched_events(), "commands.onCommand"));
+  EXPECT_EQ(is_incognito_enabled,
+            test_observer.dispatched_events().contains("commands.onCommand"));
 }
 
 IN_PROC_BROWSER_TEST_P(ActionCommandsApiTest,
@@ -839,7 +863,7 @@ IN_PROC_BROWSER_TEST_P(ActionCommandsApiTest, TriggeringCommandTriggersPopup) {
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 
   // Verify popup is shown.
-  ExtensionsToolbarContainer* extensions_container =
+  ExtensionsToolbarDesktop* extensions_container =
       browser()->GetBrowserView().toolbar()->extensions_container();
   ToolbarActionViewModel* popup_owner =
       extensions_container->popup_owner_for_testing();
@@ -854,5 +878,7 @@ INSTANTIATE_TEST_SUITE_P(All,
                                          ActionInfo::Type::kAction));
 
 INSTANTIATE_TEST_SUITE_P(All, IncognitoCommandsApiTest, testing::Bool());
+
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 }  // namespace extensions

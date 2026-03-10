@@ -1,6 +1,7 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="sr">
+<translation id="1035560095760914532">Поставите Chrome у доњу област да бисте му приступали кад год желите</translation>
 <translation id="1076643793026027628">Chrome аутоматски отвара YouTube линкове без архивирања у режиму без архивирања.</translation>
 <translation id="1081114897601629648">Следеће лозинке нису увезене у Google менаџер лозинки јер не испуњавају услове.</translation>
 <translation id="1086486568852410168">Претражите помоћу Google објектива</translation>
@@ -86,6 +87,10 @@
 <translation id="2767464022270041271">Нема сачуваних лозинки. Google менаџер лозинки може да вам проверава лозинке када их сачувате.</translation>
 <translation id="2788811701191021538">Отвара страницу за подешавање начина плаћања у Chrome-у.</translation>
 <translation id="2876628302275096482">Сазнајте више о томе <ph name="BEGIN_LINK" />како Chrome штити приватност података<ph name="END_LINK" /></translation>
+<translation id="288992067439702510">Достигли сте ограничење Google Chrome-а за обележиваче (<ph name="LIMIT" />), па неки обележивачи још увек нису сачувани на Google налогу.
+
+Не можете да сачувате нове обележиваче на налогу док неке не избришете. Ако се одјавите одмах, избрисаћете несачуване обележиваче.</translation>
+<translation id="2901621928549457170">Одмах отворите Chrome када сте на iPad-у</translation>
 <translation id="2922914028977213693">Додирните овде да бисте искористили Chrome на најбољи начин на iPad-у.</translation>
 <translation id="292371311537977079">Подешавања Chrome-а</translation>
 <translation id="2923827943290349720">Закључај картице без архивирања после затварања Chrome-а</translation>
@@ -138,7 +143,7 @@
 <translation id="424864128008805179">Желите ли да се одјавите из Chrome-а?</translation>
 <translation id="4409545895715116037">Следећи приступни кључеви нису увезени у Google менаџер лозинки јер не испуњавају услове.</translation>
 <translation id="4430797724889237570">Отвара линкове из Gmail-а, Мапа, YouTube-а и других апликација у Chrome-у</translation>
-<translation id="447252321002412580">Помозите нам да побољшамо Chrome-ове функције и учинак</translation>
+<translation id="447252321002412580">Помозите нам да побољшамо Chrome-ове функције и перформансе</translation>
 <translation id="4523886039239821078">Неки програмски додаци изазивају отказивање Chrome-а. Деинсталирајте:</translation>
 <translation id="4568024439284012497">Брже приступајте Chrome-у са почетног екрана iPhone-а.</translation>
 <translation id="4574806550936185355">Укључите Закључај картице без архивирања после затварања Chrome-а</translation>
@@ -170,6 +175,8 @@
 <translation id="5119391094379141756">Изаберите Chrome</translation>
 <translation id="5123188916260706415">Претраживање гласом у Chrome-у</translation>
 <translation id="5162467219239570114">Chrome је застарео. Ако ажурирање није доступно у <ph name="BEGIN_LINK" />App Store-у<ph name="END_LINK" />, уређај можда не подржава нове верзије Chrome-а.</translation>
+<translation id="5172049865623113551">Одмах отворите Chrome када сте на iPhone-у</translation>
+<translation id="5179095426828744632">Брже приступајте Chrome-у преко траке с апликацијама</translation>
 <translation id="5184329579814168207">Отвори у Chrome-у</translation>
 <translation id="5190139289262548459">Ваша организација, <ph name="DOMAIN" />, управља налогом на који сте пријављени и начином на који се Chrome користи.</translation>
 <translation id="5209238444239954363">Chrome не може да тражи ажурирања. Пробајте поново касније.</translation>
@@ -308,7 +315,6 @@
 <translation id="787226752901403048">Пријавите се у Chrome да бисте делили групе картица, придруживали им се и сарађивали на идејама</translation>
 <translation id="7897703007638178753">Погледајте недавне картице у Chrome-у</translation>
 <translation id="7948283758957877064">Шта је ново у Chrome-у</translation>
-<translation id="7996707498590516621">Направите слику помоћу Gemini-ја у Chrome-у</translation>
 <translation id="8000174216052461231">Савет за Chrome: Набавите најјачу Chrome заштиту</translation>
 <translation id="8006014511203279255">Користите Chrome сваки пут када додирнете линкове у порукама и другим апликацијама.</translation>
 <translation id="8014670471808569312">Chrome ће вам понудити да сачува лозинку.</translation>
@@ -320,6 +326,7 @@
 <translation id="8136856065410661948">Ово ће се користити за прављење догађаја у Apple Calendar-у из Chrome-а и Google објектива.</translation>
 <translation id="8154120522323162874">Користите Chrome на најбољи начин тако што ћете наставити са подешавањем прегледача.</translation>
 <translation id="8160472928944011082">Chrome не може да се ажурира</translation>
+<translation id="8213550501565480896">Подесите Chrome као подразумевани прегледач</translation>
 <translation id="8245080522851805544">Заштитите приватност прегледања помоћу верификације уређаја када затворите Chrome</translation>
 <translation id="8248887045858762645">Савет за Chrome</translation>
 <translation id="8265730590513812063">Отворите Chrome мени</translation>
@@ -351,6 +358,7 @@
 <translation id="8788269841521769222">Не морате да запамтите ову лозинку. Чува се у Google менаџеру лозинки за <ph name="EMAIL" /></translation>
 <translation id="8796490717897731471"><ph name="EMAIL" />. Chrome-ом се управља.</translation>
 <translation id="880967149107462122">Идите у подешавања Chrome-а</translation>
+<translation id="8840947648682778034">Chrome тема за iPhone и iPad</translation>
 <translation id="8842132678697187091">Овде можете да отворите Google објектив.</translation>
 <translation id="8850736900032787670">Да бисте добијали персонализовани садржај на основу интересовања, пријавите се у Chrome.</translation>
 <translation id="8855781063981781621">Да бисте онемогућили режим закључавања у Chrome-у, искључите га на iPad-у.</translation>

@@ -11,7 +11,7 @@
 #include "build/build_config.h"
 #include "components/named_mojo_ipc_server/named_mojo_ipc_util.h"
 #include "mojo/public/cpp/platform/named_platform_channel.h"
-#include "remoting/host/base/username.h"
+#include "remoting/base/username.h"
 
 namespace remoting {
 
@@ -44,6 +44,18 @@ constexpr char kAgentProcessBrokerIpcName[] =
 // Must match the `MachServices` key in org.chromium.chromoting.broker.plist.
 constexpr char kAgentProcessBrokerIpcName[] =
     "chromoting.agent_process_broker_mojo_ipc";
+#endif
+
+#endif
+
+#if BUILDFLAG(IS_LINUX)
+
+#if !defined(NDEBUG)
+constexpr char kLoginSessionReporterIpcName[] =
+    "chromoting.login_session_reporter_debug_mojo_ipc";
+#else
+constexpr char kLoginSessionReporterIpcName[] =
+    "chromoting.login_session_reporter_mojo_ipc";
 #endif
 
 #endif
@@ -113,5 +125,20 @@ GetAgentProcessBrokerServerName() {
 }
 
 #endif
+
+#if BUILDFLAG(IS_LINUX)
+
+const char kLoginSessionReporterMessagePipeId[] = "login-session-reporter";
+
+const mojo::NamedPlatformChannel::ServerName&
+GetLoginSessionReporterServerName() {
+  static const base::NoDestructor<mojo::NamedPlatformChannel::ServerName>
+      server_name(
+          named_mojo_ipc_server::WorkingDirectoryIndependentServerNameFromUTF8(
+              kLoginSessionReporterIpcName));
+  return *server_name;
+}
+
+#endif  // BUILDFLAG(IS_LINUX)
 
 }  // namespace remoting

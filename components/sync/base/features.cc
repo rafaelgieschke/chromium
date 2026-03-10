@@ -8,26 +8,28 @@
 
 namespace syncer {
 
+namespace {
+constexpr bool IS_AUTOFILL_AI_PLATFORM = BUILDFLAG(IS_CHROMEOS) ||
+                                         BUILDFLAG(IS_LINUX) ||
+                                         BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN);
+}  // namespace
+
 BASE_FEATURE(kDeferredSyncStartupCustomDelay,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kSyncAccountSettings, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kSyncAccountSettings,
+             IS_AUTOFILL_AI_PLATFORM ? base::FEATURE_ENABLED_BY_DEFAULT
+                                     : base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kSyncAutofillLoyaltyCard,
-#if !BUILDFLAG(IS_IOS)
-             base::FEATURE_ENABLED_BY_DEFAULT
-#else
-             base::FEATURE_DISABLED_BY_DEFAULT
-#endif
-);
+BASE_FEATURE(kSyncAutofillLoyaltyCard, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enabled by default, intended as a kill switch.
 BASE_FEATURE(kSyncMakeAutofillValuableNonEncryptable,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
-BASE_FEATURE(kSyncAutofillValuableMetadata, base::FEATURE_DISABLED_BY_DEFAULT);
-
-BASE_FEATURE(kSyncMoveValuablesToProfileDb, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kSyncAutofillValuableMetadata,
+             IS_AUTOFILL_AI_PLATFORM ? base::FEATURE_ENABLED_BY_DEFAULT
+                                     : base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kSyncSharedTabGroupAccountData, base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -36,6 +38,14 @@ BASE_FEATURE(kSyncSharedComment, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kSyncAIThread, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kSyncContextualTask, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kSyncGeminiThread, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kSyncThemesIos, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kSyncLoyaltyCardMetadata, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kSyncAccessibilityAnnotation, base::FEATURE_DISABLED_BY_DEFAULT);
 
 #if !BUILDFLAG(IS_CHROMEOS)
 BASE_FEATURE(kUnoPhase2FollowUp,
@@ -48,13 +58,7 @@ BASE_FEATURE(kUnoPhase2FollowUp,
 #endif  // !BUILDFLAG(IS_CHROMEOS)
 
 BASE_FEATURE(kSyncAutofillWalletCredentialData,
-#if BUILDFLAG(IS_IOS)
-             base::FEATURE_DISABLED_BY_DEFAULT);
-#else
              base::FEATURE_ENABLED_BY_DEFAULT);
-#endif
-
-BASE_FEATURE(kSyncBookmarksLimit, base::FEATURE_DISABLED_BY_DEFAULT);
 
 // If enabled, shows a user-actionable error when the bookmarks count limit is
 // exceeded.
@@ -90,6 +94,16 @@ BASE_FEATURE(kReplaceSyncPromosWithSignInPromos,
              base::FEATURE_DISABLED_BY_DEFAULT
 #endif
 );
+BASE_FEATURE_PARAM(bool,
+                   kExplicitSigninForExtensions,
+                   &kReplaceSyncPromosWithSignInPromos,
+                   "explicit_signin_for_extensions",
+                   false);
+BASE_FEATURE_PARAM(bool,
+                   kExplicitSigninForBookmarks,
+                   &kReplaceSyncPromosWithSignInPromos,
+                   "explicit_signin_for_bookmarks",
+                   false);
 
 BASE_FEATURE(kSyncSupportAlwaysSyncingPriorityPreferences,
 #if BUILDFLAG(IS_CHROMEOS)
@@ -101,10 +115,13 @@ BASE_FEATURE(kSyncSupportAlwaysSyncingPriorityPreferences,
 #endif  // BUILDFLAG(IS_CHROMEOS)
 );
 
-BASE_FEATURE(kSyncWalletFlightReservations, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kSyncWalletFlightReservations,
+             IS_AUTOFILL_AI_PLATFORM ? base::FEATURE_ENABLED_BY_DEFAULT
+                                     : base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kSyncWalletVehicleRegistrations,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             IS_AUTOFILL_AI_PLATFORM ? base::FEATURE_ENABLED_BY_DEFAULT
+                                     : base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kSpellcheckSeparateLocalAndAccountDictionaries,
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -130,11 +147,8 @@ bool IsReadingListAccountStorageEnabled() {
 }
 #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 
-BASE_FEATURE(kSyncPasswordCleanUpAccidentalBatchDeletions,
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
 #if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
-BASE_FEATURE(kMigrateAccountPrefs, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kMigrateAccountPrefs, base::FEATURE_ENABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
 
 // Enabled by default, intended as a kill switch.
@@ -161,6 +175,9 @@ BASE_FEATURE(kWebApkBackupAndRestoreBackend, base::FEATURE_DISABLED_BY_DEFAULT);
 #if BUILDFLAG(IS_ANDROID)
 BASE_FEATURE(kSyncEnablePasswordsSyncErrorMessageAlternative,
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kSyncTrustedVaultErrorMessageDuration,
+             base::FEATURE_DISABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(IS_IOS)
@@ -169,12 +186,10 @@ BASE_FEATURE(kSyncTrustedVaultInfobarMessageImprovements,
 #endif  // BUILDFLAG(IS_IOS)
 
 BASE_FEATURE(kSyncPreferencesUseSelectedTypes,
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
-BASE_FEATURE(kSyncUseOsCryptAsync, base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kSyncDetermineAccountManagedStatus,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE_PARAM(base::TimeDelta,
                    kSyncDetermineAccountManagedStatusTimeout,
                    &kSyncDetermineAccountManagedStatus,
@@ -182,5 +197,23 @@ BASE_FEATURE_PARAM(base::TimeDelta,
                    base::Seconds(5));
 
 BASE_FEATURE(kSyncEnableNewSyncDashboardUrl, base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kSyncRecordDeviceStatisticsMetrics,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE_PARAM(base::TimeDelta,
+                   kSyncRecordDeviceStatisticsMetricsDelay,
+                   &kSyncRecordDeviceStatisticsMetrics,
+                   "SyncRecordDeviceStatisticsMetricsDelay",
+                   base::Seconds(30));
+BASE_FEATURE_PARAM(int,
+                   kSyncRecordDeviceStatisticsMetricsPeriodDays,
+                   &kSyncRecordDeviceStatisticsMetrics,
+                   "SyncRecordDeviceStatisticsMetricsPeriodDays",
+                   1);
+
+BASE_FEATURE(kSyncDeviceInfoUseWallClockTimer,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kSyncValidateAccessToken, base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace syncer

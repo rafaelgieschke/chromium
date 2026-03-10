@@ -46,7 +46,11 @@
 #include "ui/gfx/geometry/mask_filter_info.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/rrect_f.h"
+#include "ui/gfx/geometry/size.h"
+#include "ui/gfx/geometry/size_f.h"
 #include "ui/gfx/hdr_metadata.h"
+#include "ui/gfx/overlay_transform.h"
+#include "ui/gfx/overlay_transform_utils.h"
 #include "ui/gfx/video_types.h"
 #include "ui/gl/gl_switches.h"
 
@@ -155,10 +159,11 @@ TextureDrawQuad* CreateTextureQuadAt(
   quad->SetNew(shared_quad_state, rect, /*visible_rect=*/rect,
                /*needs_blending=*/false, resource_id,
                /*top_left=*/gfx::PointF(0, 0),
-               /*bottom_right=*/gfx::PointF(1, 1),
+               /*bottom_right=*/gfx::PointF(rect.width(), rect.height()),
                /*background=*/SkColors::kBlack,
                /*nearest=*/false, /*secure_output=*/false,
-               gfx::ProtectedVideoType::kClear);
+               gfx::ProtectedVideoType::kClear,
+               /*is_tex_coords_normalized=*/false);
   return quad;
 }
 
@@ -178,10 +183,11 @@ TextureDrawQuad* CreateLowLatencyTextureQuadAt(
   quad->SetNew(shared_quad_state, rect, /*visible_rect=*/rect,
                /*needs_blending=*/false, resource_id,
                /*top_left=*/gfx::PointF(0, 0),
-               /*bottom_right=*/gfx::PointF(1, 1),
+               /*bottom_right=*/gfx::PointF(rect.width(), rect.height()),
                /*background=*/SkColors::kBlack,
                /*nearest=*/false, /*secure_output=*/false,
-               gfx::ProtectedVideoType::kClear);
+               gfx::ProtectedVideoType::kClear,
+               /*is_tex_coords_normalized=*/false);
   return quad;
 }
 
@@ -218,10 +224,13 @@ TextureDrawQuad* CreateYUVTextureQuadAt(
                        /*visible_rect=*/quad_rect,
                        /*needs_blending=*/false, resource_id,
                        /*top_left=*/gfx::PointF(0, 0),
-                       /*bottom_right=*/gfx::PointF(1, 1),
+                       /*bottom_right=*/
+                       gfx::PointF(resource_size_in_pixels.width(),
+                                   resource_size_in_pixels.height()),
                        /*background=*/SkColors::kBlack,
                        /*nearest=*/false, /*secure_output=*/false,
-                       gfx::ProtectedVideoType::kClear);
+                       gfx::ProtectedVideoType::kClear,
+                       /*is_tex_coords_normalized=*/false);
   // Content is video frame type.
   overlay_quad->is_video_frame = true;
 
@@ -397,13 +406,8 @@ class DCLayerOverlayProcessorTest : public OverlayProcessorTestBase {
     OverlayProcessorTestBase::TearDown();
   }
 
-  // TODO(crbug.com/444264038): Merge this overload with one without filter data
-  // when the RPDQ refactor is finished so that it does not need filter data.
   DCLayerOverlayProcessor::RenderPassOverlayData ProcessRootPassForOverlays(
       const AggregatedRenderPassList* render_passes,
-      const OverlayProcessorInterface::FilterOperationsMap& render_pass_filters,
-      const OverlayProcessorInterface::FilterOperationsMap&
-          render_pass_backdrop_filters,
       SurfaceDamageRectList surface_damage_rect_list_in_root_space) {
     DCLayerOverlayProcessor::RenderPassOverlayDataMap
         render_pass_overlay_data_map;
@@ -417,8 +421,7 @@ class DCLayerOverlayProcessorTest : public OverlayProcessorTestBase {
         render_passes->back()->damage_rect;
 
     dc_layer_overlay_processor_->Process(
-        resource_provider_.get(), render_pass_filters,
-        render_pass_backdrop_filters, surface_damage_rect_list_in_root_space,
+        resource_provider_.get(), surface_damage_rect_list_in_root_space,
         /*is_page_fullscreen_mode=*/false, render_pass_overlay_data_map);
 
     // |DCLayerOverlayProcessor::Process| doesn't guarantee a specific ordering
@@ -428,15 +431,6 @@ class DCLayerOverlayProcessorTest : public OverlayProcessorTestBase {
                       std::ranges::greater(), &OverlayCandidate::plane_z_order);
 
     return std::move(root_render_pass_overlay_data);
-  }
-
-  DCLayerOverlayProcessor::RenderPassOverlayData ProcessRootPassForOverlays(
-      const AggregatedRenderPassList* render_passes,
-      SurfaceDamageRectList surface_damage_rect_list_in_root_space) {
-    return ProcessRootPassForOverlays(
-        render_passes, OverlayProcessorInterface::FilterOperationsMap(),
-        OverlayProcessorInterface::FilterOperationsMap(),
-        surface_damage_rect_list_in_root_space);
   }
 
   void TestRenderPassRootTransform(bool is_overlay);
@@ -1102,12 +1096,9 @@ TEST_F(DCLayerOverlayProcessorTest, PixelMovingForegroundFilter) {
   // Create a non-root render pass with a pixel-moving foreground filter.
   AggregatedRenderPassId filter_render_pass_id{2};
   gfx::Rect filter_rect = gfx::Rect(260, 260, 100, 100);
-  cc::FilterOperations blur_filter;
-  blur_filter.Append(cc::FilterOperation::CreateBlurFilter(10.f));
   auto filter_pass = std::make_unique<AggregatedRenderPass>();
   filter_pass->SetNew(filter_render_pass_id, filter_rect, filter_rect,
                       gfx::Transform());
-  filter_pass->filters = blur_filter;
 
   // Add a solid quad to the non-root pass.
   SharedQuadState* shared_state_filter =
@@ -1126,8 +1117,15 @@ TEST_F(DCLayerOverlayProcessorTest, PixelMovingForegroundFilter) {
   // (rpdq->rect(260, 260, 100, 100) + blur filter pixel movement (2 * 10.f) =
   // (240, 240, 140, 140)) does.
 
-  CreateRenderPassDrawQuadAt(pass.get(), shared_quad_state_rpdq, filter_rect,
-                             filter_render_pass_id);
+  auto* rpdq = CreateRenderPassDrawQuadAt(pass.get(), shared_quad_state_rpdq,
+                                          filter_rect, filter_render_pass_id);
+  rpdq->SetFilters(
+      /*filters=*/cc::FilterOperations(
+          {cc::FilterOperation::CreateBlurFilter(10.f)}),
+      /*backdrop_filters=*/{},
+      /*backdrop_filter_bounds=*/std::nullopt,
+      /*filters_scale=*/gfx::Vector2dF(1.0f, 1.0f),
+      /*filters_origin=*/gfx::PointF(), /*backdrop_filter_quality=*/1.0f);
 
   // Add a video quad to the root render pass.
   SharedQuadState* shared_state =
@@ -1141,10 +1139,6 @@ TEST_F(DCLayerOverlayProcessorTest, PixelMovingForegroundFilter) {
   // 100, 100).
   pass->output_rect = gfx::Rect(0, 0, 512, 512);
 
-  OverlayProcessorInterface::FilterOperationsMap render_pass_filters;
-  OverlayProcessorInterface::FilterOperationsMap render_pass_backdrop_filters;
-  render_pass_filters[filter_render_pass_id] = &blur_filter;
-
   // filter_rect + kOverlayRect. Both are damaged.
   pass->damage_rect = gfx::Rect(0, 0, 360, 360);
   pass_list.push_back(std::move(pass));
@@ -1153,8 +1147,7 @@ TEST_F(DCLayerOverlayProcessorTest, PixelMovingForegroundFilter) {
   SurfaceDamageRectList surface_damage_rect_list = {filter_rect, kOverlayRect};
 
   auto overlay_data = ProcessRootPassForOverlays(
-      &pass_list, render_pass_filters, render_pass_backdrop_filters,
-      std::move(surface_damage_rect_list));
+      &pass_list, std::move(surface_damage_rect_list));
 
   EXPECT_EQ(1U, overlay_data.promoted_overlays.size());
   // Make sure the video is in an underlay mode if the overlay quad intersects
@@ -1171,13 +1164,10 @@ TEST_F(DCLayerOverlayProcessorTest, BackdropFilter) {
   // Create a non-root render pass with a backdrop filter.
   AggregatedRenderPassId backdrop_filter_render_pass_id{2};
   gfx::Rect backdrop_filter_rect = gfx::Rect(200, 200, 100, 100);
-  cc::FilterOperations backdrop_filter;
-  backdrop_filter.Append(cc::FilterOperation::CreateBlurFilter(10.f));
   auto backdrop_filter_pass = std::make_unique<AggregatedRenderPass>();
   backdrop_filter_pass->SetNew(backdrop_filter_render_pass_id,
                                backdrop_filter_rect, backdrop_filter_rect,
                                gfx::Transform());
-  backdrop_filter_pass->backdrop_filters = backdrop_filter;
 
   // Add a transparent solid quad to the non-root pass.
   SharedQuadState* shared_state_backdrop_filter =
@@ -1194,9 +1184,16 @@ TEST_F(DCLayerOverlayProcessorTest, BackdropFilter) {
   shared_quad_state_rpdq->opacity = 0.1f;
   // The render pass draw quad rpdq->rect intersects with the overlay quad
   // kOverlayRect(0, 0, 256, 256).
-  CreateRenderPassDrawQuadAt(pass.get(), shared_quad_state_rpdq,
-                             backdrop_filter_rect,
-                             backdrop_filter_render_pass_id);
+  auto* rpdq = CreateRenderPassDrawQuadAt(pass.get(), shared_quad_state_rpdq,
+                                          backdrop_filter_rect,
+                                          backdrop_filter_render_pass_id);
+  rpdq->SetFilters(
+      /*filters=*/{},
+      /*backdrop_filters=*/
+      cc::FilterOperations({cc::FilterOperation::CreateBlurFilter(10.f)}),
+      /*backdrop_filter_bounds=*/std::nullopt,
+      /*filters_scale=*/gfx::Vector2dF(1.0f, 1.0f),
+      /*filters_origin=*/gfx::PointF(), /*backdrop_filter_quality=*/1.0f);
 
   // Add a video quad to the root render pass.
   SharedQuadState* shared_state =
@@ -1210,11 +1207,6 @@ TEST_F(DCLayerOverlayProcessorTest, BackdropFilter) {
   // 100, 100).
   pass->output_rect = gfx::Rect(0, 0, 512, 512);
 
-  OverlayProcessorInterface::FilterOperationsMap render_pass_filters;
-  OverlayProcessorInterface::FilterOperationsMap render_pass_backdrop_filters;
-  render_pass_backdrop_filters[backdrop_filter_render_pass_id] =
-      &backdrop_filter;
-
   // backdrop_filter_rect + kOverlayRect. Both are damaged.
   pass->damage_rect = gfx::Rect(0, 0, 300, 300);
   pass_list.push_back(std::move(pass));
@@ -1224,8 +1216,7 @@ TEST_F(DCLayerOverlayProcessorTest, BackdropFilter) {
                                                     kOverlayRect};
 
   auto overlay_data = ProcessRootPassForOverlays(
-      &pass_list, render_pass_filters, render_pass_backdrop_filters,
-      std::move(surface_damage_rect_list));
+      &pass_list, std::move(surface_damage_rect_list));
 
   // Make sure the video is not promoted if the overlay quad intersects
   // with the backdrop filter rpdq->rect.
@@ -2607,6 +2598,8 @@ class OverlayProcessorWinTest : public OverlayProcessorTestBase {
         .resource_size_in_pixels = primary_plane_size,
         .supports_hdr = false,
         .is_opaque = true,
+        .si_format = SinglePlaneFormat::kRGBA_8888,
+        .color_space = gfx::ColorSpace::CreateSRGB(),
     };
   }
 
@@ -3004,16 +2997,7 @@ INSTANTIATE_TEST_SUITE_P(
     &OverlayProcessorWinSurfacePlaneTest::GetParamName);
 
 class OverlayProcessorWinSurfacePlaneFullScreenTest
-    : public OverlayProcessorWinSurfacePlaneTest {
- public:
-  OverlayProcessorWinSurfacePlaneFullScreenTest() {
-    feature_list_.InitAndEnableFeature(
-        features::kEarlyFullScreenVideoOptimization);
-  }
-
- private:
-  base::test::ScopedFeatureList feature_list_;
-};
+    : public OverlayProcessorWinSurfacePlaneTest {};
 
 // Check that we can correctly mark a full screen video (that has a background
 // mat) as "full screen".
@@ -3133,22 +3117,9 @@ class OverlayProcessorWinDelegatedCompositingTest
         pass_list.back()->damage_rect;
 
     OverlayCandidateList candidates;
-    OverlayProcessorInterface::FilterOperationsMap render_pass_filters;
-    OverlayProcessorInterface::FilterOperationsMap render_pass_backdrop_filters;
-
-    for (const auto& pass : pass_list) {
-      if (!pass->filters.IsEmpty()) {
-        render_pass_filters[pass->id] = &pass->filters;
-      }
-      if (!pass->backdrop_filters.IsEmpty()) {
-        render_pass_backdrop_filters[pass->id] = &pass->backdrop_filters;
-      }
-    }
-
     damage_rect_ = original_root_surface_damage;
     overlay_processor_->ProcessForOverlays(
         resource_provider_.get(), &pass_list, GetIdentityColorMatrix(),
-        render_pass_filters, render_pass_backdrop_filters,
         std::move(surface_damage_rect_list),
         GetDefaultPrimaryPlane(pass_list.back()->output_rect.size()),
         &candidates, &damage_rect_, &content_bounds_);
@@ -3241,10 +3212,10 @@ TEST_F(OverlayProcessorWinDelegatedCompositingTest,
     // A RPDQ with a backdrop filter occluding another quad will cause delegated
     // compositing to fail.
     auto child_pass = CreateRenderPass(AggregatedRenderPassId(2));
-    child_pass->backdrop_filters.Append(
-        cc::FilterOperation::CreateBlurFilter(1.f));
-    CreateRenderPassDrawQuadAt(pass.get(), pass->shared_quad_state_list.back(),
-                               gfx::Rect(0, 0, 50, 50), child_pass->id);
+    auto* rpdq = CreateRenderPassDrawQuadAt(
+        pass.get(), pass->shared_quad_state_list.back(),
+        gfx::Rect(0, 0, 50, 50), child_pass->id);
+    rpdq->backdrop_filters.Append(cc::FilterOperation::CreateBlurFilter(1.f));
     pass_list.push_back(std::move(child_pass));
 
     CreateSolidColorQuadAt(pass->shared_quad_state_list.back(),
@@ -3303,9 +3274,6 @@ TEST_F(OverlayProcessorWinDelegatedCompositingTest,
   // Create a pass with a backdrop filter.
   {
     auto child_pass = CreateRenderPass(child_pass_id);
-    child_pass->backdrop_filters = cc::FilterOperations({
-        cc::FilterOperation::CreateGrayscaleFilter(1.0f),
-    });
     pass_list.push_back(std::move(child_pass));
   }
 
@@ -3314,9 +3282,11 @@ TEST_F(OverlayProcessorWinDelegatedCompositingTest,
 
     const gfx::Rect rect(0, 0, 50, 50);
 
-    CreateRenderPassDrawQuadAt(
+    auto* rpdq = CreateRenderPassDrawQuadAt(
         pass.get(), CreateSharedQuadStateWithLayerNamespaceId(pass.get()), rect,
         child_pass_id);
+    rpdq->backdrop_filters = cc::FilterOperations(
+        {cc::FilterOperation::CreateGrayscaleFilter(1.0f)});
 
     // Create a quad that will be occluded by the backdrop-filtered RPDQ above.
     CreateSolidColorQuadAt(
@@ -3334,9 +3304,8 @@ class OverlayProcessorWinFullScreenTest
     : public OverlayProcessorWinDelegatedCompositingTest {
  public:
   OverlayProcessorWinFullScreenTest() {
-    feature_list_.InitWithFeatures(
-        {features::kEarlyFullScreenVideoOptimization},
-        {features::kDirectCompositionLetterboxVideoOptimization});
+    feature_list_.InitAndDisableFeature(
+        features::kDirectCompositionLetterboxVideoOptimization);
   }
 
   void SetUp() override {
@@ -3621,14 +3590,87 @@ TEST_F(OverlayProcessorWinFullScreenTest,
                          test::OverlayTargetRectIs(gfx::RectF(2400, 1600))),
       }));
 }
+
+MATCHER(TransformHasRotationOrFlip, "") {
+  return !arg.IsPositiveScaleOrTranslation();
+}
+
+// Test full screen optimization behavior in the presence of a rotated/flipped
+// video, e.g. added by the video metadata.
+TEST_F(OverlayProcessorWinFullScreenTest, LetterboxVideoHasRotation) {
+  const gfx::Rect video_rect = gfx::Rect(0, 96, 256, 64);
+
+  const auto ProcessFrameWithVideoRotation =
+      [&](gfx::OverlayTransform video_rotation) {
+        AggregatedRenderPassList pass_list;
+        auto pass = CreateRenderPass();
+        pass->output_rect = gfx::Rect(256, 256);
+
+        // We want the result of the transform to be `video_rect`, so we need to
+        // pre-rotate the size of our imagined video. We also imagine the video
+        // to be smaller than the target so we ensure the full screen code
+        // handles scaled videos as well.
+        const float video_to_target_scale = 2;
+        const gfx::Size pre_rotated_video_size = gfx::ScaleToRoundedSize(
+            gfx::OverlayTransformToTransform(video_rotation, gfx::SizeF())
+                .MapRect(video_rect)
+                .size(),
+            1 / video_to_target_scale);
+
+        auto* sqs = CreateSharedQuadStateWithLayerNamespaceId(pass.get());
+        // Offset added by e.g. the embedder of a video.
+        sqs->quad_to_target_transform.Translate(video_rect.OffsetFromOrigin());
+        sqs->quad_to_target_transform.Scale(video_to_target_scale);
+        // Rotation added by e.g. the encoding in a video.
+        sqs->quad_to_target_transform.PreConcat(
+            gfx::OverlayTransformToTransform(
+                video_rotation, gfx::SizeF(pre_rotated_video_size)));
+
+        CreateYUVTextureQuadAt(resource_provider_.get(),
+                               child_resource_provider_.get(),
+                               child_provider_.get(), sqs, pass.get(),
+                               gfx::Rect(pre_rotated_video_size));
+        CreateSolidColorQuadAt(
+            CreateSharedQuadStateWithLayerNamespaceId(pass.get()),
+            SkColors::kBlack, pass.get(), pass->output_rect);
+        pass_list.push_back(std::move(pass));
+
+        auto result = TryProcessForDelegatedOverlays(pass_list);
+        result.ExpectDelegationSuccess();
+
+        return result;
+      };
+
+  {
+    // Test that this setup succeeds when there is no buffer rotation.
+    auto result = ProcessFrameWithVideoRotation(gfx::OVERLAY_TRANSFORM_NONE);
+    EXPECT_THAT(result.candidates(), CandidatesAreSortedAndElementsAre(
+                                         {test::OverlayIsFullScreen()}));
+  }
+
+  {
+    auto result = ProcessFrameWithVideoRotation(
+        gfx::OVERLAY_TRANSFORM_ROTATE_CLOCKWISE_90);
+    EXPECT_THAT(
+        result.candidates(),
+        CandidatesAreSortedAndElementsAre({
+            test::IsSolidColorOverlay(SkColors::kBlack),
+            testing::AllOf(
+                testing::Not(test::OverlayIsFullScreen()),
+                test::OverlayTargetRectIs(gfx::RectF(video_rect)),
+                testing::Field("transform", &OverlayCandidate::transform,
+                               testing::VariantWith<gfx::Transform>(
+                                   TransformHasRotationOrFlip()))),
+        }));
+  }
+}
+
 class OverlayProcessorWinFullScreenWithAdjustmentTest
     : public OverlayProcessorWinDelegatedCompositingTest {
  public:
   OverlayProcessorWinFullScreenWithAdjustmentTest() {
-    feature_list_.InitWithFeatures(
-        {features::kEarlyFullScreenVideoOptimization,
-         features::kDirectCompositionLetterboxVideoOptimization},
-        {});
+    feature_list_.InitAndEnableFeature(
+        features::kDirectCompositionLetterboxVideoOptimization);
   }
 
   void SetUp() override {
@@ -4211,9 +4253,15 @@ TEST_F(OverlayProcessorWinPartiallyDelegatedCompositingTest,
                     pass->video_capture_enabled = true;
                   }));
 
-  CreateNamedPass("filters", true,
-                  base::BindOnce([](AggregatedRenderPass* pass) {
-                    pass->filters = cc::FilterOperations({
+  AggregatedRenderPassId filtered_pass_id =
+      CreateNamedPass("filtered pass", true, base::DoNothing());
+
+  CreateNamedPass("pass with filters", true,
+                  base::BindLambdaForTesting([&](AggregatedRenderPass* pass) {
+                    auto* rpdq = CreateRenderPassDrawQuadAt(
+                        pass, CreateSharedQuadStateWithLayerNamespaceId(pass),
+                        pass->output_rect, filtered_pass_id);
+                    rpdq->filters = cc::FilterOperations({
                         cc::FilterOperation::CreateGrayscaleFilter(1.0f),
                     });
                   }));

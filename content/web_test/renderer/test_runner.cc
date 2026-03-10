@@ -6,7 +6,6 @@
 
 #include <stddef.h>
 
-#include <algorithm>
 #include <clocale>
 #include <limits>
 #include <string_view>
@@ -15,7 +14,6 @@
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/containers/unique_ptr_adapters.h"
 #include "base/functional/callback_helpers.h"
 #include "base/logging.h"
@@ -56,6 +54,7 @@
 #include "printing/page_number.h"
 #include "printing/page_range.h"
 #include "printing/print_settings.h"
+#include "services/device/public/mojom/screen_orientation_lock_types.mojom-shared.h"
 #include "services/network/public/mojom/cors.mojom.h"
 #include "third_party/abseil-cpp/absl/numeric/int128.h"
 #include "third_party/blink/public/common/page/page_zoom.h"
@@ -281,6 +280,8 @@ class TestRunnerBindings final : public gin::Wrappable<TestRunnerBindings> {
   void ClearTrustTokenState(v8::Local<v8::Function> callback);
   void CopyImageThen(int x, int y, v8::Local<v8::Function> callback);
   void DisableMockScreenOrientation();
+  void SimulateScreenOrientationLockChanged(bool locked,
+                                            const std::string& orientation);
   void DispatchBeforeInstallPromptEvent(
       const std::vector<std::string>& event_platforms,
       v8::Local<v8::Function> callback);
@@ -313,6 +314,7 @@ class TestRunnerBindings final : public gin::Wrappable<TestRunnerBindings> {
   void ForceNextDrawingBufferCreationToFail();
   void ForceNextWebGLContextCreationToFail();
   void GetBluetoothManualChooserEvents(v8::Local<v8::Function> callback);
+  gin::Dictionary GetClipboardReadState(v8::Isolate* isolate);
   void GetManifestThen(v8::Local<v8::Function> callback);
   std::string GetWritableDirectory();
   void InsertStyleSheet(const std::string& source_code);
@@ -332,6 +334,7 @@ class TestRunnerBindings final : public gin::Wrappable<TestRunnerBindings> {
   void QueueReload();
   void RemoveSpellCheckResolvedCallback();
   void RemoveWebPageOverlay();
+  void ResetClipboardReadTracking();
   void ResolveBeforeInstallPromptPromise(const std::string& platform);
   void SendBluetoothManualChooserEvent(const std::string& event,
                                        const std::string& argument);
@@ -598,6 +601,8 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
                  &TestRunnerBindings::DisableAutoResizeMode)
       .SetMethod("disableMockScreenOrientation",
                  &TestRunnerBindings::DisableMockScreenOrientation)
+      .SetMethod("simulateScreenOrientationLockChanged",
+                 &TestRunnerBindings::SimulateScreenOrientationLockChanged)
       // Sets up a WebDocumentSubresourceFilterImpl to disallow subsequent
       // subresource loads within the current document with the given path
       // |suffixes|. The filter is created and injected even if |suffixes| is
@@ -671,6 +676,12 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       // Returns the events recorded since the last call to this function.
       .SetMethod("getBluetoothManualChooserEvents",
                  &TestRunnerBindings::GetBluetoothManualChooserEvents)
+      // Returns the clipboard read tracking state from the mock clipboard host.
+      // The returned object has boolean properties: readTextCalled,
+      // readHtmlCalled, readUnsanitizedCustomFormatCalled,
+      // readAvailableFormatsCalled.
+      .SetMethod("getClipboardReadState",
+                 &TestRunnerBindings::GetClipboardReadState)
       .SetMethod("getManifestThen", &TestRunnerBindings::GetManifestThen)
       // Returns the absolute path to a directory this test can write data in.
       // This returns the path to a fresh empty directory every time this method
@@ -712,6 +723,9 @@ gin::ObjectTemplateBuilder TestRunnerBindings::GetObjectTemplateBuilder(
       // from inside the main frame.
       .SetMethod("removeWebPageOverlay",
                  &TestRunnerBindings::RemoveWebPageOverlay)
+      // Resets the clipboard read tracking state on the mock clipboard host.
+      .SetMethod("resetClipboardReadTracking",
+                 &TestRunnerBindings::ResetClipboardReadTracking)
       .SetMethod("resolveBeforeInstallPromptPromise",
                  &TestRunnerBindings::ResolveBeforeInstallPromptPromise)
       .SetMethod("selectionAsMarkup", &TestRunnerBindings::SelectionAsMarkup)
@@ -1151,6 +1165,34 @@ std::string TestRunnerBindings::GetWritableDirectory() {
   return result.AsUTF8Unsafe();
 }
 
+gin::Dictionary TestRunnerBindings::GetClipboardReadState(
+    v8::Isolate* isolate) {
+  gin::Dictionary result = gin::Dictionary::CreateEmpty(isolate);
+  if (!frame_) {
+    return result;
+  }
+  bool read_text_called = false;
+  bool read_html_called = false;
+  bool read_unsanitized_custom_format_called = false;
+  bool read_available_formats_called = false;
+  frame_->GetWebTestControlHostRemote()->GetClipboardReadState(
+      &read_text_called, &read_html_called,
+      &read_unsanitized_custom_format_called, &read_available_formats_called);
+  result.Set("readTextCalled", read_text_called);
+  result.Set("readHtmlCalled", read_html_called);
+  result.Set("readUnsanitizedCustomFormatCalled",
+             read_unsanitized_custom_format_called);
+  result.Set("readAvailableFormatsCalled", read_available_formats_called);
+  return result;
+}
+
+void TestRunnerBindings::ResetClipboardReadTracking() {
+  if (!frame_) {
+    return;
+  }
+  frame_->GetWebTestControlHostRemote()->ResetClipboardReadTracking();
+}
+
 void TestRunnerBindings::SetFilePathForMockFileDialog(const std::string& path) {
   if (!frame_) {
     return;
@@ -1476,6 +1518,35 @@ void TestRunnerBindings::DisableMockScreenOrientation() {
   runner_->DisableMockScreenOrientation(GetWebFrame()->View());
 }
 
+void TestRunnerBindings::SimulateScreenOrientationLockChanged(
+    bool locked,
+    const std::string& orientation) {
+  if (!frame_) {
+    return;
+  }
+
+  device::mojom::ScreenOrientationLockType lock_type =
+      device::mojom::ScreenOrientationLockType::DEFAULT;
+  if (orientation == "portrait-primary") {
+    lock_type = device::mojom::ScreenOrientationLockType::PORTRAIT_PRIMARY;
+  } else if (orientation == "portrait-secondary") {
+    lock_type = device::mojom::ScreenOrientationLockType::PORTRAIT_SECONDARY;
+  } else if (orientation == "landscape-primary") {
+    lock_type = device::mojom::ScreenOrientationLockType::LANDSCAPE_PRIMARY;
+  } else if (orientation == "landscape-secondary") {
+    lock_type = device::mojom::ScreenOrientationLockType::LANDSCAPE_SECONDARY;
+  } else if (orientation == "portrait") {
+    lock_type = device::mojom::ScreenOrientationLockType::PORTRAIT;
+  } else if (orientation == "landscape") {
+    lock_type = device::mojom::ScreenOrientationLockType::LANDSCAPE;
+  } else if (orientation == "any") {
+    lock_type = device::mojom::ScreenOrientationLockType::ANY;
+  }
+
+  frame_->GetWebTestControlHostRemote()->SimulateScreenOrientationLockChanged(
+      frame_->GetWebFrame()->GetLocalFrameToken(), locked, lock_type);
+}
+
 void TestRunnerBindings::SetDisallowedSubresourcePathSuffixes(
     std::vector<std::string> suffixes,
     bool block_subresources) {
@@ -1594,8 +1665,6 @@ void TestRunnerBindings::OverridePreference(gin::Arguments* args) {
     ConvertAndSet(args, &prefs_.disable_reading_from_canvas);
   } else if (key == "WebKitStrictMixedContentChecking") {
     ConvertAndSet(args, &prefs_.strict_mixed_content_checking);
-  } else if (key == "WebKitStrictPowerfulFeatureRestrictions") {
-    ConvertAndSet(args, &prefs_.strict_powerful_feature_restrictions);
   } else if (key == "WebKitWebSecurityEnabled") {
     ConvertAndSet(args, &prefs_.web_security_enabled);
   } else if (key == "WebKitSpatialNavigationEnabled") {
@@ -2623,7 +2692,7 @@ bool TestRunner::WorkQueue::ProcessWorkItemInternal(
   NOTREACHED();
 }
 
-void TestRunner::WorkQueue::ReplicateStates(const base::Value::Dict& values,
+void TestRunner::WorkQueue::ReplicateStates(const base::DictValue& values,
                                             WebFrameTestProxy& source) {
   states_.ApplyUntrackedChanges(values);
   if (!has_items())
@@ -2982,7 +3051,7 @@ SkBitmap TestRunner::DumpPixelsInRenderer(blink::WebLocalFrame* main_frame) {
 }
 
 void TestRunner::ReplicateWebTestRuntimeFlagsChanges(
-    const base::Value::Dict& changed_values) {
+    const base::DictValue& changed_values) {
   if (!test_is_running_)
     return;
 
@@ -3067,7 +3136,7 @@ void TestRunner::AddLoadingFrame(blink::WebLocalFrame* frame) {
 
 void TestRunner::RemoveLoadingFrame(blink::WebLocalFrame* frame) {
   // We don't track frames that were started between tests.
-  if (!base::Contains(loading_frames_, frame))
+  if (!std::ranges::contains(loading_frames_, frame))
     return;
 
   // We had a DCHECK checking
@@ -3307,7 +3376,7 @@ void TestRunner::ProcessWorkItem(mojom::WorkItemPtr work_item,
   work_queue_.ProcessWorkItem(std::move(work_item), source);
 }
 
-void TestRunner::ReplicateWorkQueueStates(const base::Value::Dict& values,
+void TestRunner::ReplicateWorkQueueStates(const base::DictValue& values,
                                           WebFrameTestProxy& source) {
   if (!test_is_running_)
     return;
@@ -3565,9 +3634,9 @@ void TestRunner::DumpIconChanges(WebFrameTestProxy& source) {
 }
 
 void TestRunner::SetAudioData(const gin::ArrayBufferView& view) {
-  uint8_t* bytes = static_cast<uint8_t*>(view.bytes());
-  audio_data_.resize(view.num_bytes());
-  std::copy(bytes, UNSAFE_TODO(bytes + view.num_bytes()), audio_data_.begin());
+  base::span<const uint8_t> src = view.span();
+  audio_data_.resize(src.size());
+  base::span(audio_data_).copy_from_nonoverlapping(src);
   dump_as_audio_ = true;
 }
 

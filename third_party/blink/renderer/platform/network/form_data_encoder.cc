@@ -38,13 +38,13 @@ namespace {
 
 // Helper functions
 inline void Append(Vector<char>& buffer, std::string_view string) {
-  buffer.AppendSpan(base::span(string));
+  buffer.append_range(string);
 }
 
 inline void AppendPercentEncoded(Vector<char>& buffer, unsigned char c) {
   constexpr auto kHexChars = base::span_from_cstring("0123456789ABCDEF");
   const char tmp[] = {'%', kHexChars[c / 16], kHexChars[c % 16]};
-  buffer.AppendSpan(base::span(tmp));
+  buffer.append_range(tmp);
 }
 
 void AppendQuotedString(Vector<char>& buffer,
@@ -105,10 +105,9 @@ TextEncoding FormDataEncoder::EncodingFromAcceptCharset(
   String normalized_accept_charset = accept_charset;
   normalized_accept_charset.Replace(',', ' ');
 
-  Vector<String> charsets;
-  normalized_accept_charset.Split(' ', charsets);
-
-  for (const String& name : charsets) {
+  Vector<StringView> charsets =
+      StringView(normalized_accept_charset).SplitSkippingEmpty(' ');
+  for (const StringView& name : charsets) {
     TextEncoding encoding(name);
     if (encoding.IsValid())
       return encoding;
@@ -145,7 +144,7 @@ Vector<char> FormDataEncoder::GenerateUniqueBoundaryString() {
   base::RandBytes(base::as_writable_byte_span(random_bytes));
   for (char& c : random_bytes)
     c = kAlphaNumericEncodingMap[c & 0x3F];
-  boundary.AppendSpan(base::span(random_bytes));
+  boundary.append_range(random_bytes);
 
   boundary.push_back(
       0);  // Add a 0 at the end so we can use this as a C-style string.

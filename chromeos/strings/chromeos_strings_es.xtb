@@ -167,6 +167,7 @@
 <translation id="1621067168122174824">Realizar prueba de carga</translation>
 <translation id="1622402072367425417">burbujas brillantes</translation>
 <translation id="1626590945318984973">Combinación de teclas no disponible. Pulsa una nueva combinación de teclas sin usar la tecla de función ni la tecla <ph name="META_KEY" />.</translation>
+<translation id="163774412591892664">Tu administrador ha inhabilitado tu dispositivo y puede acceder a su ubicación.</translation>
 <translation id="1639239467298939599">Cargando</translation>
 <translation id="1641857168437328880">Alimentador de documentos (una cara)</translation>
 <translation id="1642396894598555413">bicicletas</translation>
@@ -554,7 +555,7 @@
 <translation id="345256797477978759">Anclar ventana en la parte <ph name="DIRECTION" /> más grande de la pantalla</translation>
 <translation id="3456078764689556234">Se ha impreso la página <ph name="PRINTED_PAGES" /> de <ph name="TOTAL_PAGES" />.</translation>
 <translation id="345898999683440380">Escaneando página <ph name="PAGE_NUM" />. <ph name="PERCENTAGE_VALUE" /> % completado.</translation>
-<translation id="3459509316159669723">Imprimir</translation>
+<translation id="3459509316159669723">Imprimiendo</translation>
 <translation id="3462187165860821523">Actualizando <ph name="DEVICE_NAME" /></translation>
 <translation id="346423161771747987">Corriente</translation>
 <translation id="346539236881580388">Repetir foto</translation>
@@ -727,6 +728,7 @@
 <translation id="4212169537710712814">Descarga del modelo de transcripción de <ph name="LANGUAGE_NAME" /> completada</translation>
 <translation id="42126664696688958">Exportar</translation>
 <translation id="4213104098953699324">Teclado USB</translation>
+<translation id="4217571870635786043">Dictado</translation>
 <translation id="4227825898293920515">La contraseña caducará dentro de <ph name="TIME" /></translation>
 <translation id="4238516577297848345">No hay ningún trabajo de impresión en curso</translation>
 <translation id="4239069858505860023">GPRS</translation>
@@ -1146,7 +1148,7 @@
 <translation id="6074608334942655098">Dejar de traducir</translation>
 <translation id="6074752328838739425">Ocultar resumen</translation>
 <translation id="6075872808778243331">(Android) Latencia de HTTP</translation>
-<translation id="6078323886959318429">Añadir acceso directo</translation>
+<translation id="6078323886959318429">Acceso directo</translation>
 <translation id="6079693086494835199">Restablece para asegurarte de que la página principal predeterminada no sea un sitio de phishing. Usa solo sitios web de confianza.</translation>
 <translation id="6090672065638047175">Una foto de un árbol brillante hecho de estrellas con un hermoso cielo nocturno y una galaxia de fondo.</translation>
 <translation id="6091080061796993741">amarillo</translation>
@@ -1410,7 +1412,6 @@
 <translation id="7177485034254901881"><ph name="MANAGER" /> gestiona este <ph name="DEVICE_TYPE" />. Los administradores pueden configurar el dispositivo de forma remota.</translation>
 <translation id="7180611975245234373">Actualizar</translation>
 <translation id="7180865173735832675">Personalizar</translation>
-<translation id="7182063559013288142">Conexión compartida instantánea</translation>
 <translation id="7184043045742675738">Haz clic en cualquier tecla para personalizar tu botón. Cambia la posición de la tecla con el ratón o las teclas de flecha.</translation>
 <translation id="7187669805838282391">el miércoles</translation>
 <translation id="7205318498545665455">Elige tu micrófono</translation>
@@ -1686,6 +1687,7 @@ Descarga el modelo de transcripción (hasta 100 MB) para obtener estas transcrip
 <translation id="8420955526972171689">Ejecuta pruebas y soluciona problemas de hardware</translation>
 <translation id="8422748173858722634">IMEI</translation>
 <translation id="8424039430705546751">abajo</translation>
+<translation id="8427213022735114808">Dictado envía tu voz a Google para que puedas usar Escribir por voz en cualquier campo de texto.</translation>
 <translation id="8428213095426709021">Configuración</translation>
 <translation id="8431300646573772016">Novedades de ChromeOS</translation>
 <translation id="8433186206711564395">Configuración de red</translation>
@@ -1724,6 +1726,7 @@ Descarga el modelo de transcripción (hasta 100 MB) para obtener estas transcrip
 <translation id="8584654835905316966">Es necesario reiniciar para completar la instalación del firmware de <ph name="DEVICE_NAME" /> a la versión <ph name="VERSION" />. Es posible que tu ordenador parezca que se reinicia varias veces. Este comportamiento es el esperado.</translation>
 <translation id="8593058461203131755">pausar contenido multimedia</translation>
 <translation id="8620617069779373398">Estado de roaming</translation>
+<translation id="8624524972189162859">Tu administrador de <ph name="DOMAIN_NAME" /> ha inhabilitado tu dispositivo y puede acceder a su ubicación.</translation>
 <translation id="8626489604350149811">Más acciones de <ph name="APN_NAME" /></translation>
 <translation id="86356131183441916">Morado claro</translation>
 <translation id="8647595191512746911">Transcripción de audio</translation>

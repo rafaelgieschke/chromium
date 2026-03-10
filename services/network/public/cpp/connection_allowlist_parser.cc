@@ -4,9 +4,11 @@
 
 #include "services/network/public/cpp/connection_allowlist_parser.h"
 
+#include "components/url_pattern/simple_url_pattern_matcher.h"
 #include "net/http/structured_headers.h"
 #include "services/network/public/cpp/connection_allowlist.h"
 #include "services/network/public/mojom/connection_allowlist.mojom-shared.h"
+#include "services/network/public/mojom/devtools_observer.mojom.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -16,6 +18,11 @@ namespace {
 
 constexpr char kResponseOriginToken[] = "response-origin";
 
+constexpr char kReportToParam[] = "report-to";
+
+constexpr char kRedirectsParam[] = "redirects";
+constexpr char kWebRtcParam[] = "webrtc";
+
 std::optional<std::string> ParsePattern(
     const net::structured_headers::ParameterizedItem& pattern,
     std::vector<mojom::ConnectionAllowlistIssue>& issues) {
@@ -24,8 +31,14 @@ std::optional<std::string> ParsePattern(
     return kResponseOriginToken;
   } else if (pattern.item.is_string() &&
              pattern.item.GetString() != kResponseOriginToken) {
-    // TODO(mkwst): Validate the string as a `URLPattern`.
-    return pattern.item.GetString();
+    const std::string& pattern_string = pattern.item.GetString();
+    if (!url_pattern::SimpleUrlPatternMatcher::Create(pattern_string,
+                                                      /*base_url=*/nullptr)
+             .has_value()) {
+      issues.push_back(mojom::ConnectionAllowlistIssue::kInvalidUrlPattern);
+      return std::nullopt;
+    }
+    return pattern_string;
   } else {
     issues.push_back(
         mojom::ConnectionAllowlistIssue::kInvalidAllowlistItemType);
@@ -78,15 +91,26 @@ std::optional<ConnectionAllowlist> ParseHeader(const std::string& header_string,
     }
   }
 
-  // Process the list's parameters, ignoring any other than `report-to`.
+  // Process the list's parameters, ignoring any other than `report-to` or
+  // special global tokens like `redirection-allowed` or `webrtc-allowed`.
   for (const auto& param : inner_list.params) {
-    if (param.first == "report-to") {
+    if (param.first == kReportToParam) {
       if (param.second.is_token()) {
         parsed.reporting_endpoint = param.second.GetString();
       } else {
         parsed.issues.push_back(
             mojom::ConnectionAllowlistIssue::kReportingEndpointNotToken);
       }
+    } else if (param.first == kRedirectsParam) {
+      parsed.redirect_behavior =
+          (param.second.is_token() && param.second.GetString() != "block")
+              ? ConnectionAllowlist::RedirectBehavior::kAllow
+              : ConnectionAllowlist::RedirectBehavior::kBlock;
+    } else if (param.first == kWebRtcParam) {
+      parsed.webrtc_behavior =
+          (param.second.is_token() && param.second.GetString() != "block")
+              ? ConnectionAllowlist::WebRtcBehavior::kAllow
+              : ConnectionAllowlist::WebRtcBehavior::kBlock;
     }
   }
   return parsed;
@@ -111,6 +135,32 @@ ConnectionAllowlists ParseConnectionAllowlistsFromHeaders(
   }
 
   return result;
+}
+
+void ReportConnectionAllowlistIssuesToDevtools(
+    const ConnectionAllowlists& allowlists,
+    const raw_ptr<mojom::DevToolsObserver> devtools_observer,
+    const std::string& devtools_request_id,
+    const GURL& request_url) {
+  if (!devtools_observer || devtools_request_id.empty()) {
+    return;
+  }
+
+  if (allowlists.enforced) {
+    for (const mojom::ConnectionAllowlistIssue issue :
+         allowlists.enforced->issues) {
+      devtools_observer->OnConnectionAllowlistIssue(devtools_request_id,
+                                                    request_url, issue);
+    }
+  }
+
+  if (allowlists.report_only) {
+    for (const mojom::ConnectionAllowlistIssue issue :
+         allowlists.report_only->issues) {
+      devtools_observer->OnConnectionAllowlistIssue(devtools_request_id,
+                                                    request_url, issue);
+    }
+  }
 }
 
 }  // namespace network

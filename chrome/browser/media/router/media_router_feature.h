@@ -36,7 +36,7 @@ BASE_DECLARE_FEATURE(kMediaRouter);
 
 // If enabled, allows Media Router to connect to Cast devices on all IP
 // addresses, not just RFC1918/RFC4193 private addresses. Workaround for
-// https://crbug.com/813974.
+// https://crbug.com/41371527.
 BASE_DECLARE_FEATURE(kCastAllowAllIPsFeature);
 
 // If enabled, allows all websites to request to start mirroring via
@@ -64,12 +64,6 @@ BASE_DECLARE_FEATURE(kFallbackToAudioTabMirroring);
 // receivers will be logged in chrome://media-router-internals.  These messages
 // can be frequent and contain sensitive information, so disabled by default.
 BASE_DECLARE_FEATURE(kCastMessageLogging);
-
-#if BUILDFLAG(IS_MAC)
-// If enabled, Chrome uses the Network Framework API for local device discovery
-// on Mac.
-BASE_DECLARE_FEATURE(kUseNetworkFrameworkForLocalDiscovery);
-#endif
 
 extern const base::FeatureParam<int> kCastMirroringPlayoutDelayMs;
 

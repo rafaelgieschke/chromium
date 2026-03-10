@@ -17,6 +17,7 @@
 #include "chrome/browser/glic/glic_profile_manager.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
 #include "chrome/browser/glic/public/glic_keyed_service_factory.h"
+#include "chrome/browser/glic/test_support/glic_histogram_tester.h"
 #include "chrome/browser/glic/test_support/glic_test_util.h"
 #include "chrome/browser/glic/test_support/interactive_glic_test.h"
 #include "chrome/browser/glic/test_support/interactive_test_util.h"
@@ -33,7 +34,7 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/tabs/glic_button.h"
+#include "chrome/browser/ui/views/tabs/glic/tab_strip_glic_button.h"
 #include "chrome/browser/ui/views/tabs/tab_strip_action_container.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
@@ -143,8 +144,9 @@ IN_PROC_BROWSER_TEST_F(GlicWindowControllerUiTest, ShowAndCloseDetachedWidget) {
 
 IN_PROC_BROWSER_TEST_F(GlicWindowControllerUiTest, DoNotCrashOnBrowserClose) {
   RunTestSequence(OpenGlicFloatingWindow());
+  ui_test_utils::BrowserDestroyedObserver observer(browser());
   chrome::CloseAllBrowsers();
-  ui_test_utils::WaitForBrowserToClose();
+  observer.Wait();
 }
 
 IN_PROC_BROWSER_TEST_F(GlicWindowControllerUiTest, DoNotCrashWhenReopening) {
@@ -370,7 +372,7 @@ IN_PROC_BROWSER_TEST_F(GlicWindowControllerUiTest,
     // TODO(b/453696965): Broken in multi-instance.
     GTEST_SKIP() << "Skipping for kGlicMultiInstance";
   }
-  base::HistogramTester histogram_tester;
+  GlicHistogramTester histogram_tester;
   RunTestSequence(
       OpenGlicFloatingWindow(),
       ClickMockGlicElement(kMockGlicClientHangButton, true),
@@ -420,7 +422,7 @@ IN_PROC_BROWSER_TEST_F(GlicWindowControllerUiTest,
   // (this is subtle and platform-specific, unfortunately).
   auto other_widget = std::make_unique<views::Widget>();
 
-  base::HistogramTester histogram_tester;
+  GlicHistogramTester histogram_tester;
   RunTestSequence(
       ObserveState(test::internal::kGlicAppState, GetHost()),
       OpenGlicFloatingWindow(),
@@ -772,10 +774,11 @@ IN_PROC_BROWSER_TEST_F(GlicWindowControllerUiTest, PermanentlyDeleteProfile) {
   EXPECT_TRUE(service1->IsWindowShowing());
 
   // Delete the second profile
+  ui_test_utils::BrowserDestroyedObserver observer(browser1);
   profile_manager->GetDeleteProfileHelper().MaybeScheduleProfileForDeletion(
       browser1->profile()->GetPath(), base::DoNothing(),
       ProfileMetrics::DELETE_PROFILE_USER_MANAGER);
-  ui_test_utils::WaitForBrowserToClose(browser1);
+  observer.Wait();
 
   EXPECT_FALSE(service1->IsWindowShowing());
 }

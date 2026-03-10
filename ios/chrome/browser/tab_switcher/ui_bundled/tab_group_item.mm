@@ -9,10 +9,14 @@
 #import "ios/chrome/browser/saved_tab_groups/ui/tab_group_utils.h"
 #import "ios/chrome/browser/shared/model/web_state_list/tab_group.h"
 #import "ios/chrome/browser/shared/model/web_state_list/tab_group_range.h"
+#import "ios/chrome/browser/shared/public/features/features.h"
+#import "ios/chrome/browser/shared/ui/util/color_palette/tab_group_color_palette.h"
 
 @implementation TabGroupItem {
   base::WeakPtr<const TabGroup> _tabGroup;
   raw_ptr<const void, DanglingUntriaged> _tabGroupIdentifier;
+  TabGroupColorPalette* _tabGroupColorPalette;
+  tab_groups::TabGroupColorId _colorId;
 }
 
 - (instancetype)initWithTabGroup:(const TabGroup*)tabGroup {
@@ -41,10 +45,25 @@
 }
 
 - (UIColor*)groupColor {
+  CHECK(!IsTabGroupColorOnSurfaceEnabled());
   if (!_tabGroup) {
     return nil;
   }
   return tab_groups::ColorForTabGroupColorId(_tabGroup->GetColor());
+}
+
+- (TabGroupColorPalette*)tabGroupColorPalette {
+  CHECK(IsTabGroupColorOnSurfaceEnabled());
+  if (!_tabGroup) {
+    return nil;
+  }
+  tab_groups::TabGroupColorId currentColorId = _tabGroup->GetColor();
+  if (!_tabGroupColorPalette || _colorId != currentColorId) {
+    _colorId = currentColorId;
+    _tabGroupColorPalette =
+        [[TabGroupColorPalette alloc] initWithColorId:_colorId];
+  }
+  return _tabGroupColorPalette;
 }
 
 - (UIColor*)foregroundColor {
@@ -66,6 +85,13 @@
     return NO;
   }
   return _tabGroup->visual_data().is_collapsed();
+}
+
+- (UIColor*)tabStripColor {
+  if (IsTabGroupColorOnSurfaceEnabled()) {
+    return self.tabGroupColorPalette.commonColor;
+  }
+  return self.groupColor;
 }
 
 #pragma mark - Debugging

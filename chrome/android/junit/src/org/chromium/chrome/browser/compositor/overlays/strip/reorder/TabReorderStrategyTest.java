@@ -95,8 +95,8 @@ public class TabReorderStrategyTest extends ReorderStrategyTestBase {
     @Override
     public void setup() {
         super.setup();
-        mockTabGroup(GROUP_ID1, TAB_ID1, mModel.getTabById(TAB_ID1));
-        mockTabGroup(GROUP_ID2, TAB_ID4, mModel.getTabById(TAB_ID4), mModel.getTabById(TAB_ID5));
+        mockTabGroup(GROUP_ID1, mModel.getTabById(TAB_ID1));
+        mockTabGroup(GROUP_ID2, mModel.getTabById(TAB_ID4), mModel.getTabById(TAB_ID5));
 
         mStrategy =
                 new TabReorderStrategy(
@@ -165,7 +165,7 @@ public class TabReorderStrategyTest extends ReorderStrategyTestBase {
         // [CollapsedGroup]  [Tab]  [Tab]  [ExpandedGroup]  [Tab]
         // Mock the last tab as grouped, so both edge tabs are grouped (and edge margins are set).
         int tabId = mLastTab.getTabId();
-        mockTabGroup(GROUP_ID3, tabId, mModel.getTabById(tabId));
+        mockTabGroup(GROUP_ID3, mModel.getTabById(tabId));
 
         // Start reordering the second ungrouped tab.
         startReorder(mUngroupedTab2);
@@ -415,6 +415,39 @@ public class TabReorderStrategyTest extends ReorderStrategyTestBase {
                 DELTA);
         verify(mAnimationHost, times(2)).finishAnimationsAndPushTabUpdates();
         verify(mAnimationHost).startAnimations(anyList(), isNotNull());
+    }
+
+    @Test
+    public void testCancelReorder_restorePosition_pastTab() {
+        //                     -------->
+        // [CollapsedGroup]  [Tab]  [Tab]  [ExpandedGroup]  [Tab]
+        int initialIndex = 1;
+        int expectedIndex = 2;
+
+        // Move tab and verify the position
+        testUpdateReorder_success(mUngroupedTab1, TAB_WIDTH, DRAG_PAST_TAB_SUCCESS, expectedIndex);
+        verify(mModel).moveTab(TAB_ID2, expectedIndex);
+
+        // Cancel drag and verify the tab goes back to the origin
+        mStrategy.stopReorderMode(mStripViews, mGroupTitles, /* isDragCancelled= */ true);
+        verify(mModel).moveTab(TAB_ID2, initialIndex);
+    }
+
+    @Test
+    public void testCancelReorder_restorePosition_pastCollapsedGroup() {
+        //       <--------------
+        // [CollapsedGroup]  [Tab]  [Tab]  [ExpandedGroup]  [Tab]
+        int initialIndex = 1;
+        int expectedIndex = 0;
+
+        // Move tab and verify the position
+        testUpdateReorder_success(
+                mUngroupedTab1, -TAB_WIDTH, -DRAG_PAST_COLLAPSED_GROUP_SUCCESS, expectedIndex);
+        verify(mModel).moveTab(TAB_ID2, expectedIndex);
+
+        // Cancel drag and verify the tab goes back to the origin
+        mStrategy.stopReorderMode(mStripViews, mGroupTitles, /* isDragCancelled= */ true);
+        verify(mModel).moveTab(TAB_ID2, initialIndex);
     }
 
     // ============================================================================================

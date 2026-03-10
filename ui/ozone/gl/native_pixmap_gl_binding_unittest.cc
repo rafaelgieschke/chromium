@@ -8,7 +8,6 @@
 #include "base/memory/raw_ptr.h"
 #include "base/strings/stringize_macros.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/gfx/buffer_format_util.h"
 #include "ui/gfx/buffer_types.h"
 #include "ui/gfx/client_native_pixmap.h"
 #include "ui/gfx/color_space.h"
@@ -102,8 +101,10 @@ class NativePixmapGLBindingTest : public testing::Test {
                                 ->GetCurrentGLOzone();
     EXPECT_TRUE(gl_ozone->CanImportNativePixmap(kFormat));
 
+    // The imported pixmap can be externally sampled i.e. does not provide
+    // per-plane textures but provides a unified single texture object.
     auto binding = gl_ozone->ImportNativePixmap(
-        std::move(pixmap), kFormat, gfx::BufferPlane::DEFAULT, size,
+        std::move(pixmap), kFormat, /*plane_index=*/std::nullopt, size,
         gfx::ColorSpace(), GL_TEXTURE_EXTERNAL_OES, texture_id_);
     EXPECT_TRUE(binding);
     return binding;

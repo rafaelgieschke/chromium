@@ -217,7 +217,7 @@ class PasswordsPrivateDelegate
   // Whether the current signed-in user (aka unconsented primary account) has
   // the Google account storage for passwords is enabled (as opposed to
   // local/profile storage).
-  virtual bool IsAccountStorageEnabled() = 0;
+  virtual bool IsAccountStorageActive() = 0;
 
   // Enables/disables use of the Google account storage for passwords
   virtual void SetAccountStorageEnabled(bool enabled,
@@ -250,6 +250,11 @@ class PasswordsPrivateDelegate
   // Requests to start a check for insecure passwords. Invokes |callback|
   // once a check is running or the request was stopped via StopPasswordCheck().
   virtual void StartPasswordCheck(StartPasswordCheckCallback callback) = 0;
+
+  // Starts the password change from password checkup for the given
+  // `credential_id`
+  virtual void StartPasswordChange(int credential_id,
+                                   content::WebContents* web_contents) = 0;
 
   // Returns the current status of the password check.
   virtual api::passwords_private::PasswordCheckStatus

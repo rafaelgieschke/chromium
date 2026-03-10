@@ -8,7 +8,6 @@
 #include <set>
 #include <string>
 
-#include "base/containers/contains.h"
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/test/bind.h"
@@ -73,6 +72,10 @@ class TestBookmarkClientImpl : public BookmarkClientBase {
 
   void SchedulePersistentTimerForDailyMetrics(
       base::RepeatingClosure metrics_callback) override {}
+
+  void GetEncryptor(
+      base::OnceCallback<void(os_crypt_async::Encryptor encryptor)> callback)
+      override {}
 };
 
 class MockSuggestionProvider : public SuggestedSaveLocationProvider {
@@ -163,7 +166,7 @@ TEST_F(BookmarkClientBaseTest, SuggestedFolder_Rejected) {
   ON_CALL(provider, GetSuggestion)
       .WillByDefault([suggested_folder, url_set](const GURL& url) {
         // Suggest for multiple URLs.
-        return base::Contains(url_set, url) ? suggested_folder : nullptr;
+        return url_set.contains(url) ? suggested_folder : nullptr;
       });
   ON_CALL(provider, GetBackoffTime)
       .WillByDefault(testing::Return(kBackoffTime));
@@ -218,7 +221,7 @@ TEST_F(BookmarkClientBaseTest, SuggestedFolder_RejectionCoolOff) {
   ON_CALL(provider, GetSuggestion)
       .WillByDefault([suggested_folder, url_set](const GURL& url) {
         // Suggest for multiple URLs.
-        return base::Contains(url_set, url) ? suggested_folder : nullptr;
+        return url_set.contains(url) ? suggested_folder : nullptr;
       });
   ON_CALL(provider, GetBackoffTime)
       .WillByDefault(testing::Return(base::Hours(2)));

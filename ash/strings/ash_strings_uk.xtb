@@ -9,7 +9,6 @@
 <translation id="101823271612280837">Записування зупинено. Не можна використовувати ігрову панель у режимі планшета.</translation>
 <translation id="1024364763893396229">Збережіть пристрій "<ph name="NAME" />"</translation>
 <translation id="1032891413405719768">Низький заряд акумулятора стилуса</translation>
-<translation id="1036073649888683237">Щоб керувати сповіщеннями, перейдіть у налаштування</translation>
 <translation id="1036348656032585052">Вимкнути</translation>
 <translation id="1037492556044956303"><ph name="DEVICE_NAME" /> додано</translation>
 <translation id="1038106730571050514">Показувати пропозиції</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">Фото <ph name="INDEX" /> з <ph name="TOTAL_COUNT" /> останніх.</translation>
 <translation id="2201687081523799384">Згорнути Google Завдання</translation>
 <translation id="2208323208084708176">Режим уніфікованого комп’ютера</translation>
-<translation id="2210311543574621570">Утримуйте комбінацію клавіш Ctrl + V, щоб з’явився буфер обміну. Щоб відключити цю комбінацію клавіш, вимкніть експериментальний параметр #clipboard-history-longpress на сторінці chrome://flags.</translation>
 <translation id="2215920961700443347">Немає з’єднання з Інтернетом. Підключіться до Інтернету й повторіть спробу.</translation>
 <translation id="2222841058024245321">Робочий стіл 7</translation>
 <translation id="2223384056430485343">У режимі розділення екрана</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">Установити додаток</translation>
 <translation id="2482878487686419369">Сповіщення</translation>
 <translation id="2484513351006226581">Натисніть комбінацію клавіш <ph name="KEYBOARD_SHORTCUT" />, щоб змінити розкладку клавіатури.</translation>
+<translation id="2485422356828889247">Видалити</translation>
 <translation id="2486214324139475545">Попередній огляд робочого столу "<ph name="DESK_NAME" />". Він активний.</translation>
 <translation id="2486405091093637109">Роздільну здатність дисплея "<ph name="DISPLAY_NAME" />" змінено на <ph name="RESOLUTION" /> (<ph name="REFRESH_RATE" /> Гц). Якщо не підтвердити цю зміну, попередні налаштування відновляться через <ph name="TIMEOUT_SECONDS" />.</translation>
 <translation id="2487915095798731898">Приєднатися</translation>
@@ -2195,7 +2194,6 @@
 <translation id="8241650983304689286">Додати вкладку для нового паралельного перегляду</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />, рівень сигналу – <ph name="SIGNAL_STRENGTH" />, рівень заряду акумулятора телефона – <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Показати весь контент із Google Диска</translation>
-<translation id="8257510091797044096">Налаштування пристрою</translation>
 <translation id="8261506727792406068">Видалити</translation>
 <translation id="8262312463845990408">Увімкнути або вимкнути відтворення</translation>
 <translation id="8268302343625273732">Переглянути всі завдання в Google Класі</translation>

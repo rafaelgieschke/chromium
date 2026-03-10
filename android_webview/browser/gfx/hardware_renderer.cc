@@ -326,7 +326,8 @@ void HardwareRenderer::OnViz::DrawAndSwapOnViz(
     requests.swap(child_frame->copy_requests);
     for (auto& copy_request : requests) {
       manager->RequestCopyOfOutput(child_id, std::move(copy_request),
-                                   /*capture_exact_surface_id=*/false);
+                                   /*capture_exact_surface_id=*/false,
+                                   base::TimeDelta());
     }
   }
 
@@ -463,7 +464,10 @@ void HardwareRenderer::OnViz::DrawAndSwapOnViz(
   display_->SetOutputSurfaceClipRect(clip);
 
   auto now = base::TimeTicks::Now();
-  display_->DrawAndSwap({now, now});
+  viz::DrawAndSwapParams params;
+  params.begin_frame_args.frame_time = now;
+  params.expected_display_time = now;
+  display_->DrawAndSwap(params);
 
   child_frame->rendered = true;
   without_gpu_->SetContainedSurfaces(display_->GetContainedSurfaceIds());

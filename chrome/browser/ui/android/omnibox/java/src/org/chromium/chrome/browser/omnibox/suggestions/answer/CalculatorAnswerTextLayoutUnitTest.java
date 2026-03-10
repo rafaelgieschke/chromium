@@ -7,6 +7,7 @@ package org.chromium.chrome.browser.omnibox.suggestions.answer;
 import android.content.Context;
 import android.text.SpannableStringBuilder;
 import android.text.style.TextAppearanceSpan;
+import android.view.ContextThemeWrapper;
 
 import androidx.test.filters.SmallTest;
 
@@ -17,6 +18,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.chrome.browser.omnibox.R;
 
 /** Tests for {@link CalculatorAnswerTextLayout}. */
 @RunWith(BaseRobolectricTestRunner.class)
@@ -27,17 +29,11 @@ public class CalculatorAnswerTextLayoutUnitTest {
 
     @Before
     public void setUp() {
-        mContext = ContextUtils.getApplicationContext();
-        mPrimaryText =
-                new TextAppearanceSpan(
-                        mContext,
-                        org.chromium.chrome.browser.omnibox.R.style
-                                .TextAppearance_TextLarge_Primary);
-        mMediumText =
-                new TextAppearanceSpan(
-                        mContext,
-                        org.chromium.chrome.browser.omnibox.R.style
-                                .TextAppearance_TextMedium_Secondary);
+        mContext =
+                new ContextThemeWrapper(
+                        ContextUtils.getApplicationContext(), R.style.Theme_BrowserUI_DayNight);
+        mPrimaryText = new TextAppearanceSpan(mContext, R.style.TextAppearance_TextLarge_Primary);
+        mMediumText = new TextAppearanceSpan(mContext, R.style.TextAppearance_TextMedium_Secondary);
     }
 
     @Test

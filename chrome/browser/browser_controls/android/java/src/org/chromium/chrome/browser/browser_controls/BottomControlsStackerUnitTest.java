@@ -32,13 +32,11 @@ import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.base.test.util.HistogramWatcher;
 import org.chromium.cc.input.OffsetTag;
 import org.chromium.chrome.browser.browser_controls.BottomControlsStacker.LayerScrollBehavior;
 import org.chromium.chrome.browser.browser_controls.BottomControlsStacker.LayerType;
 import org.chromium.chrome.browser.browser_controls.BottomControlsStacker.LayerVisibility;
-import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.ui.OffsetTagConstraints;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.display.DisplayAndroid;
@@ -51,7 +49,7 @@ import org.chromium.ui.display.DisplayAndroid;
 public class BottomControlsStackerUnitTest {
     private static final @LayerType int ZERO_HEIGHT_TOP_LAYER = LayerType.PROGRESS_BAR;
     private static final @LayerType int TOP_LAYER = LayerType.READ_ALOUD_PLAYER;
-    private static final @LayerType int MID_LAYER = LayerType.TABSTRIP_TOOLBAR_BELOW_READALOUD;
+    private static final @LayerType int MID_LAYER = LayerType.TABSTRIP_TOOLBAR;
     private static final @LayerType int BOTTOM_LAYER = LayerType.TEST_BOTTOM_LAYER;
 
     @Mock BrowserControlsSizer mBrowserControlsSizer;
@@ -1660,7 +1658,6 @@ public class BottomControlsStackerUnitTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.BCIV_BOTTOM_CONTROLS)
     public void reposition_AppliedByViz() {
         TestLayer top =
                 new TestLayer(
@@ -1741,7 +1738,6 @@ public class BottomControlsStackerUnitTest {
     }
 
     @Test
-    @EnableFeatures(ChromeFeatureList.BCIV_BOTTOM_CONTROLS)
     public void testOnControlsConstraintsChanged_clearOffsetTag() {
         TestLayer topLayer =
                 new TestLayer(

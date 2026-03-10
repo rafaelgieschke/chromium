@@ -74,16 +74,16 @@ const char kAppModeOAuth2Token[] = "app-mode-oauth-token";
 // OS login, and which mode the app was launched in.
 const char kAppRunOnOsLoginMode[] = "app-run-on-os-login-mode";
 
+// A process type (switches::kProcessType) that is used by App Shim processes.
+// See chrome/app_shim/app_shim_main_delegate.mm.
+const char kAppShim[] = "app-shim";
+
 // Overrides the URL that the webstore APIs download extensions from.
 // Note: the URL must contain one '%s' for the extension ID.
 const char kAppsGalleryDownloadURL[] = "apps-gallery-download-url";
 
 // Overrides the update url used by webstore extensions.
 const char kAppsGalleryUpdateURL[] = "apps-gallery-update-url";
-
-// Overrides the url that the browser treats as the webstore, granting it the
-// webstore APIs and giving it some special protections.
-const char kAppsGalleryURL[] = "apps-gallery-url";
 
 // Allowlist for Negotiate Auth servers
 const char kAuthServerAllowlist[] = "auth-server-allowlist";
@@ -161,7 +161,7 @@ const char kCrashOnHangThreads[] = "crash-on-hang-threads";
 // Browser tests may need to add this switch so that at least one browser
 // instance is created on startup.
 // TODO(nkostylev): Investigate if this switch could be removed.
-// (http://crbug.com/148675)
+// (http://crbug.com/40933835)
 const char kCreateBrowserOnStartupForTests[] =
     "create-browser-on-startup-for-tests";
 
@@ -244,7 +244,7 @@ const char kDisableStackProfiler[] = "disable-stack-profiler";
 // browser window is closed. Thus, we need a switch to force this behavior
 // for ChromeOS Aura, disable "zero window mode".
 // TODO(pkotwicz): Investigate if this bug can be removed.
-// (http://crbug.com/119175)
+// (http://crbug.com/40756809)
 const char kDisableZeroBrowsersOpenForTests[] =
     "disable-zero-browsers-open-for-tests";
 
@@ -752,6 +752,9 @@ const char kWebRtcRemoteEventLogUploadNoSuppression[] =
 // handling policy is specified in Preferences.
 const char kWebRtcIPHandlingPolicy[] = "webrtc-ip-handling-policy";
 
+// Force What's New on Desktop to request from the staging environment.
+const char kWhatsNewUseStaging[] = "whats-new-use-staging";
+
 // Specify the initial window user title: --window-name="My custom title"
 const char kWindowName[] = "window-name";
 
@@ -932,11 +935,19 @@ const char kSourceAppId[] = "source-app-id";
 // metrics.
 const char kSourceShortcut[] = "source-shortcut";
 
+// Identifies Chrome instances that start in foreground mode at startup to
+// record related metrics.
+const char kStartupForegroundLaunch[] = "startup-foreground-launch";
+
 // Runs un-installation steps that were done by chrome first-run.
 const char kUninstall[] = "uninstall";
 
 // Specifies that the WebApp with the specified id should be uninstalled.
 const char kUninstallAppId[] = "uninstall-app-id";
+
+// Specifies that the browser is running isolated and should not attempt to
+// start a second isolated browser.
+const char kIsolated[] = "isolated";
 
 // Specifies the version of the Progressive-Web-App launcher that launched
 // Chrome, used to determine whether to update all launchers.
@@ -958,14 +969,12 @@ const char kEnableNewAppMenuIcon[] = "enable-new-app-menu-icon";
 // Causes the browser to launch directly in guest mode.
 const char kGuest[] = "guest";
 
-// Forces the NTP mobile promo to appear without any preconditions.
-const char kForceNtpMobilePromo[] = "force-ntp-mobile-promo";
 #endif
 
-#if BUILDFLAG(ENABLE_GLIC) || BUILDFLAG(ENABLE_GLIC_ANDROID)
 // Overrides the glic guest URL.
 const char kGlicGuestURL[] = "glic-guest-url";
 const char kGlicAlwaysOpenFre[] = "glic-always-open-fre";
+const char kGlicAlwaysSkipFre[] = "glic-always-skip-fre";
 const char kGlicFreURL[] = "glic-fre-url";
 const char kGlicShortcutsLearnMoreURL[] = "glic-shortcuts-learn-more-url";
 // Use --glic-open-on-startup=attached or --glic-open-on-startup=detached.
@@ -998,7 +1007,14 @@ const char kGlicResetMultiInstanceEnabledByTier[] =
 // Override actual AI subscription tier by forcing G1 status, specifically for
 // multi-instance enablement. Intended for manual testing only.
 const char kGlicForceG1StatusForMultiInstance[] = "glic-force-g1-for-mi";
-#endif
+
+// Configure preset guest URLs for manual testing. These are saved to local
+// state prefs and can be selected to override the default glic guest URL
+// through corresponding entries in chrome://flags.
+const char kGlicGuestUrlPresetAutopush[] = "glic-guest-url-preset-autopush";
+const char kGlicGuestUrlPresetStaging[] = "glic-guest-url-preset-staging";
+const char kGlicGuestUrlPresetPreprod[] = "glic-guest-url-preset-preprod";
+const char kGlicGuestUrlPresetProd[] = "glic-guest-url-preset-prod";
 
 #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
 // Writes open and installed web apps for each profile to the specified file

@@ -40,6 +40,7 @@
 #include "components/enterprise/browser/reporting/common_pref_names.h"
 #include "components/enterprise/browser/reporting/report_scheduler.h"
 #include "components/policy/core/common/cloud/cloud_external_data_manager.h"
+#include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/cloud_policy_core.h"
 #include "components/policy/core/common/cloud/cloud_policy_refresh_scheduler.h"
 #include "components/policy/core/common/cloud/mock_cloud_external_data_manager.h"
@@ -123,7 +124,8 @@ class UserCloudPolicyManagerAshTest : public testing::Test {
   // in the test.
   void MakeManagerWithPreloadedStore(const base::TimeDelta& fetch_timeout) {
     std::unique_ptr<MockCloudPolicyStore> store =
-        std::make_unique<MockCloudPolicyStore>();
+        std::make_unique<MockCloudPolicyStore>(
+            dm_protocol::GetChromeUserPolicyType());
     store->set_policy_data_for_testing(
         std::make_unique<em::PolicyData>(policy_data_));
     store->policy_map_ = policy_map_.Clone();
@@ -141,8 +143,6 @@ class UserCloudPolicyManagerAshTest : public testing::Test {
         task_runner_(base::MakeRefCounted<base::TestMockTimeTaskRunner>()),
         profile_(nullptr),
         signin_profile_(nullptr),
-        user_manager_(new ash::FakeChromeUserManager()),
-        user_manager_enabler_(base::WrapUnique(user_manager_.get())),
         test_signin_shared_loader_factory_(
             base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
                 &test_signin_url_loader_factory_)),
@@ -153,11 +153,14 @@ class UserCloudPolicyManagerAshTest : public testing::Test {
   void SetUp() override {
     ash::ConciergeClient::InitializeFake(/*fake_cicerone_client=*/nullptr);
 
+    user_manager_.Reset(std::make_unique<ash::FakeChromeUserManager>());
+
     // The initialization path that blocks on the initial policy fetch requires
     // a signin Profile to use its URLRequestContext.
     profile_manager_ = std::make_unique<TestingProfileManager>(
         TestingBrowserProcess::GetGlobal());
     ASSERT_TRUE(profile_manager_->SetUp());
+
     TestingProfile::TestingFactories factories =
         IdentityTestEnvironmentProfileAdaptor::
             GetIdentityTestEnvironmentFactories();
@@ -226,9 +229,11 @@ class UserCloudPolicyManagerAshTest : public testing::Test {
     signin_profile_ = nullptr;
     profile_ = nullptr;
     identity_test_env_profile_adaptor_.reset();
-    profile_manager_->DeleteTestingProfile(chrome::kInitialProfile);
+    profile_manager_.reset();
     test_system_shared_loader_factory_->Detach();
     test_signin_shared_loader_factory_->Detach();
+
+    user_manager_.Reset();
 
     ash::ConciergeClient::Shutdown();
   }
@@ -236,7 +241,8 @@ class UserCloudPolicyManagerAshTest : public testing::Test {
   void MakeManagerWithEmptyStore(const base::TimeDelta& fetch_timeout,
                                  PolicyEnforcement enforcement_type) {
     std::unique_ptr<MockCloudPolicyStore> store =
-        std::make_unique<MockCloudPolicyStore>();
+        std::make_unique<MockCloudPolicyStore>(
+            dm_protocol::GetChromeUserPolicyType());
     EXPECT_CALL(*store, Load());
     CreateManager(std::move(store), fetch_timeout, enforcement_type);
     EXPECT_FALSE(manager_->IsInitializationComplete(POLICY_DOMAIN_CHROME));
@@ -378,8 +384,9 @@ class UserCloudPolicyManagerAshTest : public testing::Test {
       identity_test_env_profile_adaptor_;
   user_manager::UserType user_type_ = user_manager::UserType::kRegular;
 
-  raw_ptr<ash::FakeChromeUserManager, DanglingUntriaged> user_manager_;
-  user_manager::ScopedUserManager user_manager_enabler_;
+  user_manager::TypedScopedUserManager<ash::FakeChromeUserManager>
+      user_manager_;
+
   // This is automatically checked in TearDown() to ensure that we get a
   // fatal error iff |fatal_error_expected_| is true.
   bool fatal_error_expected_ = false;
@@ -500,7 +507,8 @@ TEST_F(UserCloudPolicyManagerAshTest, SynchronousLoadWithEmptyStore) {
   // session.
   fatal_error_expected_ = true;
   std::unique_ptr<MockCloudPolicyStore> store =
-      std::make_unique<MockCloudPolicyStore>();
+      std::make_unique<MockCloudPolicyStore>(
+          dm_protocol::GetChromeUserPolicyType());
   // Tell the store it couldn't load data.
   store->NotifyStoreError();
   CreateManager(std::move(store), base::TimeDelta(),

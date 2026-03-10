@@ -27,7 +27,6 @@
 #include "chrome/browser/ash/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/mixin_based_in_process_browser_test.h"
 #include "chromeos/ash/experiences/arc/mojom/app.mojom.h"
 #include "chromeos/ash/experiences/arc/test/arc_util_test_support.h"
@@ -111,7 +110,7 @@ class AppTimeTest : public MixinBasedInProcessBrowserTest {
     arc::ArcSessionManager::Get()->Shutdown();
   }
 
-  void UpdatePerAppTimeLimitsPolicy(const base::Value::Dict& policy) {
+  void UpdatePerAppTimeLimitsPolicy(const base::DictValue& policy) {
     std::string policy_value = base::WriteJson(policy).value_or("");
 
     logged_in_user_mixin_.GetUserPolicyMixin()

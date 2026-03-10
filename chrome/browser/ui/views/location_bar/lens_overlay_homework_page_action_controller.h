@@ -7,13 +7,14 @@
 
 #include <memory>
 
+#include "base/callback_list.h"
 #include "base/memory/raw_ref.h"
 #include "chrome/browser/ui/views/page_action/page_action_controller.h"
 #include "components/tabs/public/tab_interface.h"
 #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
 
 class Profile;
-class ScopedWindowCallToAction;
+class ScopedCallToActionLock;
 
 // Controller for the Lens Overlay "Homework" page action chip that appears in
 // the omnibox.
@@ -50,6 +51,9 @@ class LensOverlayHomeworkPageActionController {
   void HandlePageActionEvent(bool is_from_keyboard);
 
  private:
+  void OnTabWillDetach(tabs::TabInterface* tab,
+                       tabs::TabInterface::DetachReason reason);
+
   // Determines whether the page action icon should be shown.
   bool ShouldShow();
 
@@ -68,7 +72,9 @@ class LensOverlayHomeworkPageActionController {
   ui::ScopedUnownedUserData<LensOverlayHomeworkPageActionController>
       scoped_unowned_user_data_;
 
-  std::unique_ptr<ScopedWindowCallToAction> scoped_window_call_to_action_ptr_;
+  base::CallbackListSubscription tab_will_detach_subscription_;
+
+  std::unique_ptr<ScopedCallToActionLock> scoped_call_to_action_lock_;
 };
 
 #endif  // CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_LENS_OVERLAY_HOMEWORK_PAGE_ACTION_CONTROLLER_H_

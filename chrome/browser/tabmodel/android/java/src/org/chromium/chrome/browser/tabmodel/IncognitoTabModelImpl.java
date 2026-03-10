@@ -120,8 +120,10 @@ class IncognitoTabModelImpl implements IncognitoTabModelInternal {
         }
         mDelegateModel
                 .getCurrentTabSupplier()
-                .addObserver(mDelegateModelCurrentTabSupplierObserver);
-        mDelegateModel.getTabCountSupplier().addObserver(mDelegateModelTabCountSupplierObserver);
+                .addSyncObserverAndPostIfNonNull(mDelegateModelCurrentTabSupplierObserver);
+        mDelegateModel
+                .getTabCountSupplier()
+                .addSyncObserverAndPostIfNonNull(mDelegateModelTabCountSupplierObserver);
         for (TabModelObserver observer : mObservers) {
             mDelegateModel.addObserver(observer);
         }
@@ -179,6 +181,12 @@ class IncognitoTabModelImpl implements IncognitoTabModelInternal {
     }
 
     @Override
+    public @TabModelType int getTabModelType() {
+        // This may alternate between EMPTY and STANDARD depending on the delegate model.
+        return mDelegateModel.getTabModelType();
+    }
+
+    @Override
     public @Nullable Profile getProfile() {
         return mDelegateModel.getProfile();
     }
@@ -188,6 +196,13 @@ class IncognitoTabModelImpl implements IncognitoTabModelInternal {
         assert mNativeAndroidBrowserWindow == 0;
         mNativeAndroidBrowserWindow = nativeAndroidBrowserWindow;
         mDelegateModel.associateWithBrowserWindow(nativeAndroidBrowserWindow);
+    }
+
+    @Override
+    public void dissociateWithBrowserWindow() {
+        assert mNativeAndroidBrowserWindow != 0;
+        mDelegateModel.dissociateWithBrowserWindow();
+        mNativeAndroidBrowserWindow = 0;
     }
 
     @Override
@@ -393,6 +408,11 @@ class IncognitoTabModelImpl implements IncognitoTabModelInternal {
     public void openMostRecentlyClosedEntry() {}
 
     @Override
+    public @RecentlyClosedEntryType int getMostRecentlyClosedEntryType() {
+        return RecentlyClosedEntryType.NONE;
+    }
+
+    @Override
     public long getMostRecentClosureTime() {
         return TabModel.INVALID_TIMESTAMP;
     }
@@ -461,5 +481,10 @@ class IncognitoTabModelImpl implements IncognitoTabModelInternal {
     @Override
     public @Nullable Tab duplicateTab(Tab tab) {
         return mDelegateModel.duplicateTab(tab);
+    }
+
+    @Override
+    public boolean isClosingAllTabs() {
+        return mDelegateModel.isClosingAllTabs();
     }
 }

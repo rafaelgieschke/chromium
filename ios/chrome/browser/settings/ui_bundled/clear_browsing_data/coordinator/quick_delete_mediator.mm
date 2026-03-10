@@ -16,6 +16,7 @@
 #import "components/prefs/ios/pref_observer_bridge.h"
 #import "components/prefs/pref_change_registrar.h"
 #import "components/prefs/pref_service.h"
+#import "components/search_engines/template_url_service.h"
 #import "components/signin/public/identity_manager/objc/identity_manager_observer_bridge.h"
 #import "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/browsing_data/model/browsing_data_remove_mask.h"
@@ -23,8 +24,10 @@
 #import "ios/chrome/browser/browsing_data/model/tabs_counter.h"
 #import "ios/chrome/browser/discover_feed/model/discover_feed_service.h"
 #import "ios/chrome/browser/scoped_ui_blocker/ui_bundled/ui_blocker_target.h"
-#import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/coordinator/quick_delete_util.h"
+#import "ios/chrome/browser/search_engines/model/search_engine_observer_bridge.h"
 #import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/model/browsing_data_counter_wrapper_producer.h"
+#import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/public/features.h"
+#import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/public/quick_delete_util.h"
 #import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/ui/quick_delete_consumer.h"
 #import "ios/chrome/browser/settings/ui_bundled/clear_browsing_data/ui/quick_delete_presentation_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
@@ -36,6 +39,7 @@ namespace {
 using browsing_data::DeleteBrowsingDataDialogAction;
 using browsing_data::kDeleteBrowsingDataDialogHistogram;
 using browsing_data::TimePeriod;
+using quick_delete_util::DefaultSearchEngineState;
 
 // Delay to observe when triggering further actions after browsing data removal
 // has completed so the progress UI state is not flashed.
@@ -105,7 +109,23 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
 }  // namespace
 
 @interface QuickDeleteMediator () <IdentityManagerObserverBridgeDelegate,
-                                   PrefObserverDelegate>
+                                   PrefObserverDelegate,
+                                   SearchEngineObserving>
+
+// Private designated initializer for this mediator.
+- (instancetype)initWithPrefs:(PrefService*)prefs
+    browsingDataCounterWrapperProducer:
+        (BrowsingDataCounterWrapperProducer*)counterWrapperProducer
+                       identityManager:(signin::IdentityManager*)identityManager
+                   browsingDataRemover:(BrowsingDataRemover*)browsingDataRemover
+                   discoverFeedService:(DiscoverFeedService*)discoverFeedService
+                    templateURLService:(TemplateURLService*)templateURLService
+         canPerformRadialWipeAnimation:(BOOL)canPerformRadialWipeAnimation
+                             timeRange:(browsing_data::TimePeriod)timeRange
+                       uiBlockerTarget:(id<UIBlockerTarget>)uiBlockerTarget
+              featureEngagementTracker:(feature_engagement::Tracker*)tracker
+    NS_DESIGNATED_INITIALIZER;
+
 @end
 
 @implementation QuickDeleteMediator {
@@ -113,6 +133,12 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
   BrowsingDataCounterWrapperProducer* _counterWrapperProducer;
   raw_ptr<BrowsingDataRemover> _browsingDataRemover;
   raw_ptr<DiscoverFeedService> _discoverFeedService;
+  // The service is used to retrieve the default search engine URL.
+  raw_ptr<TemplateURLService> _templateURLService;
+  // Provides the current default search engine state.
+  DefaultSearchEngineState _defaultSearchEngineState;
+  // Observer bridge for search engine changes.
+  std::unique_ptr<SearchEngineObserverBridge> _searchEngineObserver;
 
   // The currently selected time range in the UI. Only saved into the
   // `kDeleteTimePeriod` pref when the deletion is triggered.
@@ -123,6 +149,8 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
   // yet returned.
   NSString* _browsingHistorySummary;
   NSString* _tabsSummary;
+  // TODO(crbug.com/463402932): Remove once
+  // `kPasswordRemovalFromDeleteBrowsingData` is enabled by default.
   NSString* _passwordsSummary;
   NSString* _addressesSummary;
   NSString* _paymentMethodsSummary;
@@ -143,6 +171,8 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
 
   // Used to get the current sign-in state of the primary account.
   raw_ptr<signin::IdentityManager> _identityManager;
+  // Stores the user's current sign-in status.
+  BOOL _isSignedIn;
   // Observer for `IdentityManager`.
   std::unique_ptr<signin::IdentityManagerObserverBridge>
       _identityManagerObserver;
@@ -170,32 +200,42 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
                        identityManager:(signin::IdentityManager*)identityManager
                    browsingDataRemover:(BrowsingDataRemover*)browsingDataRemover
                    discoverFeedService:(DiscoverFeedService*)discoverFeedService
+                    templateURLService:(TemplateURLService*)templateURLService
          canPerformRadialWipeAnimation:(BOOL)canPerformRadialWipeAnimation
+                             timeRange:(browsing_data::TimePeriod)timeRange
                        uiBlockerTarget:(id<UIBlockerTarget>)uiBlockerTarget
               featureEngagementTracker:(feature_engagement::Tracker*)tracker {
   if ((self = [super init])) {
-    CHECK(uiBlockerTarget);
-    _uiBlockerTarget = uiBlockerTarget;
     _prefs = prefs;
     _counterWrapperProducer = counterWrapperProducer;
     _identityManager = identityManager;
+    _isSignedIn =
+        _identityManager->HasPrimaryAccount(signin::ConsentLevel::kSignin);
     _identityManagerObserver =
         std::make_unique<signin::IdentityManagerObserverBridge>(
             _identityManager, self);
     _browsingDataRemover = browsingDataRemover;
     _discoverFeedService = discoverFeedService;
+    _templateURLService = templateURLService;
+    if (_templateURLService) {
+      _searchEngineObserver = std::make_unique<SearchEngineObserverBridge>(
+          self, templateURLService);
+    }
+    _defaultSearchEngineState =
+        quick_delete_util::GetDefaultSearchEngineState(_templateURLService);
+    _canPerformRadialWipeAnimation = canPerformRadialWipeAnimation;
+    _selectedTimeRange = timeRange;
+
+    CHECK(uiBlockerTarget);
+    _uiBlockerTarget = uiBlockerTarget;
+
     _tracker = tracker;
 
     _prefChangeRegistrar.Init(_prefs);
     _prefObserverBridge.reset(new PrefObserverBridge(self));
 
-    _selectedTimeRange = static_cast<browsing_data::TimePeriod>(
-        _prefs->GetInteger(browsing_data::prefs::kDeleteTimePeriod));
-
     // Start observing preferences.
     [self observePreferences];
-
-    _canPerformRadialWipeAnimation = canPerformRadialWipeAnimation;
   }
   return self;
 }
@@ -206,33 +246,46 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
                        identityManager:(signin::IdentityManager*)identityManager
                    browsingDataRemover:(BrowsingDataRemover*)browsingDataRemover
                    discoverFeedService:(DiscoverFeedService*)discoverFeedService
+                    templateURLService:(TemplateURLService*)templateURLService
+         canPerformRadialWipeAnimation:(BOOL)canPerformRadialWipeAnimation
+                       uiBlockerTarget:(id<UIBlockerTarget>)uiBlockerTarget
+              featureEngagementTracker:(feature_engagement::Tracker*)tracker {
+  browsing_data::TimePeriod defaultTimeRange =
+      static_cast<browsing_data::TimePeriod>(
+          prefs->GetInteger(browsing_data::prefs::kDeleteTimePeriod));
+
+  return [self initWithPrefs:prefs
+      browsingDataCounterWrapperProducer:counterWrapperProducer
+                         identityManager:identityManager
+                     browsingDataRemover:browsingDataRemover
+                     discoverFeedService:discoverFeedService
+                      templateURLService:templateURLService
+           canPerformRadialWipeAnimation:canPerformRadialWipeAnimation
+                               timeRange:defaultTimeRange
+                         uiBlockerTarget:uiBlockerTarget
+                featureEngagementTracker:tracker];
+}
+
+- (instancetype)initWithPrefs:(PrefService*)prefs
+    browsingDataCounterWrapperProducer:
+        (BrowsingDataCounterWrapperProducer*)counterWrapperProducer
+                       identityManager:(signin::IdentityManager*)identityManager
+                   browsingDataRemover:(BrowsingDataRemover*)browsingDataRemover
+                   discoverFeedService:(DiscoverFeedService*)discoverFeedService
+                    templateURLService:(TemplateURLService*)templateURLService
                              timeRange:(browsing_data::TimePeriod)timeRange
                        uiBlockerTarget:(id<UIBlockerTarget>)uiBlockerTarget
               featureEngagementTracker:(feature_engagement::Tracker*)tracker {
-  if ((self = [super init])) {
-    CHECK(uiBlockerTarget);
-    _uiBlockerTarget = uiBlockerTarget;
-    _prefs = prefs;
-    _counterWrapperProducer = counterWrapperProducer;
-    _identityManager = identityManager;
-    _identityManagerObserver =
-        std::make_unique<signin::IdentityManagerObserverBridge>(
-            _identityManager, self);
-    _browsingDataRemover = browsingDataRemover;
-    _discoverFeedService = discoverFeedService;
-    _tracker = tracker;
-
-    _prefChangeRegistrar.Init(_prefs);
-    _prefObserverBridge.reset(new PrefObserverBridge(self));
-
-    _selectedTimeRange = timeRange;
-
-    // Start observing preferences.
-    [self observePreferences];
-
-    _canPerformRadialWipeAnimation = NO;
-  }
-  return self;
+  return [self initWithPrefs:prefs
+      browsingDataCounterWrapperProducer:counterWrapperProducer
+                         identityManager:identityManager
+                     browsingDataRemover:browsingDataRemover
+                     discoverFeedService:discoverFeedService
+                      templateURLService:templateURLService
+           canPerformRadialWipeAnimation:NO
+                               timeRange:timeRange
+                         uiBlockerTarget:uiBlockerTarget
+                featureEngagementTracker:tracker];
 }
 
 - (void)setConsumer:(id<QuickDeleteConsumer>)consumer {
@@ -242,10 +295,11 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
   _consumer = consumer;
 
   [_consumer setTimeRange:_selectedTimeRange];
-
-  BOOL shouldShowFooter =
-      _identityManager->HasPrimaryAccount(signin::ConsentLevel::kSignin);
-  [_consumer setShouldShowFooter:shouldShowFooter];
+  if (IsPasswordRemovalFromDeleteBrowsingDataEnabled()) {
+    [_consumer setManageOtherDataTitle:[self manageOtherDataTitle]];
+    [_consumer setManageOtherDataSubtitle:[self manageOtherDataSubtitle]];
+  }
+  [_consumer setShouldShowFooter:_isSignedIn];
   [_consumer
       setHistorySelection:_prefs->GetBoolean(
                               browsing_data::prefs::kDeleteBrowsingHistory)];
@@ -255,8 +309,11 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
                                       browsing_data::prefs::kDeleteCookies)];
   [_consumer
       setCacheSelection:_prefs->GetBoolean(browsing_data::prefs::kDeleteCache)];
-  [_consumer setPasswordsSelection:_prefs->GetBoolean(
-                                       browsing_data::prefs::kDeletePasswords)];
+  if (!IsPasswordRemovalFromDeleteBrowsingDataEnabled()) {
+    [_consumer
+        setPasswordsSelection:_prefs->GetBoolean(
+                                  browsing_data::prefs::kDeletePasswords)];
+  }
   [_consumer setAutofillSelection:_prefs->GetBoolean(
                                       browsing_data::prefs::kDeleteFormData)];
 
@@ -267,6 +324,7 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
 - (void)disconnect {
   _prefObserverBridge.reset();
   _prefChangeRegistrar.RemoveAll();
+  _searchEngineObserver.reset();
   _counters.clear();
   _counterWrapperProducer = nil;
   _prefs = nil;
@@ -274,6 +332,7 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
   _identityManager = nil;
   _browsingDataRemover = nullptr;
   _discoverFeedService = nullptr;
+  _templateURLService = nullptr;
   _deletionTriggered = NO;
 }
 
@@ -338,7 +397,8 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
     removeMask |= BrowsingDataRemoveMask::REMOVE_CACHE;
   }
 
-  if (_prefs->GetBoolean(browsing_data::prefs::kDeletePasswords)) {
+  if (_prefs->GetBoolean(browsing_data::prefs::kDeletePasswords) &&
+      !IsPasswordRemovalFromDeleteBrowsingDataEnabled()) {
     removeMask |= BrowsingDataRemoveMask::REMOVE_PASSWORDS;
   }
 
@@ -478,6 +538,7 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
 }
 
 - (void)updatePasswordsSelection:(BOOL)selected {
+  CHECK(!IsPasswordRemovalFromDeleteBrowsingDataEnabled());
   BOOL current_state =
       _prefs->GetBoolean(browsing_data::prefs::kDeletePasswords);
   if (current_state == selected) {
@@ -507,18 +568,22 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
 
 #pragma mark - IdentityManagerObserverBridgeDelegate
 
-// Called when a user changes the sign-in state.
 - (void)onPrimaryAccountChanged:
     (const signin::PrimaryAccountChangeEvent&)event {
   switch (event.GetEventTypeFor(signin::ConsentLevel::kSignin)) {
     case signin::PrimaryAccountChangeEvent::Type::kSet:
+      _isSignedIn = YES;
       [self.consumer setShouldShowFooter:YES];
       break;
     case signin::PrimaryAccountChangeEvent::Type::kCleared:
+      _isSignedIn = NO;
       [self.consumer setShouldShowFooter:NO];
       break;
     case signin::PrimaryAccountChangeEvent::Type::kNone:
       break;
+  }
+  if (IsPasswordRemovalFromDeleteBrowsingDataEnabled()) {
+    [_consumer setManageOtherDataSubtitle:[self manageOtherDataSubtitle]];
   }
 }
 
@@ -549,6 +614,17 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
   DCHECK(false) << "Unxpected clear browsing data item type.";
 }
 
+#pragma mark - SearchEngineObserving
+
+- (void)searchEngineChanged {
+  _defaultSearchEngineState =
+      quick_delete_util::GetDefaultSearchEngineState(_templateURLService);
+  if (IsPasswordRemovalFromDeleteBrowsingDataEnabled()) {
+    [_consumer setManageOtherDataTitle:[self manageOtherDataTitle]];
+    [_consumer setManageOtherDataSubtitle:[self manageOtherDataSubtitle]];
+  }
+}
+
 #pragma mark - Private
 
 // Trigger the radial wipe animation along with the actual closure of the
@@ -572,7 +648,9 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
   [self createCounter:browsing_data::prefs::kDeleteBrowsingHistory];
   [self createCounter:browsing_data::prefs::kCloseTabs];
   [self createCounter:browsing_data::prefs::kDeleteCache];
-  [self createCounter:browsing_data::prefs::kDeletePasswords];
+  if (!IsPasswordRemovalFromDeleteBrowsingDataEnabled()) {
+    [self createCounter:browsing_data::prefs::kDeletePasswords];
+  }
   [self createCounter:browsing_data::prefs::kDeleteFormData];
 }
 
@@ -595,7 +673,7 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
   }
 }
 
-// Restarts the counters created in `createdCounters` with `_selectedTimeRange`.
+// Restarts the counters created in `createCounters` with `_selectedTimeRange`.
 // Restarting the counters results on the browsing data summary being updated in
 // the ViewController.
 - (void)restartCounters {
@@ -661,6 +739,7 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
     _cachedTabsInfo = tabsResult->cached_tabs_info();
     _tabsSummary = [self tabsSummary:tabsResult];
   } else if (prefName == browsing_data::prefs::kDeletePasswords) {
+    CHECK(!IsPasswordRemovalFromDeleteBrowsingDataEnabled());
     _passwordsSummary = [self
         passwordsSummary:static_cast<const browsing_data::PasswordsCounter::
                                          PasswordsResult*>(result)];
@@ -682,7 +761,9 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
   // `BrowsingDataCounter::Result`. Meaning that eventually this if condition
   // will evaluate to true and a non-placeholder browsing data summary will be
   // dispatched.
-  if (_browsingHistorySummary && _tabsSummary && _passwordsSummary &&
+  BOOL passwordsSummaryReady =
+      _passwordsSummary || IsPasswordRemovalFromDeleteBrowsingDataEnabled();
+  if (_browsingHistorySummary && _tabsSummary && passwordsSummaryReady &&
       _addressesSummary && _paymentMethodsSummary && _suggestionsSummary) {
     [self dispatchBrowsingDataSummary];
   }
@@ -716,7 +797,8 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
                       IDS_IOS_DELETE_BROWSING_DATA_SUMMARY_CACHED_FILES)];
   }
 
-  if (_prefs->GetBoolean(browsing_data::prefs::kDeletePasswords)) {
+  if (!IsPasswordRemovalFromDeleteBrowsingDataEnabled() &&
+      _prefs->GetBoolean(browsing_data::prefs::kDeletePasswords)) {
     if (_passwordsSummary && _passwordsSummary.length > 0) {
       [summaryItems addObject:_passwordsSummary];
     }
@@ -848,6 +930,45 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
       IDS_IOS_DELETE_BROWSING_DATA_SUMMARY_SUGGESTIONS, suggestionCount);
 }
 
+// Returns the title for the "Manage other data" cell. The title depends on the
+// user's default search engine.
+- (NSString*)manageOtherDataTitle {
+  CHECK(IsPasswordRemovalFromDeleteBrowsingDataEnabled());
+  switch (_defaultSearchEngineState) {
+    case DefaultSearchEngineState::kGoogle:
+      return l10n_util::GetNSString(
+          IDS_SETTINGS_MANAGE_OTHER_GOOGLE_DATA_LABEL);
+    case DefaultSearchEngineState::kNotGoogle:
+    case DefaultSearchEngineState::kError:
+      return l10n_util::GetNSString(IDS_SETTINGS_MANAGE_OTHER_DATA_LABEL);
+  }
+  NOTREACHED();
+}
+
+// Returns the subtitle for the "Manage other data" cell. The subtitle depends
+// on the user's default search engine and sign-in status.
+- (NSString*)manageOtherDataSubtitle {
+  CHECK(IsPasswordRemovalFromDeleteBrowsingDataEnabled());
+  switch (_defaultSearchEngineState) {
+    case DefaultSearchEngineState::kError:
+      return _isSignedIn
+                 ? l10n_util::GetNSString(
+                       IDS_IOS_CLEAR_BROWSING_DATA_MANAGE_OTHER_DATA_SUBTITLE_UNKNOWN_DSE)
+                 : l10n_util::GetNSString(
+                       IDS_SETTINGS_MANAGE_PASSWORDS_SUB_LABEL);
+
+    case DefaultSearchEngineState::kGoogle:
+      return _isSignedIn ? l10n_util::GetNSString(
+                               IDS_SETTINGS_MANAGE_OTHER_DATA_SUB_LABEL)
+                         : l10n_util::GetNSString(
+                               IDS_SETTINGS_MANAGE_PASSWORDS_SUB_LABEL);
+
+    case DefaultSearchEngineState::kNotGoogle:
+      return l10n_util::GetNSString(IDS_SETTINGS_MANAGE_OTHER_DATA_SUB_LABEL);
+  }
+  NOTREACHED();
+}
+
 - (void)observePreferences {
   _prefObserverBridge->ObserveChangesForPreference(
       browsing_data::prefs::kDeleteTimePeriod, &_prefChangeRegistrar);
@@ -887,6 +1008,7 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
   }
 
   if (prefName == browsing_data::prefs::kDeletePasswords) {
+    CHECK(!IsPasswordRemovalFromDeleteBrowsingDataEnabled());
     [_consumer setPasswordsSummary:summary];
     return;
   }
@@ -924,7 +1046,8 @@ void RecordCookieOrCacheDeletedFromDialogHistogram(
     return;
   }
 
-  if (preferenceName == browsing_data::prefs::kDeletePasswords) {
+  if (!IsPasswordRemovalFromDeleteBrowsingDataEnabled() &&
+      preferenceName == browsing_data::prefs::kDeletePasswords) {
     [_consumer setPasswordsSelection:_prefs->GetBoolean(preferenceName)];
     return;
   }

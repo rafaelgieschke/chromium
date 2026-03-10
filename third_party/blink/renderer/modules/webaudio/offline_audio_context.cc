@@ -44,6 +44,7 @@
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
@@ -122,6 +123,14 @@ OfflineAudioContext* OfflineAudioContext::Create(
       MakeGarbageCollected<OfflineAudioContext>(
           window, number_of_channels, number_of_frames, sample_rate,
           exception_state, render_quantum_frames);
+
+  if (audio_context->HasAllocationFailed()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNotSupportedError,
+        "The audio context could not be created due to memory limitations.");
+    return nullptr;
+  }
+
   audio_context->UpdateStateIfNeeded();
 
 #if DEBUG_AUDIONODE_REFERENCES
@@ -146,8 +155,10 @@ OfflineAudioContext* OfflineAudioContext::Create(
     const OfflineAudioContextOptions* options,
     ExceptionState& exception_state) {
   uint32_t render_quantum_frames = 128;
-  if (RuntimeEnabledFeatures::WebAudioConfigurableRenderQuantumEnabled() &&
+  if (RuntimeEnabledFeatures::WebAudioConfigurableRenderQuantumEnabled(
+          context) &&
       options->hasRenderSizeHint()) {
+    UseCounter::Count(context, WebFeature::kWebAudioRenderSizeHint);
     if (options->renderSizeHint()->IsUnsignedLong()) {
       render_quantum_frames = options->renderSizeHint()->GetAsUnsignedLong();
     }

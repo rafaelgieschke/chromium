@@ -4,15 +4,16 @@
 
 #include "third_party/blink/renderer/core/view_transition/view_transition_style_tracker.h"
 
+#include <algorithm>
 #include <limits>
 #include <unordered_map>
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "cc/base/features.h"
 #include "components/viz/common/view_transition_element_resource_id.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/resources/grit/blink_resources.h"
+#include "third_party/blink/renderer/bindings/core/v8/frozen_array.h"
 #include "third_party/blink/renderer/core/animation/element_animations.h"
 #include "third_party/blink/renderer/core/animation/property_handle.h"
 #include "third_party/blink/renderer/core/css/css_default_style_sheets.h"
@@ -71,6 +72,9 @@ namespace {
 
 const char* kDuplicateTagBaseError =
     "Unexpected duplicate view-transition-name: ";
+
+const char* kTagCollisionBaseError =
+    "Element cannot participate in multiple transitions: ";
 
 const CSSPropertyID kPropertiesToCapture[] = {
     CSSPropertyID::kBackdropFilter, CSSPropertyID::kColorScheme,
@@ -600,7 +604,7 @@ void ViewTransitionStyleTracker::AddTransitionElement(
                                });
   }
   // Find the existing name if one is there. If it is there, do nothing.
-  if (base::Contains(value, name, &std::pair<AtomicString, int>::first))
+  if (std::ranges::contains(value, name, &std::pair<AtomicString, int>::first))
     return;
   // Otherwise, insert a new sequence id with this name. We'll use the sequence
   // to sort later.
@@ -655,6 +659,20 @@ bool ViewTransitionStyleTracker::MatchForOnlyChild(
 
 void ViewTransitionStyleTracker::AddTransitionElementsFromCSS() {
   DCHECK(document_ && document_->View());
+
+  if (element_ && element_ != document_->documentElement()) {
+    // Scoped view transition apply auto-nesting. The nested group applies
+    // clipping unless overflow explicitly set to visible.
+    // TODO(https://github.com/w3c/csswg-drafts/issues/13445) we might consider
+    // having per axis values here. Revisit once we have a resolution for this
+    // issue.
+    if (const ComputedStyle* style = element_->GetComputedStyle()) {
+      if (style->OverflowX() != EOverflow::kVisible ||
+          style->OverflowY() != EOverflow::kVisible) {
+        apply_overflow_clip_ = true;
+      }
+    }
+  }
 
   // We need our paint layers, and z-order lists which is done during
   // compositing inputs update.
@@ -737,17 +755,6 @@ void ViewTransitionStyleTracker::AddTransitionElementsFromCSSRecursive(
   auto& root_object = root->GetLayoutObject();
   auto& root_style = root_object.StyleRef();
 
-  if ((root_style.Contain() & kContainsViewTransition) && element_ &&
-      (root_object.GetNode() != *element_)) {
-    // Having "contain: view-transition" on a descendant of the scoped element
-    // halts propagation of tag discovery into the descendant's subtree.
-    // If the scoped element itself has "contain: view-transition", the tag
-    // discovery process proceeds normally.
-    // TODO(crbug.com/422522044): Should "contain: strict" include
-    // view-transition
-    return;
-  }
-
   const auto& view_transition_name = root_style.ViewTransitionName();
   AtomicString current_name;
   if (view_transition_name && !root_object.IsFragmented()) {
@@ -794,6 +801,13 @@ void ViewTransitionStyleTracker::AddTransitionElementsFromCSSRecursive(
   // children can have outer tree scope.
   PaintLayerPaintOrderIterator child_iterator(root, kAllChildren);
   while (auto* child = child_iterator.Next()) {
+    // View-transition-scope: auto is not confined to elements with directly
+    // corresponding paint layers. Scan the DOM elements for containment
+    // within the interval including checking elements with "display: contents".
+    if (HasContainmentBoundary(root, child)) {
+      continue;
+    }
+
     // Note that both 'contain' and 'nearest' contain descendant names, per
     // https://www.w3.org/TR/css-view-transitions-2/#nearest-containing-group-name
     AddTransitionElementsFromCSSRecursive(
@@ -877,10 +891,46 @@ bool ViewTransitionStyleTracker::FlattenAndVerifyElements(
       return false;
     }
 
+    // TransitionForParticipant will not return our own transition, because
+    // VTST::IsTransitionElement() excludes kIdle and kCaptured states. So if
+    // it returns a transition, it is some other transition that is already
+    // using this element as a participant.
+    if (ViewTransitionUtils::TransitionForParticipant(*element)) {
+      StringBuilder message;
+      message.Append(kTagCollisionBaseError);
+      message.Append(name);
+      AddConsoleError(message.ReleaseString(),
+                      Vector<DOMNodeId>(element->GetDomNodeId()));
+      return false;
+    }
+
     transition_names.push_back(name);
     elements.push_back(element);
   }
   return true;
+}
+
+bool ViewTransitionStyleTracker::HasContainmentBoundary(
+    PaintLayer* root,
+    PaintLayer* child) const {
+  auto& root_object = root->GetLayoutObject();
+  auto& child_object = child->GetLayoutObject();
+  Node* node = child_object.GetNode();
+  if (!node) {
+    return false;
+  }
+  Node* root_node = root_object.GetNode();
+  while (node != root_node) {
+    if (Element* element = DynamicTo<Element>(node)) {
+      if (element != element_ &&
+          element->GetComputedStyle()->ViewTransitionScope() ==
+              EViewTransitionScope::kAll) {
+        return true;
+      }
+    }
+    node = FlatTreeTraversal::Parent(*node);
+  }
+  return false;
 }
 
 AtomicString ViewTransitionStyleTracker::ComputeContainingGroupName(
@@ -1254,9 +1304,15 @@ void ViewTransitionStyleTracker::PauseRendering() {
   DCHECK_EQ(state_, State::kCapturing);
 
   if (scope_snapshot_layer_) {
+    auto bounds = scope_snapshot_layer_->bounds();
+    auto paint_offset = scope_snapshot_layer_->paint_offset();
+
     auto resource_id = scope_snapshot_layer_->ViewTransitionResourceId();
     scope_snapshot_layer_ = cc::ViewTransitionContentLayer::Create(
         resource_id, /*is_live_content_layer=*/false);
+
+    scope_snapshot_layer_->SetBounds(bounds);
+    scope_snapshot_layer_->SetPaintOffset(paint_offset);
   }
 }
 
@@ -1580,6 +1636,10 @@ bool ViewTransitionStyleTracker::RunPostPrePaintStepsForElement(
 
   for (CSSPropertyID id : kPropertiesToCaptureOnGroupChildren) {
     capture_property(id, group_children_css_property_builder);
+  }
+  if (apply_overflow_clip_) {
+    group_children_css_property_builder.Insert(CSSPropertyID::kOverflow,
+                                               "clip");
   }
 
   auto css_properties = std::move(css_property_builder).Finish();

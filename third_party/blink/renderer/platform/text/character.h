@@ -41,16 +41,12 @@
 #include "third_party/blink/renderer/platform/text/character_property.h"
 #include "third_party/blink/renderer/platform/text/east_asian_spacing_type.h"
 #include "third_party/blink/renderer/platform/text/han_kerning_char_type.h"
-#include "third_party/blink/renderer/platform/text/text_direction.h"
-#include "third_party/blink/renderer/platform/text/text_justify.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/ascii_ctype.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
-
-struct JustificationContext;
 
 class PLATFORM_EXPORT Character {
   STATIC_ONLY(Character);
@@ -116,23 +112,7 @@ class PLATFORM_EXPORT Character {
     return c < 0x1100 ? false : IsHangulSlow(c);
   }
 
-  static unsigned ExpansionOpportunityCount(TextJustify method,
-                                            base::span<const LChar>,
-                                            TextDirection,
-                                            JustificationContext&);
-  static unsigned ExpansionOpportunityCount(TextJustify method,
-                                            base::span<const UChar>,
-                                            TextDirection,
-                                            JustificationContext&);
-
   static bool IsUprightInMixedVertical(UChar32 character);
-
-  // https://html.spec.whatwg.org/C/#prod-potentialcustomelementname
-  static bool IsPotentialCustomElementName8BitChar(LChar ch) {
-    return IsASCIILower(ch) || IsASCIIDigit(ch) || ch == '-' || ch == '.' ||
-           ch == '_' || ch == 0xb7 || (0xc0 <= ch && ch != 0xd7 && ch != 0xf7);
-  }
-  static bool IsPotentialCustomElementNameChar(UChar32 character);
 
   // http://unicode.org/reports/tr9/#Directional_Formatting_Characters
   static bool IsBidiControl(UChar32 character);
@@ -277,6 +257,18 @@ class PLATFORM_EXPORT Character {
   }
 
   static bool IsVerticalMathCharacter(UChar32);
+
+  // Returns the full-width variant of a half-width character, or the
+  // original code point if no variant exists.
+  // See CSS Text Level 3:
+  // https://drafts.csswg.org/css-text-3/#text-transform
+  static UChar32 FullwidthVariant(UChar32);
+
+  // Returns the full-size kana variant of a small kana character, or the
+  // original code point if no variant exists.
+  // See CSS Text Level 3, Appendix G:
+  // https://drafts.csswg.org/css-text-3/#small-kana-mappings
+  static UChar32 FullSizeKanaVariant(UChar32);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(CharacterTest, Derived);

@@ -9,7 +9,6 @@
 <translation id="101823271612280837">録画を停止しました。タブレット モードではゲーム ダッシュボードを使用できません。</translation>
 <translation id="1024364763893396229"><ph name="NAME" /> を保存</translation>
 <translation id="1032891413405719768">タッチペンのバッテリー残量が少なくなっています</translation>
-<translation id="1036073649888683237">通知の管理は設定アプリで行うことができす</translation>
 <translation id="1036348656032585052">オフにする</translation>
 <translation id="1037492556044956303"><ph name="DEVICE_NAME" /> が追加されました</translation>
 <translation id="1038106730571050514">候補を表示する</translation>
@@ -342,7 +341,6 @@
 <translation id="2201071101391734388">最近の <ph name="INDEX" /> / <ph name="TOTAL_COUNT" /> 件の写真。</translation>
 <translation id="2201687081523799384">Google ToDo リストを折りたたむ</translation>
 <translation id="2208323208084708176">デスクトップ統合モード</translation>
-<translation id="2210311543574621570">Ctrl+V キーを長押しするとクリップボードが表示されます。このショートカットをオフにするには、chrome://flags で #clipboard-history-longpress フラグを無効にします。</translation>
 <translation id="2215920961700443347">インターネットに接続されていません。インターネットに接続してから、もう一度お試しください。</translation>
 <translation id="2222841058024245321">デスク 7</translation>
 <translation id="2223384056430485343">分割画面表示</translation>
@@ -428,6 +426,7 @@
 <translation id="2478076885740497414">アプリをインストール</translation>
 <translation id="2482878487686419369">通知</translation>
 <translation id="2484513351006226581">キーボード レイアウトを切り替えるには <ph name="KEYBOARD_SHORTCUT" /> キーを押します。</translation>
+<translation id="2485422356828889247">アンインストール</translation>
 <translation id="2486214324139475545"><ph name="DESK_NAME" /> のプレビュー。使用中のデスクです。</translation>
 <translation id="2486405091093637109">「<ph name="DISPLAY_NAME" />」の解像度を <ph name="RESOLUTION" />（<ph name="REFRESH_RATE" /> Hz）に変更しました。確定しない場合、<ph name="TIMEOUT_SECONDS" /> 秒後に以前の設定に戻ります。</translation>
 <translation id="2487915095798731898">参加</translation>
@@ -2196,7 +2195,6 @@
 <translation id="8241650983304689286">新しい分割ビューにタブを追加</translation>
 <translation id="8247060538831475781"><ph name="CONNECTION_STATUS" />、信号強度 <ph name="SIGNAL_STRENGTH" />、電池残量 <ph name="BATTERY_STATUS" /></translation>
 <translation id="825129991941217170">Google ドライブのすべてのコンテンツを表示</translation>
-<translation id="8257510091797044096">デバイスをセットアップする</translation>
 <translation id="8261506727792406068">削除</translation>
 <translation id="8262312463845990408">再生を切り替える</translation>
 <translation id="8268302343625273732">Google Classroom ですべての課題を表示</translation>

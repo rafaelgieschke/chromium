@@ -25,6 +25,8 @@
 #include "components/segmentation_platform/public/result.h"
 #include "components/segmentation_platform/public/segmentation_platform_service.h"
 #include "components/segmentation_platform/public/testing/mock_segmentation_platform_service.h"
+#include "content/public/browser/webid/federated_embedder_login_request.h"
+#include "content/public/browser/webid/identity_credential_source.h"
 #include "content/public/browser/webid/identity_request_account.h"
 #include "content/public/browser/webid/identity_request_dialog_controller.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -46,6 +48,7 @@ const std::vector<content::IdentityRequestDialogDisclosureField>
 
 }  // namespace
 
+constexpr char kAccountId[] = "account_id1";
 constexpr char16_t kTopFrameEtldPlusOne[] = u"top-frame-example.com";
 constexpr char kIdpEtldPlusOne[] = "idp-example.com";
 constexpr float kPerPageLoadClickthroughRate = 0.1;
@@ -151,23 +154,24 @@ class IdentityDialogControllerTest : public ChromeRenderViewHostTestHarness {
   }
 
   void Accept(permissions::PermissionRequestManager* manager) {
-    manager->Accept();
+    manager->Accept(/*prompt_options=*/std::monostate());
     task_environment()->RunUntilIdle();
   }
 
   void Deny(permissions::PermissionRequestManager* manager) {
-    manager->Deny();
+    manager->Deny(/*prompt_options=*/std::monostate());
     task_environment()->RunUntilIdle();
   }
 
   void Dismiss(permissions::PermissionRequestManager* manager) {
-    manager->Dismiss();
+    manager->Dismiss(/*prompt_options=*/std::monostate());
     task_environment()->RunUntilIdle();
   }
 
   std::vector<IdentityRequestAccountPtr> CreateAccount() {
     return {base::MakeRefCounted<Account>(
-        "account_id1", "", "", "", "", "", GURL(), "", "",
+        kAccountId, "", "", "", "", "", GURL(), "", "",
+        /*potentially_approved_origin_hashes=*/std::vector<std::string>(),
         /*login_hints=*/std::vector<std::string>(),
         /*domain_hints=*/std::vector<std::string>(),
         /*labels=*/std::vector<std::string>(),
@@ -201,7 +205,8 @@ class IdentityDialogControllerTest : public ChromeRenderViewHostTestHarness {
     controller->ShowAccountsDialog(
         content::RelyingPartyData(kTopFrameEtldPlusOne,
                                   /*iframe_for_display=*/u""),
-        {idp_data}, accounts_, rp_mode, /*on_selected=*/base::DoNothing(),
+        {idp_data}, accounts_, /*filtered_accounts=*/{}, rp_mode,
+        /*on_selected=*/base::DoNothing(),
         /*on_add_account=*/base::DoNothing(), std::move(dismiss_callback),
         /*accounts_displayed_callback=*/base::DoNothing());
   }
@@ -646,6 +651,348 @@ TEST_F(IdentityDialogControllerTest,
   run_loop.Run();
 }
 
+TEST_F(IdentityDialogControllerTest,
+       AccountSelectionInvokedWhenShouldShowFedCmUiIsFalse) {
+  std::unique_ptr<IdentityDialogController> controller =
+      std::make_unique<IdentityDialogController>(web_contents());
+  controller->SetAccountSelectionViewForTesting(
+      std::make_unique<MockAccountSelectionView>());
+
+  // Set up ActorLoginRequest to make ShouldShowFedCmUi returns false.
+  GURL idp_url("https://idp.example");
+  url::Origin idp_origin = url::Origin::Create(idp_url);
+  content::webid::FederatedEmbedderLoginRequest::Set(
+      web_contents(), idp_origin, kAccountId, base::DoNothing());
+
+  std::vector<IdentityRequestAccountPtr> accounts = CreateAccount();
+  accounts[0]->idp_claimed_login_state =
+      content::IdentityRequestAccount::LoginState::kSignIn;
+  IdentityProviderDataPtr idp_data = CreateIdentityProviderData(accounts);
+  idp_data->idp_metadata.config_url = idp_url;
+
+  base::MockCallback<AccountSelectionCallback> on_selected;
+  EXPECT_CALL(on_selected, Run(idp_url, kAccountId, true)).Times(1);
+
+  // ShowAccountsDialog should return true and trigger the callback immediately
+  // without showing UI.
+  EXPECT_TRUE(controller->ShowAccountsDialog(
+      content::RelyingPartyData(kTopFrameEtldPlusOne,
+                                /*iframe_for_display=*/u""),
+      {idp_data}, accounts, /*filtered_accounts=*/{},
+      blink::mojom::RpMode::kActive, on_selected.Get(),
+      /*on_add_account=*/base::DoNothing(),
+      /*dismiss_callback=*/base::DoNothing(),
+      /*accounts_displayed_callback=*/base::DoNothing()));
+}
+
+TEST_F(IdentityDialogControllerTest,
+       TokenReceivedCallbackInvokedWhenAccountNotSignedInOrMissing) {
+  std::unique_ptr<IdentityDialogController> controller =
+      std::make_unique<IdentityDialogController>(web_contents());
+  controller->SetAccountSelectionViewForTesting(
+      std::make_unique<MockAccountSelectionView>());
+
+  GURL idp_url("https://idp.example");
+  url::Origin idp_origin = url::Origin::Create(idp_url);
+  std::string account_id = "account_id123";
+
+  // Case 1: Account is missing.
+  {
+    base::MockCallback<
+        base::RepeatingCallback<void(content::webid::FederatedLoginResult)>>
+        result_callback;
+    EXPECT_CALL(result_callback,
+                Run(content::webid::FederatedLoginResult::kAccountNotLoggedIn))
+        .Times(1);
+
+    content::webid::FederatedEmbedderLoginRequest::Set(
+        web_contents(), idp_origin, account_id, result_callback.Get());
+
+    // Create an account with different ID.
+    std::vector<IdentityRequestAccountPtr> accounts = CreateAccount();
+    accounts[0]->id = "other_account";
+    IdentityProviderDataPtr idp_data = CreateIdentityProviderData(accounts);
+    idp_data->idp_metadata.config_url = idp_url;
+
+    EXPECT_FALSE(controller->ShowAccountsDialog(
+        content::RelyingPartyData(kTopFrameEtldPlusOne,
+                                  /*iframe_for_display=*/u""),
+        {idp_data}, accounts, /*filtered_accounts=*/{},
+        blink::mojom::RpMode::kActive,
+        /*on_selected=*/base::DoNothing(),
+        /*on_add_account=*/base::DoNothing(),
+        /*dismiss_callback=*/base::DoNothing(),
+        /*accounts_displayed_callback=*/base::DoNothing()));
+  }
+
+  // Case 2: Account exists but is not signed in.
+  {
+    base::MockCallback<
+        base::RepeatingCallback<void(content::webid::FederatedLoginResult)>>
+        result_callback;
+    EXPECT_CALL(result_callback,
+                Run(content::webid::FederatedLoginResult::kAccountIsSignUp))
+        .Times(1);
+
+    content::webid::FederatedEmbedderLoginRequest::Set(
+        web_contents(), idp_origin, account_id, result_callback.Get());
+
+    std::vector<IdentityRequestAccountPtr> accounts = CreateAccount();
+    // Ensure account matches.
+    accounts[0]->id = account_id;
+    // Ensure not signed in.
+    accounts[0]->idp_claimed_login_state =
+        content::IdentityRequestAccount::LoginState::kSignUp;
+    accounts[0]->browser_trusted_login_state =
+        content::IdentityRequestAccount::LoginState::kSignUp;
+
+    IdentityProviderDataPtr idp_data = CreateIdentityProviderData(accounts);
+    idp_data->idp_metadata.config_url = idp_url;
+
+    EXPECT_FALSE(controller->ShowAccountsDialog(
+        content::RelyingPartyData(kTopFrameEtldPlusOne,
+                                  /*iframe_for_display=*/u""),
+        {idp_data}, accounts, /*filtered_accounts=*/{},
+        blink::mojom::RpMode::kActive,
+        /*on_selected=*/base::DoNothing(),
+        /*on_add_account=*/base::DoNothing(),
+        /*dismiss_callback=*/base::DoNothing(),
+        /*accounts_displayed_callback=*/base::DoNothing()));
+  }
+
+  // Case 3: Account is filtered out.
+  {
+    base::MockCallback<
+        base::RepeatingCallback<void(content::webid::FederatedLoginResult)>>
+        result_callback;
+    EXPECT_CALL(result_callback,
+                Run(content::webid::FederatedLoginResult::kAccountNotAvailable))
+        .Times(1);
+
+    content::webid::FederatedEmbedderLoginRequest::Set(
+        web_contents(), idp_origin, account_id, result_callback.Get());
+
+    // Create an account with matching ID but in filtered_accounts list.
+    std::vector<IdentityRequestAccountPtr> filtered_accounts = CreateAccount();
+    filtered_accounts[0]->id = account_id;
+    filtered_accounts[0]->idp_claimed_login_state =
+        content::IdentityRequestAccount::LoginState::kSignIn;
+    filtered_accounts[0]->browser_trusted_login_state =
+        content::IdentityRequestAccount::LoginState::kSignIn;
+
+    IdentityProviderDataPtr idp_data =
+        CreateIdentityProviderData(filtered_accounts);
+    idp_data->idp_metadata.config_url = idp_url;
+
+    EXPECT_FALSE(controller->ShowAccountsDialog(
+        content::RelyingPartyData(kTopFrameEtldPlusOne,
+                                  /*iframe_for_display=*/u""),
+        {idp_data}, /*accounts=*/{}, filtered_accounts,
+        blink::mojom::RpMode::kActive,
+        /*on_selected=*/base::DoNothing(),
+        /*on_add_account=*/base::DoNothing(),
+        /*dismiss_callback=*/base::DoNothing(),
+        /*accounts_displayed_callback=*/base::DoNothing()));
+  }
+
+  // Case 4: ShowFailureDialog with filtered_accounts.
+  {
+    base::MockCallback<
+        base::RepeatingCallback<void(content::webid::FederatedLoginResult)>>
+        result_callback;
+    EXPECT_CALL(result_callback,
+                Run(content::webid::FederatedLoginResult::kAccountNotAvailable))
+        .Times(1);
+
+    content::webid::FederatedEmbedderLoginRequest::Set(
+        web_contents(), idp_origin, account_id, result_callback.Get());
+
+    // Create an account with matching ID but in filtered_accounts list.
+    std::vector<IdentityRequestAccountPtr> filtered_accounts = CreateAccount();
+    filtered_accounts[0]->id = account_id;
+    filtered_accounts[0]->idp_claimed_login_state =
+        content::IdentityRequestAccount::LoginState::kSignIn;
+    filtered_accounts[0]->browser_trusted_login_state =
+        content::IdentityRequestAccount::LoginState::kSignIn;
+
+    IdentityProviderDataPtr idp_data =
+        CreateIdentityProviderData(filtered_accounts);
+    idp_data->idp_metadata.config_url = idp_url;
+
+    EXPECT_FALSE(controller->ShowFailureDialog(
+        content::RelyingPartyData(kTopFrameEtldPlusOne,
+                                  /*iframe_for_display=*/u""),
+        kIdpEtldPlusOne, blink::mojom::RpContext::kSignIn,
+        blink::mojom::RpMode::kActive, idp_data->idp_metadata,
+        filtered_accounts,
+        /*dismiss_callback=*/base::DoNothing(),
+        /*login_callback=*/base::DoNothing()));
+  }
+}
+
+struct FederatedLoginResultTestParam {
+  content::webid::FederatedLoginResult login_result;
+  std::string test_name;
+};
+
+class IdentityDialogControllerOnFlowCompletedTest
+    : public IdentityDialogControllerTest,
+      public testing::WithParamInterface<FederatedLoginResultTestParam> {};
+
+TEST_P(IdentityDialogControllerOnFlowCompletedTest, OnFlowCompleted) {
+  std::unique_ptr<IdentityDialogController> controller =
+      std::make_unique<IdentityDialogController>(web_contents());
+
+  GURL idp_url("https://idp.example");
+  url::Origin idp_origin = url::Origin::Create(idp_url);
+  std::string account_id = "account_id123";
+
+  base::MockCallback<
+      base::RepeatingCallback<void(content::webid::FederatedLoginResult)>>
+      result_callback;
+  EXPECT_CALL(result_callback, Run(GetParam().login_result)).Times(1);
+
+  content::webid::FederatedEmbedderLoginRequest::Set(
+      web_contents(), idp_origin, account_id, result_callback.Get());
+
+  controller->OnFlowCompleted(GetParam().login_result);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    IdentityDialogControllerOnFlowCompletedTest,
+    testing::Values(
+        FederatedLoginResultTestParam{
+            content::webid::FederatedLoginResult::kSuccess, "Success"},
+        FederatedLoginResultTestParam{
+            content::webid::FederatedLoginResult::kContinuation,
+            "Continuation"},
+        FederatedLoginResultTestParam{
+            content::webid::FederatedLoginResult::kAccountNotLoggedIn,
+            "AccountNotLoggedIn"},
+        FederatedLoginResultTestParam{
+            content::webid::FederatedLoginResult::kAccountIsSignUp,
+            "AccountIsSignUp"},
+        FederatedLoginResultTestParam{
+            content::webid::FederatedLoginResult::kAccountNotAvailable,
+            "AccountNotAvailable"},
+        FederatedLoginResultTestParam{
+            content::webid::FederatedLoginResult::kIdpReturnedError,
+            "IdpReturnedError"},
+        FederatedLoginResultTestParam{
+            content::webid::FederatedLoginResult::kIdpNetworkError,
+            "IdpNetworkError"},
+        FederatedLoginResultTestParam{
+            content::webid::FederatedLoginResult::kTokenRequestAborted,
+            "TokenRequestAborted"},
+        FederatedLoginResultTestParam{
+            content::webid::FederatedLoginResult::kFrameNotActive,
+            "FrameNotActive"},
+        FederatedLoginResultTestParam{
+            content::webid::FederatedLoginResult::kExpectedAccountNotPresent,
+            "ExpectedAccountNotPresent"}),
+    [](const testing::TestParamInfo<
+        IdentityDialogControllerOnFlowCompletedTest::ParamType>& info) {
+      return info.param.test_name;
+    });
+
+TEST_F(IdentityDialogControllerTest, OnFlowCompletedNoActorLoginRequest) {
+  std::unique_ptr<IdentityDialogController> controller =
+      std::make_unique<IdentityDialogController>(web_contents());
+
+  // Test that it does not crash if there is no actor login request.
+  controller->OnFlowCompleted(content::webid::FederatedLoginResult::kSuccess);
+}
+
+TEST_F(IdentityDialogControllerTest, ActorLoginContinuationAndSuccess) {
+  std::unique_ptr<IdentityDialogController> controller =
+      std::make_unique<IdentityDialogController>(web_contents());
+  controller->SetAccountSelectionViewForTesting(
+      std::make_unique<MockAccountSelectionView>());
+
+  GURL idp_url("https://idp.example");
+  url::Origin idp_origin = url::Origin::Create(idp_url);
+  std::string account_id = "account_id123";
+
+  // Test that showing modal dialog results in kContinuation.
+  {
+    base::MockCallback<
+        base::RepeatingCallback<void(content::webid::FederatedLoginResult)>>
+        result_callback;
+    EXPECT_CALL(result_callback,
+                Run(content::webid::FederatedLoginResult::kContinuation))
+        .Times(1);
+
+    content::webid::FederatedEmbedderLoginRequest::Set(
+        web_contents(), idp_origin, account_id, result_callback.Get());
+
+    controller->ShowModalDialog(GURL("https://idp.example/login"),
+                                blink::mojom::RpMode::kActive,
+                                base::DoNothing());
+  }
+
+  // Test Continuation -> Success.
+  {
+    base::MockCallback<
+        base::RepeatingCallback<void(content::webid::FederatedLoginResult)>>
+        result_callback;
+    EXPECT_CALL(result_callback,
+                Run(content::webid::FederatedLoginResult::kSuccess))
+        .Times(1);
+
+    // After a continuation, the callback has been consumed. For the test, we
+    // set a new request to verify that the flow can complete.
+    content::webid::FederatedEmbedderLoginRequest::Set(
+        web_contents(), idp_origin, account_id, result_callback.Get());
+
+    controller->OnFlowCompleted(content::webid::FederatedLoginResult::kSuccess);
+  }
+}
+
+TEST_F(IdentityDialogControllerTest, ActorLoginContinuationAndFailure) {
+  std::unique_ptr<IdentityDialogController> controller =
+      std::make_unique<IdentityDialogController>(web_contents());
+  controller->SetAccountSelectionViewForTesting(
+      std::make_unique<MockAccountSelectionView>());
+
+  GURL idp_url("https://idp.example");
+  url::Origin idp_origin = url::Origin::Create(idp_url);
+  std::string account_id = "account_id123";
+
+  // Test that showing modal dialog results in kContinuation.
+  {
+    base::MockCallback<
+        base::RepeatingCallback<void(content::webid::FederatedLoginResult)>>
+        result_callback;
+    EXPECT_CALL(result_callback,
+                Run(content::webid::FederatedLoginResult::kContinuation))
+        .Times(1);
+
+    content::webid::FederatedEmbedderLoginRequest::Set(
+        web_contents(), idp_origin, account_id, result_callback.Get());
+
+    controller->ShowModalDialog(GURL("https://idp.example/login"),
+                                blink::mojom::RpMode::kActive,
+                                base::DoNothing());
+  }
+
+  // Test Continuation -> Failure.
+  {
+    base::MockCallback<
+        base::RepeatingCallback<void(content::webid::FederatedLoginResult)>>
+        result_callback;
+    EXPECT_CALL(result_callback,
+                Run(content::webid::FederatedLoginResult::kIdpNetworkError))
+        .Times(1);
+
+    content::webid::FederatedEmbedderLoginRequest::Set(
+        web_contents(), idp_origin, account_id, result_callback.Get());
+
+    controller->OnFlowCompleted(
+        content::webid::FederatedLoginResult::kIdpNetworkError);
+  }
+}
+
 class IdentityDialogControllerTestWithOptimizationDisabled
     : public IdentityDialogControllerTest {
  public:
@@ -683,4 +1030,6 @@ TEST_F(IdentityDialogControllerTestWithOptimizationDisabled, NoCrash) {
   EXPECT_TRUE(prompt_factory->is_visible());
 
   Accept(manager);
+
+  EXPECT_FALSE(prompt_factory->is_visible());
 }

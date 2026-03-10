@@ -14,7 +14,6 @@
 #include <vector>
 
 #include "base/auto_reset.h"
-#include "base/containers/contains.h"
 #include "base/containers/to_value_list.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -52,6 +51,7 @@
 #include "chrome/browser/net/profile_network_context_service_factory.h"
 #include "chrome/browser/privacy_sandbox/privacy_sandbox_settings_factory.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/tab_list/tab_list_interface.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/webui_url_constants.h"
@@ -190,8 +190,9 @@ class RulesetLoadObserver : public RulesMonitorService::TestObserver {
  private:
   // RulesMonitorService::TestObserver override:
   void OnRulesetLoadComplete(const ExtensionId& extension_id) override {
-    if (extension_id_ == extension_id)
+    if (extension_id_ == extension_id) {
       run_loop_.Quit();
+    }
   }
 
   const raw_ptr<RulesMonitorService> service_;
@@ -483,11 +484,13 @@ class DeclarativeNetRequestBrowserTest
 
   void VerifyNavigations(const std::vector<GURL>& expected_blocked_urls,
                          const std::vector<GURL>& expected_allowed_urls) {
-    for (const GURL& url : expected_blocked_urls)
+    for (const GURL& url : expected_blocked_urls) {
       EXPECT_TRUE(IsNavigationBlocked(url)) << url;
+    }
 
-    for (const GURL& url : expected_allowed_urls)
+    for (const GURL& url : expected_allowed_urls) {
       EXPECT_FALSE(IsNavigationBlocked(url)) << url;
+    }
   }
 
   // TODO(crbug.com/40804030): Update function name to reflect it's used in
@@ -558,8 +561,8 @@ class DeclarativeNetRequestBrowserTest
           });
     )";
 
-    base::Value::List ids_to_disable = base::ToValueList(rule_ids_to_disable);
-    base::Value::List ids_to_enable = base::ToValueList(rule_ids_to_enable);
+    base::ListValue ids_to_disable = base::ToValueList(rule_ids_to_disable);
+    base::ListValue ids_to_enable = base::ToValueList(rule_ids_to_enable);
 
     const std::string script = content::JsReplace(
         kScript, ruleset_id, base::Value(std::move(ids_to_disable)),
@@ -601,7 +604,7 @@ class DeclarativeNetRequestBrowserTest
                 : ['expected:', expected, '; actual:', actual].join(''));
           });
     )";
-    base::Value::List expected = base::ToValueList(expected_disabled_rule_ids);
+    base::ListValue expected = base::ToValueList(expected_disabled_rule_ids);
     std::string result = ExecuteScriptInBackgroundPageAndReturnString(
         extension_id,
         content::JsReplace(kScript, ruleset_id_string, std::move(expected)));
@@ -844,8 +847,9 @@ class DeclarativeNetRequestBrowserTest
       DCHECK(url_to_wait_for_.is_empty());
       DCHECK(!wait_for_request_run_loop_);
 
-      if (requests_to_server_.count(url_to_wait_for))
+      if (requests_to_server_.count(url_to_wait_for)) {
         return;
+      }
       url_to_wait_for_ = url_to_wait_for;
       wait_for_request_run_loop_ = std::make_unique<base::RunLoop>();
     }
@@ -880,8 +884,9 @@ class DeclarativeNetRequestBrowserTest
   }
 
   net::EmbeddedTestServer* https_server() {
-    if (!https_server_)
+    if (!https_server_) {
       InitializeHttpsServer();
+    }
 
     return https_server_.get();
   }
@@ -959,10 +964,11 @@ class DeclarativeNetRequestBrowserTest
         base::FilePath crx_path = crx_dir.AppendASCII("temp.crx");
 
         base::FilePath pem_path;
-        if (is_extension_update)
+        if (is_extension_update) {
           pem_path = last_pem_path_;
-        else
+        } else {
           last_pem_path_ = crx_dir.AppendASCII("temp.pem");
+        }
 
         ASSERT_FALSE(base::PathExists(crx_dir));
         ASSERT_TRUE(base::CreateDirectory(crx_dir));
@@ -1127,7 +1133,7 @@ using DeclarativeNetRequestBrowserTest_Unpacked =
 
 // Tests the "urlFilter" and "regexFilter" property of a declarative rule
 // condition.
-// TODO: test times out on win, mac and linux. http://crbug.com/900447.
+// TODO(crbug.com/41423578): test times out on win, mac and linux.
 IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
                        DISABLED_BlockRequests_UrlFilter) {
   struct {
@@ -1189,10 +1195,11 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
     TestRule rule = CreateGenericRule();
     rule.condition->url_filter.reset();
 
-    if (rule_data.is_regex_rule)
+    if (rule_data.is_regex_rule) {
       rule.condition->regex_filter = rule_data.filter;
-    else
+    } else {
       rule.condition->url_filter = rule_data.filter;
+    }
 
     rule.condition->resource_types = std::vector<std::string>({"main_frame"});
     rule.id = rule_data.id;
@@ -1352,8 +1359,9 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
     rule.id = rule_data.id;
 
     // An empty list is not allowed for the "domains" property.
-    if (!rule_data.domains.empty())
+    if (!rule_data.domains.empty()) {
       rule.condition->domains = rule_data.domains;
+    }
 
     rule.condition->excluded_domains = rule_data.excluded_domains;
     rule.condition->resource_types = std::vector<std::string>({"sub_frame"});
@@ -1424,8 +1432,9 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
     rule.id = rule_data.id;
 
     // An empty list is not allowed for the "request_domains" property.
-    if (!rule_data.request_domains.empty())
+    if (!rule_data.request_domains.empty()) {
       rule.condition->request_domains = rule_data.request_domains;
+    }
 
     rule.condition->excluded_request_domains =
         rule_data.excluded_request_domains;
@@ -2002,10 +2011,12 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
     rule.condition->url_filter = rule_data.url_filter;
     rule.condition->resource_types = std::vector<std::string>({"main_frame"});
     rule.id = rule_data.id;
-    if (rule_data.add_to_first_extension)
+    if (rule_data.add_to_first_extension) {
       rules_1.push_back(rule);
-    if (rule_data.add_to_second_extension)
+    }
+    if (rule_data.add_to_second_extension) {
       rules_2.push_back(rule);
+    }
   }
 
   ASSERT_NO_FATAL_FAILURE(LoadExtensionWithRules(
@@ -2633,9 +2644,8 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
       content::EvalJs(GetActiveWebContents(), "document.body.textContent")
           .ExtractString();
 
-  EXPECT_TRUE(
-      base::Contains(body, "This page has been blocked by an extension"));
-  EXPECT_TRUE(base::Contains(body, "Try disabling your extensions."));
+  EXPECT_TRUE(body.contains("This page has been blocked by an extension"));
+  EXPECT_TRUE(body.contains("Try disabling your extensions."));
 }
 
 // Test an extension with multiple static rulesets.
@@ -2654,10 +2664,11 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest, MultipleRulesets) {
 
     // Enable even indexed rulesets by default.
     bool enabled = i % 2 == 0;
-    if (enabled)
+    if (enabled) {
       expected_blocked_urls.push_back(GetURLForFilter(id));
-    else
+    } else {
       expected_allowed_urls.push_back(GetURLForFilter(id));
+    }
 
     rulesets.emplace_back(id, ToListValue(rules), enabled);
   }
@@ -2696,9 +2707,10 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest, RendererCacheCleared) {
   bool expect_request_seen =
       base::FeatureList::IsEnabled(
           extensions_features::kForceWebRequestProxyForTest);
-  EXPECT_EQ(expect_request_seen,
-            base::Contains(ruleset_manager_observer()->GetAndResetRequestSeen(),
-                           observed_url));
+  EXPECT_EQ(
+      expect_request_seen,
+      std::ranges::contains(
+          ruleset_manager_observer()->GetAndResetRequestSeen(), observed_url));
 
   // Another request to |url| should not cause a network request for
   // script.js since it will be served by the renderer's in-memory
@@ -2706,7 +2718,7 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest, RendererCacheCleared) {
   NavigateToURL(url);
   EXPECT_EQ(content::PAGE_TYPE_NORMAL, GetPageType());
   EXPECT_TRUE(WasFrameWithScriptLoaded(GetPrimaryMainFrame()));
-  EXPECT_FALSE(base::Contains(
+  EXPECT_FALSE(std::ranges::contains(
       ruleset_manager_observer()->GetAndResetRequestSeen(), observed_url));
 
   // Now block requests to script.js.
@@ -2720,7 +2732,7 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest, RendererCacheCleared) {
   NavigateToURL(url);
   EXPECT_EQ(content::PAGE_TYPE_NORMAL, GetPageType());
   EXPECT_FALSE(WasFrameWithScriptLoaded(GetPrimaryMainFrame()));
-  EXPECT_TRUE(base::Contains(
+  EXPECT_TRUE(std::ranges::contains(
       ruleset_manager_observer()->GetAndResetRequestSeen(), observed_url));
 
   // Disable the extension.
@@ -2734,12 +2746,13 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest, RendererCacheCleared) {
   NavigateToURL(url);
   EXPECT_EQ(content::PAGE_TYPE_NORMAL, GetPageType());
   EXPECT_TRUE(WasFrameWithScriptLoaded(GetPrimaryMainFrame()));
-  EXPECT_EQ(expect_request_seen,
-            base::Contains(ruleset_manager_observer()->GetAndResetRequestSeen(),
-                           observed_url));
+  EXPECT_EQ(
+      expect_request_seen,
+      std::ranges::contains(
+          ruleset_manager_observer()->GetAndResetRequestSeen(), observed_url));
 }
 
-// Tests that proxy requests aren't intercepted. See https://crbug.com/794674.
+// Tests that proxy requests aren't intercepted. See https://crbug.com/40089910.
 IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
                        PacRequestsBypassRules) {
   // Load the extension.
@@ -3094,11 +3107,13 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
 
   // Finally verify that all rulesets still work fine.
   std::vector<GURL> expected_blocked_urls;
-  for (int index : non_corrupted_ruleset_indices)
+  for (int index : non_corrupted_ruleset_indices) {
     expected_blocked_urls.push_back(urls_for_indices[index]);
+  }
 
-  for (int index : corrupted_ruleset_indices)
+  for (int index : corrupted_ruleset_indices) {
     expected_blocked_urls.push_back(urls_for_indices[index]);
+  }
 
   VerifyNavigations(expected_blocked_urls,
                     /*expected_allowed_urls=*/std::vector<GURL>());
@@ -3180,8 +3195,9 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest_Packed,
 
   const int kNumStaticRulesets = 4;
   std::vector<TestRulesetInfo> rulesets;
-  for (int i = 0; i < kNumStaticRulesets; ++i)
+  for (int i = 0; i < kNumStaticRulesets; ++i) {
     rulesets.emplace_back(base::NumberToString(i), ToListValue({rule}));
+  }
 
   ASSERT_NO_FATAL_FAILURE(LoadExtensionWithRulesets(
       rulesets, "extension_directory", {} /* hosts */));
@@ -3354,9 +3370,9 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
     std::map<GURL, net::test_server::HttpRequest> seen_requests =
         GetAndResetRequestsToServer();
     EXPECT_EQ(!expect_script_redirected,
-              base::Contains(seen_requests, requested_script_url));
+              seen_requests.contains(requested_script_url));
     EXPECT_EQ(expect_script_redirected,
-              base::Contains(seen_requests, redirected_script_url));
+              seen_requests.contains(redirected_script_url));
 
     ExtensionActionRunner* runner =
         ExtensionActionRunner::GetForWebContents(GetActiveWebContents());
@@ -3766,11 +3782,11 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
   const GURL second_tab_url = get_url_for_host("nomatch.com");
   NavigateToURLInNewTab(second_tab_url);
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  // TODO(crbug.com/419057482): Support cross-platform browser windows.
-  ASSERT_EQ(2, browser()->tab_strip_model()->count());
-  ASSERT_TRUE(browser()->tab_strip_model()->IsTabSelected(1));
-#endif
+  TabListInterface* tab_list =
+      TabListInterface::From(browser_window_interface());
+  ASSERT_TRUE(tab_list);
+  ASSERT_EQ(2, tab_list->GetTabCount());
+  ASSERT_EQ(1, tab_list->GetActiveIndex());
 
   int second_tab_id = ExtensionTabUtil::GetTabId(GetActiveWebContents());
   EXPECT_EQ("", action->GetDisplayBadgeText(second_tab_id));
@@ -3818,7 +3834,7 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
 }
 
 // Ensure web request events are still dispatched even if DNR blocks/redirects
-// the request. (Regression test for crbug.com/999744).
+// the request. (Regression test for crbug.com/40642949).
 IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest, WebRequestEvents) {
   // Load the extension with a background script so scripts can be run from its
   // generated background page.
@@ -3845,8 +3861,9 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest, WebRequestEvents) {
 
     // The request will fail since it will be blocked by DNR.
     chrome.webRequest.onErrorOccurred.addListener(() => {
-      if (onBeforeRequestSeen)
+      if (onBeforeRequestSeen) {
         chrome.test.sendMessage('PASS');
+      }
     }, filter);
 
     chrome.test.sendMessage('INSTALLED');
@@ -5153,11 +5170,11 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
   // matched.
   NavigateToURLInNewTab(page_url);
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  // TODO(crbug.com/419057482): Support cross-platform browser windows.
-  ASSERT_EQ(2, browser()->tab_strip_model()->count());
-  ASSERT_TRUE(browser()->tab_strip_model()->IsTabSelected(1));
-#endif
+  TabListInterface* tab_list =
+      TabListInterface::From(browser_window_interface());
+  ASSERT_TRUE(tab_list);
+  ASSERT_EQ(2, tab_list->GetTabCount());
+  ASSERT_EQ(1, tab_list->GetActiveIndex());
 
   // Get the ActiveTabPermissionGranter for the second tab.
   ActiveTabPermissionGranter* active_tab_granter =
@@ -5558,10 +5575,11 @@ class DeclarativeNetRequestAllowAllRequestsBrowserTest
       test_rule.priority = rule.priority;
       test_rule.action->type = rule.action_type;
       test_rule.condition->url_filter.reset();
-      if (rule.is_regex_rule)
+      if (rule.is_regex_rule) {
         test_rule.condition->regex_filter = rule.url_filter;
-      else
+      } else {
         test_rule.condition->url_filter = rule.url_filter;
+      }
       test_rule.condition->resource_types = rule.resource_types;
       test_rule.condition->request_methods = rule.request_methods;
       test_rules.push_back(test_rule);
@@ -5579,14 +5597,14 @@ class DeclarativeNetRequestAllowAllRequestsBrowserTest
 
     for (const auto& path : paths_seen) {
       GURL expected_request_url = embedded_test_server()->GetURL(path);
-      EXPECT_TRUE(base::Contains(requests_seen, expected_request_url))
+      EXPECT_TRUE(requests_seen.contains(expected_request_url))
           << expected_request_url.spec()
           << " was not requested from the server.";
     }
 
     for (const auto& path : paths_not_seen) {
       GURL expected_request_url = embedded_test_server()->GetURL(path);
-      EXPECT_FALSE(base::Contains(requests_seen, expected_request_url))
+      EXPECT_FALSE(requests_seen.contains(expected_request_url))
           << expected_request_url.spec() << " request seen unexpectedly.";
     }
   }
@@ -5880,7 +5898,7 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestHostPermissionsBrowserTest,
                        SubframesRequireNoInitiatorPermissions) {
   // The extension has access to requests to "frame_1.com" and "frame_2.com".
   // These should be redirected. Note: extensions don't need access to the
-  // initiator of a navigation request to redirect it (See crbug.com/918137).
+  // initiator of a navigation request to redirect it (See crbug.com/41433450).
   ASSERT_NO_FATAL_FAILURE(
       LoadExtensionWithHostPermissions({GetMatchPatternForDomain("frame_1"),
                                         GetMatchPatternForDomain("frame_2")}));
@@ -6016,10 +6034,11 @@ class DeclarativeNetRequestResourceTypeBrowserTest
       // The "resourceTypes" property (i.e. |rule.condition->resource_types|)
       // should not be an empty list. It should either be omitted or be a non-
       // empty list.
-      if (rule_data.resource_types.empty())
+      if (rule_data.resource_types.empty()) {
         rule.condition->resource_types = std::nullopt;
-      else
+      } else {
         rule.condition->resource_types = rule_data.resource_types;
+      }
 
       rule.condition->excluded_resource_types =
           rule_data.excluded_resource_types;
@@ -6033,7 +6052,7 @@ class DeclarativeNetRequestResourceTypeBrowserTest
   }
 };
 
-// These are split into two tests to prevent a timeout. See crbug.com/787957.
+// These are split into two tests to prevent a timeout. See crbug.com/40551307.
 IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestResourceTypeBrowserTest, Test1) {
   ASSERT_NO_FATAL_FAILURE(LoadExtension());
   RunTests({{"block_subframe.com", kSubframe},
@@ -6570,8 +6589,9 @@ class DeclarativeNetRequestGlobalRulesBrowserTest
         helper.GetAllocatedGlobalRuleCount(extension_id, actual_rules_count);
 
     EXPECT_EQ(expected_rules_count.has_value(), has_allocated_rules_count);
-    if (expected_rules_count.has_value())
+    if (expected_rules_count.has_value()) {
       EXPECT_EQ(*expected_rules_count, actual_rules_count);
+    }
   }
 
   void VerifyKeepExcessAllocation(const ExtensionId& extension_id,
@@ -6893,8 +6913,9 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestBrowserTest,
     rule.condition->url_filter = rule_data.url_filter;
 
     // An empty list is not allowed for the "requestMethods" property.
-    if (!rule_data.request_methods.empty())
+    if (!rule_data.request_methods.empty()) {
       rule.condition->request_methods = rule_data.request_methods;
+    }
 
     rule.condition->excluded_request_methods =
         rule_data.excluded_request_methods;
@@ -7057,10 +7078,10 @@ IN_PROC_BROWSER_TEST_P(DeclarativeNetRequestWebTransportTest, BlockRequests) {
   rule2.condition->request_methods = {"connect"};
   rules.push_back(rule2);
 
-  TestRule rule4 = CreateGenericRule(3);
-  rule4.condition->url_filter = "echo3_exclude";
-  rule4.condition->excluded_request_methods = {"connect"};
-  rules.push_back(rule4);
+  TestRule rule3 = CreateGenericRule(3);
+  rule3.condition->url_filter = "echo3_exclude";
+  rule3.condition->excluded_request_methods = {"connect"};
+  rules.push_back(rule3);
 
   ASSERT_NO_FATAL_FAILURE(LoadExtensionWithRules(rules));
 

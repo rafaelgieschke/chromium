@@ -5,13 +5,12 @@
 package org.chromium.chrome.browser.omnibox;
 
 import android.content.Context;
+import android.util.Range;
 import android.view.ActionMode;
 import android.view.View;
 import android.view.View.OnLongClickListener;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
-
-import androidx.annotation.IntDef;
 
 import org.chromium.base.Callback;
 import org.chromium.base.ObserverList;
@@ -25,9 +24,6 @@ import org.chromium.ui.modelutil.PropertyModel;
 import org.chromium.ui.modelutil.PropertyModelChangeProcessor;
 import org.chromium.ui.widget.ViewRectProvider;
 
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
-
 /** Coordinates the interactions with the UrlBar text component. */
 @NullMarked
 public class UrlBarCoordinator
@@ -35,17 +31,6 @@ public class UrlBarCoordinator
                 UrlFocusChangeListener,
                 KeyboardVisibilityDelegate.KeyboardVisibilityListener {
     private static final int KEYBOARD_HIDE_DELAY_MS = 150;
-
-    /** Specified how the text should be selected when focused. */
-    @IntDef({SelectionState.SELECT_ALL, SelectionState.SELECT_END})
-    @Retention(RetentionPolicy.SOURCE)
-    public @interface SelectionState {
-        /** Select all of the text. */
-        int SELECT_ALL = 0;
-
-        /** Selection (along with the input cursor) will be placed at the end of the text. */
-        int SELECT_END = 1;
-    }
 
     private final UrlBar mUrlBar;
     private final UrlBarMediator mMediator;
@@ -141,19 +126,6 @@ public class UrlBarCoordinator
         }
     }
 
-    /**
-     * Install a listener called when the user begins typing in the Omnibox for the first time.
-     *
-     * <p>This callback is particularly relevant on Tablet devices, where the New Tab Page shows
-     * focused Omnibox, but the suggestions list is delayed until after user starts typing.
-     *
-     * <p>This callback gets invoked both when the user types text, and when content is pasted using
-     * keyboard shortcuts (Ctrl+V, Shift+Insert, Paste key etc).
-     */
-    public void setTypingStartedListener(Runnable listener) {
-        mMediator.setTypingStartedListener(listener);
-    }
-
     /** Set the callback that will be invoked each time the content of the Omnibox changes. */
     public void setTextChangeListener(Callback<String> listener) {
         mMediator.setTextChangeListener(listener);
@@ -172,11 +144,11 @@ public class UrlBarCoordinator
     }
 
     /**
-     * @see UrlBarMediator#setUrlBarData(UrlBarData, int, int)
+     * @see UrlBarMediator#setUrlBarData(UrlBarData, int, Range<Integer>)
      */
     public boolean setUrlBarData(
-            UrlBarData data, @ScrollType int scrollType, @SelectionState int state) {
-        return mMediator.setUrlBarData(data, scrollType, state);
+            UrlBarData data, @ScrollType int scrollType, Range<Integer> selection) {
+        return mMediator.setUrlBarData(data, scrollType, selection);
     }
 
     /** Returns the UrlBarData representing the current contents of the UrlBar. */
@@ -188,15 +160,18 @@ public class UrlBarCoordinator
      * @see UrlBarMediator#setAutocompleteText(String, String, String)
      */
     public void setAutocompleteText(
-            String userText, @Nullable String autocompleteText, @Nullable String additionalText) {
-        mMediator.setAutocompleteText(userText, autocompleteText, additionalText);
+            String userText,
+            @Nullable String autocompleteText,
+            @Nullable String additionalText,
+            @Nullable String siteSearchLabel) {
+        mMediator.setAutocompleteText(userText, autocompleteText, additionalText, siteSearchLabel);
     }
 
     /**
      * @see UrlBarMediator#setBrandedColorScheme(int)
      */
-    public boolean setBrandedColorScheme(@BrandedColorScheme int brandedColorScheme) {
-        return mMediator.setBrandedColorScheme(brandedColorScheme);
+    public void setBrandedColorScheme(@BrandedColorScheme int brandedColorScheme) {
+        mMediator.setBrandedColorScheme(brandedColorScheme);
     }
 
     /**
@@ -214,13 +189,6 @@ public class UrlBarCoordinator
     }
 
     /**
-     * @see UrlBarMediator#setSelectAllOnFocus(boolean)
-     */
-    public void setSelectAllOnFocus(boolean selectAllOnFocus) {
-        mMediator.setSelectAllOnFocus(selectAllOnFocus);
-    }
-
-    /**
      * @see UrlBarMediator#setUrlDirectionListener(Callback<Integer>)
      */
     public void setUrlDirectionListener(Callback<Integer> listener) {
@@ -232,11 +200,6 @@ public class UrlBarCoordinator
      */
     public void setIsInCct(boolean isInCct) {
         mMediator.setIsInCct(isInCct);
-    }
-
-    /** Selects all of the text of the UrlBar. */
-    public void selectAll() {
-        mUrlBar.selectAll();
     }
 
     @Override
@@ -269,15 +232,9 @@ public class UrlBarCoordinator
         return mUrlBar.getTextWithoutAutocomplete();
     }
 
-    /**
-     * Sets the selection anchor to startPos and the selection edge to endPos. When startPos is same
-     * as endPos, no text is selected and the cursor moves to startPos/EndPos.
-     *
-     * @param startPos The start position of the selection.
-     * @param endPos The end position of the selection
-     */
-    public void setSelection(int startPos, int endPos) {
-        mUrlBar.setSelection(startPos, endPos);
+    @Override
+    public void setSiteSearchChip(@Nullable String keyword) {
+        mUrlBar.setSiteSearchChip(keyword);
     }
 
     /** Returns the {@link ViewRectProvider} for the UrlBar. */

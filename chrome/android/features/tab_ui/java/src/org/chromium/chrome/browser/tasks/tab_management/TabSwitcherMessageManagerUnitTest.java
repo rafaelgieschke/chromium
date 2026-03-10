@@ -16,7 +16,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import android.app.Activity;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
@@ -33,12 +32,16 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
+import org.chromium.base.supplier.SettableNullableObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.chrome.browser.app.tabmodel.ArchivedTabModelOrchestrator;
 import org.chromium.chrome.browser.back_press.BackPressManager;
 import org.chromium.chrome.browser.browser_controls.BrowserControlsStateProvider;
+import org.chromium.chrome.browser.device_reauth.ReauthenticatorBridge;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
 import org.chromium.chrome.browser.hub.PaneManager;
@@ -94,6 +97,7 @@ public class TabSwitcherMessageManagerUnitTest {
     @Mock private MultiWindowModeStateDispatcher mMultiWindowModeStateDispatcher;
     @Mock private SnackbarManager mSnackbarManager;
     @Mock private ModalDialogManager mModalDialogManager;
+    @Mock private ReauthenticatorBridge mReauthenticatorBridge;
     @Mock private TabListCoordinator mTabListCoordinator;
     @Mock private TabListHighlighter mTabListHighlighter;
     @Mock private PriceWelcomeMessageReviewActionProvider mPriceWelcomeMessageReviewActionProvider;
@@ -115,12 +119,12 @@ public class TabSwitcherMessageManagerUnitTest {
     private ArgumentCaptor<MultiWindowModeStateDispatcher.MultiWindowModeObserver>
             mMultiWindowModeObserverCaptor;
 
-    private final ObservableSupplierImpl<TabGroupModelFilter> mCurrentTabGroupModelFilterSupplier =
-            new ObservableSupplierImpl<>();
-    private final ObservableSupplierImpl<EdgeToEdgeController> mEdgeToEdgeSupplier =
-            new ObservableSupplierImpl<>();
-    private final ObservableSupplierImpl<Integer> mTabCountSupplier =
-            new ObservableSupplierImpl<>(INITIAL_TAB_COUNT);
+    private final SettableNullableObservableSupplier<TabGroupModelFilter>
+            mCurrentTabGroupModelFilterSupplier = ObservableSuppliers.createNullable();
+    private final SettableMonotonicObservableSupplier<EdgeToEdgeController> mEdgeToEdgeSupplier =
+            ObservableSuppliers.createMonotonic();
+    private final SettableNonNullObservableSupplier<Integer> mTabCountSupplier =
+            ObservableSuppliers.createNonNull(INITIAL_TAB_COUNT);
     private TabSwitcherMessageManager mMessageManager;
     private MockTab mTab1;
     private MockTab mTab2;
@@ -145,14 +149,15 @@ public class TabSwitcherMessageManagerUnitTest {
         doReturn(mTabModel).when(mTabGroupModelFilter).getTabModel();
         doReturn(mProfile).when(mTabModel).getProfile();
         doReturn(mProfile).when(mProfile).getOriginalProfile();
-        mCurrentTabGroupModelFilterSupplier.set(mTabGroupModelFilter);
 
+        mCurrentTabGroupModelFilterSupplier.set(mTabGroupModelFilter);
         when(mArchivedTabModelOrchestrator.getTabCountSupplier()).thenReturn(mTabCountSupplier);
 
+        ReauthenticatorBridge.setInstanceForTesting(mReauthenticatorBridge);
         mActivityScenarioRule.getScenario().onActivity(this::onActivityReady);
     }
 
-    private void onActivityReady(Activity activity) {
+    private void onActivityReady(TestActivity activity) {
         FrameLayout container = new FrameLayout(activity);
         activity.setContentView(container);
 

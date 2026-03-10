@@ -26,6 +26,7 @@ dependencies {
     testCompileLatest 'org.robolectric:robolectric:+'
 
     supportsAndroidCompileLatest 'com.google.guava:guava:+'
+    compileLatest 'org.jetbrains.kotlinx:kotlinx-coroutines-guava:+'
 
     // Libraries from Google:
     compileLatest 'com.google.protobuf:protobuf-javalite:+'
@@ -33,6 +34,9 @@ dependencies {
     compileLatest 'com.google.android.material:material:+'
     compileLatest 'com.google.android.play:feature-delivery:+'
     compileLatest 'com.google.code.gson:gson:+'
+    compileLatest 'com.google.mlkit:common:+'
+    compileLatest 'com.google.mlkit:genai-common:+'
+    compileLatest 'com.google.mlkit:genai-prompt:+'
     compileLatest 'io.grpc:grpc-binder:+'
     compileLatest 'io.grpc:grpc-api:+'
     compileLatest 'io.grpc:grpc-stub:+'
@@ -48,13 +52,15 @@ dependencies {
 
     // Play Services & Firebase
     compileLatest 'com.google.android.gms:play-services-auth-api-phone:+'
-    compileLatest 'com.google.android.gms:play-services-auth-base:+'
+    compileLatest 'com.google.android.gms:play-services-auth-base:18.3.0'
     compileLatest 'com.google.android.gms:play-services-auth-blockstore:+'
-    compileLatest 'com.google.android.gms:play-services-auth:+'
+    compileLatest 'com.google.android.gms:play-services-auth:21.4.0'
     compileLatest 'com.google.android.gms:play-services-base:+'
     compileLatest 'com.google.android.gms:play-services-basement:+'
-    compileLatest 'com.google.android.gms:play-services-cast-framework:+'
-    compileLatest 'com.google.android.gms:play-services-cast:+'
+    // TODO(https://crbug.com/477567669): Compile the latest version once these
+    // packages are fixed.
+    compileLatest 'com.google.android.gms:play-services-cast-framework:22.2.0'
+    compileLatest 'com.google.android.gms:play-services-cast:22.2.0'
     compileLatest 'com.google.android.gms:play-services-fido:+'
     compileLatest 'com.google.android.gms:play-services-gcm:+'
     compileLatest 'com.google.android.gms:play-services-identity-credentials:+'

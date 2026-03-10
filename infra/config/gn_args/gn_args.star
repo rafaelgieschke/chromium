@@ -645,6 +645,13 @@ gn_args.config(
 )
 
 gn_args.config(
+    name = "enable_rust_clippy",
+    args = {
+        "enable_rust_clippy": True,
+    },
+)
+
+gn_args.config(
     name = "enable_vulkan",
     args = {
         "enable_vulkan": True,
@@ -1215,6 +1222,13 @@ gn_args.config(
 )
 
 gn_args.config(
+    name = "sanitizer_coverage_skip_stdlib_and_absl",
+    args = {
+        "sanitizer_coverage_skip_stdlib_and_absl": True,
+    },
+)
+
+gn_args.config(
     name = "shared",
     args = {
         "is_component_build": True,
@@ -1557,4 +1571,9 @@ gn_args.config(
     args = {
         "high_end_fuzzer_targets": True,
     },
+)
+
+gn_args.config(
+    name = "enable_swift_cxx_interop",
+    args = {"enable_swift_cxx_interop": True},
 )

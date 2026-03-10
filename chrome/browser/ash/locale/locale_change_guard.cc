@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <string_view>
 
-#include "base/containers/contains.h"
 #include "base/containers/fixed_flat_set.h"
 #include "base/functional/bind.h"
 #include "base/metrics/user_metrics.h"
@@ -15,12 +14,12 @@
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ash/base/locale_util.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "components/language/core/browser/pref_names.h"
 #include "components/language/core/common/locale_util.h"
 #include "components/prefs/pref_service.h"
+#include "components/session_manager/core/session_manager.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -75,7 +74,7 @@ void LocaleChangeGuard::RevertLocaleChange() {
   base::RecordAction(UserMetricsAction("LanguageChange_Revert"));
   profile_->ChangeAppLocale(from_locale_,
                             Profile::APP_LOCALE_CHANGED_VIA_REVERT);
-  chrome::AttemptUserExit();
+  session_manager::SessionManager::Get()->RequestSignOut();
 }
 
 void LocaleChangeGuard::OnUserSessionStarted(bool is_primary_user) {
@@ -223,7 +222,7 @@ bool LocaleChangeGuard::ShouldShowLocaleChangeNotification(
   if (from_lang != to_lang)
     return true;
 
-  return !base::Contains(kSkipShowNotificationLanguages, from_lang);
+  return !kSkipShowNotificationLanguages.contains(from_lang);
 }
 
 // static

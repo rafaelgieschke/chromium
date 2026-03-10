@@ -9,7 +9,6 @@
 #import "ios/chrome/app/application_delegate/fake_startup_information.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/promos_manager/model/constants.h"
-#import "ios/chrome/browser/promos_manager/model/features.h"
 #import "ios/chrome/browser/promos_manager/model/mock_promos_manager.h"
 #import "ios/chrome/browser/shared/coordinator/scene/scene_state.h"
 #import "ios/chrome/browser/shared/model/browser/browser.h"
@@ -40,6 +39,11 @@ class GeminiPromoSceneAgentTest : public PlatformTest {
         initWithPromosManager:promos_manager_.get()];
 
     agent_.sceneState = scene_state_;
+    scene_state_.UIEnabled = YES;
+  }
+
+  void TearDown() override {
+    scene_state_.UIEnabled = NO;
   }
 
  protected:

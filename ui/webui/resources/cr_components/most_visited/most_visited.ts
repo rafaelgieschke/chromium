@@ -21,7 +21,7 @@ import {EventTracker} from '//resources/js/event_tracker.js';
 import {FocusOutlineManager} from '//resources/js/focus_outline_manager.js';
 import {loadTimeData} from '//resources/js/load_time_data.js';
 import {isMac} from '//resources/js/platform.js';
-import {hasKeyModifiers} from '//resources/js/util.js';
+import {hasKeyModifiers, htmlEscape} from '//resources/js/util.js';
 import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
 import type {PropertyValues} from '//resources/lit/v3_0/lit.rollup.js';
 import {TileSource} from '//resources/mojo/components/ntp_tiles/tile_source.mojom-webui.js';
@@ -503,7 +503,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
     if (this.dialogSource_ === TileSource.ENTERPRISE_SHORTCUTS) {
       return false;
     }
-    return (this.tiles_ || []).some(({url: {url}}, index) => {
+    return (this.tiles_ || []).some(({url}, index) => {
       if (index === this.actionMenuTargetIndex_) {
         return false;
       }
@@ -725,7 +725,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
     faviconUrl.searchParams.set('size', '24');
     faviconUrl.searchParams.set('scaleFactor', '1x');
     faviconUrl.searchParams.set('showFallbackMonogram', '');
-    faviconUrl.searchParams.set('pageUrl', url.url);
+    faviconUrl.searchParams.set('pageUrl', url);
     return faviconUrl.href;
   }
 
@@ -771,7 +771,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
     updateCount();
   }
 
-  protected onAdd_() {
+  protected onAddClick_() {
     this.dialogIsReadonly_ = false;
     this.dialogSource_ = TileSource.CUSTOM_LINKS;
     this.dialogTitle_ = loadTimeData.getString('addLinkTitle');
@@ -782,7 +782,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
     this.$.dialog.showModal();
   }
 
-  protected onAddShortcutKeyDown_(e: KeyboardEvent) {
+  protected onAddShortcutKeydown_(e: KeyboardEvent) {
     if (hasKeyModifiers(e)) {
       return;
     }
@@ -803,7 +803,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
     }
   }
 
-  protected onShowMoreKeyDown_(e: KeyboardEvent) {
+  protected onShowMoreKeydown_(e: KeyboardEvent) {
     if (hasKeyModifiers(e)) {
       return;
     }
@@ -814,7 +814,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
     }
   }
 
-  protected onShowLessKeyDown_(e: KeyboardEvent) {
+  protected onShowLessKeydown_(e: KeyboardEvent) {
     if (hasKeyModifiers(e)) {
       return;
     }
@@ -829,7 +829,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
     }
   }
 
-  protected onDialogCancel_() {
+  protected onDialogCancelClick_() {
     this.actionMenuTargetIndex_ = -1;
     this.$.dialog.cancel();
   }
@@ -850,12 +850,12 @@ export class MostVisitedElement extends MostVisitedElementBase {
     }
   }
 
-  protected onDialogTileUrlChange_(e: Event) {
+  protected onDialogTileUrlValueChanged_(e: Event) {
     this.dialogTileUrl_ = (e.target as HTMLInputElement).value;
     this.dialogTileUrlInvalid_ = false;
   }
 
-  protected onDialogTileNameChange_(e: Event) {
+  protected onDialogTileNameValueChanged_(e: Event) {
     this.dialogTileTitle_ = (e.target as HTMLInputElement).value;
   }
 
@@ -866,12 +866,13 @@ export class MostVisitedElement extends MostVisitedElementBase {
 
     const modifier = isMac ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
     if (modifier && e.key === 'z') {
-      e.preventDefault();
-      this.onUndoClick_();
+      if (this.onUndoClick_()) {
+        e.preventDefault();
+      }
     }
   }
 
-  protected onDragStart_(e: DragEvent) {
+  protected onDragstart_(e: DragEvent) {
     const item = this.tiles_[this.getCurrentTargetIndex_(e)]!;
     assert(item);
     if (!this.customLinksEnabled_ &&
@@ -919,7 +920,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
     }, {once: true});
   }
 
-  protected onViewOrEdit_() {
+  protected onViewOrEditClick_() {
     this.$.actionMenu.close();
     const tile = this.tiles_[this.actionMenuTargetIndex_]!;
     const isReadonly = !tile.allowUserEdit;
@@ -928,7 +929,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
     this.dialogTitle_ =
         loadTimeData.getString(isReadonly ? 'viewLinkTitle' : 'editLinkTitle');
     this.dialogTileTitle_ = tile.title;
-    this.dialogTileUrl_ = tile.url.url;
+    this.dialogTileUrl_ = tile.url;
     this.dialogTileUrlInvalid_ = false;
     this.$.dialog.showModal();
   }
@@ -941,18 +942,18 @@ export class MostVisitedElement extends MostVisitedElementBase {
     this.pageHandler_.restoreMostVisitedDefaults(this.toastSource_);
   }
 
-  protected async onRemove_() {
+  protected async onRemoveClick_() {
     this.$.actionMenu.close();
     await this.tileRemove_(this.actionMenuTargetIndex_);
     this.actionMenuTargetIndex_ = -1;
   }
 
-  protected async onSave_() {
+  protected async onSaveClick_() {
     if (this.dialogIsReadonly_) {
       this.$.dialog.close();
       return;
     }
-    const newUrl = {url: normalizeUrl(this.dialogTileUrl_)!.href};
+    const newUrl = normalizeUrl(this.dialogTileUrl_)!.href;
     this.$.dialog.close();
     let newTitle = this.dialogTileTitle_.trim();
     if (newTitle.length === 0) {
@@ -966,7 +967,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
           TileSource.TOP_SITES);
     } else {
       const oldTile = this.tiles_[this.actionMenuTargetIndex_]!;
-      if (oldTile.url.url !== newUrl.url || oldTile.title !== newTitle) {
+      if (oldTile.url !== newUrl || oldTile.title !== newTitle) {
         const {success} = await this.pageHandler_.updateMostVisitedTile(
             oldTile, newUrl, newTitle);
         this.toast_(
@@ -1012,7 +1013,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
         item, index, e.button || 0, e.altKey, e.ctrlKey, e.metaKey, e.shiftKey);
   }
 
-  protected onTileKeyDown_(e: KeyboardEvent) {
+  protected onTileKeydown_(e: KeyboardEvent) {
     if (hasKeyModifiers(e)) {
       return;
     }
@@ -1038,7 +1039,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
     }
   }
 
-  protected onTileHover_(e: Event) {
+  protected onTileMouseenter_(e: Event) {
     if (e.defaultPrevented) {
       // Ignore previously handled events.
       return;
@@ -1064,7 +1065,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
     }
   }
 
-  protected onTileMouseDown_(e: Event) {
+  protected onTileMousedown_(e: Event) {
     if (e.defaultPrevented) {
       // Ignore previously handled events.
       return;
@@ -1082,7 +1083,7 @@ export class MostVisitedElement extends MostVisitedElementBase {
     }
   }
 
-  protected onTileExit_(e: Event) {
+  protected onTileMouseleave_(e: Event) {
     if (e.defaultPrevented) {
       // Ignore previously handled events.
       return;
@@ -1101,15 +1102,16 @@ export class MostVisitedElement extends MostVisitedElementBase {
     }
   }
 
-  protected onUndoClick_() {
+  protected onUndoClick_(): boolean {
     if (!this.$.toastManager.isToastOpen || this.$.toastManager.slottedHidden) {
-      return;
+      return false;
     }
     this.$.toastManager.hide();
     this.pageHandler_.undoMostVisitedTileAction(this.toastSource_);
+    return true;
   }
 
-  protected onTouchStart_(e: TouchEvent) {
+  protected onTouchstart_(e: TouchEvent) {
     if (this.reordering_) {
       return;
     }
@@ -1202,6 +1204,10 @@ export class MostVisitedElement extends MostVisitedElementBase {
     return loadTimeData.getString('shortcutMoreActions') ?
         loadTimeData.getStringF('shortcutMoreActions', title) :
         '';
+  }
+
+  protected getRemoveButtonText_(title: string): string {
+    return this.i18n('linkRemoveA11y', htmlEscape(title));
   }
 
   protected isFromEnterpriseShortcut_(source: number) {

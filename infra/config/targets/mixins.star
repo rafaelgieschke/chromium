@@ -60,6 +60,13 @@ targets.mixin(
             ),
         ],
     ),
+    resultdb = targets.resultdb(
+        base_variant = {
+            # LINT.IfChange(avd-11-x86-emulator)
+            "device_os": "RSR1.210722.013.A2",
+            # LINT.ThenChange(//tools/android/avd/proto/android_30_google_apis_x86.textpb:avd-11-x86-emulator)
+        },
+    ),
 )
 
 targets.mixin(
@@ -574,6 +581,14 @@ targets.mixin(
 )
 
 targets.mixin(
+    name = "tfc-cq-tast",
+    skylab = targets.skylab(
+        cros_test_tags = ["group:mainline", "dep:chrome", "group:cq-medium"],
+        cros_test_max_in_shard = 10,
+    ),
+)
+
+targets.mixin(
     name = "chromeos-generic-vm",
     args = [
         "--magic-vm-cache=magic_cros_vm_cache",
@@ -971,6 +986,18 @@ targets.mixin(
 )
 
 targets.mixin(
+    name = "gpu_linux_gce_stable",
+    swarming = targets.swarming(
+        dimensions = {
+            "cpu": "x86-64",
+            "gpu": "none",
+            "os": "Ubuntu-22.04",
+            "pool": "chromium.tests.gpu",
+        },
+    ),
+)
+
+targets.mixin(
     name = "gpu_nvidia_shield_tv_stable",
     swarming = targets.swarming(
         dimensions = {
@@ -1085,6 +1112,18 @@ targets.mixin(
             "device_os": "UP1A.231005.007",
             "device_os_type": "user",
             "os": "Android",
+            "pool": "chromium.tests.gpu",
+        },
+    ),
+)
+
+targets.mixin(
+    name = "gpu_win_gce_stable",
+    swarming = targets.swarming(
+        dimensions = {
+            "cpu": "x86-64",
+            "gpu": "none",
+            "os": "Windows-10-19045",
             "pool": "chromium.tests.gpu",
         },
     ),
@@ -1213,14 +1252,14 @@ targets.mixin(
 targets.mixin(
     name = "gpu_force_skia_ganesh",
     args = [
-        "--extra-browser-args=--disable-features=SkiaGraphite",
+        "--extra-browser-args=--disable-skia-graphite",
     ],
 )
 
 targets.mixin(
     name = "gpu_force_skia_graphite",
     args = [
-        "--extra-browser-args=--enable-features=SkiaGraphite",
+        "--extra-browser-args=--enable-skia-graphite",
     ],
 )
 
@@ -1294,18 +1333,6 @@ targets.mixin(
 )
 
 targets.mixin(
-    name = "ios_runtime_cache_17_5",
-    swarming = targets.swarming(
-        named_caches = [
-            swarming.cache(
-                name = "runtime_ios_17_5",
-                path = "Runtime-ios-17.5",
-            ),
-        ],
-    ),
-)
-
-targets.mixin(
     name = "ios_runtime_cache_18_2",
     swarming = targets.swarming(
         named_caches = [
@@ -1354,12 +1381,12 @@ targets.mixin(
 )
 
 targets.mixin(
-    name = "ios_runtime_cache_26_2",
+    name = "ios_runtime_cache_26_4",
     swarming = targets.swarming(
         named_caches = [
             swarming.cache(
-                name = "runtime_ios_26_2",
-                path = "Runtime-ios-26.2",
+                name = "runtime_ios_26_4",
+                path = "Runtime-ios-26.4",
             ),
         ],
     ),
@@ -1776,7 +1803,7 @@ targets.mixin(
             "cpu": "arm64",
             "gpu": "apple:m1",
             "mac_model": "Macmini9,1",
-            "os": "Mac-14.5",
+            "os": "Mac-15.7",
             "pool": "chromium.tests",
             "display_attached": "1",
         },
@@ -1843,7 +1870,7 @@ targets.mixin(
     swarming = targets.swarming(
         dimensions = {
             "cpu": "x86-64",
-            "os": "Mac-15",
+            "os": "Mac-26",
         },
     ),
 )
@@ -2336,7 +2363,7 @@ targets.mixin(
             targets.cipd_package(
                 package = "chromium/android_webview/tools/cts_archive",
                 location = "android_webview/tools/cts_archive/cipd",
-                revision = "8BpUBTnmt5bH3GiqPKpmTWTP-Ie2X1TuUgf4F0IsgVgC",
+                revision = "oW6-jyOPGwPJeLlaldYwrxZoYqzXpjO1OZUdyF3Qq7sC",
             ),
         ],
     ),
@@ -2361,18 +2388,6 @@ targets.mixin(
 )
 
 targets.mixin(
-    name = "win10_amd_rx_5500_xt_stable",
-    swarming = targets.swarming(
-        dimensions = {
-            "display_attached": "1",
-            "gpu": "1002:7340-31.0.24002.92",
-            "os": "Windows-10-19045",
-            "pool": "chromium.tests.gpu",
-        },
-    ),
-)
-
-targets.mixin(
     name = "win11_amd_780m_experimental",
     swarming = targets.swarming(
         dimensions = {
@@ -2392,6 +2407,30 @@ targets.mixin(
             "os": "Windows-11-26100",
             "display_attached": "1",
             "pool": "chromium.tests.gpu.experimental",
+        },
+    ),
+)
+
+targets.mixin(
+    name = "win11_amd_rx_5500_xt_experimental",
+    swarming = targets.swarming(
+        dimensions = {
+            "display_attached": "1",
+            "gpu": "1002:7340-32.0.21037.1004",
+            "os": "Windows-11-26100",
+            "pool": "chromium.tests.gpu",
+        },
+    ),
+)
+
+targets.mixin(
+    name = "win11_amd_rx_5500_xt_stable",
+    swarming = targets.swarming(
+        dimensions = {
+            "display_attached": "1",
+            "gpu": "1002:7340-32.0.21037.1004",
+            "os": "Windows-11-26100",
+            "pool": "chromium.tests.gpu",
         },
     ),
 )
@@ -2422,6 +2461,8 @@ targets.mixin(
     ),
 )
 
+# TODO(crbug.com/479147014): Remove this mixin once all uses have switched to
+# gpu_win_gce_stable.
 targets.mixin(
     name = "win10_gce_gpu_pool",
     swarming = targets.swarming(
@@ -2630,12 +2671,12 @@ targets.mixin(
     name = "xcode_26_beta",
     args = [
         "--xcode-build-version",
-        "17c52",
+        "17e5170d",
     ],
     swarming = targets.swarming(
         named_caches = [
             swarming.cache(
-                name = "xcode_ios_17c52",
+                name = "xcode_ios_17e5170d",
                 path = "Xcode.app",
             ),
         ],

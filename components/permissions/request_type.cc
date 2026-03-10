@@ -7,11 +7,11 @@
 #include <algorithm>
 
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/containers/fixed_flat_set.h"
 #include "base/feature_list.h"
 #include "base/notreached.h"
 #include "build/build_config.h"
+#include "components/content_settings/core/common/content_settings_utils.h"
 #include "components/content_settings/core/common/features.h"
 #include "components/permissions/features.h"
 #include "components/permissions/permission_request.h"
@@ -67,6 +67,8 @@ int GetIconIdAndroid(RequestType type) {
       return IDR_ANDROID_INFOBAR_NFC;
     case RequestType::kNotifications:
       return IDR_ANDROID_INFOBAR_NOTIFICATIONS;
+    case RequestType::kSensors:
+      return IDR_ANDROID_INFOBAR_SENSORS;
     case RequestType::kProtectedMediaIdentifier:
       return IDR_ANDROID_INFOBAR_PROTECTED_MEDIA_IDENTIFIER;
     case RequestType::kStorageAccess:
@@ -129,6 +131,8 @@ const gfx::VectorIcon& GetIconIdDesktop(RequestType type) {
 #endif
     case RequestType::kRegisterProtocolHandler:
       return vector_icons::kProtocolHandlerIcon;
+    case RequestType::kSensors:
+      return vector_icons::kSensorsChromeRefreshIcon;
 #if BUILDFLAG(IS_CHROMEOS)
     case RequestType::kSmartCard:
       return vector_icons::kSmartCardReaderIcon;
@@ -181,6 +185,8 @@ const gfx::VectorIcon& GetBlockedIconIdDesktop(RequestType type) {
       return vector_icons::kMicOffChromeRefreshIcon;
     case RequestType::kMidiSysex:
       return vector_icons::kMidiOffChromeRefreshIcon;
+    case RequestType::kSensors:
+      return vector_icons::kSensorsOffChromeRefreshIcon;
     case RequestType::kStorageAccess:
       return vector_icons::kStorageAccessOffIcon;
     case RequestType::kIdentityProvider:
@@ -240,6 +246,8 @@ std::optional<RequestType> ContentSettingsTypeToRequestTypeIfExists(
       return RequestType::kMidiSysex;
     case ContentSettingsType::NOTIFICATIONS:
       return RequestType::kNotifications;
+    case ContentSettingsType::SENSORS:
+      return RequestType::kSensors;
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
     case ContentSettingsType::POINTER_LOCK:
       return RequestType::kPointerLock;
@@ -323,12 +331,7 @@ std::optional<ContentSettingsType> RequestTypeToContentSettingsType(
     case RequestType::kLoopbackNetwork:
       return ContentSettingsType::LOOPBACK_NETWORK;
     case RequestType::kGeolocation:
-      if (base::FeatureList::IsEnabled(
-              content_settings::features::kApproximateGeolocationPermission)) {
-        return ContentSettingsType::GEOLOCATION_WITH_OPTIONS;
-      } else {
-        return ContentSettingsType::GEOLOCATION;
-      }
+      return content_settings::GeolocationContentSettingsType();
     case RequestType::kHandTracking:
       return ContentSettingsType::HAND_TRACKING;
     case RequestType::kIdleDetection:
@@ -347,6 +350,8 @@ std::optional<ContentSettingsType> RequestTypeToContentSettingsType(
 #endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
     case RequestType::kNotifications:
       return ContentSettingsType::NOTIFICATIONS;
+    case RequestType::kSensors:
+      return ContentSettingsType::SENSORS;
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
     case RequestType::kPointerLock:
       return ContentSettingsType::POINTER_LOCK;
@@ -390,9 +395,10 @@ bool IsConfirmationChipSupported(RequestType for_request_type) {
           RequestType::kGeolocation,
           RequestType::kCameraStream,
           RequestType::kMicStream,
+          RequestType::kSensors,
           // clang-format on
       });
-  return base::Contains(kRequestsWithChip, for_request_type);
+  return kRequestsWithChip.contains(for_request_type);
 }
 
 #if !BUILDFLAG(IS_IOS)
@@ -468,6 +474,8 @@ const char* PermissionKeyForRequestType(permissions::RequestType request_type) {
 #endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
     case permissions::RequestType::kNotifications:
       return "notifications";
+    case permissions::RequestType::kSensors:
+      return "sensors";
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
     case permissions::RequestType::kPointerLock:
       return "pointer_lock";

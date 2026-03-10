@@ -66,7 +66,7 @@ String StringBuilder::Substring(unsigned start, unsigned length) const {
   if (start >= length_)
     return g_empty_string;
   if (!string_.IsNull())
-    return string_.Substring(start, length);
+    return string_.substr(start, length);
   length = std::min(length, length_ - start);
   if (is_8bit_)
     return String(Span8().subspan(start, length));
@@ -258,7 +258,7 @@ void StringBuilder::Append(base::span<const UChar> chars) {
 
   unsigned length = base::checked_cast<unsigned>(chars.size());
   EnsureBuffer16(length);
-  buffer16_.AppendSpan(chars);
+  buffer16_.append_range(chars);
   length_ += length;
 }
 
@@ -271,13 +271,13 @@ void StringBuilder::Append(base::span<const LChar> chars) {
   unsigned length = base::checked_cast<unsigned>(chars.size());
   if (is_8bit_) {
     EnsureBuffer8(length);
-    buffer8_.AppendSpan(chars);
+    buffer8_.append_range(chars);
     length_ += length;
     return;
   }
 
   EnsureBuffer16(length);
-  buffer16_.AppendSpan(chars);
+  buffer16_.append_range(chars);
   length_ += length;
 }
 
@@ -301,14 +301,18 @@ void StringBuilder::AppendFormat(const char* format, ...) {
   Vector<char, kDefaultSize> buffer(kDefaultSize);
 
   va_start(args, format);
-  int length = base::VSpanPrintf(buffer, format, args);
+  // SAFETY: The safety of this code depends on the content of `format`. Since
+  // unsafe usage is marked with UNSAFE_TODO or UNSAFE_BUFFERS at the call
+  // site, no action is required here.
+  int length = UNSAFE_BUFFERS(base::VSpanPrintf(buffer, format, args));
   va_end(args);
   DCHECK_GE(length, 0);
 
   if (length >= static_cast<int>(kDefaultSize)) {
     buffer.Grow(length + 1);
     va_start(args, format);
-    length = base::VSpanPrintf(buffer, format, args);
+    // SAFETY: See the previous comment on base::VSpanPrintf().
+    length = UNSAFE_BUFFERS(base::VSpanPrintf(buffer, format, args));
     va_end(args);
   }
 

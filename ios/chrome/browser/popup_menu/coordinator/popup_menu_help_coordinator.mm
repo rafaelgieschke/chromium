@@ -20,7 +20,6 @@
 #import "ios/chrome/browser/bubble/ui_bundled/bubble_view_controller_presenter.h"
 #import "ios/chrome/browser/default_browser/model/utils.h"
 #import "ios/chrome/browser/feature_engagement/model/tracker_factory.h"
-#import "ios/chrome/browser/popup_menu/overflow_menu/public/feature_flags.h"
 #import "ios/chrome/browser/popup_menu/overflow_menu/public/overflow_menu_action_provider.h"
 #import "ios/chrome/browser/popup_menu/overflow_menu/public/overflow_menu_constants.h"
 #import "ios/chrome/browser/popup_menu/overflow_menu/ui/ui_swift.h"
@@ -224,10 +223,6 @@ base::TimeDelta kPromoDisplayDelayForTests = base::Seconds(1);
 // Possibly shows the IPH for the Overflow Menu Customization feature. Returns
 // whether or not the IPH was shown.
 - (BOOL)showCustomizationIPHInMenu:(UIViewController*)menu {
-  if (!IsNewOverflowMenuEnabled()) {
-    return NO;
-  }
-
   // In global coordinate system
   CGPoint anchorPointInView = CGPointMake(CGRectGetMaxX(menu.view.frame) / 2,
                                           CGRectGetMaxY(menu.view.frame) - 20);
@@ -404,8 +399,7 @@ base::TimeDelta kPromoDisplayDelayForTests = base::Seconds(1);
 }
 
 - (void)displayPopupMenuTabRemindersIPH {
-  CHECK(
-      send_tab_to_self::IsSendTabIOSPushNotificationsEnabledWithTabReminders());
+  CHECK(send_tab_to_self::AreIOSTabRemindersEnabled());
 
   BubbleViewControllerPresenter* bubblePresenter =
       [self newReminderNotificationsOverflowMenuBubblePresenter];
@@ -421,8 +415,7 @@ base::TimeDelta kPromoDisplayDelayForTests = base::Seconds(1);
 // notifications IPH in the overflow menu.
 - (BubbleViewControllerPresenter*)
     newReminderNotificationsOverflowMenuBubblePresenter {
-  CHECK(
-      send_tab_to_self::IsSendTabIOSPushNotificationsEnabledWithTabReminders());
+  CHECK(send_tab_to_self::AreIOSTabRemindersEnabled());
 
   NSString* text = l10n_util::GetNSString(
       IDS_IOS_REMINDER_NOTIFICATIONS_TOOLS_MENU_BUBBLE_IPH);
@@ -449,8 +442,7 @@ base::TimeDelta kPromoDisplayDelayForTests = base::Seconds(1);
 // `IPHDismissalReasonType`: The reason why the IPH was dismissed.
 - (void)reminderNotificationsOverflowMenuIPHDidDismissWithReasonType:
     (IPHDismissalReasonType)reason {
-  CHECK(
-      send_tab_to_self::IsSendTabIOSPushNotificationsEnabledWithTabReminders());
+  CHECK(send_tab_to_self::AreIOSTabRemindersEnabled());
 
   if (reason == IPHDismissalReasonType::kTappedAnchorView ||
       reason == IPHDismissalReasonType::kTappedIPH) {

@@ -54,6 +54,7 @@
 #include "third_party/blink/renderer/modules/webcodecs/video_frame_init_util.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_frame_rect_util.h"
 #include "third_party/blink/renderer/platform/geometry/geometry_hash_traits.h"
+#include "third_party/blink/renderer/platform/graphics/canvas_non2d_snapshot_provider_bitmap.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_snapshot_provider.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
@@ -67,7 +68,6 @@
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/libyuv/include/libyuv/planar_functions.h"
-#include "third_party/skia/include/gpu/ganesh/GrDirectContext.h"
 #include "ui/gfx/geometry/skia_conversions.h"
 #include "v8/include/v8.h"
 
@@ -351,25 +351,16 @@ class CanvasSnapshotProviderCache
   CanvasSnapshotProviderCache(const CanvasSnapshotProviderCache&) = delete;
 
   CanvasSnapshotProvider* CreateProvider(const media::VideoFrame& frame) {
-    const auto alpha_type = media::IsOpaque(frame.format())
-                                ? kOpaque_SkAlphaType
-                                : kPremul_SkAlphaType;
-    const auto dest_color_space = frame.CompatRGBColorSpace();
-
-    // TODO(https://crbug.com/40230609): N32 may be incorrect when drawing high
-    // bit depth frames destined for a high bit depth canvas.
-    const auto image_format = GetN32FormatForCanvas();
-
     if (providers_.empty()) {
       PostMonitoringTask();
     }
 
     last_access_time_ = base::TimeTicks::Now();
 
+    auto required_provider_info =
+        CreateSnapshotProviderInfoForVideoFrame(frame);
     for (const auto& provider : providers_) {
-      if (provider->IsValid() && provider->Size() == frame.natural_size() &&
-          provider->GetColorSpace() == dest_color_space &&
-          provider->GetAlphaType() == alpha_type) {
+      if (required_provider_info.Matches(*provider)) {
         return provider.get();
       }
     }
@@ -378,9 +369,22 @@ class CanvasSnapshotProviderCache
       providers_.clear();
     }
 
-    auto provider = CreateSnapshotProviderForVideoFrame(
-        frame.natural_size(), image_format, alpha_type, dest_color_space,
-        GetRasterContextProvider().get());
+    std::unique_ptr<CanvasSnapshotProvider> provider;
+    if (ShouldCreateAcceleratedImages(GetRasterContextProvider().get())) {
+      provider = CanvasNon2DResourceProviderSharedImage::Create(
+          required_provider_info.size, required_provider_info.format,
+          required_provider_info.alpha_type, required_provider_info.color_space,
+          SharedGpuContext::ContextProviderWrapper(),
+          gpu::SHARED_IMAGE_USAGE_DISPLAY_READ);
+    } else {
+      provider =
+          CanvasNon2DSnapshotProviderBitmap::Create(required_provider_info);
+    }
+
+    if (!provider) {
+      return nullptr;
+    }
+
     auto* result = provider.get();
     providers_.emplace_back(std::move(provider));
     return result;
@@ -438,7 +442,8 @@ const base::TimeDelta CanvasSnapshotProviderCache::kIdleTimeout =
 
 std::optional<media::VideoPixelFormat> CopyToFormat(
     const media::VideoFrame& frame) {
-  const bool mappable = frame.IsMappable() || frame.HasMappableSharedImage();
+  const bool mappable =
+      frame.HasDirectCpuAccess() || frame.HasMappableSharedImage();
   const bool texturable = frame.HasSharedImage();
   if (!(mappable || texturable)) {
     return std::nullopt;
@@ -832,6 +837,7 @@ VideoFrame* VideoFrame::Create(ScriptState* script_state,
 
     auto client_shared_image = sbi->GetSharedImage();
     CHECK(client_shared_image);
+    gfx_color_space = client_shared_image->color_space();
     frame = media::VideoFrame::WrapSharedImage(
         format, std::move(client_shared_image), sbi->GetSyncToken(),
         std::move(release_cb), coded_size, parsed_init.visible_rect,
@@ -1401,7 +1407,7 @@ ScriptPromise<IDLSequence<PlaneLayout>> VideoFrame::copyTo(
     }
     ConvertAndCopyToRGB(local_frame, src_rect, dest_layout, buffer,
                         target_color_space);
-  } else if (local_frame->IsMappable()) {
+  } else if (local_frame->HasDirectCpuAccess()) {
     CopyMappablePlanes(*local_frame, src_rect, dest_layout, buffer);
   } else if (local_frame->HasMappableSharedImage()) {
     auto mapped_frame = media::ConvertToMemoryMappedFrame(local_frame);
@@ -1466,16 +1472,7 @@ scoped_refptr<Image> VideoFrame::GetSourceImageForCanvas(
                                                   orientation_enum);
   }
 
-  auto* execution_context =
-      ExecutionContext::From(v8::Isolate::GetCurrent()->GetCurrentContext());
-  auto& provider_cache = CanvasSnapshotProviderCache::From(*execution_context);
-
-  auto* snapshot_provider =
-      provider_cache.CreateProvider(*local_handle->frame());
-
-  auto image =
-      CreateImageFromVideoFrame(local_handle->frame(), snapshot_provider,
-                                /*video_renderer=*/nullptr);
+  auto image = CreateImageFromVideoFrame(local_handle->frame());
   if (!image) {
     *status = kInvalidSourceImageStatus;
     return nullptr;
@@ -1537,6 +1534,37 @@ ImageBitmapSourceStatus VideoFrame::CheckUsability() const {
   return base::ok();
 }
 
+// Killswitch guarding WebCodecs not caching the SkSurface used for
+// VideoFrame->StaticBitmapImage software draws.
+BASE_FEATURE(kWebCodecsDrawCacheSkSurface, base::FEATURE_DISABLED_BY_DEFAULT);
+
+scoped_refptr<StaticBitmapImage> VideoFrame::CreateImageFromVideoFrame(
+    scoped_refptr<media::VideoFrame> frame) {
+  auto* execution_context =
+      ExecutionContext::From(v8::Isolate::GetCurrent()->GetCurrentContext());
+  auto& provider_cache = CanvasSnapshotProviderCache::From(*execution_context);
+
+  auto* snapshot_provider = provider_cache.CreateProvider(*frame);
+  if (!snapshot_provider) {
+    return nullptr;
+  }
+
+  if (snapshot_provider->IsExternalBitmapProvider()) {
+    auto* snapshot_provider_bitmap =
+        static_cast<CanvasNon2DSnapshotProviderBitmap*>(snapshot_provider);
+    sk_sp<SkSurface> draw_surface =
+        base::FeatureList::IsEnabled(kWebCodecsDrawCacheSkSurface)
+            ? snapshot_provider_bitmap->GetCachedSurface()
+            : nullptr;
+    return CreateUnacceleratedImageFromVideoFrame(
+        frame, snapshot_provider_bitmap->Info(), draw_surface);
+  }
+
+  return CreateAcceleratedImageFromVideoFrame(
+      frame,
+      static_cast<CanvasNon2DResourceProviderSharedImage*>(snapshot_provider));
+}
+
 ScriptPromise<ImageBitmap> VideoFrame::CreateImageBitmap(
     ScriptState* script_state,
     std::optional<gfx::Rect> crop_rect,
@@ -1564,16 +1592,7 @@ ScriptPromise<ImageBitmap> VideoFrame::CreateImageBitmap(
                                                  options, exception_state);
   }
 
-  auto* execution_context =
-      ExecutionContext::From(v8::Isolate::GetCurrent()->GetCurrentContext());
-  auto& provider_cache = CanvasSnapshotProviderCache::From(*execution_context);
-
-  auto* snapshot_provider =
-      provider_cache.CreateProvider(*local_handle->frame());
-
-  auto image =
-      CreateImageFromVideoFrame(local_handle->frame(), snapshot_provider,
-                                /*video_renderer=*/nullptr);
+  auto image = CreateImageFromVideoFrame(local_handle->frame());
   if (!image) {
     exception_state.ThrowDOMException(
         DOMExceptionCode::kNotSupportedError,

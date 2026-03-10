@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/core/css/cssom/computed_style_property_map.h"
 
+#include <algorithm>
+
 #include "third_party/blink/renderer/core/css/computed_style_css_value_mapping.h"
 #include "third_party/blink/renderer/core/css/css_function_value.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
@@ -41,14 +43,14 @@ bool ComputedStylePropertyMap::ComparePropertyNames(
     const CSSPropertyName& name_b) {
   AtomicString a = name_a.ToAtomicString();
   AtomicString b = name_b.ToAtomicString();
-  if (a.StartsWith("--")) {
-    return b.StartsWith("--") && CodeUnitCompareLessThan(a, b);
+  if (a.starts_with("--")) {
+    return b.starts_with("--") && CodeUnitCompareLessThan(a, b);
   }
-  if (a.StartsWith("-")) {
-    return b.StartsWith("--") ||
-           (b.StartsWith("-") && CodeUnitCompareLessThan(a, b));
+  if (a.starts_with("-")) {
+    return b.starts_with("--") ||
+           (b.starts_with("-") && CodeUnitCompareLessThan(a, b));
   }
-  return b.StartsWith("-") || CodeUnitCompareLessThan(a, b);
+  return b.starts_with("-") || CodeUnitCompareLessThan(a, b);
 }
 
 Element* ComputedStylePropertyMap::StyledElement() const {
@@ -109,7 +111,7 @@ const CSSValue* ComputedStylePropertyMap::GetProperty(
       CSSPropertyID::kColumnRuleWidth, CSSPropertyID::kOutlineWidth,
   };
 
-  if (base::Contains(kWidthProperties, property_id)) {
+  if (std::ranges::contains(kWidthProperties, property_id)) {
     RecordUseCounterForWidthStyleValues(property_id, *style);
   }
 

@@ -30,7 +30,7 @@
 #include "base/test/test_future.h"
 #include "base/types/expected.h"
 #include "chrome/browser/ui/web_applications/test/isolated_web_app_test_utils.h"
-#include "chrome/browser/web_applications/isolated_web_apps/install/pending_install_info.h"
+#include "chrome/browser/web_applications/isolated_web_apps/install/non_installed_bundle_inspection_context.h"
 #include "chrome/browser/web_applications/isolated_web_apps/isolated_web_app_url_info.h"
 #include "chrome/browser/web_applications/test/mock_data_retriever.h"
 #include "chrome/browser/web_applications/test/test_web_app_url_loader.h"
@@ -186,8 +186,10 @@ TEST_F(IsolatedWebAppInstallCommandHelperTrustAndSignaturesTest,
       url_info, CreateDefaultDataRetriever(url_info.origin().GetURL()));
 
   base::test::TestFuture<base::expected<void, std::string>> future;
-  command_helper->CheckTrustAndSignatures(CreateDevProxySource(), &*profile(),
-                                          future.GetCallback());
+  command_helper->CheckTrustAndSignatures(
+      CreateDevProxySource(),
+      IwaInstallOperation{.source = webapps::WebappInstallSource::IWA_DEV_UI},
+      &*profile(), future.GetCallback());
   EXPECT_THAT(future.Get(), HasValue());
 }
 
@@ -201,8 +203,10 @@ TEST_F(IsolatedWebAppInstallCommandHelperTrustAndSignaturesTest,
       url_info, CreateDefaultDataRetriever(url_info.origin().GetURL()));
 
   base::test::TestFuture<base::expected<void, std::string>> future;
-  command_helper->CheckTrustAndSignatures(CreateDevProxySource(), &*profile(),
-                                          future.GetCallback());
+  command_helper->CheckTrustAndSignatures(
+      CreateDevProxySource(),
+      IwaInstallOperation{.source = webapps::WebappInstallSource::IWA_DEV_UI},
+      &*profile(), future.GetCallback());
   EXPECT_THAT(
       future.Take(),
       ErrorIs(HasSubstr("Isolated Web App Developer Mode is not enabled")));
@@ -265,8 +269,10 @@ TEST_F(IsolatedWebAppInstallCommandHelperLoadUrlTest,
       }));
 
   base::test::TestFuture<base::expected<void, std::string>> future;
-  command_helper->LoadInstallUrl(CreateDevProxySource(), web_contents(),
-                                 *url_loader, future.GetCallback());
+  command_helper->LoadInstallUrl(
+      CreateDevProxySource(),
+      IwaInstallOperation{.source = webapps::WebappInstallSource::IWA_DEV_UI},
+      web_contents(), *url_loader, future.GetCallback());
   EXPECT_THAT(future.Get(), HasValue());
   EXPECT_THAT(
       last_url_comparison,
@@ -290,14 +296,15 @@ TEST_F(IsolatedWebAppInstallCommandHelperLoadUrlTest,
       [&](const GURL& unused_url, content::WebContents* web_contents,
           webapps::WebAppUrlLoader::UrlComparison unused_url_comparison) {
         source =
-            IsolatedWebAppPendingInstallInfo::FromWebContents(*web_contents)
-                .source();
+            NonInstalledBundleInspectionContext::FromWebContents(web_contents)
+                ->source();
       }));
 
   base::test::TestFuture<base::expected<void, std::string>> future;
   command_helper->LoadInstallUrl(
       IwaSourceProxy{
           url::Origin::Create(GURL("http://some-testing-proxy-url.com/"))},
+      IwaInstallOperation{.source = webapps::WebappInstallSource::IWA_DEV_UI},
       web_contents(), *url_loader, future.GetCallback());
   EXPECT_THAT(future.Get(), HasValue());
   EXPECT_THAT(source, Optional(Eq(IwaSourceProxy{url::Origin::Create(
@@ -321,14 +328,16 @@ TEST_F(IsolatedWebAppInstallCommandHelperLoadUrlTest,
       [&](const GURL& unused_url, content::WebContents* web_contents,
           webapps::WebAppUrlLoader::UrlComparison unused_url_comparison) {
         source =
-            IsolatedWebAppPendingInstallInfo::FromWebContents(*web_contents)
-                .source();
+            NonInstalledBundleInspectionContext::FromWebContents(web_contents)
+                ->source();
       }));
 
   base::test::TestFuture<base::expected<void, std::string>> future;
   command_helper->LoadInstallUrl(
       IwaSourceBundleProdMode{
           base::FilePath{FILE_PATH_LITERAL("/testing/path/to/a/bundle")}},
+      IwaInstallOperation{
+          .source = webapps::WebappInstallSource::IWA_GRAPHICAL_INSTALLER},
       web_contents(), *url_loader, future.GetCallback());
   EXPECT_THAT(future.Get(), HasValue());
   EXPECT_THAT(source, Optional(Eq(IwaSourceBundleProdMode{base::FilePath{
@@ -347,8 +356,10 @@ TEST_F(IsolatedWebAppInstallCommandHelperLoadUrlTest, HandlesFailure) {
       webapps::WebAppUrlLoaderResult::kFailedErrorPageLoaded);
 
   base::test::TestFuture<base::expected<void, std::string>> future;
-  command_helper->LoadInstallUrl(CreateDevProxySource(), web_contents(),
-                                 *url_loader, future.GetCallback());
+  command_helper->LoadInstallUrl(
+      CreateDevProxySource(),
+      IwaInstallOperation{.source = webapps::WebappInstallSource::IWA_DEV_UI},
+      web_contents(), *url_loader, future.GetCallback());
   EXPECT_THAT(future.Get(), ErrorIs(HasSubstr("FailedErrorPageLoaded")));
 }
 

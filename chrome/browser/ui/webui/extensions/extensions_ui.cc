@@ -47,6 +47,7 @@
 #include "extensions/common/extension_features.h"
 #include "extensions/common/extension_urls.h"
 #include "extensions/grit/extensions_browser_resources.h"
+#include "extensions/strings/grit/extensions_strings.h"
 #include "services/network/public/mojom/content_security_policy.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -68,6 +69,16 @@ constexpr char kEnableEnhancedSiteControls[] = "enableEnhancedSiteControls";
 
 std::string GetLoadTimeClasses(bool in_dev_mode) {
   return in_dev_mode ? "in-dev-mode" : std::string();
+}
+
+bool IsGlobalShortcutEnabled() {
+// Disable the global scoped shortcuts on Android and ChromeOS since they're
+// no-ops.
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS)
+  return false;
+#else
+  return true;
+#endif
 }
 
 content::WebUIDataSource* CreateAndAddExtensionsSource(Profile* profile,
@@ -120,12 +131,6 @@ content::WebUIDataSource* CreateAndAddExtensionsSource(Profile* profile,
        IDS_EXTENSIONS_EDIT_SITE_PERMISSIONS_CUSTOMIZE_PER_EXTENSION},
       {"editSitePermissionsRestrictExtensions",
        IDS_EXTENSIONS_EDIT_SITE_PERMISSIONS_RESTRICT_EXTENSIONS},
-      {"enableToggleTooltipDisabled",
-       IDS_EXTENSIONS_ENABLE_TOGGLE_TOOLTIP_DISABLED},
-      {"enableToggleTooltipEnabled",
-       IDS_EXTENSIONS_ENABLE_TOGGLE_TOOLTIP_ENABLED},
-      {"enableToggleTooltipEnabledWithSiteAccess",
-       IDS_EXTENSIONS_ENABLE_TOGGLE_TOOLTIP_ENABLED_WITH_SITE_ACCESS},
       {"errorsPageHeading", IDS_EXTENSIONS_ERROR_PAGE_HEADING},
       {"clearActivities", IDS_EXTENSIONS_CLEAR_ACTIVITIES},
       {"clearAll", IDS_EXTENSIONS_ERROR_CLEAR_ALL},
@@ -369,6 +374,7 @@ content::WebUIDataSource* CreateAndAddExtensionsSource(Profile* profile,
       {"setShortcutInSystemSettings",
        IDS_EXTENSIONS_SET_SHORTCUT_IN_SYSTEM_SETTINGS},
       {"shortcutNotSet", IDS_SHORTCUT_NOT_SET},
+      {"shortcutClear", IDS_SHORTCUT_CLEAR},
       {"shortcutScopeGlobal", IDS_EXTENSIONS_SHORTCUT_SCOPE_GLOBAL},
       {"shortcutScopeLabel", IDS_EXTENSIONS_SHORTCUT_SCOPE_LABEL},
       {"shortcutScopeInChrome", IDS_EXTENSIONS_SHORTCUT_SCOPE_IN_CHROME},
@@ -485,6 +491,7 @@ content::WebUIDataSource* CreateAndAddExtensionsSource(Profile* profile,
   source->AddBoolean(
       "safetyHubThreeDotDetails",
       base::FeatureList::IsEnabled(features::kSafetyHubThreeDotDetails));
+  source->AddBoolean("enableGlobalScopedShortcuts", IsGlobalShortcutEnabled());
 
   // MV2 deprecation.
   auto* mv2_experiment_manager = ManifestV2ExperimentManager::Get(profile);
@@ -584,7 +591,7 @@ base::RefCountedMemory* ExtensionsUI::GetFaviconResourceBytes(
 // Normally volatile data does not belong in loadTimeData, but in this case
 // prevents flickering on a very prominent surface (top of the landing page).
 void ExtensionsUI::OnDevModeChanged() {
-  base::Value::Dict update;
+  base::DictValue update;
   update.Set(kInDevModeKey, *in_dev_mode_);
   update.Set(kLoadTimeClassesKey, GetLoadTimeClasses(*in_dev_mode_));
   content::WebUIDataSource::Update(Profile::FromWebUI(web_ui()),

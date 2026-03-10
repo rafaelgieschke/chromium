@@ -11,15 +11,39 @@
 #include "base/functional/bind.h"
 #include "base/functional/callback.h"
 #include "base/logging.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/types/expected.h"
 #include "base/types/expected_macros.h"
+#include "build/build_config.h"
+#include "build/buildflag.h"
+#include "components/unexportable_keys/background_task_origin.h"
 #include "components/unexportable_keys/service_error.h"
 #include "components/unexportable_keys/unexportable_key_id.h"
 #include "components/unexportable_keys/unexportable_key_task_manager.h"
 #include "crypto/unexportable_key.h"
 
 namespace unexportable_keys {
+
+namespace {
+
+// Returns the application tag from the config on Mac if the provider supports
+// stateful unexportable keys. Otherwise, returns an empty string.
+std::string_view GetApplicationTag(
+    const crypto::UnexportableKeyProvider::Config& config) {
+#if BUILDFLAG(IS_MAC)
+  if (UnexportableKeyServiceImpl::IsStatefulUnexportableKeyProviderSupported(
+          config)) {
+    return config.application_tag;
+  }
+
+  return "";
+#else
+  return "";
+#endif  // BUILDFLAG(IS_MAC)
+}
+
+}  // namespace
 
 // Class holding either an `UnexportableKeyId` or a list of callbacks waiting
 // for the key creation.
@@ -33,10 +57,19 @@ class MaybePendingUnexportableKeyId {
 
   // Constructs an instance holding a list of callbacks.
   MaybePendingUnexportableKeyId() = default;
+  MaybePendingUnexportableKeyId(MaybePendingUnexportableKeyId&&) = default;
+  MaybePendingUnexportableKeyId& operator=(MaybePendingUnexportableKeyId&&) =
+      default;
 
   // Constructs an instance holding `key_id`.
   explicit MaybePendingUnexportableKeyId(UnexportableKeyId key_id)
       : pending_callbacks_or_key_id_(key_id) {}
+
+  ~MaybePendingUnexportableKeyId() {
+    if (!HasKeyId()) {
+      RunCallbacksWithFailure(ServiceError::kOperationCancelled);
+    }
+  }
 
   // Returns true if a key has been assigned to this instance. Otherwise,
   // returns false which means that this instance holds a list of callbacks.
@@ -88,8 +121,9 @@ class MaybePendingUnexportableKeyId {
 
 UnexportableKeyServiceImpl::UnexportableKeyServiceImpl(
     UnexportableKeyTaskManager& task_manager,
+    BackgroundTaskOrigin task_origin,
     crypto::UnexportableKeyProvider::Config config)
-    : task_manager_(task_manager), config_(config) {}
+    : task_manager_(task_manager), task_origin_(task_origin), config_(config) {}
 
 UnexportableKeyServiceImpl::~UnexportableKeyServiceImpl() = default;
 
@@ -115,35 +149,50 @@ void UnexportableKeyServiceImpl::GenerateSigningKeySlowlyAsync(
     BackgroundTaskPriority priority,
     base::OnceCallback<void(ServiceErrorOr<UnexportableKeyId>)> callback) {
   task_manager_->GenerateSigningKeySlowlyAsync(
-      config_, acceptable_algorithms, priority,
-      base::BindOnce(&UnexportableKeyServiceImpl::OnKeyGenerated,
-                     generate_key_weak_ptr_factory_.GetWeakPtr(),
-                     std::move(callback)));
+      task_origin_, config_, acceptable_algorithms, priority,
+      WrapCallbackWithErrorIfCancelled(
+          std::move(callback),
+          // SAFETY: `this` is guaranteed to be alive if the projection callback
+          // is invoked.
+          base::BindOnce(&UnexportableKeyServiceImpl::OnKeyGeneratedImpl,
+                         base::Unretained(this))));
 }
 
 void UnexportableKeyServiceImpl::FromWrappedSigningKeySlowlyAsync(
     base::span<const uint8_t> wrapped_key,
     BackgroundTaskPriority priority,
     base::OnceCallback<void(ServiceErrorOr<UnexportableKeyId>)> callback) {
-  auto& [wrapped_key_vec, maybe_pending_key_id] =
-      *key_id_by_wrapped_key_.lazy_emplace(wrapped_key, [&](const auto& ctor) {
-        ctor(base::ToVector(wrapped_key), MaybePendingUnexportableKeyId());
-      });
+  // Construct a key_view from the wrapped key and application tag stored in the
+  // config. Materialize it into the map only if needed.
+  //
+  // NOTE: In case the key does not exist in the map yet and we ask the backend
+  // for the matching signing key, the application tag returned by the platform
+  // must match the tag stored in the config. This invariant is CHECKed in
+  // `OnKeyCreatedFromWrappedKeyAndTag`.
+  const WrappedKeyAndTagView key_view(wrapped_key, GetApplicationTag(config_));
+  auto& [wrapped_key_and_tag, maybe_pending_key_id] =
+      *key_id_by_wrapped_key_and_tag_.lazy_emplace(
+          key_view, [&](const auto& ctor) {
+            ctor(Materialize(key_view), MaybePendingUnexportableKeyId());
+          });
 
   if (maybe_pending_key_id.HasKeyId()) {
     std::move(callback).Run(maybe_pending_key_id.GetKeyId());
     return;
   }
 
+  // NOTE: We don't wrap the callback in `WrapCallbackWithErrorIfCancelled`
+  // here, but rather run the callbacks explicitly during the destruction of
+  // `MaybePendingUnexportableKeyId`.
   size_t n_callbacks = maybe_pending_key_id.AddCallback(std::move(callback));
   if (n_callbacks == 1) {
     // `callback` is the first one waiting for the wrapped key. Schedule the
     // task to create a key from the wrapped key.
     task_manager_->FromWrappedSigningKeySlowlyAsync(
-        config_, wrapped_key, priority,
-        base::BindOnce(&UnexportableKeyServiceImpl::OnKeyCreatedFromWrappedKey,
-                       from_wrapped_key_weak_ptr_factory_.GetWeakPtr(),
-                       wrapped_key_vec));
+        task_origin_, config_, wrapped_key, priority,
+        base::BindOnce(
+            &UnexportableKeyServiceImpl::OnKeyCreatedFromWrappedKeyAndTag,
+            weak_ptr_factory_.GetWeakPtr(), wrapped_key_and_tag));
   }
 }
 
@@ -153,11 +202,14 @@ void UnexportableKeyServiceImpl::
         base::OnceCallback<void(ServiceErrorOr<std::vector<UnexportableKeyId>>)>
             callback) {
   task_manager_->GetAllSigningKeysForGarbageCollectionSlowlyAsync(
-      config_, priority,
-      base::BindOnce(&UnexportableKeyServiceImpl::
-                         OnGetAllSigningKeysForGarbageCollectionSlowly,
-                     get_all_keys_weak_ptr_factory_.GetWeakPtr(),
-                     std::move(callback)));
+      task_origin_, config_, priority,
+      WrapCallbackWithErrorIfCancelled(
+          std::move(callback),
+          // SAFETY: `this` is guaranteed to be alive if the projection callback
+          // is invoked.
+          base::BindOnce(&UnexportableKeyServiceImpl::
+                             OnGetAllSigningKeysForGarbageCollectionSlowlyImpl,
+                         base::Unretained(this))));
 }
 
 void UnexportableKeyServiceImpl::SignSlowlyAsync(
@@ -171,84 +223,48 @@ void UnexportableKeyServiceImpl::SignSlowlyAsync(
     return;
   }
 
-  // The type expected by the callback
-  using ArgType = ServiceErrorOr<std::vector<uint8_t>>;
   task_manager_->SignSlowlyAsync(
-      it->second, data, priority,
-      base::BindOnce(&UnexportableKeyServiceImpl::RunCallbackIfAlive<ArgType>,
-                     service_weak_ptr_factory_.GetWeakPtr(),
-                     std::move(callback)));
+      task_origin_, it->second, data, priority,
+      WrapCallbackWithErrorIfCancelled(std::move(callback)));
 }
 
-void UnexportableKeyServiceImpl::DeleteKeySlowlyAsync(
-    UnexportableKeyId key_id,
+void UnexportableKeyServiceImpl::DeleteKeysSlowlyAsync(
+    base::span<const UnexportableKeyId> key_ids,
     BackgroundTaskPriority priority,
-    base::OnceCallback<void(ServiceErrorOr<void>)> callback) {
-  auto key_id_it = key_by_key_id_.find(key_id);
-  if (key_id_it == key_by_key_id_.end()) {
+    base::OnceCallback<void(ServiceErrorOr<size_t>)> callback) {
+  // Delete the keys from the in-memory maps.
+  std::vector<ServiceErrorOr<scoped_refptr<RefCountedUnexportableSigningKey>>>
+      keys_or_errors = base::ToVector(key_ids, [&](UnexportableKeyId key_id) {
+        return ExtractKeyFromMaps(key_id);
+      });
+
+  // Collect the keys that were successfully deleted.
+  std::erase_if(keys_or_errors, [](auto& k) { return !k.has_value(); });
+  std::vector<scoped_refptr<RefCountedUnexportableSigningKey>> signing_keys =
+      base::ToVector(keys_or_errors, [](auto& key) { return *std::move(key); });
+
+  // If no keys were deleted, return an error.
+  if (signing_keys.empty()) {
     std::move(callback).Run(base::unexpected(ServiceError::kKeyNotFound));
     return;
   }
 
-  std::vector<uint8_t> wrapped_key = key_id_it->second->key().GetWrappedKey();
-  auto wrapped_key_it = key_id_by_wrapped_key_.find(wrapped_key);
-  CHECK(wrapped_key_it != key_id_by_wrapped_key_.end());
-  CHECK(wrapped_key_it->second.HasKeyId());
-  CHECK_EQ(wrapped_key_it->second.GetKeyId(), key_id);
-
-  key_by_key_id_.erase(key_id_it);
-  key_id_by_wrapped_key_.erase(wrapped_key_it);
-
-  // The type expected by the callback
-  using ArgType = ServiceErrorOr<void>;
-  task_manager_->DeleteSigningKeySlowlyAsync(
-      config_, std::move(wrapped_key), priority,
-      base::BindOnce(&UnexportableKeyServiceImpl::RunCallbackIfAlive<ArgType>,
-                     service_weak_ptr_factory_.GetWeakPtr(),
-                     std::move(callback)));
-}
-
-void UnexportableKeyServiceImpl::CopyKeyFromOtherService(
-    const UnexportableKeyService& other_service,
-    UnexportableKeyId key_id_from_other_service,
-    BackgroundTaskPriority priority,
-    base::OnceCallback<void(ServiceErrorOr<UnexportableKeyId>)> callback) {
-  ServiceErrorOr<std::vector<uint8_t>> wrapped_key =
-      other_service.GetWrappedKey(key_id_from_other_service);
-  if (!wrapped_key.has_value()) {
-    std::move(callback).Run(base::unexpected(wrapped_key.error()));
-    return;
-  }
-
-  // TODO: crbug.com/455538141 - Implement key copy in the task manager.
-  FromWrappedSigningKeySlowlyAsync(*wrapped_key, priority, std::move(callback));
+  task_manager_->DeleteSigningKeysSlowlyAsync(
+      task_origin_, config_, std::move(signing_keys), priority,
+      WrapCallbackWithErrorIfCancelled(std::move(callback)));
 }
 
 void UnexportableKeyServiceImpl::DeleteAllKeysSlowlyAsync(
-    BackgroundTaskPriority priority,
     base::OnceCallback<void(ServiceErrorOr<size_t>)> callback) {
   key_by_key_id_.clear();
-
-  // Clear the in-memory cache of pending key IDs by moving it to a local
-  // variable and run pending callbacks with a failure.
-  for (auto& [_, maybe_pending_key_id] :
-       std::exchange(key_id_by_wrapped_key_, {})) {
-    if (!maybe_pending_key_id.HasKeyId()) {
-      maybe_pending_key_id.RunCallbacksWithFailure(ServiceError::kKeyNotFound);
-    }
-  }
+  key_id_by_wrapped_key_and_tag_.clear();
 
   // Invalidate weak pointers to cancel pending key lookup requests.
-  get_all_keys_weak_ptr_factory_.InvalidateWeakPtrs();
-  from_wrapped_key_weak_ptr_factory_.InvalidateWeakPtrs();
+  weak_ptr_factory_.InvalidateWeakPtrs();
 
-  // The type expected by the callback
-  using ArgType = ServiceErrorOr<size_t>;
   task_manager_->DeleteAllSigningKeysSlowlyAsync(
-      config_, priority,
-      base::BindOnce(&UnexportableKeyServiceImpl::RunCallbackIfAlive<ArgType>,
-                     service_weak_ptr_factory_.GetWeakPtr(),
-                     std::move(callback)));
+      task_origin_, config_, BackgroundTaskPriority::kUserBlocking,
+      WrapCallbackWithErrorIfCancelled(std::move(callback)));
 }
 
 ServiceErrorOr<std::vector<uint8_t>>
@@ -309,14 +325,46 @@ ServiceErrorOr<base::Time> UnexportableKeyServiceImpl::GetCreationTime(
   return stateful_key->GetCreationTime();
 }
 
-void UnexportableKeyServiceImpl::OnGetAllSigningKeysForGarbageCollectionSlowly(
-    base::OnceCallback<void(ServiceErrorOr<std::vector<UnexportableKeyId>>)>
-        client_callback,
-    ServiceErrorOr<std::vector<scoped_refptr<RefCountedUnexportableSigningKey>>>
-        keys_or_error) {
-  std::move(client_callback)
-      .Run(OnGetAllSigningKeysForGarbageCollectionSlowlyImpl(
-          std::move(keys_or_error)));
+// static
+UnexportableKeyServiceImpl::WrappedKeyAndTag
+UnexportableKeyServiceImpl::GetWrappedKeyAndTag(
+    const RefCountedUnexportableSigningKey& key) {
+  std::string tag;
+  if (crypto::StatefulUnexportableSigningKey* stateful_key =
+          key.key().AsStatefulUnexportableSigningKey()) {
+    tag = stateful_key->GetKeyTag();
+  }
+
+  return {key.key().GetWrappedKey(), std::move(tag)};
+}
+
+// static
+UnexportableKeyServiceImpl::WrappedKeyAndTag
+UnexportableKeyServiceImpl::Materialize(WrappedKeyAndTagView view) {
+  auto [wrapped_key, tag] = view;
+  return {base::ToVector(wrapped_key), std::string(tag)};
+}
+
+ServiceErrorOr<scoped_refptr<RefCountedUnexportableSigningKey>>
+UnexportableKeyServiceImpl::ExtractKeyFromMaps(UnexportableKeyId key_id) {
+  auto key_id_it = key_by_key_id_.find(key_id);
+  if (key_id_it == key_by_key_id_.end()) {
+    return base::unexpected(ServiceError::kKeyNotFound);
+  }
+
+  scoped_refptr<RefCountedUnexportableSigningKey> key =
+      key_by_key_id_.extract(key_id_it).mapped();
+
+  auto wrapped_key_and_tag_handle =
+      key_id_by_wrapped_key_and_tag_.extract(GetWrappedKeyAndTag(*key));
+
+  CHECK(!wrapped_key_and_tag_handle.empty());
+  MaybePendingUnexportableKeyId& mapped_key_id =
+      wrapped_key_and_tag_handle.mapped();
+
+  CHECK(mapped_key_id.HasKeyId());
+  CHECK_EQ(mapped_key_id.GetKeyId(), key_id);
+  return key;
 }
 
 ServiceErrorOr<std::vector<UnexportableKeyId>>
@@ -332,8 +380,8 @@ UnexportableKeyServiceImpl::OnGetAllSigningKeysForGarbageCollectionSlowlyImpl(
   for (scoped_refptr<RefCountedUnexportableSigningKey>& key : keys) {
     CHECK(key);
     UnexportableKeyId key_id = key->id();
-    auto [it, inserted] =
-        key_id_by_wrapped_key_.try_emplace(key->key().GetWrappedKey(), key_id);
+    auto [it, inserted] = key_id_by_wrapped_key_and_tag_.try_emplace(
+        GetWrappedKeyAndTag(*key), key_id);
 
     if (!inserted) {
       // If insertion failed, it means that there were pending callbacks
@@ -363,14 +411,6 @@ UnexportableKeyServiceImpl::OnGetAllSigningKeysForGarbageCollectionSlowlyImpl(
   return key_ids;
 }
 
-void UnexportableKeyServiceImpl::OnKeyGenerated(
-    base::OnceCallback<void(ServiceErrorOr<UnexportableKeyId>)> client_callback,
-    ServiceErrorOr<scoped_refptr<RefCountedUnexportableSigningKey>>
-        key_or_error) {
-  return std::move(client_callback)
-      .Run(OnKeyGeneratedImpl(std::move(key_or_error)));
-}
-
 ServiceErrorOr<UnexportableKeyId>
 UnexportableKeyServiceImpl::OnKeyGeneratedImpl(
     ServiceErrorOr<scoped_refptr<RefCountedUnexportableSigningKey>>
@@ -380,7 +420,8 @@ UnexportableKeyServiceImpl::OnKeyGeneratedImpl(
   // `key` must be non-null if `key_or_error` holds a value.
   CHECK(key);
   UnexportableKeyId key_id = key->id();
-  if (!key_id_by_wrapped_key_.try_emplace(key->key().GetWrappedKey(), key_id)
+  if (!key_id_by_wrapped_key_and_tag_
+           .try_emplace(GetWrappedKeyAndTag(*key), key_id)
            .second) {
     // Drop a newly generated key in the case of a key collision. This should
     // be extremely rare.
@@ -393,12 +434,12 @@ UnexportableKeyServiceImpl::OnKeyGeneratedImpl(
   return key_id;
 }
 
-void UnexportableKeyServiceImpl::OnKeyCreatedFromWrappedKey(
-    std::vector<uint8_t> wrapped_key,
+void UnexportableKeyServiceImpl::OnKeyCreatedFromWrappedKeyAndTag(
+    WrappedKeyAndTag wrapped_key_and_tag,
     ServiceErrorOr<scoped_refptr<RefCountedUnexportableSigningKey>>
         key_or_error) {
-  auto it = key_id_by_wrapped_key_.find(wrapped_key);
-  if (it == key_id_by_wrapped_key_.end()) {
+  auto it = key_id_by_wrapped_key_and_tag_.find(wrapped_key_and_tag);
+  if (it == key_id_by_wrapped_key_and_tag_.end()) {
     DVLOG(1) << "`wrapped_key` is unknown, did the key get deleted?";
     return;
   }
@@ -414,12 +455,12 @@ void UnexportableKeyServiceImpl::OnKeyCreatedFromWrappedKey(
 
   ASSIGN_OR_RETURN(scoped_refptr<RefCountedUnexportableSigningKey> key,
                    std::move(key_or_error), [&](ServiceError error) {
-                     auto node = key_id_by_wrapped_key_.extract(it);
+                     auto node = key_id_by_wrapped_key_and_tag_.extract(it);
                      node.mapped().RunCallbacksWithFailure(error);
                    });
   // `key` must be non-null if `key_or_error` holds a value.
   CHECK(key);
-  DCHECK(wrapped_key == key->key().GetWrappedKey());
+  CHECK(wrapped_key_and_tag == GetWrappedKeyAndTag(*key));
 
   UnexportableKeyId key_id = key->id();
   // A newly created key ID must be unique.

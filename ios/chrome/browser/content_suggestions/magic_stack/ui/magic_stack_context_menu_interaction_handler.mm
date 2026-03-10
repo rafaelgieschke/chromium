@@ -4,7 +4,6 @@
 
 #import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_context_menu_interaction_handler.h"
 
-#import "base/containers/contains.h"
 #import "base/notreached.h"
 #import "base/strings/sys_string_conversions.h"
 #import "components/commerce/core/commerce_feature_list.h"
@@ -13,7 +12,7 @@
 #import "ios/chrome/browser/content_suggestions/magic_stack/ui/magic_stack_module_container_delegate.h"
 #import "ios/chrome/browser/content_suggestions/public/content_suggestions_constants.h"
 #import "ios/chrome/browser/content_suggestions/shop_card/ui/shop_card_data.h"
-#import "ios/chrome/browser/content_suggestions/tab_resumption/ui/tab_resumption_item.h"
+#import "ios/chrome/browser/content_suggestions/tab_resumption/ui/tab_resumption_config.h"
 #import "ios/chrome/browser/content_suggestions/ui/content_suggestions_collection_utils.h"
 #import "ios/chrome/browser/push_notification/model/push_notification_client_id.h"
 #import "ios/chrome/browser/push_notification/model/push_notification_settings_util.h"
@@ -55,10 +54,10 @@ NSString* GetContextMenuTitleForType(ContentSuggestionsModuleType type,
                                      MagicStackModule* config) {
   switch (type) {
     case ContentSuggestionsModuleType::kTabResumption: {
-      TabResumptionItem* tabResumptionItemConfig =
-          static_cast<TabResumptionItem*>(config);
-      if ((base::Contains(commerce::kShopCardVariation.Get(),
-                          commerce::kShopCardArm3) ||
+      TabResumptionConfig* tabResumptionItemConfig =
+          static_cast<TabResumptionConfig*>(config);
+      if ((commerce::kShopCardVariation.Get().contains(
+               commerce::kShopCardArm3) ||
            commerce::kShopCardVariation.Get() == commerce::kShopCardArm4) &&
           tabResumptionItemConfig.shopCardData) {
         if (tabResumptionItemConfig.shopCardData.shopCardItemType ==
@@ -106,8 +105,8 @@ NSString* GetContextMenuHideDescriptionForType(
     MagicStackModule* config) {
   switch (type) {
     case ContentSuggestionsModuleType::kTabResumption: {
-      TabResumptionItem* tabResumptionItemConfig =
-          static_cast<TabResumptionItem*>(config);
+      TabResumptionConfig* tabResumptionItemConfig =
+          static_cast<TabResumptionConfig*>(config);
       if (tabResumptionItemConfig.shopCardData &&
           tabResumptionItemConfig.shopCardData.shopCardItemType ==
               ShopCardItemType::kPriceTrackableProductOnTab) {
@@ -186,18 +185,14 @@ NSString* GetContextMenuHideDescriptionForType(
 - (NSArray<UIMenuElement*>*)menuElements {
   NSMutableArray<UIAction*>* actions = [[NSMutableArray alloc] init];
 
-  BOOL canShowTipsNotificationsOptIn = IsTipsModuleType(self.type);
-
-  BOOL canShowSafetyCheckNotificationsOptIn =
-      self.type == ContentSuggestionsModuleType::kSafetyCheck &&
-      IsSafetyCheckNotificationsEnabled();
-
-  if (canShowTipsNotificationsOptIn || canShowSafetyCheckNotificationsOptIn) {
+  // Currently, only Tips and Safety Check modules support the notifications
+  // opt-in/out toggle.
+  if (IsTipsModuleType(self.type) ||
+      self.type == ContentSuggestionsModuleType::kSafetyCheck) {
     [actions addObject:[self toggleNotificationsActionForModuleType:self.type]];
   }
 
   [actions addObject:[self hideAction]];
-
   [actions addObject:[self customizeCardAction]];
 
   return actions;

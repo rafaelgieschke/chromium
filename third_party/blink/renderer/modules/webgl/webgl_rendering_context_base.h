@@ -72,7 +72,7 @@ class PaintCanvasVideoRenderer;
 namespace blink {
 
 class AcceleratedStaticBitmapImage;
-class CanvasResourceProvider;
+class CanvasNon2DResourceProviderSharedImage;
 class CanvasSnapshotProvider;
 class EXTDisjointTimerQuery;
 class EXTDisjointTimerQueryWebGL2;
@@ -683,11 +683,7 @@ class MODULES_EXPORT WebGLRenderingContextBase
 
   // Returns approximate gpu memory allocated.
   base::ByteSize AllocatedBufferSize() const override;
-  int AllocatedBufferCountPerPixel() const override { NOTREACHED(); }
 
-  // Returns the drawing buffer size after it is, probably, has scaled down
-  // to the maximum supported canvas size.
-  gfx::Size DrawingBufferSize() const override;
   DrawingBuffer* GetDrawingBuffer() const;
 
   class TextureUnitState {
@@ -780,8 +776,9 @@ class MODULES_EXPORT WebGLRenderingContextBase
       std::unique_ptr<WebGraphicsContext3DProvider>,
       const Platform::WebGLContextInfo&);
   void SetupFlags();
-  bool CopyRenderingResultsFromDrawingBuffer(CanvasResourceProviderSharedImage*,
-                                             SourceDrawingBuffer);
+  bool CopyRenderingResultsFromDrawingBuffer(
+      CanvasNon2DResourceProviderSharedImage*,
+      SourceDrawingBuffer);
 
   // CanvasRenderingContext implementation.
   bool IsComposited() const override { return true; }
@@ -973,20 +970,13 @@ class MODULES_EXPORT WebGLRenderingContextBase
     LRUCanvasSnapshotProviderCache(wtf_size_t capacity, CacheType type);
     // The pointer returned is owned by the image buffer map.
     CanvasSnapshotProvider* GetCanvasSnapshotProvider(
-        gfx::Size size,
-        viz::SharedImageFormat format,
-        SkAlphaType alpha_type,
-        const gfx::ColorSpace& color_space);
+        const CanvasSnapshotProvider::Info& info);
 
    private:
     void BubbleToFront(wtf_size_t idx);
     const wtf_size_t capacity_;
     const CacheType type_;
     Vector<std::unique_ptr<CanvasSnapshotProvider>> snapshot_providers_;
-    // The returned CanvasSnapshotProvider may have a different format from the
-    // one requested (e.g, BGRA vs RGBA). Ensure this doesn't cause cache
-    // misses by recording also the requested format.
-    Vector<viz::SharedImageFormat> requested_formats_;
   };
   LRUCanvasSnapshotProviderCache generated_image_cache_{
       4, LRUCanvasSnapshotProviderCache::CacheType::kImage};
@@ -2037,13 +2027,13 @@ class MODULES_EXPORT WebGLRenderingContextBase
   scoped_refptr<ExternalCanvasResource> ExportLowLatencyCanvasResource(
       SourceDrawingBuffer source_buffer);
 
-  CanvasResourceProviderSharedImage* GetSharedImageResourceProvider();
+  CanvasNon2DResourceProviderSharedImage* GetSharedImageResourceProvider();
 
   // Attempts to paint the most recent rendering results into a
-  // CanvasResourceProvider. Returns the CanvasResourceProvider if the paint
+  // CanvasNon2DResourceProviderSharedImage. Returns the provider if the paint
   // succeeded; otherwise returns nullptr.
-  CanvasResourceProvider* PaintRenderingResultsToResourceProvider(
-      SourceDrawingBuffer source_buffer);
+  CanvasNon2DResourceProviderSharedImage*
+  PaintRenderingResultsToResourceProvider(SourceDrawingBuffer source_buffer);
   void TexImageHelperMediaVideoFrame(
       TexImageParams,
       WebGLTexture*,
@@ -2093,7 +2083,7 @@ class MODULES_EXPORT WebGLRenderingContextBase
 
   // Used to provide accelerated snapshots and CanvasResources holding the
   // current content.
-  std::unique_ptr<CanvasResourceProviderSharedImage> resource_provider_;
+  std::unique_ptr<CanvasNon2DResourceProviderSharedImage> resource_provider_;
 
   // Whether `resource_provider_` has fresh content that should be sent to the
   // compositor in response to a PushFrame() call.
@@ -2130,8 +2120,6 @@ class MODULES_EXPORT WebGLRenderingContextBase
   int number_of_user_allocated_multisampled_renderbuffers_;
 
   bool has_been_drawn_to_ = false;
-
-  uint32_t number_of_context_losses_ = 0;
 
   // Tracks if the context has ever called glBeginPixelLocalStorageANGLE. If it
   // has, we need to start using the pixel local storage interrupt mechanism

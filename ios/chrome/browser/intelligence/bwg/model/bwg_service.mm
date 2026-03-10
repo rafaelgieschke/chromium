@@ -12,8 +12,8 @@
 #import "google_apis/gaia/google_service_auth_error.h"
 #import "ios/chrome/app/tests_hook.h"
 #import "ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_prefs.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
-#import "ios/chrome/browser/intelligence/proto_wrappers/page_context_utils.h"
 #import "ios/chrome/browser/optimization_guide/model/optimization_guide_service.h"
 #import "ios/chrome/browser/shared/model/prefs/pref_names.h"
 #import "ios/chrome/browser/shared/model/profile/profile_ios.h"
@@ -37,9 +37,10 @@ BwgService::BwgService(ProfileIOS* profile,
   // entrypoints when we know whether they are eligible. Otherwise, we're OK
   // with having the entrypoint maybe disappear at a later time (actual Gemini
   // requests to ineligible accounts will fail regardless).
-  is_disabled_by_gemini_policy_ =
-      auth_service_ &&
-      auth_service_->HasPrimaryIdentityManaged(signin::ConsentLevel::kSignin);
+  if (auth_service_ &&
+      auth_service_->HasPrimaryIdentityManaged(signin::ConsentLevel::kSignin)) {
+    is_disabled_by_gemini_policy_ = true;
+  }
 
   if (IsAskGeminiChipEnabled()) {
     optimization_guide_ = optimization_guide;
@@ -64,51 +65,30 @@ void BwgService::Shutdown() {
 
 #pragma mark - Public
 
-bool BwgService::IsProfileEligibleForBwg() {
-  if (!IsGeminiAvailableForManagedAccounts()) {
-    if (auth_service_ && auth_service_->HasPrimaryIdentityManaged(
-                             signin::ConsentLevel::kSignin)) {
-      return false;
-    }
-  }
-
+bool BwgService::IsProfileEligibleForGemini() {
   AccountInfo account_info = identity_manager_->FindExtendedAccountInfo(
       identity_manager_->GetPrimaryAccountInfo(signin::ConsentLevel::kSignin));
-  bool tokens_ok =
+  const bool can_use_model_execution = CanUseGeminiModelExecution(account_info);
+  const bool allowed_by_enterprise =
+      gemini::GeminiAllowedByPolicy(pref_service_);
+  const bool authenticated =
+      !account_info.IsEmpty() &&
       identity_manager_
-          ->GetErrorStateOfRefreshTokenForAccount(account_info.account_id)
-          .state() == GoogleServiceAuthError::NONE;
-
-  // If the account info was not found, the user is likely not authenticated.
-  bool has_account_info = !account_info.IsEmpty();
-
-  // Checks whether the account capabilities permit model execution.
-  bool can_use_model_execution =
-      has_account_info
-          ? account_info.capabilities.can_use_model_execution_features() ==
-                signin::Tribool::kTrue
-          : false;
-
-  // Checks the Chrome and Gemini Enterprise policies.
-  // kGeminiEnabledByPolicy is 0 for allowed, 1 for disallowed.
-  bool is_disabled_by_policy =
-      pref_service_->GetInteger(prefs::kGeminiEnabledByPolicy) == 1 ||
-      is_disabled_by_gemini_policy_;
-
-  bool is_eligible = can_use_model_execution && !is_disabled_by_policy &&
-                     tokens_ok && !profile_->IsOffTheRecord();
-
-  base::UmaHistogramBoolean(kEligibilityHistogram, is_eligible);
+              ->GetErrorStateOfRefreshTokenForAccount(account_info.account_id)
+              .state() == GoogleServiceAuthError::NONE;
+  const bool is_eligible = can_use_model_execution && allowed_by_enterprise &&
+                           !is_disabled_by_gemini_policy_.value_or(false) &&
+                           authenticated && !profile_->IsOffTheRecord();
+  const gemini::IneligibilityReasons ineligibility_reasons =
+      gemini::IneligibilityReasons()
+          .set_workspace(is_disabled_by_gemini_policy_.value_or(false))
+          .set_chrome_enterprise(!allowed_by_enterprise)
+          .set_account_capability(!can_use_model_execution)
+          .set_authentication(!authenticated);
+  RecordGeminiIneligibilityReasons(ineligibility_reasons);
+  RecordGeminiEligibility(is_eligible);
 
   return is_eligible;
-}
-
-bool BwgService::IsBwgAvailableForWebState(web::WebState* web_state) {
-  if (!web_state || !IsProfileEligibleForBwg()) {
-    return false;
-  }
-
-  return CanExtractPageContextForWebState(web_state);
 }
 
 #pragma mark - signin::IdentityManager::Observer
@@ -161,6 +141,25 @@ void BwgService::CheckGeminiEnterpriseEligibility() {
       auth_service_, base::CallbackToBlock(base::BindOnce(
                          &BwgService::OnGeminiEligibilityResult,
                          eligibility_weak_ptr_factory_.GetWeakPtr())));
+}
+
+bool BwgService::CanUseGeminiModelExecution(const AccountInfo& account_info) {
+  // If the account info was not found, the user is likely not authenticated.
+  if (account_info.IsEmpty()) {
+    return false;
+  }
+
+  const AccountCapabilities capabilities =
+      account_info.GetAccountCapabilities();
+
+  // Checks whether the account capabilities permit model execution.
+  if (IsGeminiUpdatedEligibilityEnabled()) {
+    return signin::TriboolToBoolOr(capabilities.can_use_gemini_in_chrome(),
+                                   false);
+  }
+
+  return capabilities.can_use_model_execution_features() ==
+         signin::Tribool::kTrue;
 }
 
 void BwgService::ClearConsentPref() {

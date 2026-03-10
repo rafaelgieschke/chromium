@@ -43,22 +43,21 @@ class CORE_EXPORT GridLanesRunningPositions {
 
   GridLanesRunningPositions(const GridLayoutTrackCollection& track_collection,
                             const ComputedStyle& style,
-                            LayoutUnit tie_threshold,
-                            const Vector<wtf_size_t>& collapsed_track_indexes)
+                            LayoutUnit tie_threshold)
       : track_collection_openings_(
             /*size=*/track_collection.EndLineOfImplicitGrid(),
             Vector<TrackOpening>(
                 /*size=*/1,
                 TrackOpening{LayoutUnit(), LayoutUnit::Max()})),
-        auto_placement_cursor_(style.IsReverseGridLanesDirection()
+        auto_placement_cursor_(style.IsReverseGridLanesTrackDirection()
                                    ? track_collection.EndLineOfImplicitGrid()
                                    : 0),
         tie_threshold_(tie_threshold),
-        is_dense_packing_(style.IsGridAutoFlowAlgorithmDense()),
-        is_reverse_direction_(style.IsReverseGridLanesDirection()) {
+        is_dense_packing_(style.IsGridLanesPackDense()),
+        is_reverse_track_direction_(style.IsReverseGridLanesTrackDirection()) {
     // To avoid placing items in collapsed tracks, set such tracks to the max
     // size.
-    for (wtf_size_t index : collapsed_track_indexes) {
+    for (wtf_size_t index : track_collection.CollapsedTrackIndexes()) {
       track_collection_openings_[index].back().start_position =
           LayoutUnit::Max();
     }
@@ -262,7 +261,7 @@ class CORE_EXPORT GridLanesRunningPositions {
   LayoutUnit tie_threshold_;
 
   bool is_dense_packing_{false};
-  bool is_reverse_direction_{false};
+  bool is_reverse_track_direction_{false};
 };
 
 }  // namespace blink

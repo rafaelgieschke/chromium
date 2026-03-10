@@ -72,13 +72,10 @@ SpeechRecognitionDispatcherHost::SpeechRecognitionDispatcherHost(
 // static
 void SpeechRecognitionDispatcherHost::Create(
     int render_process_id,
-    RenderFrameHost* host,
+    int render_frame_id,
     mojo::PendingReceiver<media::mojom::SpeechRecognizer> receiver) {
-  // NOTE: Calling host->GetProcess() dereferences a WeakPtr which is bound to
-  //       the UI thread.  This runs on the IO thread and therefore the
-  //       render_process_id is passed in separately.
   mojo::MakeSelfOwnedReceiver(std::make_unique<SpeechRecognitionDispatcherHost>(
-                                  render_process_id, host->GetRoutingID()),
+                                  render_process_id, render_frame_id),
                               std::move(receiver));
 }
 
@@ -96,7 +93,6 @@ void SpeechRecognitionDispatcherHost::Start(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (params->audio_forwarder.is_valid()) {
-    CHECK_GT(params->channel_count, 0);
     if (params->channel_count <= 0) {
       mojo::ReportBadMessage("Channel count must be positive.");
       return;

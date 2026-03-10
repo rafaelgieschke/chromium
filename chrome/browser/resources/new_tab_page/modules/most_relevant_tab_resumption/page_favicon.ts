@@ -15,13 +15,7 @@ import {getCss} from './page_favicon.css.js';
  * @fileoverview This file provides a custom element displaying a page favicon.
  */
 
-declare global {
-  interface HTMLElementTagNameMap {
-    'page-favicon': PageFavicon;
-  }
-}
-
-class PageFavicon extends CrLitElement {
+class PageFaviconElement extends CrLitElement {
   static get is() {
     return 'page-favicon';
   }
@@ -80,7 +74,7 @@ class PageFavicon extends CrLitElement {
         this.style.setProperty(
             'background-image',
             getFaviconForPageURL(
-                this.url.url, this.isKnownToSync, '',
+                this.url, this.isKnownToSync, '',
                 /* --favicon-size */ this.size,
                 /* forceLightMode */ false,
                 /* fallbackToHost */ this.fallbackToHost));
@@ -89,4 +83,10 @@ class PageFavicon extends CrLitElement {
   }
 }
 
-customElements.define(PageFavicon.is, PageFavicon);
+declare global {
+  interface HTMLElementTagNameMap {
+    'page-favicon': PageFaviconElement;
+  }
+}
+
+customElements.define(PageFaviconElement.is, PageFaviconElement);

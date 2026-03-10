@@ -5,6 +5,7 @@
 #import "ios/web/web_state/ui/crw_context_menu_controller.h"
 
 #import "base/auto_reset.h"
+#import "base/feature_list.h"
 #import "base/values.h"
 #import "ios/web/common/crw_viewport_adjustment.h"
 #import "ios/web/common/crw_viewport_adjustment_container.h"
@@ -13,19 +14,24 @@
 #import "ios/web/public/ui/context_menu_params.h"
 #import "ios/web/public/web_state.h"
 #import "ios/web/public/web_state_delegate.h"
+#import "ios/web/web_state/ui/buildflags.h"
 #import "ios/web/web_state/ui/crw_context_menu_element_fetcher.h"
 #import "ui/gfx/geometry/rect_f.h"
 #import "ui/gfx/image/image.h"
 
 namespace {
 
-const CGFloat kJavaScriptTimeout = 1;
+const CGFloat kJavaScriptTimeout = 0.5;
 
 // Wrapper around CFRunLoop() to help crash server put all crashes happening
 // while the loop is executed in the same bucket. Marked as `noinline` to
 // prevent clang from optimising the function out in official builds.
 void __attribute__((noinline)) ContextMenuNestedCFRunLoop() {
-  CFRunLoopRun();
+  if (base::FeatureList::IsEnabled(web::features::kEnableContextMenuTimeout)) {
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.5, false);
+  } else {
+    CFRunLoopRun();
+  }
 }
 
 }  // namespace
@@ -43,6 +49,11 @@ void __attribute__((noinline)) ContextMenuNestedCFRunLoop() {
 @property(nonatomic, assign) web::WebState* webState;
 
 @property(nonatomic, strong) CRWContextMenuElementFetcher* elementFetcher;
+
+- (UIContextMenuConfiguration*)
+    contextMenuConfigurationWithParams:(web::ContextMenuParams)params
+                              location:(CGPoint)location
+                           interaction:(UIContextMenuInteraction*)interaction;
 
 @end
 
@@ -105,6 +116,36 @@ void __attribute__((noinline)) ContextMenuNestedCFRunLoop() {
   locationInWebView.x /= self.webView.scrollView.zoomScale;
   locationInWebView.y /= self.webView.scrollView.zoomScale;
 
+#if BUILDFLAG(IOS_USE_BE_DEFERRED_CONTEXT_MENU)
+  if (@available(iOS 17.4, *)) {
+    if (base::FeatureList::IsEnabled(
+            web::features::kEnableBEContextMenuConfiguration) &&
+        self.webState && self.webState->GetDelegate()) {
+      UIContextMenuConfiguration* config =
+          self.webState->GetDelegate()->GetCustomContextMenuConfiguration();
+      if (config) {
+        __weak __typeof(self) weakSelf = self;
+        [self.elementFetcher
+            fetchDOMElementAtPoint:locationInWebView
+                 completionHandler:^(const web::ContextMenuParams& params) {
+                   CRWContextMenuController* strongSelf = weakSelf;
+                   if (!strongSelf) {
+                     return;
+                   }
+                   UIContextMenuConfiguration* innerConfig = [strongSelf
+                       contextMenuConfigurationWithParams:params
+                                                 location:location
+                                              interaction:interaction];
+
+                   strongSelf.webState->GetDelegate()
+                       ->ContextMenuConfigurationLoaded(config, innerConfig);
+                 }];
+        return config;
+      }
+    }
+  }
+#endif
+
   std::optional<web::ContextMenuParams> optionalParams =
       [self fetchContextMenuParamsAtLocation:locationInWebView];
 
@@ -113,32 +154,9 @@ void __attribute__((noinline)) ContextMenuNestedCFRunLoop() {
   }
   web::ContextMenuParams params = optionalParams.value();
 
-  self.screenshotView.center = location;
-
-  // Adding the screenshotView here so they can be used in the
-  // delegate's methods. Will be removed if no menu is presented.
-  [interaction.view addSubview:self.screenshotView];
-
-  params.location = [self.webView convertPoint:location
-                                      fromView:interaction.view];
-
-  __block UIContextMenuConfiguration* configuration = nil;
-  if (self.webState && self.webState->GetDelegate()) {
-    self.webState->GetDelegate()->ContextMenuConfiguration(
-        self.webState, params, ^(UIContextMenuConfiguration* conf) {
-          configuration = conf;
-        });
-  }
-
-  if (configuration) {
-    // User long pressed on a link or an image. Cancelling all touches will
-    // intentionally suppress system context menu UI. See crbug.com/1250352.
-    [self cancelAllTouches];
-  } else {
-    [self.screenshotView removeFromSuperview];
-  }
-
-  return configuration;
+  return [self contextMenuConfigurationWithParams:params
+                                         location:location
+                                      interaction:interaction];
 }
 
 - (UITargetedPreview*)contextMenuInteraction:
@@ -201,6 +219,38 @@ void __attribute__((noinline)) ContextMenuNestedCFRunLoop() {
 }
 
 #pragma mark - Private
+
+- (UIContextMenuConfiguration*)
+    contextMenuConfigurationWithParams:(web::ContextMenuParams)params
+                              location:(CGPoint)location
+                           interaction:(UIContextMenuInteraction*)interaction {
+  self.screenshotView.center = location;
+
+  // Adding the screenshotView here so they can be used in the
+  // delegate's methods. Will be removed if no menu is presented.
+  [interaction.view addSubview:self.screenshotView];
+
+  params.location = [self.webView convertPoint:location
+                                      fromView:interaction.view];
+
+  __block UIContextMenuConfiguration* configuration = nil;
+  if (self.webState && self.webState->GetDelegate()) {
+    self.webState->GetDelegate()->ContextMenuConfiguration(
+        self.webState, params, ^(UIContextMenuConfiguration* conf) {
+          configuration = conf;
+        });
+  }
+
+  if (configuration) {
+    // User long pressed on a link or an image. Cancelling all touches will
+    // intentionally suppress system context menu UI. See crbug.com/1250352.
+    [self cancelAllTouches];
+  } else {
+    [self.screenshotView removeFromSuperview];
+  }
+
+  return configuration;
+}
 
 // Prevents the web view gesture recognizer to get the touch events.
 - (void)cancelAllTouches {

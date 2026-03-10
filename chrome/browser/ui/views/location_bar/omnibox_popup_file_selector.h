@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_UI_VIEWS_LOCATION_BAR_OMNIBOX_POPUP_FILE_SELECTOR_H_
 
 #include "base/memory/weak_ptr.h"
+#include "base/types/expected.h"
+#include "components/contextual_search/contextual_search_types.h"
 #include "components/lens/lens_bitmap_processing.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 
@@ -53,11 +55,13 @@ class OmniboxPopupFileSelector : public ui::SelectFileDialog::Listener {
 
   void OnFileDataReady(std::unique_ptr<FileData> file_data);
 
-  void UpdateSearchboxContextData(lens::MimeType mime_type,
-                                  std::string image_data_url,
-                                  std::string file_name,
-                                  std::string mime_string,
-                                  const base::UnguessableToken& file_token);
+  void UpdateSearchboxContextData(
+      lens::MimeType mime_type,
+      std::string image_data_url,
+      std::string file_name,
+      std::string mime_string,
+      base::expected<base::UnguessableToken,
+                     contextual_search::ContextUploadErrorType> result);
 
   // ui::SelectFileDialog::Listener:
   void FileSelected(const ui::SelectedFileInfo& file, int index) override;
@@ -71,6 +75,7 @@ class OmniboxPopupFileSelector : public ui::SelectFileDialog::Listener {
   std::optional<lens::ImageEncodingOptions> image_encoding_options_;
   gfx::NativeWindow owning_window_;
   bool was_ai_mode_open_ = false;
+  bool is_image_ = false;
 
   base::WeakPtrFactory<OmniboxPopupFileSelector> weak_factory_{this};
 };

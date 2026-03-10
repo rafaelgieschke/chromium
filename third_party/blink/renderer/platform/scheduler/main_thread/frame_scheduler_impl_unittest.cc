@@ -13,6 +13,7 @@
 #include "base/functional/callback.h"
 #include "base/functional/callback_helpers.h"
 #include "base/location.h"
+#include "base/memory/memory_pressure_listener_registry.h"
 #include "base/memory/raw_ptr.h"
 #include "base/metrics/field_trial_param_associator.h"
 #include "base/metrics/field_trial_params.h"
@@ -604,6 +605,7 @@ class FrameSchedulerImplTest : public testing::Test {
         {GetUnreportedTaskTime()});
   }
 
+  base::MemoryPressureListenerRegistry memory_pressure_listener_registry_;
   base::test::ScopedFeatureList feature_list_;
   base::test::TaskEnvironment task_environment_;
   std::unique_ptr<MainThreadSchedulerImpl> scheduler_;
@@ -1707,6 +1709,52 @@ TEST_F(FrameSchedulerImplTest, BackForwardCacheOptOut) {
   EXPECT_THAT(
       frame_scheduler_->GetActiveFeaturesTrackedForBackForwardCacheMetrics(),
       testing::UnorderedElementsAre());
+}
+
+TEST_F(FrameSchedulerImplTest, RetainsThreadTypeUnderWebRTCMediaThreadTypes) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kWebRtcUseMediaThreadTypes);
+
+  EXPECT_EQ(base::PlatformThread::GetCurrentThreadType(),
+            base::ThreadType::kPresentation);
+  auto feature_handle1 =
+      frame_scheduler_->RegisterFeature(SchedulingPolicy::Feature::kWebRTC, {});
+  EXPECT_EQ(base::PlatformThread::GetCurrentThreadType(),
+            base::ThreadType::kPresentation);
+  auto feature_handle2 =
+      frame_scheduler_->RegisterFeature(SchedulingPolicy::Feature::kWebRTC, {});
+  EXPECT_EQ(base::PlatformThread::GetCurrentThreadType(),
+            base::ThreadType::kPresentation);
+  feature_handle1.reset();
+  EXPECT_EQ(base::PlatformThread::GetCurrentThreadType(),
+            base::ThreadType::kPresentation);
+  feature_handle2.reset();
+  EXPECT_EQ(base::PlatformThread::GetCurrentThreadType(),
+            base::ThreadType::kPresentation);
+}
+
+TEST_F(FrameSchedulerImplTest, ResetsThreadTypeUnderWebRTCDefaultThreadType) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitWithFeatures(
+      {features::kRendererMainIsDefaultThreadTypeForWebRTC},
+      {features::kWebRtcUseMediaThreadTypes});
+
+  EXPECT_EQ(base::PlatformThread::GetCurrentThreadType(),
+            base::ThreadType::kPresentation);
+  auto feature_handle1 =
+      frame_scheduler_->RegisterFeature(SchedulingPolicy::Feature::kWebRTC, {});
+  EXPECT_EQ(base::PlatformThread::GetCurrentThreadType(),
+            base::ThreadType::kDefault);
+  auto feature_handle2 =
+      frame_scheduler_->RegisterFeature(SchedulingPolicy::Feature::kWebRTC, {});
+  EXPECT_EQ(base::PlatformThread::GetCurrentThreadType(),
+            base::ThreadType::kDefault);
+  feature_handle1.reset();
+  EXPECT_EQ(base::PlatformThread::GetCurrentThreadType(),
+            base::ThreadType::kDefault);
+  feature_handle2.reset();
+  EXPECT_EQ(base::PlatformThread::GetCurrentThreadType(),
+            base::ThreadType::kPresentation);
 }
 
 TEST_F(FrameSchedulerImplTest, FeatureUpload) {

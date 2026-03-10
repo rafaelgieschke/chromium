@@ -6,13 +6,13 @@
 
 #include <stddef.h>
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <string>
 
 #include "base/check.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
@@ -489,7 +489,7 @@ std::string GetExitTypePreferenceFromDisk(Profile* profile) {
   if (!value)
     return std::string();
 
-  base::Value::Dict* dict = value->GetIfDict();
+  base::DictValue* dict = value->GetIfDict();
   if (!dict)
     return std::string();
 
@@ -528,7 +528,7 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest,
   // It is important that the MessageLoop not pump extra messages during
   // EndSession() as some of those may be tasks queued to attempt to revive
   // services and processes that were just intentionally killed. This is a
-  // regression blocker for https://crbug.com/318527.
+  // regression blocker for https://crbug.com/40341017.
   // Need to use this WeakPtr workaround as the browser test harness runs all
   // tasks until idle when tearing down.
   struct FailsIfCalledWhileOnStack {
@@ -935,9 +935,9 @@ IN_PROC_BROWSER_TEST_F(ProfileBrowserTest, TestGetAllOffTheRecordProfiles) {
       regular_profile->GetAllOffTheRecordProfiles();
 
   EXPECT_EQ(3u, all_otrs.size());
-  EXPECT_TRUE(base::Contains(all_otrs, otr_profile1));
-  EXPECT_TRUE(base::Contains(all_otrs, otr_profile2));
-  EXPECT_TRUE(base::Contains(all_otrs, incognito_profile));
+  EXPECT_TRUE(std::ranges::contains(all_otrs, otr_profile1));
+  EXPECT_TRUE(std::ranges::contains(all_otrs, otr_profile2));
+  EXPECT_TRUE(std::ranges::contains(all_otrs, incognito_profile));
 }
 
 // Tests Profile::IsSameOrParent

@@ -4,6 +4,8 @@
 
 package org.chromium.android_webview.common;
 
+import static org.chromium.build.NullUtil.assumeNonNull;
+
 import static java.lang.annotation.ElementType.TYPE_USE;
 
 import android.content.SharedPreferences;
@@ -76,10 +78,7 @@ public class WebViewCachedFlags {
      */
     public static void init(SharedPreferences prefs) {
         synchronized (sLock) {
-            if (sInstance != null) {
-                throw new IllegalStateException(
-                        "Cannot call WebViewCachedFlags.init more than once.");
-            }
+            assert sInstance == null : "Cannot call WebViewCachedFlags.init more than once.";
             sInstance =
                     new WebViewCachedFlags(
                             prefs,
@@ -93,7 +92,10 @@ public class WebViewCachedFlags {
                                             AwFeatures.WEBVIEW_MOVE_WORK_TO_PROVIDER_INIT,
                                             DefaultState.DISABLED),
                                     Map.entry(
-                                            AwFeatures.WEBVIEW_EARLY_PERFETTO_INIT,
+                                            AwFeatures.WEBVIEW_EARLY_TRACING_INIT,
+                                            DefaultState.DISABLED),
+                                    Map.entry(
+                                            AwFeatures.WEBVIEW_BACKGROUND_TRACING_INIT,
                                             DefaultState.DISABLED),
                                     Map.entry(
                                             AwFeatures.WEBVIEW_EARLY_STARTUP_TRACING,
@@ -122,8 +124,39 @@ public class WebViewCachedFlags {
                                     Map.entry(
                                             AwFeatures
                                                     .WEBVIEW_OPT_IN_TO_GMS_BIND_SERVICE_OPTIMIZATION,
+                                            DefaultState.DISABLED),
+                                    Map.entry(
+                                            AwFeatures.WEBVIEW_DEFER_STARTUP_GMS_CALLS,
+                                            DefaultState.DISABLED),
+                                    Map.entry(
+                                            AwFeatures.WEBVIEW_ENABLE_API_CALL_USER_ACTIONS,
+                                            DefaultState.DISABLED),
+                                    Map.entry(
+                                            AwFeatures.WEBVIEW_USE_NONEMBEDDED_LOW_ENTROPY_SOURCE,
+                                            DefaultState.DISABLED),
+                                    Map.entry(
+                                            AwFeatures.WEBVIEW_FASTER_GET_DEFAULT_USER_AGENT,
                                             DefaultState.DISABLED)));
         }
+    }
+
+    /**
+     * Initializes cached flags singleton instance and uses the default values for all experiments.
+     *
+     * @param prefs the SharedPreferences which will be cleared during initialization.
+     */
+    public static void initForSafeMode(SharedPreferences prefs) {
+        init(prefs);
+        // Once regular init has finished, reset both enabled and disabled sets so that every flag
+        // uses its default value.
+        assumeNonNull(sInstance).resetToDefaults();
+    }
+
+    /** Forces all experiments to use their default values. */
+    @VisibleForTesting
+    public void resetToDefaults() {
+        mOverrideEnabled.clear();
+        mOverrideDisabled.clear();
     }
 
     /**

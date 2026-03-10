@@ -17,7 +17,6 @@
 #include "base/barrier_callback.h"
 #include "base/barrier_closure.h"
 #include "base/check_op.h"
-#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/queue.h"
 #include "base/files/file_path.h"
@@ -26,6 +25,7 @@
 #include "base/functional/callback.h"
 #include "base/functional/callback_helpers.h"
 #include "base/json/json_string_value_serializer.h"
+#include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/notreached.h"
@@ -41,6 +41,7 @@
 #include "base/version.h"
 #include "build/build_config.h"
 #include "chrome/enterprise_companion/global_constants.h"
+#include "chrome/updater/app/app_uninstall.h"
 #include "chrome/updater/app/app_utils.h"
 #include "chrome/updater/auto_run_on_os_upgrade_task.h"
 #include "chrome/updater/branded_constants.h"
@@ -69,6 +70,7 @@
 #include "components/update_client/protocol_definition.h"
 #include "components/update_client/update_client.h"
 #include "components/update_client/update_client_errors.h"
+#include "components/update_client/utils.h"
 
 #if BUILDFLAG(IS_MAC)
 #include <sys/mount.h>
@@ -110,8 +112,6 @@ UpdateService::Result ToResult(update_client::Error error) {
     case update_client::Error::INVALID_ARGUMENT:
     case update_client::Error::BAD_CRX_DATA_CALLBACK:
       return UpdateService::Result::kInvalidArgument;
-    case update_client::Error::MAX_VALUE:
-      NOTREACHED();
   }
 }
 
@@ -201,7 +201,7 @@ namespace {
 std::wstring GetTextForUpdateClientInstallError(int error_code,
                                                 const std::wstring& language) {
 #define INSTALL_SWITCH_ENTRY(error_code)                                     \
-  case static_cast<int>(error_code):                                         \
+  case std::to_underlying(error_code):                                       \
     return GetLocalizedStringF(IDS_GENERIC_INSTALL_ERROR_BASE, L#error_code, \
                                language)
 
@@ -230,7 +230,7 @@ std::wstring GetTextForUpdateClientInstallError(int error_code,
 
 std::wstring GetTextForDownloadError(int error, const std::wstring& language) {
 #define DOWNLOAD_SWITCH_ENTRY(error_code)                                     \
-  case static_cast<int>(error_code):                                          \
+  case std::to_underlying(error_code):                                        \
     return GetLocalizedStringF(IDS_GENERIC_DOWNLOAD_ERROR_BASE, L#error_code, \
                                language)
 
@@ -241,9 +241,9 @@ std::wstring GetTextForDownloadError(int error, const std::wstring& language) {
         update_client::CrxDownloaderError::BITS_TOO_MANY_JOBS);
     DOWNLOAD_SWITCH_ENTRY(update_client::CrxDownloaderError::GENERIC_ERROR);
 
-    case static_cast<int>(update_client::CrxDownloaderError::BAD_HASH):
+    case std::to_underlying(update_client::CrxDownloaderError::BAD_HASH):
       return GetLocalizedString(IDS_DOWNLOAD_HASH_MISMATCH_BASE);
-    case static_cast<int>(update_client::CrxDownloaderError::DISK_FULL):
+    case std::to_underlying(update_client::CrxDownloaderError::DISK_FULL):
       return GetLocalizedString(IDS_UPDATER_DISK_FULL_BASE);
 
     default:
@@ -255,11 +255,11 @@ std::wstring GetTextForDownloadError(int error, const std::wstring& language) {
 
 std::wstring GetTextForUnpackError(int error, const std::wstring& language) {
 #define UNPACK_SWITCH_ENTRY(error_code)                                     \
-  case static_cast<int>(error_code):                                        \
+  case std::to_underlying(error_code):                                      \
     return GetLocalizedStringF(IDS_GENERIC_UNPACK_ERROR_BASE, L#error_code, \
                                language)
 #define UNPACK_CACHING_SWITCH_ENTRY(error_code)                             \
-  case static_cast<int>(error_code):                                        \
+  case std::to_underlying(error_code):                                      \
     return GetLocalizedStringF(IDS_UNPACK_CACHING_ERROR_BASE, L#error_code, \
                                language)
 
@@ -308,7 +308,7 @@ std::wstring GetTextForServiceError(int error, const std::wstring& language) {
     SERVICE_SWITCH_ENTRY(update_client::ServiceError::UPDATE_DISABLED);
     SERVICE_SWITCH_ENTRY(update_client::ServiceError::CHECK_FOR_UPDATE_ONLY);
 
-    case static_cast<int>(update_client::ServiceError::CANCELLED):
+    case std::to_underlying(update_client::ServiceError::CANCELLED):
       return GetLocalizedString(IDS_SERVICE_ERROR_CANCELLED_BASE, language);
 
     default:
@@ -335,26 +335,27 @@ std::wstring GetTextForUpdateCheckError(int error,
     UPDATE_CHECK_SWITCH_ENTRY(update_client::ProtocolError::URL_FETCHER_FAILED);
     UPDATE_CHECK_SWITCH_ENTRY(update_client::ProtocolError::INVALID_APPID);
 
-    case static_cast<int>(update_client::ProtocolError::UNKNOWN_APPLICATION):
+    case std::to_underlying(update_client::ProtocolError::UNKNOWN_APPLICATION):
       return GetLocalizedString(IDS_UNKNOWN_APPLICATION_BASE, language);
 
-    case static_cast<int>(update_client::ProtocolError::RESTRICTED_APPLICATION):
+    case std::to_underlying(
+        update_client::ProtocolError::RESTRICTED_APPLICATION):
       return GetLocalizedString(IDS_RESTRICTED_RESPONSE_FROM_SERVER_BASE,
                                 language);
 
-    case static_cast<int>(update_client::ProtocolError::OS_NOT_SUPPORTED):
+    case std::to_underlying(update_client::ProtocolError::OS_NOT_SUPPORTED):
       return GetLocalizedString(IDS_OS_NOT_SUPPORTED_BASE, language);
 
-    case static_cast<int>(update_client::ProtocolError::HW_NOT_SUPPORTED):
+    case std::to_underlying(update_client::ProtocolError::HW_NOT_SUPPORTED):
       return GetLocalizedString(IDS_HW_NOT_SUPPORTED_BASE, language);
 
-    case static_cast<int>(update_client::ProtocolError::NO_HASH):
+    case std::to_underlying(update_client::ProtocolError::NO_HASH):
       return GetLocalizedString(IDS_NO_HASH_BASE, language);
 
-    case static_cast<int>(update_client::ProtocolError::UNSUPPORTED_PROTOCOL):
+    case std::to_underlying(update_client::ProtocolError::UNSUPPORTED_PROTOCOL):
       return GetLocalizedString(IDS_UNSUPPORTED_PROTOCOL_BASE, language);
 
-    case static_cast<int>(update_client::ProtocolError::INTERNAL):
+    case std::to_underlying(update_client::ProtocolError::INTERNAL):
       return GetLocalizedString(IDS_INTERNAL_BASE, language);
 
     // Http Status Code `401` Unauthorized.
@@ -1066,20 +1067,21 @@ void UpdateServiceImplImpl::Update(
             if (update_state.error_category !=
                 UpdateService::ErrorCategory::kNone) {
               event->AddError(
-                  {.category = static_cast<int>(update_state.error_category),
+                  {.category = std::to_underlying(update_state.error_category),
                    .code = update_state.error_code,
                    .extracode1 = update_state.extra_code1});
             }
             if (!update_state.next_version.empty()) {
               event->SetNextVersion(update_state.next_version);
             }
+            event->AddUpdateState(update_state.state);
             return update_state;
           },
           event.get())
           .Then(state_update);
   callback = base::BindOnce(
                  [](std::unique_ptr<UpdateEndEvent> event, Result result) {
-                   event->WriteAsync();
+                   event->SetResult(result).WriteAsync();
                    return result;
                  },
                  std::move(event))
@@ -1140,7 +1142,7 @@ void UpdateServiceImplImpl::UpdateAll(
 
   auto app_ids = config_->GetUpdaterPersistedData()->GetAppIds();
 
-  CHECK(base::Contains(
+  CHECK(std::ranges::contains(
       app_ids, base::ToLowerASCII(kUpdaterAppId),
       static_cast<std::string (*)(std::string_view)>(&base::ToLowerASCII)));
 
@@ -1162,15 +1164,15 @@ void UpdateServiceImplImpl::UpdateAll(
               UpdateEndEvent& event = events_by_app_id->at(update_state.app_id);
               if (update_state.error_category !=
                   UpdateService::ErrorCategory::kNone) {
-                event.AddError(
-                    {.category = static_cast<int>(update_state.error_category),
-                     .code = update_state.error_code,
-                     .extracode1 = update_state.extra_code1});
+                event.AddError({.category = std::to_underlying(
+                                    update_state.error_category),
+                                .code = update_state.error_code,
+                                .extracode1 = update_state.extra_code1});
               }
               if (!update_state.next_version.empty()) {
                 event.SetNextVersion(update_state.next_version);
               }
-              event.SetOutcome(update_state.state);
+              event.AddUpdateState(update_state.state);
             }
             return update_state;
           },
@@ -1181,7 +1183,7 @@ void UpdateServiceImplImpl::UpdateAll(
                         events_by_app_id,
                     Result result) {
                    for (auto& [_, event] : *events_by_app_id) {
-                     event.WriteAsync();
+                     event.SetResult(result).WriteAsync();
                    }
                    return result;
                  },
@@ -1229,7 +1231,7 @@ void UpdateServiceImplImpl::Install(
             if (update_state.error_category !=
                 UpdateService::ErrorCategory::kNone) {
               event->AddError(
-                  {.category = static_cast<int>(update_state.error_category),
+                  {.category = std::to_underlying(update_state.error_category),
                    .code = update_state.error_code,
                    .extracode1 = update_state.extra_code1});
             }
@@ -1398,26 +1400,32 @@ void UpdateServiceImplImpl::RunInstallerImpl(
       config_->GetUpdaterPersistedData()->GetBrandCode(app_id), pv,
       config_->GetUpdaterPersistedData()->GetExistenceCheckerPath(app_id));
 
-  const base::Version installer_version([&install_settings]() -> std::string {
-    std::unique_ptr<base::Value> install_settings_deserialized =
-        JSONStringValueDeserializer(install_settings)
-            .Deserialize(
-                /*error_code=*/nullptr, /*error_message=*/nullptr);
-    if (install_settings_deserialized) {
-      const base::Value::Dict* install_settings_dict =
-          install_settings_deserialized->GetIfDict();
+  std::unique_ptr<base::Value> install_settings_deserialized =
+      JSONStringValueDeserializer(install_settings)
+          .Deserialize(
+              /*error_code=*/nullptr, /*error_message=*/nullptr);
+  auto get_install_setting_string =
+      [](base::Value* install_settings_deserialized_raw,
+         std::string_view setting_key) -> std::string {
+    if (install_settings_deserialized_raw) {
+      const base::DictValue* install_settings_dict =
+          install_settings_deserialized_raw->GetIfDict();
       if (install_settings_dict) {
-        const std::string* installer_version_value =
-            install_settings_dict->FindString(kInstallerVersion);
-        if (installer_version_value) {
-          return *installer_version_value;
+        const std::string* install_setting_value =
+            install_settings_dict->FindString(setting_key);
+        if (install_setting_value) {
+          return *install_setting_value;
         }
       }
     }
 
     return {};
-  }());
+  };
 
+  const base::Version installer_version(get_install_setting_string(
+      install_settings_deserialized.get(), kInstallerVersion));
+  const std::string install_source(get_install_setting_string(
+      install_settings_deserialized.get(), kInstallSourceSwitch));
   // Create a task runner that:
   //   1) has SequencedTaskRunner::CurrentDefaultHandle set, to run
   //      `state_update` callback.
@@ -1476,7 +1484,8 @@ void UpdateServiceImplImpl::RunInstallerImpl(
              base::RepeatingCallback<void(const UpdateState&)> state_update,
              const std::string& app_id, const std::string& ap,
              const std::string& brand, const std::string& language,
-             bool new_install, base::OnceCallback<void(Result)> callback,
+             const std::string& install_source, bool new_install,
+             base::OnceCallback<void(Result)> callback,
              const InstallerResult& result) {
             // Final state update after installation completes.
             UpdateState state;
@@ -1528,7 +1537,9 @@ void UpdateServiceImplImpl::RunInstallerImpl(
               install_data.lang = language;
               install_data.brand = brand;
               install_data.requires_network_encryption = false;
-              install_data.install_source = kInstallSourceOffline;
+              install_data.install_source = install_source.empty()
+                                                ? kInstallSourceOffline
+                                                : install_source;
               install_data.version = installer_version;
               update_client->SendPing(
                   install_data,
@@ -1552,7 +1563,8 @@ void UpdateServiceImplImpl::RunInstallerImpl(
           },
           config_, config_->GetUpdaterPersistedData(), update_client_,
           installer_version, state_update, app_info.app_id, app_info.ap,
-          app_info.brand, language, new_install, std::move(callback)));
+          app_info.brand, language, install_source, new_install,
+          std::move(callback)));
 }
 
 void UpdateServiceImplImpl::GetUpdaterState(
@@ -1560,38 +1572,41 @@ void UpdateServiceImplImpl::GetUpdaterState(
   VLOG(1) << __func__;
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  // TODO(crbug.com/456497861): populate `UpdaterState`.
-  main_task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), UpdaterState()));
+  base::ThreadPool::CreateSequencedTaskRunner(
+      {base::MayBlock(), base::WithBaseSyncPrimitives(),
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})
+      ->PostTaskAndReplyWithResult(
+          FROM_HERE, base::BindOnce([] {
+            std::vector<std::string> inactive_versions;
+            for (const base::FilePath& version_executable_path :
+                 GetVersionExecutablePaths(GetUpdaterScope())) {
+              inactive_versions.push_back(update_client::StringTypeToUTF8(
+                  version_executable_path.DirName().BaseName().value()));
+            }
+            return inactive_versions;
+          }),
+          base::BindOnce(
+              [](scoped_refptr<PersistedData> persisted_data,
+                 base::OnceCallback<void(const UpdaterState&)> callback,
+                 const std::vector<std::string>& inactive_versions) {
+                std::move(callback).Run(
+                    UpdaterState(kUpdaterVersion, inactive_versions,
+                                 persisted_data->GetLastChecked(),
+                                 persisted_data->GetLastStarted()));
+              },
+              config_->GetUpdaterPersistedData(), std::move(callback)));
 }
 
-void UpdateServiceImplImpl::GetUpdaterPolicies(
-    base::OnceCallback<void(const base::flat_map<std::string, PolicyValue>&)>
-        callback) {
+void UpdateServiceImplImpl::GetPoliciesJson(
+    base::OnceCallback<void(const std::string&)> callback) {
   VLOG(1) << __func__;
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  // TODO(crbug.com/456497861): populate the vector of `PolicyValues`.
+  std::string policies_json;
+  base::JSONWriter::Write(config_->GetPolicyService()->GetAllPolicies(),
+                          &policies_json);
   main_task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback),
-                                base::flat_map<std::string, PolicyValue>()));
-}
-
-void UpdateServiceImplImpl::GetAppPolicies(
-    base::OnceCallback<
-        void(const base::flat_map<std::string,
-                                  base::flat_map<std::string, PolicyValue>>&)>
-        callback) {
-  VLOG(1) << __func__;
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-
-  // TODO(crbug.com/456497861): populate the vector of `PolicyValues`.
-  main_task_runner_->PostTask(
-      FROM_HERE,
-      base::BindOnce(
-          std::move(callback),
-          base::flat_map<std::string,
-                         base::flat_map<std::string, PolicyValue>>()));
+      FROM_HERE, base::BindOnce(std::move(callback), std::move(policies_json)));
 }
 
 bool UpdateServiceImplImpl::IsUpdateDisabledByPolicy(const std::string& app_id,

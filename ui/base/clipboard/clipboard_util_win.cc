@@ -10,6 +10,7 @@
 #include "ui/base/clipboard/clipboard_util_win.h"
 
 #include <shellapi.h>
+#include <shldisp.h>  // For IDataObjectAsyncCapability
 #include <wininet.h>  // For INTERNET_MAX_URL_LENGTH.
 #include <wrl/client.h>
 
@@ -19,8 +20,11 @@
 #include <string_view>
 #include <utility>
 
+#include "base/feature_list.h"
 #include "base/files/file_util.h"
+#include "base/json/json_reader.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -34,6 +38,7 @@
 #include "net/base/filename_util.h"
 #include "ui/base/clipboard/clipboard_format_type.h"
 #include "ui/base/clipboard/custom_data_helper.h"
+#include "ui/base/ui_base_features.h"
 #include "url/gurl.h"
 
 namespace ui {
@@ -42,6 +47,20 @@ namespace {
 
 constexpr STGMEDIUM kNullStorageMedium = {.tymed = TYMED_NULL,
                                           .pUnkForRelease = nullptr};
+
+// Result type for virtual file extraction: pairs of (temp_file_path,
+// display_name).
+using VirtualFileResults =
+    std::vector<std::pair<base::FilePath, base::FilePath>>;
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class AsyncVirtualFileExtractionError {
+  kCoGetInterfaceAndReleaseStreamFailed = 0,
+  kCoMarshalInterThreadInterfaceInStreamFailed = 1,
+  kSourceStreamSOKWithZeroBytesRead = 2,
+  kMaxValue = kSourceStreamSOKWithZeroBytesRead,
+};
 
 bool HasData(IDataObject* data_object, const ClipboardFormatType& format) {
   FORMATETC format_etc = format.ToFormatEtc();
@@ -101,6 +120,48 @@ void SplitUrlAndTitle(const std::u16string& str,
   } else {
     *url = GURL(str);
     title->assign(str);
+  }
+}
+
+// Parses a BookmarkListType clipboard payload. Accepts a JSON array of
+// objects with a required "url" string and an optional "title" string.
+// On success, appends each entry to url_infos as {GURL(url), title}.
+//
+// Example JSON payload:
+// [
+//   { "url": "https://chromium.org", "title": "Chromium Project" },
+//   { "url": "https://www.mozilla.org", "title": "Mozilla Home" }
+// ]
+void ParseBookmarkListData(const std::u16string& str,
+                           std::vector<ClipboardUrlInfo>& url_infos) {
+  const std::string utf8_payload = base::UTF16ToUTF8(str);
+
+  std::optional<base::Value> json_payload =
+      base::JSONReader::Read(utf8_payload, base::JSON_PARSE_RFC);
+
+  if (json_payload && json_payload->is_list()) {
+    for (const base::Value& item : json_payload->GetList()) {
+      if (!item.is_dict()) {
+        continue;
+      }
+
+      const auto& dict = item.GetDict();
+      const std::string* url_str = dict.FindString("url");
+      if (!url_str) {
+        continue;
+      }
+      GURL url(*url_str);
+      if (!url.is_valid()) {
+        continue;
+      }
+
+      std::u16string title;
+      if (const std::string* title_str = dict.FindString("title")) {
+        title = base::UTF8ToUTF16(*title_str);
+      }
+
+      url_infos.emplace_back(std::move(url), std::move(title));
+    }
   }
 }
 
@@ -233,14 +294,12 @@ base::FilePath WriteFileContentsToTempFile(const base::FilePath& suggested_name,
   return temp_path;
 }
 
-std::vector<
-    std::pair</*temp path*/ base::FilePath, /*display name*/ base::FilePath>>
-WriteAllFileContentsToTempFiles(
+VirtualFileResults WriteAllFileContentsToTempFiles(
     const std::vector<base::FilePath>& display_names,
     const std::vector<HGLOBAL>& memory_backed_contents) {
   DCHECK_EQ(display_names.size(), memory_backed_contents.size());
 
-  std::vector<std::pair<base::FilePath, base::FilePath>> filepaths_and_names;
+  VirtualFileResults filepaths_and_names;
   for (size_t i = 0; i < display_names.size(); i++) {
     base::FilePath temp_path = WriteFileContentsToTempFile(
         display_names[i], memory_backed_contents[i]);
@@ -321,10 +380,34 @@ HGLOBAL CopyFileContentsToHGlobal(IDataObject* data_object, LONG index) {
               content.pstm->Seek(zero_displacement, STREAM_SEEK_SET, nullptr);
         }
 
-        // Copy all data to the file stream.
-        ULARGE_INTEGER max_bytes;
-        max_bytes.QuadPart = std::numeric_limits<uint64_t>::max();
-        hr = content.pstm->CopyTo(stream.Get(), max_bytes, nullptr, nullptr);
+        if (base::FeatureList::IsEnabled(features::kVirtualFileChunkedRead)) {
+          // Read in chunks and write to the destination stream
+          constexpr ULONG kChunkSize = 16 * 1024 * 1024;  // 16 MB
+          auto buffer = std::make_unique<char[]>(kChunkSize);
+          ULONG bytes_read = 0;
+          while (SUCCEEDED(hr = content.pstm->Read(buffer.get(), kChunkSize,
+                                                   &bytes_read)) &&
+                 bytes_read > 0) {
+            ULONG bytes_written = 0;
+            hr = stream->Write(buffer.get(), bytes_read, &bytes_written);
+            if (FAILED(hr) || bytes_written != bytes_read) {
+              hr = E_FAIL;
+              break;
+            }
+          }
+          if (hr == S_OK && bytes_read == 0) {
+            base::UmaHistogramEnumeration(
+                "Clipboard.AsyncVirtualFileExtractionError",
+                AsyncVirtualFileExtractionError::
+                    kSourceStreamSOKWithZeroBytesRead);
+            LOG(WARNING) << "Source stream returned S_OK with zero bytes read.";
+          }
+        } else {
+          // Copy all data to the file stream.
+          ULARGE_INTEGER max_bytes;
+          max_bytes.QuadPart = std::numeric_limits<uint64_t>::max();
+          hr = content.pstm->CopyTo(stream.Get(), max_bytes, nullptr, nullptr);
+        }
 
         if (SUCCEEDED(hr_seek)) {
           // Restore the stream pointer to its original position.
@@ -360,6 +443,41 @@ HGLOBAL CopyFileContentsToHGlobal(IDataObject* data_object, LONG index) {
   ReleaseStgMedium(&content);
 
   return hdata;
+}
+
+// Extracts virtual file contents and writes them to temp files asynchronously
+// on a worker thread.
+VirtualFileResults ExtractVirtualFiles(
+    Microsoft::WRL::ComPtr<IStream> marshaled_data_object_stream,
+    const std::vector<base::FilePath>& display_names) {
+  base::ScopedBlockingCall scoped_blocking_call(FROM_HERE,
+                                                base::BlockingType::MAY_BLOCK);
+
+  // Unmarshal the IDataObject from the stream.
+  Microsoft::WRL::ComPtr<IDataObject> data_object;
+  HRESULT hr = ::CoGetInterfaceAndReleaseStream(
+      marshaled_data_object_stream.Get(), IID_PPV_ARGS(&data_object));
+  // CoGetInterfaceAndReleaseStream already released the stream;
+  // Detach() prevents ComPtr destructor from double-releasing.
+  marshaled_data_object_stream.Detach();
+
+  if (FAILED(hr) || !data_object) {
+    base::UmaHistogramEnumeration(
+        "Clipboard.AsyncVirtualFileExtractionError",
+        AsyncVirtualFileExtractionError::kCoGetInterfaceAndReleaseStreamFailed);
+    LOG(WARNING) << "CoGetInterfaceAndReleaseStream failed: "
+                 << (FAILED(hr) ? hr : E_UNEXPECTED);
+    return {};
+  }
+
+  std::vector<HGLOBAL> memory_backed_contents;
+  memory_backed_contents.reserve(display_names.size());
+  for (size_t i = 0; i < display_names.size(); i++) {
+    memory_backed_contents.push_back(
+        CopyFileContentsToHGlobal(data_object.Get(), static_cast<LONG>(i)));
+  }
+
+  return WriteAllFileContentsToTempFiles(display_names, memory_backed_contents);
 }
 
 std::wstring ConvertString(const char* string) {
@@ -468,6 +586,7 @@ bool HasUrl(IDataObject* data_object, bool convert_filenames) {
   return HasData(data_object, ClipboardFormatType::MozUrlType()) ||
          HasData(data_object, ClipboardFormatType::UrlType()) ||
          HasData(data_object, ClipboardFormatType::UrlAType()) ||
+         HasData(data_object, ClipboardFormatType::BookmarkListType()) ||
          (convert_filenames && HasFilenames(data_object));
 }
 
@@ -478,10 +597,30 @@ bool HasFilenames(IDataObject* data_object) {
          HasData(data_object, ClipboardFormatType::FilenameAType());
 }
 
+// Some virtual file providers like Windows ZIP Shell Folder
+// advertise these formats (CF_HDROP, CFSTR_FILENAME) in QueryGetData but fail
+// on GetData, so it must be checked if those formats can provide data to
+// correctly identify real files.
+bool HasRealFiles(IDataObject* data_object) {
+  DCHECK(data_object);
+  STGMEDIUM medium;
+  if (GetData(data_object, ClipboardFormatType::CFHDropType(), &medium) ||
+      GetData(data_object, ClipboardFormatType::FilenameType(), &medium) ||
+      GetData(data_object, ClipboardFormatType::FilenameAType(), &medium)) {
+    ReleaseStgMedium(&medium);
+    return true;
+  }
+  return false;
+}
+
 bool HasVirtualFilenames(IDataObject* data_object) {
   DCHECK(data_object);
+  const bool has_real_files = base::FeatureList::IsEnabled(
+                                  features::kUseClipboardStrictVirtualFileCheck)
+                                  ? HasRealFiles(data_object)
+                                  : HasFilenames(data_object);
   // Favor real files on the file system over virtual files.
-  return !HasFilenames(data_object) &&
+  return !has_real_files &&
          HasData(data_object, ClipboardFormatType::FileContentAtIndexType(0)) &&
          (HasData(data_object, ClipboardFormatType::FileDescriptorType()) ||
           HasData(data_object, ClipboardFormatType::FileDescriptorAType()));
@@ -506,38 +645,56 @@ bool HasPlainText(IDataObject* data_object) {
          HasData(data_object, ClipboardFormatType::PlainTextAType());
 }
 
-bool GetUrl(IDataObject* data_object,
-            GURL* url,
-            std::u16string* title,
-            bool convert_filenames) {
-  DCHECK(data_object && url && title);
+bool GetUrlInfos(IDataObject* data_object,
+                 std::vector<ClipboardUrlInfo>& url_infos,
+                 bool convert_filenames) {
+  DCHECK(data_object);
   if (!HasUrl(data_object, convert_filenames))
     return false;
 
   // Try to extract a URL from |data_object| in a variety of formats.
   STGMEDIUM store;
-  if (GetUrlFromHDrop(data_object, url, title))
+  GURL url;
+  std::u16string title;
+  if (GetUrlFromHDrop(data_object, &url, &title)) {
+    url_infos.emplace_back(url, title);
     return true;
+  }
 
+  // Check for the BookmarkListType clipboard format, which contains a JSON
+  // array of URLs and titles.
+  if (GetData(data_object, ClipboardFormatType::BookmarkListType(), &store)) {
+    {
+      base::win::ScopedHGlobal<wchar_t*> data(store.hGlobal);
+      ParseBookmarkListData(base::WideToUTF16(data.data()), url_infos);
+    }
+    ReleaseStgMedium(&store);
+    return !url_infos.empty();
+  }
+
+  // Check for single URL formats, including CFSTR_INETURLW,
+  // text/x-moz-url(a bookmark), or a text/uri-list that happens to
+  // contain only one URL.
   if (GetData(data_object, ClipboardFormatType::MozUrlType(), &store) ||
       GetData(data_object, ClipboardFormatType::UrlType(), &store)) {
     {
-      // Mozilla URL format or Unicode URL
       base::win::ScopedHGlobal<wchar_t*> data(store.hGlobal);
-      SplitUrlAndTitle(base::WideToUTF16(data.data()), url, title);
+      SplitUrlAndTitle(base::WideToUTF16(data.data()), &url, &title);
+      url_infos.emplace_back(url, title);
     }
     ReleaseStgMedium(&store);
-    return url->is_valid();
+    return url_infos[0].url.is_valid();
   }
 
+  // Check for single URL format(CFSTR_INETURLA),
   if (GetData(data_object, ClipboardFormatType::UrlAType(), &store)) {
     {
-      // URL using ASCII
       base::win::ScopedHGlobal<char*> data(store.hGlobal);
-      SplitUrlAndTitle(base::UTF8ToUTF16(data.data()), url, title);
+      SplitUrlAndTitle(base::UTF8ToUTF16(data.data()), &url, &title);
+      url_infos.emplace_back(url, title);
     }
     ReleaseStgMedium(&store);
-    return url->is_valid();
+    return url_infos[0].url.is_valid();
   }
 
   if (convert_filenames) {
@@ -545,11 +702,37 @@ bool GetUrl(IDataObject* data_object,
     if (!GetFilenames(data_object, &filenames))
       return false;
     DCHECK_GT(filenames.size(), 0U);
-    *url = net::FilePathToFileURL(base::FilePath(filenames[0]));
-    return url->is_valid();
+    GURL file_url = net::FilePathToFileURL(base::FilePath(filenames[0]));
+    if (file_url.is_valid()) {
+      url_infos.emplace_back(file_url, u"");
+    }
+    return !url_infos.empty();
   }
 
   return false;
+}
+
+std::vector<std::wstring> GetFilenames(HDROP hdrop) {
+  std::vector<std::wstring> filenames;
+  if (!hdrop) {
+    return filenames;
+  }
+
+  const unsigned num_files = DragQueryFileW(hdrop, 0xffffffff, 0, 0);
+  for (unsigned int i = 0; i < num_files; ++i) {
+    const UINT required_len = DragQueryFileW(hdrop, i, nullptr, 0);
+    if (!required_len) {
+      continue;
+    }
+    const UINT buffer_size = required_len + 1;
+    std::wstring filename;
+    if (!DragQueryFileW(hdrop, i, base::WriteInto(&filename, buffer_size),
+                        buffer_size)) {
+      continue;
+    }
+    filenames.push_back(std::move(filename));
+  }
+  return filenames;
 }
 
 bool GetFilenames(IDataObject* data_object,
@@ -562,19 +745,7 @@ bool GetFilenames(IDataObject* data_object,
   if (GetData(data_object, ClipboardFormatType::CFHDropType(), &medium)) {
     {
       base::win::ScopedHGlobal<HDROP> hdrop(medium.hGlobal);
-      if (!hdrop.data()) {
-        return false;
-      }
-
-      const int kMaxFilenameLen = 4096;
-      const unsigned num_files = DragQueryFileW(hdrop.data(), 0xffffffff, 0, 0);
-      for (unsigned int i = 0; i < num_files; ++i) {
-        wchar_t filename[kMaxFilenameLen];
-        if (!DragQueryFileW(hdrop.data(), i, filename, kMaxFilenameLen)) {
-          continue;
-        }
-        filenames->push_back(filename);
-      }
+      *filenames = GetFilenames(hdrop.data());
     }
     ReleaseStgMedium(&medium);
     return !filenames->empty();
@@ -674,12 +845,72 @@ std::optional<std::vector<base::FilePath>> GetVirtualFilenames(
   return ui::GetVirtualFilenames<FILEGROUPDESCRIPTORA>(data_object);
 }
 
+// Checks if the data object supports async operations via
+// IDataObjectAsyncCapability.
+Microsoft::WRL::ComPtr<IDataObjectAsyncCapability>
+GetAsyncCapabilityIfSupported(IDataObject* data_object) {
+  if (!base::FeatureList::IsEnabled(features::kAsyncVirtualFileExtraction)) {
+    return nullptr;
+  }
+
+  Microsoft::WRL::ComPtr<IDataObjectAsyncCapability> async_capability;
+  HRESULT hr = data_object->QueryInterface(IID_PPV_ARGS(&async_capability));
+  if (FAILED(hr)) {
+    return nullptr;
+  }
+
+  BOOL supports_async = FALSE;
+  hr = async_capability->GetAsyncMode(&supports_async);
+  if (FAILED(hr) || !supports_async) {
+    return nullptr;
+  }
+
+  return async_capability;
+}
+
+// Marshals the IDataObject to a stream for cross-thread COM access.
+Microsoft::WRL::ComPtr<IStream> MarshalDataObjectToStream(
+    IDataObject* data_object) {
+  Microsoft::WRL::ComPtr<IStream> marshaled_stream;
+  HRESULT hr = ::CoMarshalInterThreadInterfaceInStream(
+      IID_IDataObject, data_object, &marshaled_stream);
+  if (FAILED(hr) || !marshaled_stream) {
+    base::UmaHistogramEnumeration(
+        "Clipboard.AsyncVirtualFileExtractionError",
+        AsyncVirtualFileExtractionError::
+            kCoMarshalInterThreadInterfaceInStreamFailed);
+    LOG(WARNING) << "CoMarshalInterThreadInterfaceInStream failed: " << hr;
+    return nullptr;
+  }
+  return marshaled_stream;
+}
+
+// Posts the virtual file extraction work to a background thread.
+void PostVirtualFileExtractionTask(
+    Microsoft::WRL::ComPtr<IStream> marshaled_stream,
+    Microsoft::WRL::ComPtr<IDataObjectAsyncCapability> async_capability,
+    const std::vector<base::FilePath>& display_names,
+    base::OnceCallback<void(const VirtualFileResults&)> callback) {
+  base::ThreadPool::PostTaskAndReplyWithResult(
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
+      base::BindOnce(&ExtractVirtualFiles, marshaled_stream, display_names),
+      base::BindOnce(
+          [](Microsoft::WRL::ComPtr<IDataObjectAsyncCapability> async_cap,
+             base::OnceCallback<void(const VirtualFileResults&)> cb,
+             const VirtualFileResults& result) {
+            if (async_cap) {
+              HRESULT op_result = result.empty() ? E_FAIL : S_OK;
+              DWORD effect = result.empty() ? DROPEFFECT_NONE : DROPEFFECT_COPY;
+              async_cap->EndOperation(op_result, nullptr, effect);
+            }
+            std::move(cb).Run(result);
+          },
+          async_capability, std::move(callback)));
+}
+
 void GetVirtualFilesAsTempFiles(
     IDataObject* data_object,
-    base::OnceCallback<
-        void(const std::vector<std::pair</*temp path*/ base::FilePath,
-                                         /*display name*/ base::FilePath>>&)>
-        callback) {
+    base::OnceCallback<void(const VirtualFileResults&)> callback) {
   // Retrieve the display names of the virtual files.
   std::optional<std::vector<base::FilePath>> display_names =
       GetVirtualFilenames(data_object);
@@ -688,14 +919,29 @@ void GetVirtualFilesAsTempFiles(
     return;
   }
 
-  // Write the file contents to global memory.
-  std::vector<HGLOBAL> memory_backed_contents;
-  for (size_t i = 0; i < display_names.value().size(); i++) {
-    HGLOBAL hdata = CopyFileContentsToHGlobal(data_object, i);
-    memory_backed_contents.push_back(hdata);
+  // Try async extraction if supported.
+  if (auto async_capability = GetAsyncCapabilityIfSupported(data_object)) {
+    async_capability->StartOperation(nullptr);
+
+    if (auto marshaled_stream = MarshalDataObjectToStream(data_object)) {
+      PostVirtualFileExtractionTask(std::move(marshaled_stream),
+                                    std::move(async_capability),
+                                    display_names.value(), std::move(callback));
+      return;
+    }
+
+    // Marshal failed, end the async operation.
+    async_capability->EndOperation(E_FAIL, nullptr, DROPEFFECT_NONE);
   }
 
-  // Queue a task to actually write the temp files on a worker thread.
+  // Fallback: async not supported or marshal failed.
+  // Copy file contents to global memory on the UI thread.
+  std::vector<HGLOBAL> memory_backed_contents;
+  for (size_t i = 0; i < display_names.value().size(); i++) {
+    memory_backed_contents.push_back(CopyFileContentsToHGlobal(data_object, i));
+  }
+
+  // Write the temp files on a worker thread.
   base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
       base::BindOnce(&WriteAllFileContentsToTempFiles, display_names.value(),
@@ -731,10 +977,9 @@ bool GetPlainText(IDataObject* data_object, std::u16string* plain_text) {
 
   // If a file is dropped on the window, it does not provide either of the
   // plain text formats, so here we try to forcibly get a url.
-  GURL url;
-  std::u16string title;
-  if (GetUrl(data_object, &url, &title, false)) {
-    *plain_text = base::UTF8ToUTF16(url.spec());
+  std::vector<ClipboardUrlInfo> url_infos;
+  if (GetUrlInfos(data_object, url_infos, false)) {
+    *plain_text = base::UTF8ToUTF16(url_infos.front().url.spec());
     return true;
   }
   return false;
@@ -790,11 +1035,6 @@ bool GetFileContents(IDataObject* data_object,
               &content)) {
     if (TYMED_HGLOBAL == content.tymed) {
       base::win::ScopedHGlobal<char*> data(content.hGlobal);
-      file_contents->assign(data.data(), data.size());
-    } else if (TYMED_ISTREAM == content.tymed) {
-      // For example, files dragged out of a ZIP Folder.
-      HGLOBAL hdata = CopyFileContentsToHGlobal(data_object, 0);
-      base::win::ScopedHGlobal<char*> data(hdata);
       file_contents->assign(data.data(), data.size());
     }
     ReleaseStgMedium(&content);

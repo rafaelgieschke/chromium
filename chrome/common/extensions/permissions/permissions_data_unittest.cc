@@ -82,12 +82,12 @@ scoped_refptr<const Extension> GetExtensionWithHostPermission(
     const std::string& id,
     const std::string& host_permissions,
     ManifestLocation location) {
-  base::Value::List permissions;
+  base::ListValue permissions;
   if (!host_permissions.empty())
     permissions.Append(host_permissions);
 
   return ExtensionBuilder()
-      .SetManifest(base::Value::Dict()
+      .SetManifest(base::DictValue()
                        .Set("name", id)
                        .Set("description", "an extension")
                        .Set("manifest_version", 2)
@@ -864,7 +864,7 @@ TEST_F(ExtensionScriptAndCaptureVisibleTest, TabSpecific) {
 }
 
 // Test that activeTab is required for capturing chrome:// urls with
-// tabs.captureVisibleTab. https://crbug.com/810220.
+// tabs.captureVisibleTab. https://crbug.com/40090425.
 TEST_F(ExtensionScriptAndCaptureVisibleTest, CaptureChromeURLs) {
   const int kTabId = 42;
   scoped_refptr<const Extension> all_urls =
@@ -1569,11 +1569,11 @@ TEST_F(CaptureVisiblePageTest, URLsCapturableOnlyWithActiveTab) {
       GURL("chrome-extension://cccccccccccccccccccccccccccccccc/foo.html"),
 
       // filesystem: urls behave like the underlying origin.
-      // https://crbug.com/853392: filesystem: URLs don't work with activeTab.
+      // https://crbug.com/40581025: filesystem: URLs don't work with activeTab.
       // GURL("filesystem:chrome-extension://cccccccccccccccccccccccccccccccc/foo"),
 
       // blob: urls behave like the underlying origin.
-      // https://crbug.com/853392: blob: URLs don't work with activeTab.
+      // https://crbug.com/40581025: blob: URLs don't work with activeTab.
       // GURL("blob:chrome-extension://cccccccccccccccccccccccccccccccc/bar"),
 
       // data: urls have no associated origin, so are more restricted.
@@ -1691,9 +1691,9 @@ TEST_F(CaptureVisiblePageTest, SelfExtensionURLs) {
 
   const GURL active_tab_extension_urls[] = {
       active_tab().GetResourceURL("foo.html"),
-      // https://crbug.com/853392: filesystem: URLs don't work with activeTab.
+      // https://crbug.com/40581025: filesystem: URLs don't work with activeTab.
       // get_filesystem_url_for_extension(active_tab()),
-      // https://crbug.com/853392: blob: URLs don't work with activeTab.
+      // https://crbug.com/40581025: blob: URLs don't work with activeTab.
       // get_blob_url_for_extension(active_tab()),
   };
 

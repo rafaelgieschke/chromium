@@ -14,6 +14,8 @@
 #include "components/services/storage/dom_storage/dom_storage_database.h"
 
 namespace storage {
+class DomStorageDatabaseLevelDB;
+
 // The "map-" prefix for all key/value pairs.
 inline constexpr const uint8_t kMapIdPrefix[] = {'m', 'a', 'p', '-'};
 
@@ -70,24 +72,18 @@ class SessionStorageLevelDB : public DomStorageDatabase {
   using PassKey = base::PassKey<DomStorageDatabaseFactory>;
 
  public:
-  // Use `DomStorageDatabaseFactory::Open()` to construct a
+  // Use `DomStorageDatabaseFactory::Create()` to construct a
   // `base::SequenceBound<DomStorageDatabase>`.
   explicit SessionStorageLevelDB(PassKey);
   ~SessionStorageLevelDB() override;
-
-  // Opens an on-disk or in-memory LevelDB and returns the result. To create an
-  // in-memory database, provide an empty `directory`.
-  DbStatus Open(PassKey,
-                const base::FilePath& directory,
-                const std::string& name,
-                const std::optional<base::trace_event::MemoryAllocatorDumpGuid>&
-                    memory_dump_id);
 
   SessionStorageLevelDB(const SessionStorageLevelDB&) = delete;
   SessionStorageLevelDB& operator=(const SessionStorageLevelDB&) = delete;
 
   // Implement the `DomStorageDatabase` interface:
-  DomStorageDatabaseLevelDB& GetLevelDB() override;
+  DbStatus Open(const base::FilePath& directory,
+                const std::optional<base::trace_event::MemoryAllocatorDumpGuid>&
+                    memory_dump_id) override;
   StatusOr<std::map<Key, Value>> ReadMapKeyValues(
       MapLocator map_locator) override;
   DbStatus UpdateMaps(std::vector<MapBatchUpdate> map_updates) override;
@@ -114,25 +110,13 @@ class SessionStorageLevelDB : public DomStorageDatabase {
                           std::vector<MapLocator> maps_to_delete) override;
 
   DbStatus PurgeOrigins(std::set<url::Origin> origins) override;
-  DbStatus RewriteDB() override;
+  DbStatus CleanUpStaleData() override;
 
   // Test-only functions.
+  DbStatus PutVersionForTesting(int64_t version) override;
   void MakeAllCommitsFailForTesting() override;
   void SetDestructionCallbackForTesting(base::OnceClosure callback) override;
-
-  // Returns `namespace-<session_id>-<storage_key>`.
-  //
-  // TODO(crbug.com/377242771): Make private after refactoring to support a
-  // swappable backend for SQLite.
-  static Key CreateMapMetadataKey(std::string session_id,
-                                  const blink::StorageKey& storage_key);
-
-  // Returns the prefix for all key/value pairs that belong to a specific map.
-  // For example: "map-1-".
-  //
-  // TODO(crbug.com/377242771): Make private after refactoring to support a
-  // swappable backend for SQLite.
-  static Key GetMapPrefix(int64_t map_id);
+  DomStorageDatabaseLevelDB& GetLevelDBForTesting();
 
  private:
   // Parses the value from the next map ID key in the LevelDB.  Converts the

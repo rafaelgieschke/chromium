@@ -16,6 +16,10 @@ namespace base {
 // running USER_VISIBLE tasks.
 BASE_EXPORT BASE_DECLARE_FEATURE(kUseUtilityThreadGroup);
 
+// Under this feature, thread groups will be created for kAudioProcessing and
+// kPresentation ThreadTypes.
+BASE_EXPORT BASE_DECLARE_FEATURE(kUseHighPriorityThreadGroup);
+
 // Under this feature, a non-zero leeway is added to delayed tasks. Along with
 // DelayPolicy, this affects the time at which a delayed task runs.
 BASE_EXPORT BASE_DECLARE_FEATURE(kAddTaskLeewayFeature);
@@ -46,6 +50,16 @@ BASE_EXPORT BASE_DECLARE_FEATURE(kUIPumpImprovementsWin);
 
 // Feature to run tasks by batches before pumping out messages.
 BASE_EXPORT BASE_DECLARE_FEATURE(kRunTasksByBatches);
+
+// Feature to adjust how quickly the ThreadPool capacity is increased when
+// a foreground task is blocked in a ScopedBlockingCall.
+BASE_EXPORT BASE_DECLARE_FEATURE(kThreadPoolForegroundBlockingTimeouts);
+BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
+    TimeDelta,
+    kThreadPoolForegroundMayBlockThresholdParam);
+BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
+    TimeDelta,
+    kThreadPoolForegroundBlockedWorkersPollParam);
 
 }  // namespace base
 

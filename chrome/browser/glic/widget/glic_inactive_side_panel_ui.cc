@@ -91,7 +91,8 @@ bool GlicInactiveSidePanelUi::IsShowing() const {
   if (!glic_side_panel_coordinator) {
     return false;
   }
-  return glic_side_panel_coordinator->IsShowing();
+  return glic_side_panel_coordinator->state() !=
+         GlicSidePanelCoordinator::State::kClosed;
 }
 
 void GlicInactiveSidePanelUi::Show(const ShowOptions& options) {
@@ -107,17 +108,19 @@ void GlicInactiveSidePanelUi::Show(const ShowOptions& options) {
   glic_side_panel_coordinator->Show(suppress_animations);
 }
 
-void GlicInactiveSidePanelUi::Close() {
+void GlicInactiveSidePanelUi::Close(const CloseOptions& options) {
   auto* glic_side_panel_coordinator = GetGlicSidePanelCoordinator();
   if (!glic_side_panel_coordinator) {
     return;
   }
-  glic_side_panel_coordinator->Close();
+  glic_side_panel_coordinator->Close(options);
 }
 
+#if !BUILDFLAG(IS_ANDROID)
 base::WeakPtr<views::View> GlicInactiveSidePanelUi::GetView() {
   return nullptr;
 }
+#endif
 
 void GlicInactiveSidePanelUi::Focus() {
   // Do nothing. Inactive view doesn't have webcontents to set focus on.

@@ -9,10 +9,10 @@ import type {AppElement} from './app.js';
 export function getHtml(this: AppElement) {
   // clang-format off
   return html`<!--_html_template_start_-->
-<immersive-mode-header id="immersiveHeader"
-    ?hidden="${!this.isImmersiveMode()}">
-</immersive-mode-header>
-<div id="appFlexParent">
+<div id="appFlexParent" class="${this.getImmersiveClass_()}">
+<!-- Overlay to prevent cursor from interacting with background elements when
+ the settings menu is open. -->
+<div id="settingsOverlay" class="settings-overlay"></div>
   <div id="toolbar-container">
     <read-anything-toolbar
         .presentationState="${this.presentationState_}"
@@ -26,6 +26,9 @@ export function getHtml(this: AppElement) {
         .previewVoicePlaying="${this.previewVoicePlaying_}"
         .localeToDisplayName="${this.localeToDisplayName_}"
         .pageLanguage="${this.pageLanguage_}"
+        .isImmersiveMode="${this.isImmersiveMode()}"
+        .lineFocusStyle="${this.lineFocusStyle_}"
+        .lineFocusMovement="${this.lineFocusMovement_}"
         @select-voice="${this.onSelectVoice_}"
         @voice-language-toggle="${this.onVoiceLanguageToggle_}"
         @preview-voice="${this.onPreviewVoice_}"
@@ -37,8 +40,8 @@ export function getHtml(this: AppElement) {
         @rate-change="${this.onSpeechRateChange_}"
         @next-granularity-click="${this.onNextGranularityClick_}"
         @previous-granularity-click="${this.onPreviousGranularityClick_}"
-        @links-toggle="${this.updateLinks_}"
-        @images-toggle="${this.updateImages_}"
+        @links-toggle="${this.onLinksToggle_}"
+        @images-toggle="${this.onImagesToggle_}"
         @letter-spacing-change="${this.onLetterSpacingChange_}"
         @theme-change="${this.onThemeChange_}"
         @line-spacing-change="${this.onLineSpacingChange_}"
@@ -47,7 +50,11 @@ export function getHtml(this: AppElement) {
         @toolbar-overflow="${this.onToolbarOverflow_}"
         @language-menu-open="${this.onLanguageMenuOpen_}"
         @language-menu-close="${this.onLanguageMenuClose_}"
-        @line-focus-change="${this.onLineFocusChange_}"
+        @line-focus-style-change="${this.onLineFocusStyleChange_}"
+        @line-focus-movement-change="${this.onLineFocusMovementChange_}"
+        @close-all-menus="${this.onCloseAllMenus_}"
+        @settings-opened="${this.onSettingsOpened_}"
+        @settings-closed="${this.onSettingsClosed_}"
         id="toolbar">
     </read-anything-toolbar>
   </div>
@@ -56,7 +63,7 @@ export function getHtml(this: AppElement) {
     <div id="lineFocus"></div>
     <div id="containerScroller" class="sp-scroller"
         @scroll="${this.onContainerScroll_}"
-        @scrollend="${this.onContainerScrollEnd_}">
+        @scrollend="${this.onContainerScrollend_}">
       <div id="container"
         class=
           "user-select-disabled-when-speech-active-${this.isSpeechActive_}">
@@ -69,7 +76,9 @@ export function getHtml(this: AppElement) {
       Load More
     </cr-button>
   </div>
-  <div id="empty-state-container" ?hidden="${this.computeHasContent()}">
+  <div id="empty-state-container"
+      class="sp-scroller"
+      ?hidden="${this.computeHasContent()}">
     <sp-empty-state image-path="${this.contentState_.imagePath}"
         dark-image-path="${this.contentState_.darkImagePath}"
         heading="${this.contentState_.heading}"

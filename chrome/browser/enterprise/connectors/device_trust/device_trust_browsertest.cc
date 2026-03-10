@@ -10,7 +10,6 @@
 #include "base/functional/bind.h"
 #include "base/test/test_future.h"
 #include "base/values.h"
-#include "build/branding_buildflags.h"
 #include "build/build_config.h"
 #include "chrome/browser/enterprise/connectors/device_trust/common/metrics_utils.h"
 #include "chrome/browser/enterprise/connectors/device_trust/device_trust_features.h"
@@ -235,9 +234,6 @@ class DeviceTrustDelayedManagementBrowserTest
     scoped_feature_list_.InitWithFeatures(
         /*enabled_features=*/
         {
-#if BUILDFLAG(IS_MAC)
-            kDTCKeyRotationUploadedBySharedAPIEnabled,
-#endif  // BUILDFLAG(IS_MAC)
             kDTCKeyUploadedBySharedAPIEnabled,
 #if BUILDFLAG(IS_CHROMEOS)
             ash::features::kUnmanagedDeviceDeviceTrustConnectorEnabled
@@ -299,17 +295,16 @@ IN_PROC_BROWSER_TEST_F(DeviceTrustBrowserTest, SignalsContract) {
       DeviceTrustServiceFactory::GetForProfile(browser()->profile());
   ASSERT_TRUE(device_trust_service);
 
-  base::test::TestFuture<base::Value::Dict> future;
+  base::test::TestFuture<base::DictValue> future;
   device_trust_service->GetSignals(future.GetCallback());
 
   // This error most likely indicates that one of the signals decorators did
   // not invoke its done_closure in time.
   ASSERT_TRUE(future.Wait()) << "Timed out while collecting signals.";
 
-  const base::Value::Dict& signals_dict = future.Get();
+  const base::DictValue& signals_dict = future.Get();
 
-  const auto signals_contract_map =
-      device_signals::test::GetSignalsContract(IsDTCAntivirusSignalEnabled());
+  const auto signals_contract_map = device_signals::test::GetSignalsContract();
   ASSERT_FALSE(signals_contract_map.empty());
   for (const auto& signals_contract_entry : signals_contract_map) {
     // First is the signal name.
@@ -491,9 +486,6 @@ class DeviceTrustBrowserTestWithConsent
         {
             enterprise_signals::features::kDeviceSignalsConsentDialog,
             kDTCKeyUploadedBySharedAPIEnabled,
-#if BUILDFLAG(IS_MAC)
-            kDTCKeyRotationUploadedBySharedAPIEnabled,
-#endif  // BUILDFLAG(IS_MAC)
         },
         /*disabled_features=*/{});
   }
@@ -900,18 +892,17 @@ IN_PROC_BROWSER_TEST_F(DeviceTrustBrowserTestSignalsContractForUnmanagedDevices,
       DeviceTrustServiceFactory::GetForProfile(browser()->profile());
   ASSERT_TRUE(device_trust_service);
 
-  base::test::TestFuture<base::Value::Dict> future;
+  base::test::TestFuture<base::DictValue> future;
   device_trust_service->GetSignals(future.GetCallback());
 
   // This error most likely indicates that one of the signals decorators did
   // not invoke its done_closure in time.
   ASSERT_TRUE(future.Wait()) << "Timed out while collecting signals.";
 
-  const base::Value::Dict& signals_dict = future.Get();
+  const base::DictValue& signals_dict = future.Get();
 
   const auto signals_contract_map =
-      device_signals::test::GetSignalsContractForUnmanagedDevices(
-          IsDTCAntivirusSignalEnabled());
+      device_signals::test::GetSignalsContractForUnmanagedDevices();
   ASSERT_FALSE(signals_contract_map.empty());
   for (const auto& signals_contract_entry : signals_contract_map) {
     // First is the signal name.

@@ -19,7 +19,6 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/page_action/page_action_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/branded_strings.h"
 #include "chrome/test/base/chrome_test_utils.h"
@@ -27,7 +26,7 @@
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/input/native_web_keyboard_event.h"
-#include "components/tabs/public/split_tab_visual_data.h"
+#include "components/split_tabs/split_tab_visual_data.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/test_navigation_observer.h"
@@ -49,6 +48,7 @@
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "ash/wm/window_pin_util.h"
+#include "chrome/browser/ash/boca/on_task/on_task_locked_controller.h"
 #endif
 
 using views::FocusManager;
@@ -171,8 +171,7 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, BrowserFullscreenShowTopView) {
   // In non-immersive mode, the bookmark visibility cannot be changed because
   // the toolbar is invisible. In immersive mode, the bookmark visibility should
   // be able to change because the toolbar cannot be permanently hidden.
-  EXPECT_EQ(chrome::IsCommandEnabled(browser(), IDC_SHOW_BOOKMARK_BAR),
-            base::FeatureList::IsEnabled(features::kImmersiveFullscreen));
+  EXPECT_TRUE(chrome::IsCommandEnabled(browser(), IDC_SHOW_BOOKMARK_BAR));
 
   if (ImmersiveModeController::From(browser())->IsEnabled()) {
     // Move mouse to the upper border of the browser window and the toolbar
@@ -230,7 +229,7 @@ IN_PROC_BROWSER_TEST_F(BrowserViewTest, BrowserFullscreenShowTopView) {
   EXPECT_EQ(top_view_in_browser_fullscreen, browser_view->GetTabStripVisible());
   // This makes sure that the layout was updated accordingly.
   EXPECT_EQ(top_view_in_browser_fullscreen,
-            browser_view->tabstrip()->GetVisible());
+            browser_view->horizontal_tab_strip_for_testing()->GetVisible());
   EXPECT_EQ(top_view_in_browser_fullscreen,
             chrome::IsCommandEnabled(browser(), IDC_SHOW_BOOKMARK_BAR));
 
@@ -634,14 +633,16 @@ IN_PROC_BROWSER_TEST_F(BrowserViewLockedFullscreenTestChromeOS,
 
 IN_PROC_BROWSER_TEST_F(BrowserViewLockedFullscreenTestChromeOS,
                        DisableImmersiveModeWhenNotLockedForOnTask) {
-  browser()->SetLockedForOnTask(false);
+  ash::boca::OnTaskLockedController::From(browser())->set_locked_for_on_task(
+      false);
   ash::PinWindow(browser()->window()->GetNativeWindow(), /*trusted=*/true);
   EXPECT_FALSE(ImmersiveModeController::From(browser())->IsEnabled());
 }
 
 IN_PROC_BROWSER_TEST_F(BrowserViewLockedFullscreenTestChromeOS,
                        EnableImmersiveModeWhenLockedForOnTask) {
-  browser()->SetLockedForOnTask(true);
+  ash::boca::OnTaskLockedController::From(browser())->set_locked_for_on_task(
+      true);
   ash::PinWindow(browser()->window()->GetNativeWindow(), /*trusted=*/true);
   EXPECT_TRUE(ImmersiveModeController::From(browser())->IsEnabled());
 }

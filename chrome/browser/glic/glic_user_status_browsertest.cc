@@ -180,7 +180,7 @@ class GlicUserStatusBrowserTest : public InProcessBrowserTest {
   // Gets the user status code from the pref.
   std::optional<UserStatusCode> GetCachedStatusCode() {
     PrefService* prefs = profile()->GetPrefs();
-    const base::Value::Dict& dict = prefs->GetDict(prefs::kGlicUserStatus);
+    const base::DictValue& dict = prefs->GetDict(prefs::kGlicUserStatus);
     if (!dict.FindInt(kUserStatus)) {
       return std::nullopt;
     }
@@ -198,7 +198,7 @@ class GlicUserStatusBrowserTest : public InProcessBrowserTest {
   }
 
   void SetGlicUserStatus(UserStatusCode code) {
-    base::Value::Dict data;
+    base::DictValue data;
     data.Set(kAccountId, GetGaiaIdHashBase64());
     data.Set(kUserStatus, code);
     data.Set(kUpdatedAt, base::Time::Now().InSecondsFSinceUnixEpoch());
@@ -207,9 +207,9 @@ class GlicUserStatusBrowserTest : public InProcessBrowserTest {
   }
 
   // Gets the full user status details from prefs.
-  std::optional<base::Value::Dict> GetCachedStatusDict() {
+  std::optional<base::DictValue> GetCachedStatusDict() {
     PrefService* prefs = profile()->GetPrefs();
-    const base::Value::Dict& dict = prefs->GetDict(prefs::kGlicUserStatus);
+    const base::DictValue& dict = prefs->GetDict(prefs::kGlicUserStatus);
     if (dict.empty()) {
       return std::nullopt;
     }
@@ -254,7 +254,7 @@ IN_PROC_BROWSER_TEST_F(GlicUserStatusBrowserTest, EnterpriseSignInEnabled) {
   ASSERT_TRUE(base::test::RunUntil(
       [&]() { return GetCachedStatusDict().has_value(); }));
 
-  std::optional<base::Value::Dict> cached_dict = GetCachedStatusDict();
+  std::optional<base::DictValue> cached_dict = GetCachedStatusDict();
   EXPECT_EQ(cached_dict->FindInt(kUserStatus).value_or(-1),
             UserStatusCode::ENABLED);
   EXPECT_EQ(*cached_dict->FindString(kAccountId), GetGaiaIdHashBase64());
@@ -444,7 +444,7 @@ IN_PROC_BROWSER_TEST_F(GlicUserStatusBrowserTest,
   ASSERT_TRUE(base::test::RunUntil(
       [&]() { return GetCachedStatusDict().has_value(); }));
 
-  std::optional<base::Value::Dict> cached_dict = GetCachedStatusDict();
+  std::optional<base::DictValue> cached_dict = GetCachedStatusDict();
   EXPECT_EQ(cached_dict->FindInt(kUserStatus).value_or(-1),
             UserStatusCode::DISABLED_BY_ADMIN);
   EXPECT_EQ(*cached_dict->FindString(kAccountId), GetGaiaIdHashBase64());
@@ -474,7 +474,7 @@ IN_PROC_BROWSER_TEST_F(GlicUserStatusBrowserTest,
   ASSERT_TRUE(base::test::RunUntil(
       [&]() { return GetCachedStatusDict().has_value(); }));
 
-  std::optional<base::Value::Dict> cached_dict = GetCachedStatusDict();
+  std::optional<base::DictValue> cached_dict = GetCachedStatusDict();
   EXPECT_EQ(cached_dict->FindInt(kUserStatus).value_or(-1),
             UserStatusCode::DISABLED_OTHER);
   EXPECT_EQ(*cached_dict->FindString(kAccountId), GetGaiaIdHashBase64());
@@ -517,13 +517,78 @@ IN_PROC_BROWSER_TEST_F(
   ASSERT_TRUE(base::test::RunUntil(
       [&]() { return GetCachedStatusDict().has_value(); }));
 
-  std::optional<base::Value::Dict> cached_dict = GetCachedStatusDict();
+  std::optional<base::DictValue> cached_dict = GetCachedStatusDict();
   EXPECT_EQ(cached_dict->FindInt(kUserStatus).value_or(-1),
             UserStatusCode::DISABLED_BY_ADMIN);
   EXPECT_EQ(*cached_dict->FindString(kAccountId), GetGaiaIdHashBase64());
 
   // Verify GlicEnabling status - Should be disabled by this status
   EXPECT_FALSE(IsGlicEnabled());
+}
+
+// Regression test for crbug.com/481357491.
+IN_PROC_BROWSER_TEST_F(
+    GlicUserStatusBrowserTest,
+    EnterpriseSignInRefreshTokenLostAndRecoveredDuringManagedCheck) {
+  RegisterUserStatusHandler(
+      net::HTTP_OK,
+      R"({"isGlicEnabled": true, "isAccessDeniedByAdmin": false})");
+  net::test_server::EmbeddedTestServerHandle test_server_handle;
+  ASSERT_TRUE(test_server_handle =
+                  embedded_test_server()->StartAndReturnHandle());
+
+  SetGlicUserStatusUrlForTest();
+
+  // Sign in, but don't provide extended account info. This will leave the
+  // account managed status as pending.
+  identity_test_env_->SetAutomaticIssueOfAccessTokens(true);
+  AccountInfo account_info = identity_test_env_->MakePrimaryAccountAvailable(
+      enterpriseAccount.email, signin::ConsentLevel::kSignin);
+  enterprise_util::SetUserAcceptedAccountManagement(profile(), true);
+  AccountCapabilitiesTestMutator mutator(&account_info.capabilities);
+  SetGlicCapability(mutator, true);
+  identity_test_env_->UpdateAccountInfoForAccount(account_info);
+  EXPECT_FALSE(GetCachedStatusDict().has_value());
+
+  // Revoke the refresh token. This should cause the managed status check to
+  // fail, and no RPC will be sent.
+  identity_test_env_->RemoveRefreshTokenForAccount(account_info.account_id);
+
+  // Verify no request is sent.
+  {
+    base::RunLoop run_loop;
+    base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
+        FROM_HERE, run_loop.QuitClosure(), base::Milliseconds(300));
+    run_loop.Run();
+    EXPECT_FALSE(GetCachedStatusDict().has_value());
+  }
+
+  // Now, restore the refresh token and provide account info. This should allow
+  // the fetcher to retry and succeed.
+  identity_test_env_->MakeAccountAvailable(account_info.email);
+
+  // Re-apply capabilities, as they are lost when the token is restored.
+  account_info = identity_manager_->FindExtendedAccountInfoByAccountId(
+      account_info.account_id);
+  AccountCapabilitiesTestMutator refreshed_mutator(&account_info.capabilities);
+  SetGlicCapability(refreshed_mutator, true);
+  identity_test_env_->UpdateAccountInfoForAccount(account_info);
+
+  SimulateSuccessfulFetchOfAccountInfo(&enterpriseAccount, &account_info);
+  policy::ScopedManagementServiceOverrideForTesting platform_management(
+      policy::ManagementServiceFactory::GetForProfile(profile()),
+      policy::EnterpriseManagementAuthority::CLOUD);
+
+  // Verify Prefs are now set, meaning the RPC was successful.
+  ASSERT_TRUE(base::test::RunUntil(
+      [&]() { return GetCachedStatusDict().has_value(); }));
+
+  std::optional<base::DictValue> cached_dict = GetCachedStatusDict();
+  EXPECT_EQ(cached_dict->FindInt(kUserStatus).value_or(-1),
+            UserStatusCode::ENABLED);
+  EXPECT_EQ(*cached_dict->FindString(kAccountId), GetGaiaIdHashBase64());
+
+  EXPECT_TRUE(IsGlicEnabled());
 }
 
 // It happens that google.com accounts are always considered enterprise
@@ -549,7 +614,7 @@ IN_PROC_BROWSER_TEST_F(GlicUserStatusBrowserTest,
   ASSERT_TRUE(base::test::RunUntil(
       [&]() { return GetCachedStatusDict().has_value(); }));
 
-  std::optional<base::Value::Dict> cached_dict = GetCachedStatusDict();
+  std::optional<base::DictValue> cached_dict = GetCachedStatusDict();
   EXPECT_EQ(cached_dict->FindInt(kUserStatus).value_or(-1),
             UserStatusCode::DISABLED_BY_ADMIN);
   EXPECT_EQ(*cached_dict->FindString(kAccountId), GetGaiaIdHashBase64());
@@ -594,7 +659,7 @@ IN_PROC_BROWSER_TEST_F(GlicUserStatusBrowserTestWithPolicyManagementService,
   ASSERT_TRUE(base::test::RunUntil(
       [&]() { return GetCachedStatusDict().has_value(); }));
 
-  std::optional<base::Value::Dict> cached_dict = GetCachedStatusDict();
+  std::optional<base::DictValue> cached_dict = GetCachedStatusDict();
   EXPECT_EQ(cached_dict->FindInt(kUserStatus).value_or(-1),
             UserStatusCode::DISABLED_BY_ADMIN);
   EXPECT_EQ(*cached_dict->FindString(kAccountId), GetGaiaIdHashBase64());
@@ -622,7 +687,7 @@ IN_PROC_BROWSER_TEST_F(GlicUserStatusBrowserTest,
 
   // Verify that when the user status code is SERVER_UNAVAILABLE, the glic user
   // status result is not stored.
-  std::optional<base::Value::Dict> cached_dict = GetCachedStatusDict();
+  std::optional<base::DictValue> cached_dict = GetCachedStatusDict();
   EXPECT_FALSE(cached_dict.has_value());
 
   EXPECT_TRUE(IsGlicEnabled());
@@ -652,7 +717,7 @@ IN_PROC_BROWSER_TEST_F(GlicUserStatusBrowserTest,
 
   // Verify that when the user status code is SERVER_UNAVAILABLE, the previous
   // stored pref value is not overwritten.
-  std::optional<base::Value::Dict> cached_dict = GetCachedStatusDict();
+  std::optional<base::DictValue> cached_dict = GetCachedStatusDict();
   EXPECT_TRUE(cached_dict.has_value());
   EXPECT_EQ(cached_dict->FindInt(kUserStatus).value_or(-1), user_status_code);
 
@@ -816,21 +881,11 @@ IN_PROC_BROWSER_TEST_F(GlicUserStatusBrowserTest, ClientDataHeaderExists) {
   EXPECT_NE(most_recent_request().headers["X-Client-Data"], "");
 }
 
-class GlicShareImageEnablementBrowserTest
-    : public GlicUserStatusBrowserTest,
-      public testing::WithParamInterface<bool> {
+class GlicShareImageEnablementBrowserTest : public GlicUserStatusBrowserTest {
  protected:
   GlicShareImageEnablementBrowserTest() {
-    if (IsGlicShareImageEnterpriseEnabled()) {
-      feature_list_.InitWithFeatures(
-          {features::kGlicShareImage, features::kGlicShareImageEnterprise}, {});
-    } else {
-      feature_list_.InitWithFeatures({features::kGlicShareImage},
-                                     {features::kGlicShareImageEnterprise});
-    }
+    feature_list_.InitWithFeatures({features::kGlicShareImage}, {});
   }
-
-  bool IsGlicShareImageEnterpriseEnabled() const { return GetParam(); }
 
   bool IsShareImageEnabled() {
     return GlicEnabling::IsShareImageEnabledForProfile(profile());
@@ -839,97 +894,36 @@ class GlicShareImageEnablementBrowserTest
   base::test::ScopedFeatureList feature_list_;
 };
 
-IN_PROC_BROWSER_TEST_P(GlicShareImageEnablementBrowserTest,
-                       EnterpriseSignInEnabledNonManaged) {
+IN_PROC_BROWSER_TEST_F(GlicShareImageEnablementBrowserTest, LiveEligibility) {
   policy::ScopedManagementServiceOverrideForTesting platform_management(
       policy::ManagementServiceFactory::GetForProfile(profile()),
       policy::EnterpriseManagementAuthority::NONE);
-
-  // If enterprise checks are enabled, we should reject if value is pending.
-  EXPECT_EQ(IsShareImageEnabled(), IsGlicShareImageEnterpriseEnabled());
-
-  SimulatePrimaryAccountChangedSignIn(&enterpriseAccount);
-
-  // This should continue to be the case after fetching (as this is an
-  // enterprise user).
-  EXPECT_EQ(IsShareImageEnabled(), IsGlicShareImageEnterpriseEnabled());
-}
-
-IN_PROC_BROWSER_TEST_P(GlicShareImageEnablementBrowserTest,
-                       NonEnterpriseSignIn) {
-  EXPECT_EQ(IsShareImageEnabled(), IsGlicShareImageEnterpriseEnabled());
+  auto* const identity_manager =
+      IdentityManagerFactory::GetForProfile(profile());
 
   SimulatePrimaryAccountChangedSignIn(&nonEnterpriseAccount);
+  AccountInfo primary_account =
+      identity_manager->FindExtendedAccountInfoByAccountId(
+          identity_manager->GetPrimaryAccountId(signin::ConsentLevel::kSignin));
+  ASSERT_FALSE(primary_account.IsEmpty());
+  AccountCapabilitiesTestMutator mutator(&primary_account.capabilities);
 
-  ASSERT_TRUE(IsGlicEnabled());
-  {
-    policy::ScopedManagementServiceOverrideForTesting platform_management(
-        policy::ManagementServiceFactory::GetForProfile(profile()),
-        policy::EnterpriseManagementAuthority::CLOUD);
-    EXPECT_EQ(IsShareImageEnabled(), IsGlicShareImageEnterpriseEnabled());
-  }
-  {
-    policy::ScopedManagementServiceOverrideForTesting platform_management(
-        policy::ManagementServiceFactory::GetForProfile(profile()),
-        policy::EnterpriseManagementAuthority::NONE);
-    // In all cases, share image should be enabled here.
-    EXPECT_TRUE(IsShareImageEnabled());
-  }
-}
+  // Set the account capability to true.
+  mutator.set_can_use_model_execution_features(true);
+  signin::UpdateAccountInfoForAccount(identity_test_env_->identity_manager(),
+                                      primary_account);
 
-class GlicShareImageGlicDisabledBrowserTest
-    : public GlicUserStatusBrowserTest,
-      public testing::WithParamInterface<bool> {
- protected:
-  GlicShareImageGlicDisabledBrowserTest() {
-    if (IsGlicShareImageEnterpriseEnabled()) {
-      feature_list_.InitWithFeatures(
-          {features::kGlicShareImage, features::kGlicShareImageEnterprise},
-          {features::kGlic});
-    } else {
-      feature_list_.InitWithFeatures(
-          {features::kGlicShareImage},
-          {features::kGlicShareImageEnterprise, features::kGlic});
-    }
-  }
+  // Share image should be enabled here.
+  EXPECT_TRUE(IsShareImageEnabled());
 
-  bool IsGlicShareImageEnterpriseEnabled() const { return GetParam(); }
+  // Now disable the account capability.
+  mutator.set_can_use_model_execution_features(false);
+  signin::UpdateAccountInfoForAccount(identity_test_env_->identity_manager(),
+                                      primary_account);
 
-  bool IsShareImageEnabled() {
-    return GlicEnabling::IsShareImageEnabledForProfile(profile());
-  }
-
-  base::test::ScopedFeatureList feature_list_;
-};
-
-// If glic is disabled, share image should always be disabled.
-IN_PROC_BROWSER_TEST_P(GlicShareImageGlicDisabledBrowserTest, AlwaysDisabled) {
+  // Share image should now be disabled without this capability.
   EXPECT_FALSE(IsShareImageEnabled());
-
-  SimulatePrimaryAccountChangedSignIn(&nonEnterpriseAccount);
-
-  ASSERT_FALSE(IsGlicEnabled());
-  {
-    policy::ScopedManagementServiceOverrideForTesting platform_management(
-        policy::ManagementServiceFactory::GetForProfile(profile()),
-        policy::EnterpriseManagementAuthority::CLOUD);
-    EXPECT_FALSE(IsShareImageEnabled());
-  }
-  {
-    policy::ScopedManagementServiceOverrideForTesting platform_management(
-        policy::ManagementServiceFactory::GetForProfile(profile()),
-        policy::EnterpriseManagementAuthority::NONE);
-    EXPECT_FALSE(IsShareImageEnabled());
-  }
 }
-
-INSTANTIATE_TEST_SUITE_P(ToggleGlicShareImageEnterprise,
-                         GlicShareImageEnablementBrowserTest,
-                         testing::Bool());
-
-INSTANTIATE_TEST_SUITE_P(ToggleGlicShareImageEnterprise,
-                         GlicShareImageGlicDisabledBrowserTest,
-                         testing::Bool());
 
 }  // namespace
 }  // namespace glic

@@ -27,6 +27,7 @@ extern NSString* const kGoogleShieldSymbol;
 extern NSString* const kGoogleMapsSymbol;
 extern NSString* const kGooglePaySymbol;
 extern NSString* const kGooglePhotosSymbol;
+extern NSString* const kGoogleWalletSymbol;
 extern NSString* const kMulticolorChromeballSymbol;
 extern NSString* const kPageInsightsSymbol;
 #else
@@ -53,6 +54,7 @@ extern NSString* const kShieldSymbol;
 extern NSString* const kReadingListSymbol;
 extern NSString* const kRecentTabsSymbol;
 extern NSString* const kLanguageSymbol;
+extern NSString* const kPassportSymbol;
 extern NSString* const kPasswordSymbol;
 #if !BUILDFLAG(IS_IOS_MACCATALYST)
 extern NSString* const kMulticolorPasswordSymbol;
@@ -78,10 +80,14 @@ extern NSString* const kMagnifyingglassSparkSymbol;
 extern NSString* const kPhoneSparkleSymbol;
 extern NSString* const kTextSearchSymbol;
 extern NSString* const kIncognitoRectangle;
+extern NSString* const kTextAnalysisSymbol;
 extern NSString* const kTextSparkSymbol;
 extern NSString* const kIncognitoCircleFillSymbol;
 extern NSString* const kPlusCircleFillSymbol;
 extern NSString* const kPDFFillSymbol;
+extern NSString* const kLineThreeSparkSymbol;
+extern NSString* const kDocumentBadgeSpark;
+extern NSString* const kDeepSearchSymbol;
 
 // Use custom symbol for camera because the default video icon in iOS should
 // always represent “Apple Facetime”.
@@ -144,6 +150,9 @@ extern NSString* const kSaveImageActionSymbol;
 extern NSString* const kOpenImageActionSymbol;
 extern NSString* const kQRCodeSymbol;
 extern NSString* const kPrinterSymbol;
+extern NSString* const kAirplaneSymbol;
+extern NSString* const kAirplaneUpRightSymbol API_AVAILABLE(ios(26.0));
+extern NSString* const kCarSymbol;
 extern NSString* const kCreditCardSymbol;
 extern NSString* const kMicrophoneFillSymbol;
 extern NSString* const kMicrophoneSymbol;
@@ -189,6 +198,8 @@ extern NSString* const kExpandSymbol;
 extern NSString* const kBackSymbol;
 extern NSString* const kForwardSymbol;
 extern NSString* const kPersonFillSymbol;
+extern NSString* const kPersonFillCheckmarkSymbol;
+extern NSString* const kPersonTextRectangleSymbol;
 extern NSString* const kPersonBadgeKeyFillSymbol;
 extern NSString* const kPersonClockFillSymbol;
 extern NSString* const kPersonFillBadgePlusSymbol;
@@ -273,6 +284,7 @@ extern NSString* const kFolderBadgePlusSymbol;
 extern NSString* const kCartSymbol;
 extern NSString* const kArrowUTurnForwardSymbol;
 extern NSString* const kArrowUTurnForwardCircleFillSymbol;
+extern NSString* const kArrowUTurnBackwardSymbol;
 extern NSString* const kIPhoneAndArrowForwardSymbol;
 extern NSString* const kPersonPlusSymbol;
 extern NSString* const kArrowUpTrashSymbol;
@@ -293,6 +305,9 @@ extern NSString* const kVideoSymbol;
 extern NSString* const kWaveformSymbol;
 extern NSString* const kRightArrowCircleFillSymbol;
 extern NSString* const kArrowDownToLineSymbol;
+extern NSString* const kPhotoOnRectangleAngled;
+extern NSString* const kSparklesSymbol;
+extern NSString* const kSparkles2Symbol;
 
 // Names of the default symbol being non-monochrome by default. When using them,
 // you probably want to set their color to monochrome.

@@ -1,6 +1,7 @@
 <?xml version="1.0" ?>
 <!DOCTYPE translationbundle>
 <translationbundle lang="kk">
+<translation id="1035560095760914532">Chrome-ды кез келген уақытта ашу үшін төменгі жағына қойыңыз</translation>
 <translation id="1076643793026027628">Chrome браузері YouTube-тің инкогнито сілтемелерін автоматты түрде инкогнито режимінде ашады.</translation>
 <translation id="1081114897601629648">Келесі құпия сөздер Google Password Manager-ге импортталмады, себебі олар талаптарға сай емес.</translation>
 <translation id="1086486568852410168">Google Lens арқылы іздеу</translation>
@@ -86,6 +87,10 @@
 <translation id="2767464022270041271">Ешқандай құпия сөз сақталмаған. Google Password Manager құпия сөздерді сақтаған кезде оларды тексере алады.</translation>
 <translation id="2788811701191021538">Chrome-дағы "Төлеу әдістерін орнату" бетін ашады.</translation>
 <translation id="2876628302275096482"><ph name="BEGIN_LINK" />Chrome-ның деректеріңізді құпия сақтау жолы<ph name="END_LINK" /> туралы толық ақпарат</translation>
+<translation id="288992067439702510">Google Chrome-ның <ph name="LIMIT" /> бетбелгі шегіне жеттіңіз, сондықтан кейбір бетбелгілер Google аккаунтыңызға әлі сақталмады.
+
+Кейбір бетбелгілерді жоймайынша, аккаунтыңызға жаңа бетбелгілерді сақтау мүмкін емес. Аккаунттан қазір шықсаңыз, сақталмаған бетбелгілер жойылады.</translation>
+<translation id="2901621928549457170">iPad-та Chrome-ды жылдам ашыңыз</translation>
 <translation id="2922914028977213693">Chrome-ды iPad-та барынша тиімді пайдалану үшін осы жерді түртіңіз.</translation>
 <translation id="292371311537977079">Chrome параметрлері</translation>
 <translation id="2923827943290349720">Chrome браузерін жабу кезінде инкогнито қойындыларын құлыптау</translation>
@@ -102,7 +107,7 @@
 <translation id="3109170945534582468">Chrome-дағы әрекеттер</translation>
 <translation id="3140589780564632473">Chrome-нан визуалдық графиканы іздеу</translation>
 <translation id="314782365035065913">Негізгі экранның бекіту аймағынан Chrome-ға жылдам кіріңіз</translation>
-<translation id="3167189358072330585">Аккаунт Google Chrome бағдарламасында жұмыс істемейді. Домен әкімшісіне хабарласыңыз немесе кіру үшін әдеттегі Google аккаунтсын пайдаланыңыз.</translation>
+<translation id="3167189358072330585">Аккаунт Google Chrome бағдарламасында жұмыс істемейді. Домен әкімшісіне хабарласыңыз немесе кіру үшін әдеттегі Google аккаунтын пайдаланыңыз.</translation>
 <translation id="320747600144551583">Chrome кеңесі: күшейтілген Safe Browsing күніңізді жеңілдетеді</translation>
 <translation id="322254490661677575">Google аккаунтыңызда Chrome деректерін пайдалану және сақтау үшін құпия фразаңызды енгізіңіз.</translation>
 <translation id="3303503998967553377">iOS жүйесінде Chrome-дағы әрекеттерді пайдалану</translation>
@@ -170,6 +175,8 @@
 <translation id="5119391094379141756">Chrome браузерін таңдаңыз.</translation>
 <translation id="5123188916260706415">Chrome-да дауыспен іздеу</translation>
 <translation id="5162467219239570114">Chrome ескірген. Егер <ph name="BEGIN_LINK" />App Store<ph name="END_LINK" /> дүкенінде жаңа нұсқа болмаса, құрылғыңыз Chrome-ның жаңа нұсқаларын бұдан былай қолдамайтын болуы мүмкін.</translation>
+<translation id="5172049865623113551">iPhone-да Chrome-ды жылдам ашыңыз</translation>
+<translation id="5179095426828744632">Бекіту аймағынан Chrome-ға жылдам кіріңіз</translation>
 <translation id="5184329579814168207">Chrome жүйесінде ашу</translation>
 <translation id="5190139289262548459">Ұйымыңыз (<ph name="DOMAIN" />) сіз кірген аккаунт пен Chrome-ды пайдалану жолын басқарады.</translation>
 <translation id="5209238444239954363">Chrome жаңа нұсқалардың бар-жоғын тексере алмады. Кейінірек қайталап көріңіз.</translation>
@@ -308,7 +315,6 @@ Chrome тәжірибесін жақсарту үшін деректерді қ�
 <translation id="787226752901403048">Қойындылар топтарын бөлісу, оларға қосылу және идеялар төңірегінде бірлесіп жұмыс істеу үшін Chrome-ға кіріңіз.</translation>
 <translation id="7897703007638178753">Chrome-дағы соңғы қойындыларды көру</translation>
 <translation id="7948283758957877064">Chrome-дағы жаңалықтар</translation>
-<translation id="7996707498590516621">Chrome-дағы Gemini көмегімен сурет жасау</translation>
 <translation id="8000174216052461231">Chrome кеңесі: Chrome браузерінің ең күшті қорғанысын қолданыңыз</translation>
 <translation id="8006014511203279255">Хабарларда немесе басқа қолданбаларда сілтемелерді түрткенде, Chrome браузері ашылады.</translation>
 <translation id="8014670471808569312">Chrome құпия сөзіңізді сақтауды ұсынады.</translation>
@@ -320,6 +326,7 @@ Chrome тәжірибесін жақсарту үшін деректерді қ�
 <translation id="8136856065410661948">Apple Calendar-да Chrome және Google Lens арқылы оқиғалар жасау үшін пайдаланылады.</translation>
 <translation id="8154120522323162874">Браузерді реттеуді жалғастырып, Chrome-ды барынша тиімді пайдаланыңыз.</translation>
 <translation id="8160472928944011082">Chrome жаңартылмайды.</translation>
+<translation id="8213550501565480896">Chrome-ды әдепкі браузер ретінде орнату</translation>
 <translation id="8245080522851805544">Chrome браузерін жапқан кезде, құрылғы аутентификациясы арқылы шолуды құпия сақтаңыз.</translation>
 <translation id="8248887045858762645">Chrome кеңесі</translation>
 <translation id="8265730590513812063">Chrome мәзірін ашыңыз.</translation>
@@ -351,6 +358,7 @@ Chrome тәжірибесін жақсарту үшін деректерді қ�
 <translation id="8788269841521769222">Бұл құпия сөзді есте сақтаудың қажеті жоқ. Ол <ph name="EMAIL" /> аккаунтына арналған Google құпия сөздер реттегішіне сақталады.</translation>
 <translation id="8796490717897731471"><ph name="EMAIL" />. Chrome басқарылады.</translation>
 <translation id="880967149107462122">Chrome параметрлеріне өту</translation>
+<translation id="8840947648682778034">iPhone және iPad құрылғыларына арналған Chrome тақырыбы</translation>
 <translation id="8842132678697187091">Google Lens-ді осы жерден аша аласыз.</translation>
 <translation id="8850736900032787670">Қызығушылықтарыңызға сай жекелендірілген контент алу үшін Chrome-ға кіріңіз.</translation>
 <translation id="8855781063981781621">Chrome браузерінде "Құлыптау" режимін өшіру үшін оны iPad құрылғыңызда өшіріңіз.</translation>

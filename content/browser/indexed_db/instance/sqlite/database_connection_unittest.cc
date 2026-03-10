@@ -8,16 +8,22 @@
 #include <string>
 #include <string_view>
 
+#include "base/containers/span.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
+#include "base/rand_util.h"
 #include "base/test/bind.h"
 #include "base/test/gmock_expected_support.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/task_environment.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "components/services/storage/indexed_db/locks/partitioned_lock.h"
+#include "components/services/storage/indexed_db/locks/partitioned_lock_id.h"
+#include "components/services/storage/indexed_db/locks/partitioned_lock_manager.h"
 #include "content/browser/indexed_db/file_path_util.h"
 #include "content/browser/indexed_db/indexed_db_data_loss_info.h"
 #include "content/browser/indexed_db/indexed_db_value.h"
@@ -27,7 +33,7 @@
 #include "sql/meta_table.h"
 #include "sql/test/test_helpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-data-view.h"
+#include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom-shared.h"
 
 namespace content::indexed_db::sqlite {
 
@@ -88,12 +94,17 @@ class DatabaseConnectionTest : public testing::Test {
   void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
-    // Create a mock backing store for testing
-    backing_store_ =
-        std::make_unique<BackingStoreImpl>(temp_dir_.GetPath(), blob_context_);
+    backing_store_ = std::make_unique<BackingStoreImpl>(
+        temp_dir_.GetPath(), blob_context_,
+        base::BindRepeating(&DatabaseConnectionTest::AcquireDatabaseLocks,
+                            base::Unretained(this)),
+        base::DoNothing());
   }
 
-  void TearDown() override { backing_store_.reset(); }
+  void TearDown() override {
+    backing_store_->FlushForTesting();
+    backing_store_.reset();
+  }
 
   DatabaseConnection* GetDatabaseConnection(const std::u16string& name) {
     auto it = backing_store()->open_connections_.find(name);
@@ -109,7 +120,10 @@ class DatabaseConnectionTest : public testing::Test {
   std::unique_ptr<BackingStore::Database> OpenDb(std::u16string_view name) {
     StatusOr<std::unique_ptr<BackingStore::Database>> db =
         backing_store()->CreateOrOpenDatabase(std::u16string(name));
-    EXPECT_TRUE(db.has_value());
+    if (!db.has_value()) {
+      ADD_FAILURE();
+      return nullptr;
+    }
     EXPECT_TRUE(db.value().get());
     return std::move(db.value());
   }
@@ -118,12 +132,26 @@ class DatabaseConnectionTest : public testing::Test {
     return temp_dir_.GetPath().Append(DatabaseNameToFileName(name));
   }
 
+  std::vector<PartitionedLock> AcquireDatabaseLocks(
+      const std::u16string& name) {
+    base::RunLoop loop;
+    PartitionedLockHolder locks_receiver;
+    lock_manager_.AcquireLocks(
+        {{{0, DatabaseNameToFileName(name).MaybeAsASCII()},
+          PartitionedLockManager::LockType::kExclusive}},
+        locks_receiver, loop.QuitClosure());
+    loop.Run();
+    return std::move(locks_receiver.locks);
+  }
+
   // Create an object store with one record in it.
   void InitializeDbWithOneRecord(BackingStore::Database& db) {
     auto vc =
         db.CreateTransaction(blink::mojom::IDBTransactionDurability::Default,
                              blink::mojom::IDBTransactionMode::VersionChange);
-    vc->Begin({});
+    std::vector<PartitionedLock> locks;
+    locks.emplace_back(PartitionedLock{{}, base::DoNothing()});
+    vc->Begin(std::move(locks));
     ASSERT_TRUE(
         vc->CreateObjectStore(kObjectStoreId, u"object store name", {}, true)
             .ok());
@@ -141,6 +169,7 @@ class DatabaseConnectionTest : public testing::Test {
 
   base::test::TaskEnvironment task_environment_;
   MockBlobStorageContext blob_context_;
+  PartitionedLockManager lock_manager_;
   base::ScopedTempDir temp_dir_;
   std::unique_ptr<BackingStore> backing_store_;
 };
@@ -151,7 +180,7 @@ TEST_F(DatabaseConnectionTest, TooNew) {
   base::HistogramTester histograms;
 
   // Create DB.
-  const std::u16string_view kDbName{u"test db"};
+  const std::u16string kDbName{u"test db"};
   auto connection = OpenDb(kDbName);
   ASSERT_NO_FATAL_FAILURE(InitializeDbWithOneRecord(*connection));
   connection.reset();
@@ -163,10 +192,11 @@ TEST_F(DatabaseConnectionTest, TooNew) {
 
   // Simulate a newer version of the browser updating the schema.
   auto sql_db = std::make_unique<sql::Database>(sql::DatabaseOptions()
-                                                    .set_exclusive_locking(true)
                                                     .set_wal_mode(true)
                                                     .set_enable_triggers(true),
                                                 sql::test::kTestTag);
+  // Wait for the earlier database to close fully before reopening.
+  AcquireDatabaseLocks(kDbName);
   ASSERT_TRUE(sql_db->Open(db_path));
   ASSERT_TRUE(sql::MetaTable::DoesTableExist(sql_db.get()));
   int original_version, original_compat_version;
@@ -200,6 +230,7 @@ TEST_F(DatabaseConnectionTest, TooNew) {
       "IndexedDB.SQLite.SpecificEvent.OnDisk",
       DatabaseConnection::SpecificEvent::kDatabaseHadSqlError, 0);
 
+  AcquireDatabaseLocks(kDbName);
   ASSERT_TRUE(sql_db->Open(db_path));
   ASSERT_TRUE(sql::MetaTable::DoesTableExist(sql_db.get()));
   {
@@ -214,6 +245,50 @@ TEST_F(DatabaseConnectionTest, TooNew) {
   }
 }
 
+TEST_F(DatabaseConnectionTest, CompressionHistograms) {
+  base::HistogramTester histograms;
+
+  const std::u16string_view kDbName{u"test db"};
+  auto db = OpenDb(kDbName);
+  auto vc =
+      db->CreateTransaction(blink::mojom::IDBTransactionDurability::Default,
+                            blink::mojom::IDBTransactionMode::VersionChange);
+  std::vector<PartitionedLock> locks;
+  locks.emplace_back(PartitionedLock{{}, base::DoNothing()});
+  vc->Begin(std::move(locks));
+  ASSERT_TRUE(
+      vc->CreateObjectStore(kObjectStoreId, u"object store name", {}, true)
+          .ok());
+
+  // Compressible data.
+  std::string compressible_data(1000, 'a');
+  ASSERT_TRUE(
+      vc->PutRecord(kObjectStoreId, kKey, IndexedDBValue(compressible_data, {}))
+          .has_value());
+
+  histograms.ExpectTotalCount("IndexedDB.SQLite.PutRecord.CompressionRatio", 1);
+  histograms.ExpectUniqueSample(
+      "IndexedDB.SQLite.PutRecord.PrecompressionValueSize.Compressed",
+      compressible_data.size(), 1);
+  histograms.ExpectTotalCount(
+      "IndexedDB.SQLite.PutRecord.PrecompressionValueSize.Uncompressed", 0);
+
+  // Data that is not effectively compressible.
+  std::string incompressible_data(1000, 'a');
+  base::RandBytes(base::as_writable_byte_span(incompressible_data));
+  ASSERT_TRUE(vc->PutRecord(kObjectStoreId, blink::IndexedDBKey("key2"),
+                            IndexedDBValue(incompressible_data, {}))
+                  .has_value());
+  vc.reset();
+
+  histograms.ExpectTotalCount("IndexedDB.SQLite.PutRecord.CompressionRatio", 2);
+  histograms.ExpectTotalCount(
+      "IndexedDB.SQLite.PutRecord.PrecompressionValueSize.Compressed", 1);
+  histograms.ExpectUniqueSample(
+      "IndexedDB.SQLite.PutRecord.PrecompressionValueSize.Uncompressed",
+      incompressible_data.size(), 1);
+}
+
 class DatabaseConnectionCorruptionTest : public DatabaseConnectionTest {
  public:
   DatabaseConnectionCorruptionTest() = default;
@@ -224,10 +299,15 @@ class DatabaseConnectionCorruptionTest : public DatabaseConnectionTest {
   // recovering or deleting the DB. In short: the code in `read_value_callback`
   // is being verified for its error reporting, and the rest of the code in this
   // function is verifying DatabaseConnection's error *handling*.
+  //
+  // When `recoverable` is false, the second pass of corruption uses a technique
+  // that prevents successful recovery --- the DB file should still be deleted
+  // and recreated as a fallback.
   void VerifyCorruptionHandling(
+      bool recoverable,
       base::RepeatingCallback<StatusOr<IndexedDBValue>(
           BackingStore::Transaction&)> read_value_callback) {
-    const std::u16string_view kDbName{u"test db"};
+    const std::u16string kDbName{u"test db"};
 
     auto db = OpenDb(kDbName);
     ASSERT_NO_FATAL_FAILURE(InitializeDbWithOneRecord(*db));
@@ -237,7 +317,9 @@ class DatabaseConnectionCorruptionTest : public DatabaseConnectionTest {
       auto ro =
           db->CreateTransaction(blink::mojom::IDBTransactionDurability::Default,
                                 blink::mojom::IDBTransactionMode::ReadOnly);
-      ro->Begin({});
+      std::vector<PartitionedLock> locks;
+      locks.emplace_back(PartitionedLock{{}, base::DoNothing()});
+      ro->Begin(std::move(locks));
       StatusOr<IndexedDBValue> value = read_value_callback.Run(*ro);
       ro->Rollback();
       return value;
@@ -245,16 +327,16 @@ class DatabaseConnectionCorruptionTest : public DatabaseConnectionTest {
 
     StatusOr<IndexedDBValue> value = read_value();
 
-    ASSERT_TRUE(value.has_value());
-    EXPECT_EQ(base::span(value.value().bits), base::span(kValue.bits));
+    ASSERT_OK_AND_ASSIGN(IndexedDBValue value_unwrapped, std::move(value));
+    EXPECT_EQ(base::span(value_unwrapped.bits), base::span(kValue.bits));
 
-    StatusOr<base::DictValue> contents_before_corruption =
-        SnapshotDatabase(*db);
-    ASSERT_TRUE(contents_before_corruption.has_value());
+    ASSERT_OK_AND_ASSIGN(base::DictValue contents_before_corruption,
+                         SnapshotDatabase(*db));
 
     // Close the database and then corrupt it.
     db.reset();
     const base::FilePath db_path = GetDatabasePath(kDbName);
+    AcquireDatabaseLocks(kDbName);
     ASSERT_TRUE(sql::test::CorruptIndexRootPage(db_path, "records_by_key"));
 
     // Reopen the database. The corruption isn't detected until the index is
@@ -267,25 +349,29 @@ class DatabaseConnectionCorruptionTest : public DatabaseConnectionTest {
 
     // Closing the database should run the recovery routine.
     db.reset();
+    AcquireDatabaseLocks(kDbName);
     db = OpenDb(kDbName);
 
-    auto verify_recovery = [&]() {
+    auto verify_recovery = [&](bool recovery_expected) {
       StatusOr<IndexedDBValue> recovered_value = read_value();
 #if BUILDFLAG(IS_FUCHSIA)
-      // Read "works" in that it doesn't fail, but the record doesn't exist,
-      // since the corrupted DB was deleted and recreated.
-      ASSERT_TRUE(recovered_value.has_value());
-      EXPECT_TRUE(recovered_value.value().empty());
-
-      // Reinsert the record. If we don't, the database will be deleted the next
-      // time the connection is destroyed, as the database is empty.
-      ASSERT_NO_FATAL_FAILURE(InitializeDbWithOneRecord(*db));
-      recovered_value = read_value();
-#else
-      StatusOr<base::DictValue> contents_after_recovery = SnapshotDatabase(*db);
-      ASSERT_TRUE(contents_after_recovery.has_value());
-      EXPECT_EQ(*contents_after_recovery, *contents_before_corruption);
+      recovery_expected = false;
 #endif
+      if (recovery_expected) {
+        ASSERT_OK_AND_ASSIGN(base::DictValue contents_after_recovery,
+                             SnapshotDatabase(*db));
+        EXPECT_EQ(contents_after_recovery, contents_before_corruption);
+      } else {
+        // Read "works" in that it doesn't fail, but the record doesn't exist,
+        // since the corrupted DB was deleted and recreated.
+        ASSERT_TRUE(recovered_value.has_value());
+        EXPECT_TRUE(recovered_value.value().empty());
+
+        // Reinsert the record. If we don't, the database will be deleted the
+        // next time the connection is destroyed, as the database is empty.
+        ASSERT_NO_FATAL_FAILURE(InitializeDbWithOneRecord(*db));
+        recovered_value = read_value();
+      }
 
       // Read works because the DB was recovered (or, on Fuchsia, was deleted,
       // recreated, and the record inserted again).
@@ -293,20 +379,40 @@ class DatabaseConnectionCorruptionTest : public DatabaseConnectionTest {
       EXPECT_EQ(base::span(recovered_value.value().bits),
                 base::span(kValue.bits));
     };
-    verify_recovery();
+    verify_recovery(/*recovery_expected=*/true);
 
     // Now try a different style of corruption which is detected when the DB is
     // first opened. This verifies that such corruptions will be detected and
     // handled on startup.
     db.reset();
-    ASSERT_TRUE(sql::test::CorruptSizeInHeader(db_path));
+    AcquireDatabaseLocks(kDbName);
+    if (recoverable) {
+      ASSERT_TRUE(sql::test::CorruptSizeInHeader(db_path));
+    } else {
+      std::array<uint8_t, 100> empty_data = {};
+      base::File file(db_path, base::File::FLAG_OPEN | base::File::FLAG_READ |
+                                   base::File::FLAG_WRITE);
+      ASSERT_TRUE(file.IsValid());
+      ASSERT_TRUE(file.WriteAndCheck(0, empty_data));
+    }
     db = OpenDb(kDbName);
-    verify_recovery();
+    verify_recovery(/*recovery_expected=*/recoverable);
+    db.reset();
+    AcquireDatabaseLocks(kDbName);
   }
 };
 
 TEST_F(DatabaseConnectionCorruptionTest, Get) {
   VerifyCorruptionHandling(
+      /*recoverable=*/true,
+      base::BindLambdaForTesting([&](BackingStore::Transaction& ro) {
+        return ro.GetRecord(kObjectStoreId, kKey);
+      }));
+}
+
+TEST_F(DatabaseConnectionCorruptionTest, UnrecoverableGet) {
+  VerifyCorruptionHandling(
+      /*recoverable=*/false,
       base::BindLambdaForTesting([&](BackingStore::Transaction& ro) {
         return ro.GetRecord(kObjectStoreId, kKey);
       }));
@@ -314,6 +420,7 @@ TEST_F(DatabaseConnectionCorruptionTest, Get) {
 
 TEST_F(DatabaseConnectionCorruptionTest, ObjectStoreCursor) {
   VerifyCorruptionHandling(
+      /*recoverable=*/true,
       base::BindLambdaForTesting([&](BackingStore::Transaction& ro) {
         return ro
             .OpenObjectStoreCursor(kObjectStoreId, blink::IndexedDBKeyRange(),

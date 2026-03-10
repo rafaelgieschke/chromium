@@ -130,6 +130,12 @@ export interface PageElementTypes {
   selectCredential: HTMLSelectElement;
   credentialOnce: HTMLButtonElement;
   credentialAlways: HTMLButtonElement;
+  selectedCredentialUsername: HTMLSpanElement;
+  selectedCredentialSource: HTMLSpanElement;
+  selectedCredentialRequestOrigin: HTMLSpanElement;
+  selectedCredentialIcon: HTMLImageElement;
+  selectedCredentialType: HTMLSpanElement;
+  selectedCredentialAccountPicture: HTMLImageElement;
   actionProtoEncodedText: HTMLInputElement;
   actionStatus: HTMLSpanElement;
   autofillSuggestionsDialogSection: HTMLElement;
@@ -157,9 +163,6 @@ export interface PageElementTypes {
   shareCandidates: HTMLElement;
   enableShareCandidates: HTMLInputElement;
   unpin: HTMLButtonElement;
-  viewChangedBtn: HTMLButtonElement;
-  viewChangedCurrentView: HTMLSelectElement;
-  viewChangedAutomaticallyAccept: HTMLInputElement;
   mqlsClientIdBtn: HTMLButtonElement;
   additionalContextResult: HTMLTextAreaElement;
   additionalContextImages: HTMLDivElement;
@@ -171,6 +174,20 @@ export interface PageElementTypes {
   conversationId: HTMLInputElement;
   textmode: HTMLInputElement;
   audiomode: HTMLInputElement;
+  skillIdInput: HTMLInputElement;
+  skillNameInput: HTMLInputElement;
+  skillIconInput: HTMLInputElement;
+  skillSourceSelect: HTMLSelectElement;
+  skillPromptInput: HTMLInputElement;
+  createSkillBtn: HTMLButtonElement;
+  updateSkillBtn: HTMLButtonElement;
+  getSkillBtn: HTMLButtonElement;
+  manageSkillsBtn: HTMLButtonElement;
+  skillsList: HTMLUListElement;
+  stressTestEngageBtn: HTMLButtonElement;
+  stressTestEngageRetainBtn: HTMLButtonElement;
+  invocationLog: HTMLDivElement;
+  clearInvocationLog: HTMLButtonElement;
 }
 
 export const $: PageElementTypes = new Proxy({}, {

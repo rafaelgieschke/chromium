@@ -18,6 +18,7 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/sync/model/string_ordinal.h"
 #include "extensions/browser/blocklist_state.h"
@@ -104,6 +105,7 @@ class ExtensionPrefs : public KeyedService {
     kWaitForIdle = 2,
     kWaitForImports = 3,
     kWaitForOsUpdate = 4,
+    kMax = kWaitForOsUpdate,
   };
 
   // This enum is used to specify the operation for bit map prefs.
@@ -155,12 +157,12 @@ class ExtensionPrefs : public KeyedService {
 
     // Returns a mutable value for the key (ownership remains with the prefs),
     // if one exists. Otherwise, returns NULL.
-    base::Value::List* Get();
+    base::ListValue* Get();
 
     // Creates and returns a mutable value for the key (the prefs own the new
     // value), if one does not already exist. Otherwise, returns the current
     // value.
-    base::Value::List* Ensure();
+    base::ListValue* Ensure();
 
    private:
     std::unique_ptr<prefs::ScopedDictionaryPrefUpdate> update_;
@@ -272,7 +274,7 @@ class ExtensionPrefs : public KeyedService {
                             const syncer::StringOrdinal& page_ordinal,
                             int install_flags,
                             const std::string& install_parameter,
-                            base::Value::Dict ruleset_install_prefs);
+                            base::DictValue ruleset_install_prefs);
   // OnExtensionInstalled with no install flags and `ruleset_install_prefs`.
   void OnExtensionInstalled(const Extension* extension,
                             const base::flat_set<int>& disable_reasons,
@@ -310,14 +312,14 @@ class ExtensionPrefs : public KeyedService {
   void SetStringPref(const PrefMap& pref, const std::string& value);
   void SetTimePref(const PrefMap& pref, base::Time value);
   void SetGURLPref(const PrefMap& pref, const GURL& value);
-  void SetDictionaryPref(const PrefMap& pref, base::Value::Dict value);
+  void SetDictionaryPref(const PrefMap& pref, base::DictValue value);
 
   int GetPrefAsInteger(const PrefMap& pref) const;
   bool GetPrefAsBoolean(const PrefMap& pref) const;
   std::string GetPrefAsString(const PrefMap& pref) const;
   base::Time GetPrefAsTime(const PrefMap& pref) const;
   GURL GetPrefAsGURL(const PrefMap& pref) const;
-  const base::Value::Dict& GetPrefAsDictionary(const PrefMap& pref) const;
+  const base::DictValue& GetPrefAsDictionary(const PrefMap& pref) const;
 
   // Returns a wrapper that allows to update an ExtensionPref with a
   // PrefType::kDictionary.
@@ -338,10 +340,10 @@ class ExtensionPrefs : public KeyedService {
                      std::string value);
   void SetListPref(const ExtensionId& id,
                    const PrefMap& pref,
-                   base::Value::List value);
+                   base::ListValue value);
   void SetDictionaryPref(const ExtensionId& id,
                          const PrefMap& pref,
-                         base::Value::Dict value);
+                         base::DictValue value);
   void SetTimePref(const ExtensionId& id,
                    const PrefMap& pref,
                    base::Time value);
@@ -366,11 +368,11 @@ class ExtensionPrefs : public KeyedService {
                         const PrefMap& pref,
                         std::string* out_value) const;
 
-  const base::Value::List* ReadPrefAsList(const ExtensionId& extension_id,
-                                          const PrefMap& pref) const;
+  const base::ListValue* ReadPrefAsList(const ExtensionId& extension_id,
+                                        const PrefMap& pref) const;
 
-  const base::Value::Dict* ReadPrefAsDictionary(const ExtensionId& extension_id,
-                                                const PrefMap& pref) const;
+  const base::DictValue* ReadPrefAsDictionary(const ExtensionId& extension_id,
+                                              const PrefMap& pref) const;
 
   base::Time ReadPrefAsTime(const ExtensionId& extension_id,
                             const PrefMap& pref) const;
@@ -387,11 +389,11 @@ class ExtensionPrefs : public KeyedService {
                         std::string_view pref_key,
                         std::string* out_value) const;
 
-  const base::Value::List* ReadPrefAsList(const ExtensionId& extension_id,
-                                          std::string_view pref_key) const;
+  const base::ListValue* ReadPrefAsList(const ExtensionId& extension_id,
+                                        std::string_view pref_key) const;
 
-  const base::Value::Dict* ReadPrefAsDict(const ExtensionId& extension_id,
-                                          std::string_view pref_key) const;
+  const base::DictValue* ReadPrefAsDict(const ExtensionId& extension_id,
+                                        std::string_view pref_key) const;
 
   // Interprets the list pref, `pref_key` in `extension_id`'s preferences, as a
   // URLPatternSet. The `valid_schemes` specify how to parse the URLPatterns.
@@ -529,7 +531,7 @@ class ExtensionPrefs : public KeyedService {
   void SetActiveBit(const ExtensionId& extension_id, bool active);
 
   // Returns the granted permission set for the extension with `extension_id`,
-  // and NULL if no preferences were found for `extension_id`.
+  // and nullptr if no preferences were found for `extension_id`.
   // This passes ownership of the returned set to the caller.
   std::unique_ptr<PermissionSet> GetGrantedPermissions(
       const ExtensionId& extension_id) const;
@@ -651,28 +653,39 @@ class ExtensionPrefs : public KeyedService {
       const ExtensionId& extension_id,
       bool include_component_extensions = false) const;
 
+  // Info stored for a delayed extension install.
+  // `install_flags` are a bitmask of extension::InstallFlags.
+  struct DelayedInstallInfo {
+    DelayedInstallInfo();
+    DelayedInstallInfo(int install_flags,
+                       DelayReason delay_reason,
+                       const syncer::StringOrdinal& page_ordinal,
+                       const std::string& install_parameter,
+                       base::DictValue ruleset_install_prefs = {});
+    ~DelayedInstallInfo();
+    DelayedInstallInfo(DelayedInstallInfo&&);
+    DelayedInstallInfo& operator=(DelayedInstallInfo&&);
+
+    int install_flags = kInstallFlagNone;
+    DelayReason delay_reason = DelayReason::kNone;
+    syncer::StringOrdinal page_ordinal;
+    std::string install_parameter;
+    base::DictValue ruleset_install_prefs;
+  };
+
   // We've downloaded an updated .crx file for the extension, but are waiting
   // to install it.
-  //
-  // `install_flags` are a bitmask of extension::InstallFlags.
   void SetDelayedInstallInfo(const Extension* extension,
-                             const base::flat_set<int>& disable_reasons,
-                             int install_flags,
-                             DelayReason delay_reason,
-                             const syncer::StringOrdinal& page_ordinal,
-                             const std::string& install_parameter,
-                             base::Value::Dict ruleset_install_prefs = {});
-
-  // Removes any delayed install information we have for the given
-  // `extension_id`. Returns true if there was info to remove; false otherwise.
-  bool RemoveDelayedInstallInfo(const ExtensionId& extension_id);
-
-  // Update the prefs to finish the update for an extension.
-  bool FinishDelayedInstallInfo(const ExtensionId& extension_id);
+                             DelayedInstallInfo install_info);
 
   // Returns the ExtensionInfo from the prefs for delayed install information
   // for `extension_id`, if we have any. Otherwise returns std::nullopt.
-  std::optional<ExtensionInfo> GetDelayedInstallInfo(
+  std::optional<ExtensionInfo> GetDelayedInstallExtensionInfo(
+      const ExtensionId& extension_id) const;
+
+  // Returns the delayed install info for `extension_id`. Returns a
+  // default-constructed DelayedInstallInfo if no delayed install info exists.
+  DelayedInstallInfo GetDelayedInstallInfo(
       const ExtensionId& extension_id) const;
 
   DelayReason GetDelayedInstallReason(const ExtensionId& extension_id) const;
@@ -703,6 +716,7 @@ class ExtensionPrefs : public KeyedService {
   // history is cleared.
   void ClearLastLaunchTimes();
 
+  static void RegisterBrowserPrefs(PrefRegistrySimple* registry);
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
 
   bool extensions_disabled() const { return extensions_disabled_; }
@@ -715,15 +729,14 @@ class ExtensionPrefs : public KeyedService {
 
   // Used by AppWindowGeometryCache to persist its cache. These methods
   // should not be called directly.
-  const base::Value::Dict* GetGeometryCache(
+  const base::DictValue* GetGeometryCache(
       const ExtensionId& extension_id) const;
-  void SetGeometryCache(const ExtensionId& extension_id,
-                        base::Value::Dict cache);
+  void SetGeometryCache(const ExtensionId& extension_id, base::DictValue cache);
 
   // Used for verification of installed extension ids. For the Set method, pass
   // null to remove the preference.
-  const base::Value::Dict& GetInstallSignature() const;
-  void SetInstallSignature(base::Value::Dict* signature);
+  const base::DictValue& GetInstallSignature() const;
+  void SetInstallSignature(base::DictValue* signature);
 
   // Whether the extension with the given `extension_id` needs to be synced.
   // This is set when the state (such as enabled/disabled or allowed in
@@ -799,11 +812,11 @@ class ExtensionPrefs : public KeyedService {
   void MakePathsRelative();
 
   // Helper function used by GetInstalledExtensionInfo() and
-  // GetDelayedInstallInfo() to construct an ExtensionInfo from the provided
-  // `extension` dictionary.
+  // GetDelayedInstallExtensionInfo() to construct an ExtensionInfo from the
+  // provided `extension` dictionary.
   std::optional<ExtensionInfo> GetInstalledInfoHelper(
       const ExtensionId& extension_id,
-      const base::Value::Dict& extension,
+      const base::DictValue& extension,
       bool include_component_extensions) const;
 
   // Read the boolean preference entry and return true if the preference exists
@@ -835,7 +848,12 @@ class ExtensionPrefs : public KeyedService {
 
   // Returns an immutable dictionary for extension `id`'s prefs, or NULL if it
   // doesn't exist.
-  const base::Value::Dict* GetExtensionPref(
+  const base::DictValue* GetExtensionPref(
+      const ExtensionId& extension_id) const;
+
+  // Returns the delayed install info sub-dictionary for the given extension,
+  // or nullptr if no delayed install info exists.
+  const base::DictValue* GetDelayedInstallDict(
       const ExtensionId& extension_id) const;
 
   // Returns an immutable base::Value for extension `id`'s prefs, or nullptr if
@@ -889,9 +907,9 @@ class ExtensionPrefs : public KeyedService {
                                   const base::flat_set<int>& disable_reasons,
                                   int install_flags,
                                   const std::string& install_parameter,
-                                  base::Value::Dict ruleset_install_prefs,
+                                  base::DictValue ruleset_install_prefs,
                                   prefs::DictionaryValueUpdate* extension_dict,
-                                  base::Value::List& removed_prefs);
+                                  base::ListValue& removed_prefs);
 
   void InitExtensionControlledPrefs(const ExtensionsInfo& extensions_info);
 
@@ -933,7 +951,12 @@ class ExtensionPrefs : public KeyedService {
 
   bool extensions_disabled_;
 
-  base::ObserverList<ExtensionPrefsObserver>::Unchecked observer_list_;
+  // TODO(crbug.com/484371187): Investigate if reentrancy can be removed.
+  base::ObserverList<
+      ExtensionPrefsObserver,
+      /*check_empty=*/false,
+      base::ObserverListReentrancyPolicy::kAllowReentrancyUntriaged>
+      observer_list_;
 };
 
 }  // namespace extensions

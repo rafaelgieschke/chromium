@@ -50,7 +50,6 @@
 #include "chrome/browser/web_applications/web_app_install_info.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
@@ -89,6 +88,7 @@
 #include "ui/display/test/test_screen.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image_skia_operations.h"
+#include "ui/gfx/image/image_skia_rep.h"
 #include "ui/gfx/image/image_unittest_util.h"
 
 using crostini::CrostiniTestHelper;
@@ -136,7 +136,7 @@ scoped_refptr<extensions::Extension> MakeApp(const std::string& name,
                                              const std::string& url,
                                              const std::string& id) {
   std::u16string err;
-  base::Value::Dict value;
+  base::DictValue value;
   value.Set("name", name);
   value.Set("version", version);
   value.SetByDottedPath("app.launch.web_url", url);
@@ -635,7 +635,7 @@ class WebAppBuilderDemoModeTest : public WebAppBuilderTest {
 // This test adds a web app to the app list for demo mode when online.
 TEST_F(WebAppBuilderDemoModeTest, WebAppListOnline) {
   network::TestNetworkConnectionTracker::GetInstance()->SetConnectionType(
-      network::mojom::ConnectionType::CONNECTION_ETHERNET);
+      net::NetworkChangeNotifier::ConnectionType::CONNECTION_ETHERNET);
 
   const std::string kAppName = "https://test.com";
   CreateWebApp(kAppName);
@@ -646,7 +646,7 @@ TEST_F(WebAppBuilderDemoModeTest, WebAppListOnline) {
 // This test adds a web app to the app list for demo mode when offline.
 TEST_F(WebAppBuilderDemoModeTest, WebAppListOffline) {
   network::TestNetworkConnectionTracker::GetInstance()->SetConnectionType(
-      network::mojom::ConnectionType::CONNECTION_NONE);
+      net::NetworkChangeNotifier::ConnectionType::CONNECTION_NONE);
 
   const std::string kAppName = "https://test.com";
   CreateWebApp(kAppName);

@@ -181,7 +181,13 @@ void WebView::SetCrashedOverlayView(View* crashed_overlay_view) {
   }
 
   if (crashed_overlay_view_.view()) {
-    RemoveChildView(crashed_overlay_view_.view());
+    View* old_view = crashed_overlay_view_.view();
+    if (old_view->owned_by_client()) {
+      RemoveChildView(old_view);
+    } else {
+      std::move(return_crashed_overlay_to_owner_)
+          .Run(RemoveChildViewT(old_view));
+    }
     // Show the hosted web contents view iff the crashed
     // overlay is NOT showing, to ensure hit testing is
     // correct on Mac. See https://crbug.com/896508
@@ -198,6 +204,67 @@ void WebView::SetCrashedOverlayView(View* crashed_overlay_view) {
   }
 
   UpdateCrashedOverlayView();
+}
+
+void WebView::TakeCrashedOverlayViewImpl(
+    std::unique_ptr<View> crashed_overlay_view,
+    ReturnCrashOverlayToOwnerCallback return_to_owner) {
+  if (crashed_overlay_view.get()) {
+    CHECK(!crashed_overlay_view->owned_by_client());
+  }
+
+  // TODO(http://crbug.com/486052969): Remove code below that depends on a
+  // transitory set_owned_by_client and non-set_owned_by_client state after
+  // SadTabView drops set_owned_by_client().
+  if (crashed_overlay_view_.view() == crashed_overlay_view.get()) {
+    return;
+  }
+
+  if (crashed_overlay_view_.view()) {
+    View* old_view = crashed_overlay_view_.view();
+    if (old_view->owned_by_client()) {
+      RemoveChildView(old_view);
+    } else {
+      std::move(return_crashed_overlay_to_owner_)
+          .Run(RemoveChildViewT(old_view));
+    }
+    // Show the hosted web contents view iff the crashed
+    // overlay is NOT showing, to ensure hit testing is
+    // correct on Mac. See https://crbug.com/896508
+    holder_->SetVisible(true);
+  }
+
+  if (crashed_overlay_view) {
+    crashed_overlay_view_.SetView(
+        AddChildView(std::move(crashed_overlay_view)));
+    return_crashed_overlay_to_owner_ = std::move(return_to_owner);
+    holder_->SetVisible(false);
+    crashed_overlay_view_.view()->SetBoundsRect(GetLocalBounds());
+  } else {
+    crashed_overlay_view_.SetView(nullptr);
+  }
+
+  UpdateCrashedOverlayView();
+}
+
+std::nullptr_t WebView::TakeCrashedOverlayView(std::nullptr_t) {
+  TakeCrashedOverlayView(std::unique_ptr<View>());
+  return nullptr;
+}
+
+std::unique_ptr<View> WebView::DetachCrashedOverlayViewImpl() {
+  if (!crashed_overlay_view_) {
+    return nullptr;
+  }
+  std::unique_ptr<View> old_view =
+      RemoveChildViewT(crashed_overlay_view_.view());
+  return_crashed_overlay_to_owner_.Reset();
+  // Show the hosted web contents view iff the crashed
+  // overlay is NOT showing, to ensure hit testing is
+  // correct on Mac. See https://crbug.com/896508
+  holder_->SetVisible(true);
+  UpdateCrashedOverlayView();
+  return old_view;
 }
 
 base::CallbackListSubscription WebView::AddWebContentsAttachedCallback(
@@ -282,7 +349,7 @@ bool WebView::SkipDefaultKeyEventProcessing(const ui::KeyEvent& event) {
   // We'll first give the page a chance to process the key events.  If it does
   // not process them, they'll be returned to us and we'll treat them as
   // accelerators then.
-  return web_contents() && !web_contents()->IsCrashed();
+  return IsWebContentsAlive();
 }
 
 bool WebView::OnMousePressed(const ui::MouseEvent& event) {
@@ -301,13 +368,47 @@ bool WebView::OnMousePressed(const ui::MouseEvent& event) {
 }
 
 void WebView::OnFocus() {
-  if (web_contents() && !web_contents()->IsCrashed()) {
+  // A WebView can be focused in a few ways:
+  //
+  // - Click inside the hosted NativeView:
+  //   The native view (aura::Window or NSView) will be focused, which causes
+  //   the WebContents to notify its observer via
+  //   WebContentsObserver::OnWebContentsFocused(). WebView observes the
+  //   WebContents' focus change, then updates views::FocusManager by calling
+  //   View::RequestFocus(), which eventually calls WebView::OnFocus().
+  //   This makes the HTML element :focused, but not :focus-visible (usually
+  //   this means the element has no focus ring).
+  //
+  // - Click on the WebView (outside the NativeView):
+  //   Handled by WebView::OnMousePressed(), which calls RequestFocus(), which
+  //   eventually calls WebView::OnFocus().
+  //   This restores the HTML document's last focused element and the previous
+  //   :focus and :focus-visible state.
+  //   For the HTML document's initial focus, :focus-visible will be added.
+  //
+  // - Programmatic focus:
+  //   Some code calls FocusManager::SetFocusedView() directly, invoking
+  //   WebView::OnFocus().
+  //   This restores the HTML document's last focused element and the previous
+  //   :focus and :focus-visible state.
+  //   For the HTML document's initial focus, :focus-visible will be added.
+  //
+  // - Focus traversal (i.e., Tab and Shift+Tab):
+  //   FocusManager::AdvanceFocus() calls
+  //   View::AboutToRequestFocusFromTabTraversal(), where WebView invokes
+  //   WebContents::FocusThroughTabTraversal(). This focuses the first
+  //   focusable element (e.g., a <button>).
+  //   FocusManager then calls SetFocusedView(), invoking WebView::OnFocus().
+  //   The focused HTML element becomes :focused and :focus-visible (has focus
+  //   ring).
+  //
+  if (IsWebContentsAlive()) {
     web_contents()->Focus();
   }
 }
 
 void WebView::AboutToRequestFocusFromTabTraversal(bool reverse) {
-  if (web_contents() && !web_contents()->IsCrashed()) {
+  if (IsWebContentsAlive()) {
     web_contents()->FocusThroughTabTraversal(reverse);
   }
 }
@@ -354,7 +455,7 @@ gfx::NativeViewAccessible WebView::GetNativeViewAccessible() {
     return View::GetNativeViewAccessible();
   }
 
-  if (web_contents() && !web_contents()->IsCrashed()) {
+  if (IsWebContentsAlive()) {
     content::RenderWidgetHostView* host_view =
         web_contents()->GetRenderWidgetHostView();
     if (host_view) {
@@ -443,7 +544,7 @@ void WebView::DidToggleFullscreenModeForTab(bool entered_fullscreen,
 
 void WebView::OnWebContentsFocused(
     content::RenderWidgetHost* render_widget_host) {
-  RequestFocus();
+  RequestFocusWithReason(FocusManager::FocusChangeReason::kFocusNativeView);
   web_contents_focused_callbacks_.Notify(this);
 }
 
@@ -558,6 +659,10 @@ void WebView::OnWidgetAXManagerEnabled() {
   }
 
   widget_ax_manager_observation_.Reset();
+}
+
+bool WebView::IsWebContentsAlive() const {
+  return web_contents() && !web_contents()->IsCrashed();
 }
 
 void WebView::HandleWidgetAXManagerEnablement() {

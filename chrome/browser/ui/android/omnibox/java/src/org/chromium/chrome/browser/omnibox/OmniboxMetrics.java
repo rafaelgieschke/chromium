@@ -13,6 +13,7 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.omnibox.suggestions.mostvisited.SuggestTileType;
 import org.chromium.components.metrics.OmniboxEventProtos.OmniboxEventProto.PageClassification;
+import org.chromium.components.omnibox.AutocompleteInput.RefineActionUsage;
 import org.chromium.components.omnibox.AutocompleteMatch;
 import org.chromium.components.omnibox.AutocompleteRequestType;
 import org.chromium.components.omnibox.suggestions.OmniboxSuggestionUiType;
@@ -78,22 +79,6 @@ public class OmniboxMetrics {
             "Android.Omnibox.SearchPrefetch.TouchDownPrefetchResult.NavigationPrefetch";
 
     @IntDef({
-        RefineActionUsage.NOT_USED,
-        RefineActionUsage.SEARCH_WITH_ZERO_PREFIX,
-        RefineActionUsage.SEARCH_WITH_PREFIX,
-        RefineActionUsage.SEARCH_WITH_BOTH,
-        RefineActionUsage.COUNT
-    })
-    @Retention(RetentionPolicy.SOURCE)
-    public @interface RefineActionUsage {
-        int NOT_USED = 0; // User did not interact with Refine button.
-        int SEARCH_WITH_ZERO_PREFIX = 1; // User interacted with Refine button in zero-prefix mode.
-        int SEARCH_WITH_PREFIX = 2; // User interacted with Refine button in non-zero-prefix mode.
-        int SEARCH_WITH_BOTH = 3; // User interacted with Refine button in both contexts.
-        int COUNT = 4;
-    }
-
-    @IntDef({
         ActionInSuggestIntentResult.SUCCESS,
         ActionInSuggestIntentResult.BAD_URI_SYNTAX,
         ActionInSuggestIntentResult.ACTIVITY_NOT_FOUND,
@@ -137,8 +122,8 @@ public class OmniboxMetrics {
     @interface FocusResultedInNavigationTypes {
         // LINT.IfChange(FocusResultedInNavigationTypes)
         int NO_NAV_NO_ATTACHMENT = 0;
-        int NO_NAV_WITH_ATTACHMENT = 1;
-        int NAV_NO_ATTACHMENT = 2;
+        int NAV_NO_ATTACHMENT = 1;
+        int NO_NAV_WITH_ATTACHMENT = 2;
         int NAV_WITH_ATTACHMENT = 3;
         int COUNT = 4;
         // LINT.ThenChange(//tools/metrics/histograms/metadata/omnibox/enums.xml:FocusResultedInNavigationTypes)
@@ -501,6 +486,9 @@ public class OmniboxMetrics {
                 break;
 
             case PageClassification.NTP_COMPOSEBOX_VALUE:
+            case PageClassification.NTP_OMNIBOX_COMPOSEBOX_VALUE:
+            case PageClassification.OTHER_OMNIBOX_COMPOSEBOX_VALUE:
+            case PageClassification.SRP_OMNIBOX_COMPOSEBOX_VALUE:
                 suffix = "ComposeBox";
                 break;
 
@@ -511,15 +499,6 @@ public class OmniboxMetrics {
                 break;
 
             default:
-                // May trigger if nev PageClassifications were added to
-                // third_party/metrics_proto/omnibox_event.proto file,
-                // but have not been reflected here. If that's the case, file a bug for the
-                // author of the new PageClassification.
-                // Last supported value: OTHER_ON_CCT.
-                assert false
-                        : "b/40221519: Invalid page classification: "
-                                + pageClass
-                                + ". Please re-open bug, and attach captured stack trace.";
                 break;
         }
 

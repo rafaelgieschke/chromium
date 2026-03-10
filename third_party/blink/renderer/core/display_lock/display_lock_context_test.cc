@@ -38,6 +38,7 @@
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/core/timing/soft_navigation_context.h"
 #include "third_party/blink/renderer/core/timing/soft_navigation_heuristics.h"
+#include "third_party/blink/renderer/core/timing/soft_navigation_heuristics_test_util.h"
 #include "third_party/blink/renderer/core/timing/soft_navigation_paint_attribution_tracker.h"
 #include "third_party/blink/renderer/platform/testing/task_environment.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
@@ -3556,7 +3557,16 @@ TEST_F(DisplayLockContextTest, ShouldForceUnlockObjectWithFallbackContent) {
   EXPECT_FALSE(target->GetDisplayLockContext()->IsLocked());
 }
 
-class SoftNavigationDisplayLockContextTest : public DisplayLockContextTest {};
+class SoftNavigationDisplayLockContextTest : public DisplayLockContextTest {
+ public:
+  SoftNavigationContext* CreateSoftNavigationContext() {
+    auto* initial_event_timing = CreatePerformanceEventTimingForTest(
+        event_type_names::kClick, base::TimeTicks::Now(), GetDocument().body(),
+        GetDocument().domWindow());
+    return MakeGarbageCollected<SoftNavigationContext>(
+        *GetDocument().domWindow(), initial_event_timing);
+  }
+};
 
 TEST_F(SoftNavigationDisplayLockContextTest, AncestorSoftNavigationContext) {
   SetHtmlInnerHTML(R"HTML(
@@ -3615,8 +3625,7 @@ TEST_F(SoftNavigationDisplayLockContextTest, AncestorSoftNavigationContext) {
   EXPECT_TRUE(locked_object->ShouldInheritSoftNavigationContext());
   EXPECT_TRUE(lockedchild_object->ShouldInheritSoftNavigationContext());
 
-  SoftNavigationContext* context =
-      MakeGarbageCollected<SoftNavigationContext>(*GetDocument().domWindow());
+  SoftNavigationContext* context = CreateSoftNavigationContext();
   SoftNavigationHeuristics* heuristics =
       GetDocument().domWindow()->GetSoftNavigationHeuristics();
   ASSERT_TRUE(heuristics);
@@ -3760,8 +3769,7 @@ TEST_F(SoftNavigationDisplayLockContextTest, DescendantSoftNavigationContext) {
   EXPECT_TRUE(target_object->ShouldInheritSoftNavigationContext());
   EXPECT_TRUE(content_object->ShouldInheritSoftNavigationContext());
 
-  auto* context =
-      MakeGarbageCollected<SoftNavigationContext>(*GetDocument().domWindow());
+  auto* context = CreateSoftNavigationContext();
   SoftNavigationHeuristics* heuristics =
       GetDocument().domWindow()->GetSoftNavigationHeuristics();
   ASSERT_TRUE(heuristics);
@@ -3867,6 +3875,78 @@ TEST_F(SoftNavigationDisplayLockContextTest, DescendantSoftNavigationContext) {
   EXPECT_FALSE(target_object->ShouldInheritSoftNavigationContext());
   EXPECT_TRUE(content_object->ShouldInheritSoftNavigationContext());
   EXPECT_TRUE(tracker->IsAttributable(content_element, context));
+}
+
+TEST_F(DisplayLockContextRenderingTest,
+       VisualOverflowCalculateOnDescendantOfLockedSVGDoesNotCrash) {
+  SetHtmlInnerHTML(R"HTML(
+    <svg width=100 height=100>
+      <g id=outer_lock>
+        <foreignObject id=inner_lock width=100 height=100>
+          <div id=child style="width: 50px; height: 50px; background: blue;"></div>
+        </foreignObject>
+      </g>
+    </svg>
+  )HTML");
+
+  auto* outer = GetDocument().getElementById(AtomicString("outer_lock"));
+  auto* inner = GetDocument().getElementById(AtomicString("inner_lock"));
+
+  LockImmediate(&outer->EnsureDisplayLockContext());
+  LockImmediate(&inner->EnsureDisplayLockContext());
+
+  UpdateAllLifecyclePhasesForTest();
+
+  // Verify that outer doesn't have a layer, but inner does.
+  EXPECT_FALSE(outer->GetLayoutObject()->HasLayer());
+  auto* inner_layer = GetPaintLayerByElementId("inner_lock");
+  ASSERT_TRUE(inner_layer);
+
+  // Mark inner for overflow recalc.
+  inner_layer->SetNeedsVisualOverflowRecalc();
+
+  // Ensure no crash.
+  UpdateAllLifecyclePhasesForTest();
+}
+
+TEST_F(DisplayLockContextRenderingTest, VisualOverflowUpdateAfterUnlock) {
+  SetHtmlInnerHTML(R"HTML(
+    <style>
+      #target {
+        width: 100px;
+        height: 100px;
+        background: blue;
+        box-shadow: 10px 10px 0px red;
+        contain: style layout;
+      }
+    </style>
+    <div id="target"></div>
+  )HTML");
+
+  auto* target = GetDocument().getElementById(AtomicString("target"));
+  auto* box = target->GetLayoutBox();
+  auto* layer = box->Layer();
+
+  UpdateAllLifecyclePhasesForTest();
+  EXPECT_EQ(layer->GetLayoutObject().VisualOverflowRect(),
+            PhysicalRect(0, 0, 110, 110));
+
+  LockImmediate(&target->EnsureDisplayLockContext());
+  UpdateAllLifecyclePhasesForTest();
+
+  target->setAttribute(html_names::kStyleAttr,
+                       AtomicString("box-shadow: 20px 20px 0px red;"));
+  GetDocument().UpdateStyleAndLayoutTree();
+  EXPECT_TRUE(layer->NeedsVisualOverflowRecalc());
+
+  UpdateAllLifecyclePhasesForTest();
+
+  target->GetDisplayLockContext()->SetRequestedState(
+      EContentVisibility::kVisible);
+  UpdateAllLifecyclePhasesForTest();
+
+  EXPECT_EQ(layer->GetLayoutObject().VisualOverflowRect(),
+            PhysicalRect(0, 0, 120, 120));
 }
 
 }  // namespace blink

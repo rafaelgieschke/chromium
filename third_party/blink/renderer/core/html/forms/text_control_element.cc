@@ -32,7 +32,7 @@
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/focus_params.h"
-#include "third_party/blink/renderer/core/dom/form_control_range.h"
+#include "third_party/blink/renderer/core/dom/opaque_range.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/editing/editing_behavior.h"
@@ -96,8 +96,7 @@ void AppendWrappedNode(const Element& container,
                        Position& break_position,
                        StringBuilder& result) {
   if (IsA<HTMLBRElement>(node)) {
-    if (RuntimeEnabledFeatures::TextareaLineEndingsAsBrEnabled() &&
-        !TextControlElement::IsPlaceholderBreakElement(&node)) {
+    if (!TextControlElement::IsPlaceholderBreakElement(&node)) {
       result.Append(uchar::kLineFeed);
     } else {
       DCHECK_EQ(&node, container.lastChild());
@@ -178,11 +177,11 @@ void TextControlElement::DispatchBlurEvent(
 }
 
 void TextControlElement::DefaultEventHandler(Event& event) {
-  // FormControlRange snapshots on beforeinput and commits after the value
+  // OpaqueRange snapshots on beforeinput and commits after the value
   // mutation, ensuring updates are visible before input listeners run.
-  if (RuntimeEnabledFeatures::FormControlRangeEnabled() &&
+  if (RuntimeEnabledFeatures::OpaqueRangeEnabled() &&
       event.type() == event_type_names::kBeforeinput && event.IsInputEvent()) {
-    CaptureFormControlRangePreEdit();
+    CaptureOpaqueRangePreEdit();
   }
 
   if (event.type() == event_type_names::kWebkitEditableContentChanged &&
@@ -226,8 +225,8 @@ String TextControlElement::StrippedPlaceholder() const {
   // the attribute value.
   const AtomicString& attribute_value =
       FastGetAttribute(html_names::kPlaceholderAttr);
-  if (!attribute_value.Contains(uchar::kLineFeed) &&
-      !attribute_value.Contains(uchar::kCarriageReturn)) {
+  if (!attribute_value.contains(uchar::kLineFeed) &&
+      !attribute_value.contains(uchar::kCarriageReturn)) {
     return attribute_value;
   }
 
@@ -424,14 +423,14 @@ void TextControlElement::setRangeText(const String& replacement,
   text.Append(StringView(original_text, end));
 
   // Suppress SetValue()’s automatic full-value diff within this scope to avoid
-  // emitting a duplicate FormControlRange update; then commit the precise
+  // emitting a duplicate OpaqueRange update; then commit the precise
   // programmatic edit.
   {
     ScopedSkipValueAutoDiff skip_value_auto_diff(*this);
     SetValue(text.ToString(), TextFieldEventBehavior::kDispatchNoEvent,
              TextControlSetValueSelection::kDoNotSet);
-    if (RuntimeEnabledFeatures::FormControlRangeEnabled()) {
-      CommitProgrammaticFormControlRangeEdit(original_text, start, end);
+    if (RuntimeEnabledFeatures::OpaqueRangeEnabled()) {
+      CommitProgrammaticOpaqueRangeEdit(original_text, start, end);
     }
   }
 
@@ -939,17 +938,12 @@ bool TextControlElement::LastChangeWasUserEdit() const {
 
 Node* TextControlElement::CreatePlaceholderBreakElement() const {
   auto* element = MakeGarbageCollected<HTMLBRElement>(GetDocument());
-  if (RuntimeEnabledFeatures::TextareaLineEndingsAsBrEnabled()) {
-    element->setAttribute(html_names::kIdAttr,
-                          shadow_element_names::kIdPlaceholderBreak);
-  }
+  element->setAttribute(html_names::kIdAttr,
+                        shadow_element_names::kIdPlaceholderBreak);
   return element;
 }
 
 bool TextControlElement::IsPlaceholderBreakElement(const Node* node) {
-  if (!RuntimeEnabledFeatures::TextareaLineEndingsAsBrEnabled()) {
-    return IsA<HTMLBRElement>(node);
-  }
   return IsA<HTMLBRElement>(node) &&
          To<Element>(node)->GetIdAttribute() ==
              shadow_element_names::kIdPlaceholderBreak;
@@ -962,19 +956,18 @@ void TextControlElement::AdjustPlaceholderBreakElement() {
     return;
   }
   Node* last_child = inner_editor->lastChild();
-  if (RuntimeEnabledFeatures::TextareaLastLineRemovalFixEnabled()) {
-    // Remove the last empty text.  It prevents from adding the placeholder
-    // break though it produces no height.
-    while (auto* text_last_child = DynamicTo<Text>(last_child)) {
-      if (!text_last_child->data().empty()) {
-        break;
-      }
-      last_child = last_child->previousSibling();
-      text_last_child->remove();
+
+  // Remove the last empty text.  It prevents from adding the placeholder
+  // break though it produces no height.
+  while (auto* text_last_child = DynamicTo<Text>(last_child)) {
+    if (!text_last_child->data().empty()) {
+      break;
     }
+    last_child = last_child->previousSibling();
+    text_last_child->remove();
   }
-  if (RuntimeEnabledFeatures::TextareaLineEndingsAsBrEnabled() &&
-      IsA<HTMLBRElement>(last_child)) {
+
+  if (IsA<HTMLBRElement>(last_child)) {
     if (!IsPlaceholderBreakElement(last_child)) {
       inner_editor->AppendChild(CreatePlaceholderBreakElement());
     } else if (IsPlaceholderBreakElement(last_child->previousSibling())) {
@@ -989,9 +982,10 @@ void TextControlElement::AdjustPlaceholderBreakElement() {
   auto* last_child_text_node = DynamicTo<Text>(last_child);
   if (!last_child_text_node)
     return;
-  if (last_child_text_node->data().EndsWith('\n') ||
-      last_child_text_node->data().EndsWith('\r'))
+  if (last_child_text_node->data().ends_with('\n') ||
+      last_child_text_node->data().ends_with('\r')) {
     inner_editor->AppendChild(CreatePlaceholderBreakElement());
+  }
 }
 
 void TextControlElement::SetInnerEditorValue(const String& value) {
@@ -1013,8 +1007,7 @@ void TextControlElement::SetInnerEditorValue(const String& value) {
   // We don't use setTextContent.  It triggers unnecessary paint.
   if (value.empty()) {
     inner_editor->RemoveChildren();
-  } else if (!RuntimeEnabledFeatures::TextareaLineEndingsAsBrEnabled() ||
-             IsA<HTMLInputElement>(this)) {
+  } else if (IsA<HTMLInputElement>(this)) {
     inner_editor->RemoveChildren();
     AppendText(value, 0, value.length(), *inner_editor);
   } else {
@@ -1074,29 +1067,8 @@ String TextControlElement::SerializeInnerEditorValue() const {
     return g_empty_string;
   }
 
-  if (RuntimeEnabledFeatures::TextareaLineEndingsAsBrEnabled()) {
-    auto [length, is_8bit] = AnalyzeInnerEditorValue(nullptr);
-    return SerializeInnerEditorValueInternal(length, is_8bit);
-  }
-
-  StringBuilder result;
-  for (Node& node : NodeTraversal::InclusiveDescendantsOf(*inner_editor)) {
-    if (IsA<HTMLBRElement>(node)) {
-      if (RuntimeEnabledFeatures::TextareaLineEndingsAsBrEnabled()) {
-        if (!IsPlaceholderBreakElement(&node)) {
-          result.Append(uchar::kLineFeed);
-        }
-      } else {
-        DCHECK_EQ(&node, inner_editor->lastChild());
-        if (&node != inner_editor->lastChild()) {
-          result.Append(uchar::kLineFeed);
-        }
-      }
-    } else if (auto* text_node = DynamicTo<Text>(node)) {
-      result.Append(text_node->data());
-    }
-  }
-  return result.ToString();
+  auto [length, is_8bit] = AnalyzeInnerEditorValue(nullptr);
+  return SerializeInnerEditorValueInternal(length, is_8bit);
 }
 
 std::pair<wtf_size_t, bool> TextControlElement::AnalyzeInnerEditorValue(
@@ -1182,49 +1154,30 @@ String TextControlElement::ValueWithHardLineBreaks() const {
   if (!layout_object)
     return Value();
 
-  if (RuntimeEnabledFeatures::TextareaMultipleIfcsEnabled()) {
-    StringBuilder result;
-    bool has_valid_ifcs = false;
-    for (auto* anonymous = To<LayoutBlockFlow>(layout_object->FirstChild());
-         anonymous; anonymous = To<LayoutBlockFlow>(anonymous->NextSibling())) {
-      InlineCursor cursor(*anonymous);
-      if (!cursor) {
-        continue;
-      }
-      const auto* mapping = InlineNode::GetOffsetMapping(anonymous);
-      if (!mapping) {
-        continue;
-      }
-      has_valid_ifcs = true;
-      Position break_position = GetNextSoftBreak(*mapping, cursor);
-      const Node* node = anonymous->FirstChild()
-                             ? anonymous->FirstChild()->GetNode()
-                             : nullptr;
-      for (; node && node->GetLayoutObject() &&
-             node->GetLayoutObject()->Parent() == anonymous;
-           node = node->nextSibling()) {
-        AppendWrappedNode(*inner_text, *node, *mapping, cursor, break_position,
-                          result);
-      }
-    }
-    return has_valid_ifcs ? result.ReleaseString() : Value();
-  }
-
-  InlineCursor cursor(*layout_object);
-  if (!cursor) {
-    return Value();
-  }
-  const auto* mapping = InlineNode::GetOffsetMapping(layout_object);
-  if (!mapping) {
-    return Value();
-  }
-  Position break_position = GetNextSoftBreak(*mapping, cursor);
   StringBuilder result;
-  for (Node& node : NodeTraversal::DescendantsOf(*inner_text)) {
-    AppendWrappedNode(*inner_text, node, *mapping, cursor, break_position,
-                      result);
+  bool has_valid_ifcs = false;
+  for (auto* anonymous = To<LayoutBlockFlow>(layout_object->FirstChild());
+       anonymous; anonymous = To<LayoutBlockFlow>(anonymous->NextSibling())) {
+    InlineCursor cursor(*anonymous);
+    if (!cursor) {
+      continue;
+    }
+    const auto* mapping = InlineNode::GetOffsetMapping(anonymous);
+    if (!mapping) {
+      continue;
+    }
+    has_valid_ifcs = true;
+    Position break_position = GetNextSoftBreak(*mapping, cursor);
+    const Node* node =
+        anonymous->FirstChild() ? anonymous->FirstChild()->GetNode() : nullptr;
+    for (; node && node->GetLayoutObject() &&
+           node->GetLayoutObject()->Parent() == anonymous;
+         node = node->nextSibling()) {
+      AppendWrappedNode(*inner_text, *node, *mapping, cursor, break_position,
+                        result);
+    }
   }
-  return result.ToString();
+  return has_valid_ifcs ? result.ReleaseString() : Value();
 }
 
 TextControlElement* EnclosingTextControl(const Position& position) {
@@ -1268,11 +1221,12 @@ String TextControlElement::DirectionForFormData() const {
       continue;
     }
 
-    if (EqualIgnoringASCIICase(dir_attribute_value, "rtl") ||
-        EqualIgnoringASCIICase(dir_attribute_value, "ltr"))
+    if (EqualIgnoringAsciiCase(dir_attribute_value, "rtl") ||
+        EqualIgnoringAsciiCase(dir_attribute_value, "ltr")) {
       return dir_attribute_value;
+    }
 
-    if (EqualIgnoringASCIICase(dir_attribute_value, "auto")) {
+    if (EqualIgnoringAsciiCase(dir_attribute_value, "auto")) {
       return element->CachedDirectionality() == TextDirection::kRtl ? "rtl"
                                                                     : "ltr";
     }
@@ -1345,7 +1299,7 @@ void TextControlElement::ScheduleSelectionchangeEvent() {
 
 void TextControlElement::Trace(Visitor* visitor) const {
   visitor->Trace(inner_editor_);
-  visitor->Trace(form_control_ranges_);
+  visitor->Trace(opaque_ranges_);
   HTMLFormControlElementWithState::Trace(visitor);
 }
 
@@ -1366,34 +1320,70 @@ TextOverflowData TextControlElement::ValueForTextOverflow() const {
   return ComputedStyleRef().TextOverflow();
 }
 
-void TextControlElement::RegisterFormControlRange(FormControlRange* range) {
-  form_control_ranges_.push_back(range);
-}
-
-void TextControlElement::UnregisterFormControlRange(FormControlRange* range) {
-  auto iter = std::ranges::find(form_control_ranges_, range);
-  if (iter != form_control_ranges_.end()) {
-    form_control_ranges_.erase(iter);
+void TextControlElement::DisconnectAllOpaqueRanges() {
+  while (!opaque_ranges_.empty()) {
+    opaque_ranges_.back()->disconnect();
   }
 }
 
-void TextControlElement::NotifyFormControlRangesOfTextChange(
+void TextControlElement::RemovedFrom(ContainerNode& insertion_point) {
+  if (insertion_point.isConnected() &&
+      RuntimeEnabledFeatures::OpaqueRangeEnabled()) {
+    DisconnectAllOpaqueRanges();
+  }
+  HTMLFormControlElementWithState::RemovedFrom(insertion_point);
+}
+
+void TextControlElement::RegisterOpaqueRange(OpaqueRange* range) {
+  opaque_ranges_.push_back(range);
+}
+
+void TextControlElement::UnregisterOpaqueRange(OpaqueRange* range) {
+  auto iter = std::ranges::find(opaque_ranges_, range);
+  if (iter != opaque_ranges_.end()) {
+    opaque_ranges_.erase(iter);
+  }
+}
+
+OpaqueRange* TextControlElement::createValueRange(
+    unsigned start_offset,
+    unsigned end_offset,
+    ExceptionState& exception_state) {
+  CHECK(RuntimeEnabledFeatures::OpaqueRangeEnabled());
+
+  const String value = Value();
+  if (start_offset > value.length() || end_offset > value.length()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kIndexSizeError,
+        "Start or end offset exceeds value length.");
+    return nullptr;
+  }
+
+  // Auto-collapse backwards ranges to match Range behavior.
+  if (start_offset > end_offset) {
+    end_offset = start_offset;
+  }
+
+  return OpaqueRange::Create(GetDocument(), this, start_offset, end_offset);
+}
+
+void TextControlElement::NotifyOpaqueRangesOfTextChange(
     unsigned change_offset,
     unsigned deleted_count,
     unsigned inserted_count) const {
-  DCHECK(RuntimeEnabledFeatures::FormControlRangeEnabled());
-  if (form_control_ranges_.empty()) {
+  DCHECK(RuntimeEnabledFeatures::OpaqueRangeEnabled());
+  if (opaque_ranges_.empty()) {
     return;
   }
-  for (const auto& range : form_control_ranges_) {
+  for (const auto& range : opaque_ranges_) {
     range->UpdateOffsetsForTextChange(change_offset, deleted_count,
                                       inserted_count);
   }
 }
 
-void TextControlElement::CaptureFormControlRangePreEdit() {
-  DCHECK(RuntimeEnabledFeatures::FormControlRangeEnabled());
-  if (form_control_ranges_.empty()) {
+void TextControlElement::CaptureOpaqueRangePreEdit() {
+  DCHECK(RuntimeEnabledFeatures::OpaqueRangeEnabled());
+  if (opaque_ranges_.empty()) {
     return;
   }
   const String old_value = InnerEditorValue();
@@ -1403,24 +1393,24 @@ void TextControlElement::CaptureFormControlRangePreEdit() {
                               std::min(selectionEnd(), old_length)});
 }
 
-void TextControlElement::CommitFormControlRangeEdit() {
-  DCHECK(RuntimeEnabledFeatures::FormControlRangeEnabled());
-  if (form_control_ranges_.empty() || !pending_user_edit_) {
+void TextControlElement::CommitOpaqueRangeEdit() {
+  DCHECK(RuntimeEnabledFeatures::OpaqueRangeEnabled());
+  if (opaque_ranges_.empty() || !pending_user_edit_) {
     pending_user_edit_.reset();
     return;
   }
 
   // After observable value mutation and before 'input' listeners, compute and
   // apply a selection-bounded single replace using the pre-edit baseline.
-  ApplyFormControlRangeUpdate(pending_user_edit_->old_value,
-                              pending_user_edit_->selection_start,
-                              pending_user_edit_->selection_end);
+  ApplyOpaqueRangeUpdate(pending_user_edit_->old_value,
+                         pending_user_edit_->selection_start,
+                         pending_user_edit_->selection_end);
   pending_user_edit_.reset();
 }
 
-void TextControlElement::ApplyFormControlRangeUpdate(const String& old_value,
-                                                     unsigned sel_start,
-                                                     unsigned sel_end) {
+void TextControlElement::ApplyOpaqueRangeUpdate(const String& old_value,
+                                                unsigned sel_start,
+                                                unsigned sel_end) {
   const String new_value = InnerEditorValue();
   if (old_value == new_value) {
     return;
@@ -1463,23 +1453,22 @@ void TextControlElement::ApplyFormControlRangeUpdate(const String& old_value,
   const unsigned deleted_count = old_length - prefix - suffix;
   const unsigned inserted_count = new_length - prefix - suffix;
   if (deleted_count || inserted_count) {
-    NotifyFormControlRangesOfTextChange(prefix, deleted_count, inserted_count);
+    NotifyOpaqueRangesOfTextChange(prefix, deleted_count, inserted_count);
   }
 }
 
-void TextControlElement::CommitProgrammaticFormControlRangeEdit(
+void TextControlElement::CommitProgrammaticOpaqueRangeEdit(
     const String& old_value,
     unsigned old_sel_start,
     unsigned old_sel_end) {
-  if (!RuntimeEnabledFeatures::FormControlRangeEnabled() ||
-      form_control_ranges_.empty()) {
+  if (!RuntimeEnabledFeatures::OpaqueRangeEnabled() || opaque_ranges_.empty()) {
     return;
   }
   // Clear any pending user pre-edit snapshot to avoid applying a user-driven
   // diff after a programmatic value change.
   pending_user_edit_.reset();
 
-  ApplyFormControlRangeUpdate(old_value, old_sel_start, old_sel_end);
+  ApplyOpaqueRangeUpdate(old_value, old_sel_start, old_sel_end);
 }
 
 void TextControlElement::SetSkipNextSetValueAutoDiff(bool should_skip) {

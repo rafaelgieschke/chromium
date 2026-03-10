@@ -163,9 +163,18 @@ class SystemTrustStoreChromeWithUnOwnedSystemStore : public SystemTrustStore {
     return trust_store_chrome_->version();
   }
 
+  std::optional<base::Time> mtc_metadata_update_time() const override {
+    return trust_store_chrome_->mtc_metadata_update_time();
+  }
+
   base::span<const ChromeRootCertConstraints> GetChromeRootConstraints(
-      const bssl::ParsedCertificate* cert) const override {
-    return trust_store_chrome_->GetConstraintsForCert(cert);
+      const bssl::CertPathBuilderResultPath* path) const override {
+    return trust_store_chrome_->GetConstraintsForCert(path);
+  }
+
+  const TrustStoreChrome::MtcAnchorExtraData* GetMTCAnchorData(
+      base::span<const uint8_t> log_id) const override {
+    return trust_store_chrome_->GetMTCAnchorData(log_id);
   }
 
   bssl::TrustStore* eutl_trust_store() override {
@@ -376,6 +385,12 @@ void InitializeTrustStoreAndroid() {
   // ObserveCertDBChanges on the singleton TrustStoreAndroid.
   GetGlobalTrustStoreAndroidForCRS()->ObserveCertDBChanges();
 
+  static bool initialized = false;
+  if (initialized) {
+    return;
+  }
+
+  initialized = true;
   base::ThreadPool::PostTask(
       FROM_HERE,
       {base::MayBlock(), base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},

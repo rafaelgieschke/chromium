@@ -36,9 +36,12 @@ struct ProfileEnablement {
   // `GlicRollout` flag, or by the `GlicTieredRollout` flag and synced pref.
   bool not_rolled_out;
 
-  // Whether the primary account is not capable, by failing to have the
-  // can_use_model_execution_features accountcapability.
+  // Whether a primary account doesn't exist or is not capable, by failing to
+  // have the can_use_model_execution_features accountcapability.
   bool primary_account_not_capable;
+
+  // Whether the primary account is fully signed in (if it exists).
+  bool primary_account_not_fully_signed_in;
 
   // Whether the profile is disallowed by chrome policy.
   bool disallowed_by_chrome_policy;
@@ -51,6 +54,51 @@ struct ProfileEnablement {
 
   // Whether the user has passed the FRE.
   bool not_consented;
+
+  // Whether the user has consented to actuation.
+  bool actuation_not_consented;
+
+  // Whether live (audio) functionality is disallowed for this account type.
+  bool live_disallowed;
+
+  // Whether 'Create Image with Gemini' functionality is disallowed for this
+  // account type.
+  bool share_image_disallowed;
+
+  // Summary of whether actuation is enabled, and if not, why not.
+  ActuationEligibility actuation_eligibility;
+};
+
+// Basic configuration information about Glic.
+struct ConfigInfo {
+  // The URL from which the guest web client is loaded from.
+  url.mojom.Url guest_url;
+
+  // The URL from which the FRE page is loaded from.
+  url.mojom.Url fre_guest_url;
+
+  // User configured preset URLs for different environments of the guest web
+  // client.
+  url.mojom.Url autopush_guest_url;
+  url.mojom.Url staging_guest_url;
+  url.mojom.Url preprod_guest_url;
+  url.mojom.Url prod_guest_url;
+};
+
+// Consolidated data payload to populate the Glic internals page.
+struct InternalsDataPayload {
+  ProfileEnablement enablement;
+  ConfigInfo config;
+};
+
+// Whether actuation is enabled, and if not, why not.
+enum ActuationEligibility {
+  kEligible,
+  kMissingAccountCapability,
+  kMissingChromeBenefits,
+  kDisabledByPolicy,
+  kEnterpriseWithoutManagement,
+  kPlatformUnsupported,
 };
 
 // The ready state of the profile.
@@ -65,6 +113,13 @@ enum ProfileReadyState {
   kIneligible,
   // Similar to kIneligible, but the admin has explicitly disabled Glic.
   kDisabledByAdmin,
+};
+
+// Directions for adjusting the zoom level of the WebUI page's hosted webview.
+enum ZoomAction {
+  kZoomIn,
+  kZoomOut,
+  kReset,
 };
 
 // A minimal interface for the initial handshake.
@@ -86,6 +141,9 @@ interface Page {
 
   // Called to inform the page of the UI surface it is being rendered in.
   UpdatePageState(PanelStateKind panelStateKind);
+
+  // Notifies the page to adjust the zoom level of its hosted webview.
+  Zoom(ZoomAction action);
 };
 
 // Page handler for pre-loading tasks.
@@ -208,13 +266,29 @@ interface PageHandler {
   // Notifies the PageHandler that the state of the WebUI has changed.
   WebUiStateChanged(WebUiState new_state);
 
-  // Called by the internals WebUI page to get the GlicEnabling state.
-  GetProfileEnablement() => (ProfileEnablement enablement);
+};
+
+// Page handler for the glic internals WebUI.
+interface InternalsPageHandler {
+  // Called by the internals WebUI page to get the data it will present.
+  GetInternalsDataPayload() => (InternalsDataPayload internals_data);
+
+  // Sets the guest URL presets for the internals page.
+  SetGuestUrlPresets(url.mojom.Url autopush,
+                     url.mojom.Url staging,
+                     url.mojom.Url preprod,
+                     url.mojom.Url prod);
+};
+
+// Factory for InternalsPageHandler used in chrome://glic/internals.
+interface InternalsPageHandlerFactory {
+  // Creates the InternalsPageHandler for chrome://glic/internals.
+  CreateInternalsPageHandler(
+      pending_receiver<InternalsPageHandler> receiver);
 };
 
 // @generate glic_api
 // Reason for failure while acting.
-// LINT.IfChange(PerformActionsErrorReason)
 [Stable, Extensible]
 enum PerformActionsErrorReason {
   [Default] kUnknown = 0,
@@ -225,20 +299,22 @@ enum PerformActionsErrorReason {
   [MinVersion=2] kMissingTaskId = 2,
 };
 
-// LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:PerformActionsErrorReason)
-
 // @generate glic_api
 // Reason for failure when creating an actor task.
-// LINT.IfChange(CreateTaskErrorReason)
 [Stable, Extensible]
 enum CreateTaskErrorReason {
   [Default] kUnknown = 0,
 
   // The host does not support the actor task system.
   kTaskSystemUnavailable = 1,
-};
 
-// LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:CreateTaskErrorReason)
+  // The host already has an existing task in progress. The client must stop it
+  // before requesting a new task.
+  [MinVersion=1] kExistingActiveTask = 2,
+
+  // The user's browser policy or account settings prevent creating actor tasks.
+  [MinVersion=2] kBlockedByPolicy = 3,
+};
 
 // @generate glic_api
 // The state of an actor task.
@@ -341,6 +417,16 @@ enum Platform {
   kWindows = 2,
   kLinux = 3,
   kChromeOS = 4,
+  kAndroid = 5,
+};
+
+// @generate glic_api
+// The form factor of the device glic is running on.
+enum FormFactor {
+  kUnknown = 0,
+  kDesktop = 1,
+  kPhone = 2,
+  kTablet = 3,
 };
 
 // The result of `WebClientCreated()`. Contains information that needs to be
@@ -356,6 +442,7 @@ struct WebClientInitialState {
   string hotkey;
   mojo_base.mojom.Version chrome_version;
   Platform platform;
+  FormFactor form_factor;
   // Whether the glic panel can currently be attached to a browser window.
   bool can_attach;
   // Whether the panel is active. See `NotifyPanelActiveChange`.
@@ -365,6 +452,7 @@ struct WebClientInitialState {
   // Reflects the enabling state of always-detached mode.
   bool always_detached_mode;
   bool enable_zero_state_suggestions;
+  bool enable_cached_get_user_profile_info;
   // Whether features::kGlicActor is enabled.
   bool enable_act_in_focused_tab;
   // Whether features::kGlicScrollTo is enabled.
@@ -373,8 +461,6 @@ struct WebClientInitialState {
   bool enable_default_tab_context_setting_feature;
   // Whether the glic default tab context setting is enabled.
   bool default_tab_context_setting_enabled;
-  // Whether features::kGlicClosedCaptioning is enabled.
-  bool enable_closed_captioning_feature;
   // Whether the glic closed captioning setting is enabled.
   bool closed_captioning_setting_enabled;
   // Whether features::kGlicUserStatusCheck is enabled with
@@ -410,6 +496,53 @@ struct WebClientInitialState {
   bool enable_trust_first_onboarding;
   // Whether the user has completed the onboarding flow.
   bool onboarding_completed;
+  // Whether the skills feature is enabled.
+  bool enable_skills;
+};
+
+// @generate glic_api
+// Enum to specify the image format of the screenshot.
+[Stable, Extensible]
+enum ScreenshotImageFormat {
+  // JPEG screenshot format. This is the default format.
+  [Default] kJpeg = 0,
+  // PNG screenshot format.
+  kPng = 1,
+  // WEBP screenshot format.
+  kWebp = 2,
+};
+
+// @generate glic_api
+// Enum to specify the compression quality of the screenshot. Depending on
+// screenshot format, the compression quality may not be respected or may mean
+// something different.
+[Stable, Extensible]
+enum ScreenshotCompressionQuality {
+  // No compression.
+  [Default] kNone = 0,
+  // Low compression quality.
+  kLow = 1,
+  // Medium compression quality.
+  kMedium = 2,
+  // High compression quality.
+  kHigh = 3,
+};
+
+struct ScreenshotCollectionOptions {
+  // Screenshot will be scaled to fit the max width and height while
+  // maintaining the aspect ratio.
+  // If set to 0, the screenshot will be captured without limiting the width
+  // (so long as the height is not limited).
+  uint32 max_width;
+  // Screenshot will be scaled to fit the max width and height while maintaining
+  // the aspect ratio.
+  // If set to 0, the screenshot will be captured without limiting the height
+  // (so long as the width is not limited).
+  uint32 max_height;
+  // The format of the screenshot.
+  ScreenshotImageFormat screenshot_image_format;
+  // The compression quality of the screenshot.
+  ScreenshotCompressionQuality screenshot_compression_quality;
 };
 
 // Options for getting tab context.
@@ -434,6 +567,8 @@ struct GetTabContextOptions {
   //
   // If invalid, falls back to using ANNOTATED_PAGE_CONTENT_MODE_DEFAULT.
   uint32 annotated_page_content_mode = 0;
+  // The screenshot collection options to use for the screenshot.
+  ScreenshotCollectionOptions screenshot_collection_options;
 };
 
 // Options for requesting pin candidates.
@@ -551,6 +686,116 @@ struct SuggestionContent {
   string suggestion;
 };
 
+// @generate glic_api
+// Enum to specify the source of the Skill.
+// LINT.IfChange(SkillSource)
+[Stable, Extensible]
+enum SkillSource {
+  [Default] kUnknown = 0,
+  // Skill created by Google.
+  kFirstParty = 1,
+  // Skill created by an end-user.
+  kUserCreated = 2,
+  // Skill derived from a first party skill.
+  [MinVersion=1] kDerivedFromFirstParty = 3,
+};
+
+// clang-format off
+// LINT.ThenChange(//components/skills/public/skill.mojom:SkillSource, //components/sync/protocol/skill_specifics.proto:SkillSource)
+// clang-format on
+
+// LINT.IfChange(Skill)
+// A single skill preview.
+struct SkillPreview {
+  // The unique identifier of the skill which is an UUID.
+  string id;
+  // The name of the skill.
+  string name;
+  // The icon of the skill, which is an emoji.
+  string icon;
+  // The source of the skill which can be 1P or user created.
+  SkillSource source;
+  // The description of the skill.
+  string description;
+};
+
+// A single skill.
+struct Skill {
+  // The preview of the skill which contains the basic information of the skill.
+  SkillPreview preview;
+  // The prompt of the skill.
+  string prompt;
+  // The id of the source skill this skill is derived from. This is only present
+  // if the SkillSource is kDerivedFromFirstParty.
+  string? source_skill_id;
+};
+
+// clang-format off
+// LINT.ThenChange(//components/skills/public/skill.mojom:Skill, //components/skills/public/skill.h:Skill, //chrome/browser/resources/glic/glic_api/glic_api.ts:Skill)
+// clang-format on
+
+// Request to create a skill.
+struct CreateSkillRequest {
+  // The unique identifier of the skill which is an UUID.
+  string id;
+  // The name of the skill.
+  string name;
+  // The icon of the skill, which is an emoji.
+  string icon;
+  // The source of the skill.
+  SkillSource source;
+  // A prompt for the skill which can be an empty string.
+  string prompt;
+  // The description of the skill.
+  string description;
+};
+
+// Request to update a skill.
+struct UpdateSkillRequest {
+  // The unique identifier of the skill to be updated.
+  string id;
+};
+
+// @generate glic_api
+// Enum to specify the skills web client event for metrics recording.
+// Includes both direct user interactions and WebClient state
+// transitions to track feature funnels.
+// LINT.IfChange(SkillsWebClientEvent)
+[Stable, Extensible]
+enum SkillsWebClientEvent {
+  // Default value for unknown or uninitialized actions.
+  [Default] kUnknown = 0,
+  // User invoked a first-party skill.
+  kUsedFirstPartySkill = 1,
+  // User invoked a skill they created themselves.
+  kUsedUserCreatedSkill = 2,
+  // User invoked a skill that was remix/derived from a first-party skill.
+  kUsedDerivedFirstPartySkill = 3,
+  // User typed '/' or triggered the skills menu.
+  kOpenedMenu = 4,
+  // User clicked the button to open the full skills management UI.
+  kClickedManageFromMenu = 5,
+  // User clicked the generic '+' button to create a new empty skill.
+  kClickedAddFromMenu = 6,
+  // User clicked the edit button on an existing skill preview.
+  kClickedEditFromMenu = 7,
+  // User clicked the generic '+' button on a 1P skill preview.
+  kClickedAddOn1pSkill = 8,
+  // User clicked the 'Save as Skill' chip that appears on hover.
+  kClickedSaveAsSkillHoverChip = 9,
+  // User clicked the 'Edit Skill' chip that appears on hover.
+  [MinVersion=1] kClickedEditSkillHoverChip = 10,
+  // Skill Builder Step 1: User clicked the promo chip to start the flow.
+  kSkillBuilderClickedPromoChip = 20,
+  // Skill Builder Step 2: A draft skill was successfully generated by the AI.
+  kSkillBuilderPromptGenerated = 21,
+  // Skill Builder Step 3: User clicked save on the generated draft.
+  kSkillBuilderClickedSaveAsSkill = 22,
+};
+// LINT.ThenChange(
+//  //tools/metrics/histograms/metadata/glic/enums.xml:SkillsWebClientEvent
+// )
+
 // A list of suggestions for the currently focused tab.
 struct ZeroStateSuggestions {
   // The list of suggestions to present to the user.
@@ -568,6 +813,8 @@ struct ZeroStateSuggestionsV2 {
   // Whether there is a current outstanding request to generate suggestions for
   // the current tab context.
   bool is_pending;
+  // The host's invocation source.
+  InvocationSource invocation_source;
 };
 
 // The options associated with the current zero state suggestions.
@@ -630,6 +877,22 @@ struct UnpinTabsOptions {
   UnpinTrigger unpin_trigger;
 };
 
+// @generate glic_api
+// Result of CancelActions().
+[Stable, Extensible]
+enum CancelActionsResult {
+  // Do not manually use this value. Fail safe when an old client receives an
+  // extended new enum.
+  [Default] kUnknown = 0,
+  // Actions were successfully cancelled.
+  kSuccess = 1,
+  // The task was not found.
+  kTaskNotFound = 2,
+  // Could not cancel the actions for other reasons (e.g., the task is already
+  // completed).
+  kFailed = 3,
+};
+
 // Access to the browser from the web client by proxy through the WebUI.
 // A single WebClientHandler will provide access to the browser for only
 // a single web client. If the webview navigates or refreshes, a new
@@ -660,6 +923,24 @@ interface WebClientHandler {
   // Opens the glic settings page.
   OpenGlicSettingsPage(OpenSettingsOptions options);
 
+  // Called when a form is presented in the autofill selection dialog.
+  AutofillSuggestionDialogOnFormPresented(
+      int32 task_id,
+      actor.webui.mojom.AutofillSuggestionDialogOnFormPresentedParams params);
+
+  // Called when a suggestion preview is changed for a form in the autofill
+  // selection dialog.
+  AutofillSuggestionDialogOnFormPreviewChanged(
+      int32 task_id,
+      actor.webui.mojom.AutofillSuggestionDialogOnFormPreviewChangedParams
+          params);
+
+  // Called when a form is confirmed with a selected suggestion in the autofill
+  // selection dialog.
+  AutofillSuggestionDialogOnFormConfirmed(
+      int32 task_id,
+      actor.webui.mojom.AutofillSuggestionDialogOnFormConfirmedParams params);
+
   // Opens the password manager settings page.
   OpenPasswordManagerSettingsPage();
 
@@ -679,6 +960,9 @@ interface WebClientHandler {
 
   // Notifies the browser that the web client has switched modes.
   OnModeChange(WebClientMode new_mode);
+
+  // Called when the microphone status changes in the web client.
+  OnMicrophoneStatusChange(MicrophoneStatus status);
 
   // Triggers the change profile flow, which allows the user to switch which
   // profile is used. If a new profile is chosen, this WebUI will be closed in
@@ -735,6 +1019,25 @@ interface WebClientHandler {
   [RuntimeFeature=glic.mojom.features.kGlicMultiTab]
   UnpinAllTabs(UnpinTabsOptions? options);
 
+  // Initiates the creation of a skill by opening a modal dialog. It returns a
+  // boolean indicating whether the modal dialog was opened successfully.
+  // TODO(crbug.com/471796872): Add the actual c++ implementation.
+  CreateSkill(CreateSkillRequest request) => (bool modal_opened);
+
+  // Initiates the update of a skill by opening a modal dialog. It returns a
+  // boolean indicating whether the modal dialog was opened successfully.
+  // TODO(crbug.com/471796872): Add the actual c++ implementation.
+  UpdateSkill(UpdateSkillRequest request) => (bool modal_opened);
+
+  // Requests that the browser show skill management UI.
+  ShowManageSkillsUi();
+
+  // Gets a skill by its id. Returns null if the skill does not exist.
+  GetSkill(string id) => (Skill? skill);
+
+  // Logs metrics for web client specific skill events.
+  RecordSkillsWebClientEvent(SkillsWebClientEvent event);
+
   // Subscribes to receive updates on pin candidates.
   [RuntimeFeature=glic.mojom.features.kGlicMultiTab]
   SubscribeToPinCandidates(GetPinCandidatesOptions options,
@@ -752,6 +1055,10 @@ interface WebClientHandler {
   // It is an error to act with a paused task.
   PerformActions(array<uint8> actions_proto)
       => result<mojo_base.mojom.ProtoWrapper, PerformActionsErrorReason>;
+
+  // Cancel the actions for the specified actor task. Does not revert actions
+  // already taken. Returns an error if the task is not found.
+  CancelActions(int32 task_id) => (CancelActionsResult result);
 
   // Immediately stops the actor from taking any further actions associated with
   // the given id and exits acting mode. The stop_reason indicates the reason
@@ -950,9 +1257,6 @@ interface WebClientHandler {
   // Called when the web client completes a turn.
   OnTurnCompleted(WebClientModel model, mojo_base.mojom.TimeDelta duration);
 
-  // Called when the web client changes the model.
-  OnModelChanged(WebClientModel model);
-
   // Called when the web client wants to record a use counter.
   // The counter values matches the WebUseCounter enum. We do not use the
   // explicit type because we do not want enforcement of the range of the
@@ -1010,11 +1314,6 @@ interface WebClientHandler {
   // This is useful for debugging the webview without having the responsiveness
   // check get in the way.
   IsDebuggerAttached() => (bool is_attached_to_webview);
-
-  // Called when the web client has changed the view shown to the user. This is
-  // used to trigger updates to browser UI which shows the current state of the
-  // web client, such as toggle controls.
-  OnViewChanged(ViewChangedNotification notification);
 
   // Subscribe to be notified when meta tags change. Sends the current state on
   // first call, and then notifies when the state changes. Call with an empty
@@ -1087,6 +1386,12 @@ struct PanelOpeningData {
   // If set, the textbox for user input will be populated with the given string
   // before the panel opens.
   string? prompt_suggestion;
+  // If true and prompt_suggestion is set, the prompt will be automatically
+  // submitted after the panel opens. If prompt is null, this will be forced
+  // to false.
+  bool auto_send;
+  // An optional Skill object. If provided, the Gemini app should auto-run it.
+  Skill? skill_to_invoke;
   // Up to 3 most recently active conversations, ordered by most recently active
   // first.
   array<ConversationInfo>? recently_active_conversations;
@@ -1156,9 +1461,59 @@ enum InvocationSource {
   [MinVersion=5] kSharedImage = 13,
   // From the handoff button.
   [MinVersion=6] kHandoffButton = 14,
+  // From invoking skills.
+  [MinVersion=7] kSkills = 15,
+  // Automatically opened from contextual cueing.
+  [MinVersion=8] kAutoOpenedByContextualCue = 16,
+  // User clicked the summarize button in the PDF viewer.
+  [MinVersion=9] kPdfSummarizeButton = 17,
+  // From a navigation capture.
+  [MinVersion=10] kNavigationCapture = 18,
+  // Automatically opened for a PDF.
+  [MinVersion=11] kAutoOpenedForPdf = 19,
+  // Selection hotkey.
+  [MinVersion=12] kCaptureRegionHotkey = 20,
+  // From the in-product-help (IPH) entrypoint.
+  [MinVersion=13] kIph = 21,
 };
 
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:GlicInvocationSource, //chrome/browser/glic/glic_metrics.h:ResponseSegmentation)
+
+// @generate glic_api
+// Mode for specific feature behaviors.
+[Stable, Extensible]
+enum FeatureMode {
+  [Default] kUnspecified = 0,
+  kImageGeneration = 1,
+  kBluedog = 2,
+};
+
+// @generate glic_api
+// Options for the Invoke method.
+struct InvokeOptions {
+  // Source that triggered this invocation.
+  InvocationSource invocation_source;
+
+  // Prompts to pre-populate or suggest.
+  array<string>? prompts;
+
+  // Additional context to attach.
+  AdditionalContext? context;
+
+  // Whether to automatically submit the prompt. May be ignored (e.g. if
+  // multiple prompts are provided for an invocation source that requires
+  // user-selection before submission).
+  bool auto_submit;
+
+  // Feature mode to use.
+  FeatureMode feature_mode;
+
+  // Whether to suppress Zero State Suggestions.
+  bool disable_zero_state_suggestions;
+
+  // If this invocation is for a skill, the ID of the skill to use.
+  string? skill_id;
+};
 
 // @generate glic_api
 // Web client's operation modes.
@@ -1173,6 +1528,15 @@ enum WebClientMode {
 };
 
 // LINT.ThenChange(//tools/metrics/histograms/metadata/glic/enums.xml:WebClientMode)
+
+// @generate glic_api
+// Microphone status.
+[Stable, Extensible]
+enum MicrophoneStatus {
+  kNotListening = 0,
+  kListening = 1,
+  [Default] kUnknown = 2,
+};
 
 // @generate glic_api
 // Web client's operation model.
@@ -1244,8 +1608,19 @@ union AdditionalContextPart {
   CapturedRegion region;
 };
 
+// @generate glic_api
+[Stable, Extensible]
+enum AdditionalContextSource {
+  [Default] kUnknown = 2,
+  kShareContextMenu = 0,
+  kRegionSelection = 1,
+  kTextSelection = 3,
+};
+
 // An additional context object.
 struct AdditionalContext {
+  // The source of the additional context.
+  AdditionalContextSource source;
   // The name of the context.
   string? name;
   // Tab id, if associated with a tab.
@@ -1284,6 +1659,9 @@ interface WebClient {
   // The Microphone permission has changed either by action within the web
   // client or by user action in the glic settings.
   NotifyMicrophonePermissionStateChanged(bool enabled);
+
+  // Requests the web client to stop microphone recording.
+  StopMicrophone() => ();
 
   // The Location permission has changed either by action within the web client
   // or by user action in the glic settings.
@@ -1325,6 +1703,21 @@ interface WebClient {
   [RuntimeFeature=glic.mojom.features.kGlicMultiTab]
   NotifyPinnedTabDataChanged(TabData tab_data);
 
+  // Notify that a skill has been deleted.
+  NotifySkillDeleted(string skill_id);
+
+  // Notify that a skill preview has changed.
+  NotifySkillPreviewChanged(SkillPreview skill_preview);
+
+  // Notify that the contextual skills previews have changed.
+  NotifyContextualSkillPreviewsChanged(array<SkillPreview> skill_previews);
+
+  // Notify that the skills previews have changed.
+  NotifySkillPreviewsChanged(array<SkillPreview> skill_previews);
+
+  // Notify that the skill to invoke has changed.
+  NotifySkillToInvokeChanged(Skill skill);
+
   // Informs the client that the zero state suggestions have changed.
   NotifyZeroStateSuggestionsChanged(ZeroStateSuggestionsV2? suggestions,
                                     ZeroStateSuggestionsOptions options);
@@ -1332,13 +1725,6 @@ interface WebClient {
   // Notify that the actor task with the given id has changed to the indicated
   // state.
   NotifyActorTaskStateChanged(int32 task_id, ActorTaskState state);
-
-  // Called when the browser wants the web client to change its view to match
-  // the requested change (e.g., because the user clicked a UI element to toggle
-  // to a different view).
-  //
-  // The web client should update its view to match the requested change.
-  RequestViewChange(ViewChangeRequest request);
 
   // Informs the client that the metadata tags have changed.
   // Contents from meta tags are passed unsanitized from the renderer.
@@ -1391,6 +1777,13 @@ interface WebClient {
 
   // The onboarding completed state has changed.
   NotifyOnboardingCompletedChanged(bool completed);
+
+  // Notifies the client that the user has clicked on a row in the actor task
+  // list bubble.
+  NotifyActorTaskListRowClicked(int32 task_id);
+
+  // Invokes Glic with specific options. Expects a return to signal completion.
+  Invoke(InvokeOptions options) => ();
 };
 
 // Information extracted from a tab.
@@ -1601,39 +1994,8 @@ enum HostCapability {
   kTrustFirstOnboardingArm2 = 5,
   // Glic host supports sharing additional image context.
   kShareAdditionalImageContext = 6,
-};
-
-// A request to change the glic web client to a view suitable for tracking the
-// progress of actuation.
-struct ViewChangeRequestActuation {};
-
-// A request to change the glic web client to a view which shows a
-// conversational interface of some type (whether textual, aural or other).
-struct ViewChangeRequestConversation {};
-
-union ViewChangeRequestDetails {
-  ViewChangeRequestActuation actuation;
-  ViewChangeRequestConversation conversation;
-};
-
-// A request to change the glic web client to a view of some type. These all
-// specify what the desired view is (via the union discriminator) but some may
-// carry additional information.
-struct ViewChangeRequest {
-  ViewChangeRequestDetails details;
-};
-
-// A coarse categorization of the view currently shown to the user.
-enum CurrentView {
-  // A conversational interface of some type (whether textual, aural or other).
-  kConversation = 0,
-
-  // A view suitable for tracking the progress of actuation.
-  kActuation = 1,
-};
-
-// A notification that the glic web client has changed the view shown to the
-// user.
-struct ViewChangedNotification {
-  CurrentView current_view;
+  // Enables the PDF Zero State Web UI.
+  kPdfZeroState = 7,
+  // Indicates that the host supports the invoke mechanism.
+  kInvoke = 8,
 };

@@ -65,13 +65,15 @@ class TestTargetConfig : public TargetConfig {
   JobLevel GetJobLevel() const override { return sandbox::JobLevel{}; }
   void SetJobMemoryLimit(size_t memory_limit) override {}
   ResultCode AllowFileAccess(FileSemantics semantics,
-                             const wchar_t* pattern) override {
+                             std::wstring_view pattern) override {
     return SBOX_ALL_OK;
   }
-  ResultCode AllowExtraDll(const wchar_t* path) override { return SBOX_ALL_OK; }
+  ResultCode AllowExtraDll(std::wstring_view path) override {
+    return SBOX_ALL_OK;
+  }
   ResultCode SetFakeGdiInit() override { return SBOX_ALL_OK; }
-  void AddDllToUnload(const wchar_t* dll_name) override {
-    blocklisted_dlls_.push_back(dll_name);
+  void AddDllToUnload(std::wstring_view dll_name) override {
+    blocklisted_dlls_.emplace_back(dll_name);
   }
   const std::vector<std::wstring>& blocklisted_dlls() const {
     return blocklisted_dlls_;
@@ -81,7 +83,7 @@ class TestTargetConfig : public TargetConfig {
   }
   IntegrityLevel GetIntegrityLevel() const override { return IntegrityLevel{}; }
   void SetDelayedIntegrityLevel(IntegrityLevel level) override {}
-  ResultCode SetLowBox(const wchar_t* sid) override { return SBOX_ALL_OK; }
+  ResultCode SetLowBox(base::wcstring_view sid) override { return SBOX_ALL_OK; }
   ResultCode SetProcessMitigations(MitigationFlags flags) override {
     return SBOX_ALL_OK;
   }
@@ -97,7 +99,7 @@ class TestTargetConfig : public TargetConfig {
   void AddKernelObjectToClose(HandleToClose handle_info) override {}
   void SetDisconnectCsrss() override {}
 
-  ResultCode AddAppContainerProfile(const wchar_t* package_name) override {
+  ResultCode AddAppContainerProfile(base::wcstring_view package_name) override {
     app_container_ = AppContainerBase::Open(package_name);
     if (!app_container_) {
       return SBOX_ERROR_CREATE_APPCONTAINER;
@@ -115,6 +117,7 @@ class TestTargetConfig : public TargetConfig {
   void SetFilterEnvironment(bool env) override {}
   bool GetEnvironmentFiltered() override { return false; }
   void SetZeroAppShim() override {}
+  void SetSecurityAttributeName(std::wstring_view name) override {}
 
  private:
   std::vector<std::wstring> blocklisted_dlls_;
@@ -377,6 +380,10 @@ class TestSandboxDelegate : public SandboxDelegate {
   bool CetCompatible() override { return true; }
 
   bool RestrictCoreSharing() override { return false; }
+
+  std::optional<std::wstring> GetSecurityAttributeName() override {
+    return std::nullopt;
+  }
 
  private:
   sandbox::mojom::Sandbox sandbox_type_;

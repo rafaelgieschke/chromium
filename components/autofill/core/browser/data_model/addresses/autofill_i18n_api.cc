@@ -4,10 +4,10 @@
 
 #include "components/autofill/core/browser/data_model/addresses/autofill_i18n_api.h"
 
+#include <algorithm>
 #include <memory>
 #include <string>
 
-#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
 #include "base/feature_list.h"
 #include "base/notreached.h"
@@ -43,7 +43,7 @@ using TreeEdgesList = base::span<const FieldTypeDescription>;
 constexpr FieldTypeSet kAddressComputedTypes = {
     ADDRESS_HOME_LINE1, ADDRESS_HOME_LINE2, ADDRESS_HOME_LINE3};
 
-std::u16string GetFormattingExpressionOverrides(
+std::u16string_view GetFormattingExpressionOverrides(
     FieldType field_type,
     AddressCountryCode country_code) {
   // The list of countries for which the street location is composed of the
@@ -55,7 +55,7 @@ std::u16string GetFormattingExpressionOverrides(
            "SG", "LK", "TH", "GB", "US", "VN", "ZA"});
 
   if (field_type == ADDRESS_HOME_STREET_LOCATION) {
-    if (base::Contains(kHouseNumberFirstCountriesSet, country_code.value())) {
+    if (kHouseNumberFirstCountriesSet.contains(country_code.value())) {
       return u"${ADDRESS_HOME_HOUSE_NUMBER;;} ${ADDRESS_HOME_STREET_NAME;;}";
     }
   }
@@ -76,8 +76,7 @@ std::u16string GetFormattingExpressionOverrides(
 
   if (field_type == ADDRESS_HOME_ZIP &&
       base::FeatureList::IsEnabled(features::kAutofillSupportSplitZipCode)) {
-    if (base::Contains(kSpaceZipCodeSeparatorCountriesSet,
-                       country_code.value())) {
+    if (kSpaceZipCodeSeparatorCountriesSet.contains(country_code.value())) {
       return u"${ADDRESS_HOME_ZIP_PREFIX;;} ${ADDRESS_HOME_ZIP_SUFFIX;;}";
     }
   }
@@ -157,20 +156,30 @@ std::unique_ptr<AddressComponent> BuildTreeNode(
     case ADDRESS_HOME_BETWEEN_STREETS_OR_LANDMARK:
       return std::make_unique<BetweenStreetsOrLandmarkNode>(
           std::move(children));
+    case ADDRESS_HOME_STREET_LOCATION_AND_LOCALITY:
+      return std::make_unique<StreetLocationAndLocalityNode>(
+          std::move(children));
     case ADDRESS_HOME_LINE1:
     case ADDRESS_HOME_LINE2:
     case ADDRESS_HOME_LINE3:
     case ADDRESS_HOME_APT_TYPE:
     case ADDRESS_HOME_OTHER_SUBUNIT:
     case ADDRESS_HOME_ADDRESS_WITH_NAME:
-    case ADDRESS_HOME_STREET_LOCATION_AND_LOCALITY:
-    case ADDRESS_HOME_STREET_LOCATION_AND_LANDMARK:
-    case ADDRESS_HOME_DEPENDENT_LOCALITY_AND_LANDMARK:
+    case ADDRESS_HOME_ZIP_AND_CITY:
     case ADDRESS_HOME_ZIP_PREFIX:
     case ADDRESS_HOME_ZIP_SUFFIX:
     case DELIVERY_INSTRUCTIONS:
+      return std::make_unique<AddressComponent>(
+          type, std::move(children),
+          base::FeatureList::IsEnabled(
+              features::kAutofillEnableStreetAddressMergeModes)
+              ? MergeMode::kDefault
+              : MergeMode::kNone);
+    // These are synthesized nodes so they don't require merging.
+    case ADDRESS_HOME_STREET_LOCATION_AND_LANDMARK:
+    case ADDRESS_HOME_DEPENDENT_LOCALITY_AND_LANDMARK:
       return std::make_unique<AddressComponent>(type, std::move(children),
-                                                MergeMode::kDefault);
+                                                MergeMode::kNone);
     case NO_SERVER_DATA:
     case UNKNOWN_TYPE:
     case EMPTY_TYPE:
@@ -266,6 +275,13 @@ std::unique_ptr<AddressComponent> BuildTreeNode(
     case FLIGHT_RESERVATION_ARRIVAL_AIRPORT:
     case FLIGHT_RESERVATION_DEPARTURE_AIRPORT:
     case FLIGHT_RESERVATION_DEPARTURE_DATE:
+    case ORDER_ID:
+    case ORDER_DATE:
+    case ORDER_MERCHANT_NAME:
+    case ORDER_MERCHANT_DOMAIN:
+    case ORDER_PRODUCT_NAMES:
+    case ORDER_ACCOUNT:
+    case ORDER_GRAND_TOTAL:
     case MAX_VALID_FIELD_TYPE:
       return nullptr;
   }
@@ -392,8 +408,8 @@ bool IsSynthesizedType(FieldType field_type, AddressCountryCode country_code) {
        field_type});
 }
 
-std::u16string GetFormattingExpression(FieldType field_type,
-                                       AddressCountryCode country_code) {
+std::u16string_view GetFormattingExpression(FieldType field_type,
+                                            AddressCountryCode country_code) {
   if (GroupTypeOfFieldType(field_type) == FieldTypeGroup::kAddress) {
     // If `country_code` is specified, return the corresponding formatting
     // expression if they exist. Note that it should not fallback to a legacy
@@ -402,12 +418,10 @@ std::u16string GetFormattingExpression(FieldType field_type,
       auto it =
           kAutofillFormattingRulesMap.find({country_code.value(), field_type});
 
-      return it != kAutofillFormattingRulesMap.end()
-                 ? std::u16string(it->second)
-                 : u"";
+      return it != kAutofillFormattingRulesMap.end() ? it->second : u"";
     }
 
-    if (std::u16string format_override =
+    if (std::u16string_view format_override =
             GetFormattingExpressionOverrides(field_type, country_code);
         !format_override.empty()) {
       return format_override;
@@ -415,9 +429,8 @@ std::u16string GetFormattingExpression(FieldType field_type,
     // Otherwise return a legacy formatting expression that exists.
     auto legacy_it = kAutofillFormattingRulesMap.find(
         {kLegacyHierarchyCountryCode.value(), field_type});
-    return legacy_it != kAutofillFormattingRulesMap.end()
-               ? std::u16string(legacy_it->second)
-               : u"";
+    return legacy_it != kAutofillFormattingRulesMap.end() ? legacy_it->second
+                                                          : u"";
   }
 
   auto* pattern_provider = StructuredAddressesFormatProvider::GetInstance();
@@ -466,7 +479,7 @@ bool IsTypeEnabledForCountry(FieldType field_type,
   return std::ranges::any_of(
       it->second, [field_type](const FieldTypeDescription& description) {
         return description.field_type == field_type ||
-               base::Contains(description.children, field_type);
+               std::ranges::contains(description.children, field_type);
       });
 }
 

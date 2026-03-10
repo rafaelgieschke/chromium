@@ -4,42 +4,26 @@
 
 #include "android_webview/browser/prefetch/aw_prefetch_manager.h"
 
-#include "android_webview/browser/aw_browser_context.h"
-#include "android_webview/browser/aw_browser_context_store.h"
-#include "android_webview/common/aw_features.h"
+#include "android_webview/browser/metrics/aw_metrics_test_utils.h"
 #include "base/android/jni_android.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/test/task_environment.h"
-#include "content/public/browser/browser_context.h"
-#include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/public/test/test_content_client_initializer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace android_webview {
 
-class AwPrefetchManagerTest : public testing::Test {
+class AwPrefetchManagerTest : public AwMetricsTestBase {
  protected:
   void SetUp() override {
-    test_content_client_initializer_ =
-        new content::TestContentClientInitializer();
+    AwMetricsTestBase::SetUp();
     browser_context_ = std::make_unique<content::TestBrowserContext>();
   }
 
   void TearDown() override {
-    // Drain the message queue before destroying
-    // |test_content_client_initializer_|, otherwise a posted task may call
-    // content::GetNetworkConnectionTracker() after
-    // TestContentClientInitializer's destructor sets it to null.
-    base::RunLoop().RunUntilIdle();
     browser_context_.reset();
-    delete test_content_client_initializer_;
+    AwMetricsTestBase::TearDown();
   }
 
-  // Create the TestBrowserThreads.
-  content::BrowserTaskEnvironment task_environment_;
-  raw_ptr<content::TestContentClientInitializer>
-      test_content_client_initializer_;
   std::unique_ptr<content::TestBrowserContext> browser_context_;
 };
 
@@ -53,11 +37,12 @@ TEST_F(AwPrefetchManagerTest, UpdateCacheConfig) {
   prefetch_manager.SetMaxPrefetches(base::android::AttachCurrentThread(),
                                     /* max_prefetches=*/5);
 
-  EXPECT_EQ(prefetch_manager.GetTtlInSec(base::android::AttachCurrentThread()),
+  EXPECT_EQ(prefetch_manager.GetTtlInSecForTesting(
+                base::android::AttachCurrentThread()),
             60 * 10);
-  EXPECT_EQ(
-      prefetch_manager.GetMaxPrefetches(base::android::AttachCurrentThread()),
-      5);
+  EXPECT_EQ(prefetch_manager.GetMaxPrefetchesForTesting(
+                base::android::AttachCurrentThread()),
+            5);
 }
 
 TEST_F(AwPrefetchManagerTest, MaxPrefetchReachesLimit) {

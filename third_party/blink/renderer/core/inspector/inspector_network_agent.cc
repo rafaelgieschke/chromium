@@ -136,12 +136,11 @@ constexpr int kDefaultResourceBufferSize = 20 * 1000 * 1000;  // 20 MB
 
 // Pattern may contain stars ('*') which match to any (possibly empty) string.
 // Stars implicitly assumed at the begin/end of pattern.
-bool Matches(const String& url, const String& pattern) {
-  Vector<String> parts;
-  pattern.Split("*", parts);
+bool Matches(const String& url, const StringView& pattern) {
+  Vector<StringView> parts = pattern.SplitSkippingEmpty('*');
   wtf_size_t pos = 0;
-  for (const String& part : parts) {
-    pos = url.Find(part, pos);
+  for (const StringView& part : parts) {
+    pos = url.find(part, pos);
     if (pos == kNotFound)
       return false;
     pos += part.length();
@@ -325,16 +324,15 @@ class InspectorPostBodyParser : public RefCounted<InspectorPostBodyParser> {
     if (!request_body || request_body->IsEmpty())
       return;
 
-    parts_.Grow(request_body->Elements().size());
+    raw_parts_.Grow(request_body->Elements().size());
     for (wtf_size_t i = 0; i < request_body->Elements().size(); i++) {
       const FormDataElement& data = request_body->Elements()[i];
       switch (data.type_) {
         case FormDataElement::kData:
-          parts_[i] = String::FromUTF8WithLatin1Fallback(
-              base::as_byte_span(data.data_));
+          raw_parts_[i] = data.data_;
           break;
         case FormDataElement::kEncodedBlob:
-          ReadDataBlob(data.blob_data_handle_, &parts_[i]);
+          ReadDataBlob(data.blob_data_handle_, &raw_parts_[i]);
           break;
         case FormDataElement::kEncodedFile:
         case FormDataElement::kDataPipe:
@@ -350,25 +348,42 @@ class InspectorPostBodyParser : public RefCounted<InspectorPostBodyParser> {
   ~InspectorPostBodyParser() {
     if (error_)
       return;
-    StringBuilder result;
-    for (const auto& part : parts_)
-      result.Append(part);
-    callback_->sendSuccess(result.ToString());
+
+    // Concatenate all parts into a single buffer.
+    Vector<char> combined;
+    for (const auto& part : raw_parts_) {
+      combined.append_range(part);
+    }
+
+    // Try to decode as UTF-8 first.
+    String text_attempt = String::FromUTF8(base::as_byte_span(combined));
+
+    String result;
+    bool base64_encoded = false;
+
+    if (text_attempt.IsNull()) {
+      // Decode failed, treat as binary.
+      result = Base64Encode(base::as_byte_span(combined));
+      base64_encoded = true;
+    } else {
+      // Decode succeeded, use the result.
+      result = text_attempt;
+    }
+
+    callback_->sendSuccess(result, base64_encoded);
   }
 
-  void BlobReadCallback(String* destination,
+  void BlobReadCallback(Vector<char>* destination,
                         std::optional<SegmentedBuffer> raw_data) {
     if (raw_data) {
-      Vector<char> flattened_data = std::move(*raw_data).CopyAs<Vector<char>>();
-      *destination = String::FromUTF8WithLatin1Fallback(
-          base::as_byte_span(flattened_data));
+      *destination = std::move(*raw_data).CopyAs<Vector<char>>();
     } else {
       error_ = true;
     }
   }
 
   void ReadDataBlob(scoped_refptr<blink::BlobDataHandle> blob_handle,
-                    String* destination) {
+                    Vector<char>* destination) {
     if (!blob_handle)
       return;
     auto* reader = MakeGarbageCollected<InspectorFileReaderLoaderClient>(
@@ -381,7 +396,7 @@ class InspectorPostBodyParser : public RefCounted<InspectorPostBodyParser> {
   std::unique_ptr<GetRequestPostDataCallback> callback_;
   const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   bool error_;
-  Vector<String> parts_;
+  Vector<Vector<char>> raw_parts_;
 };
 
 KURL UrlWithoutFragment(const KURL& url) {
@@ -566,11 +581,11 @@ String BuildCorsError(network::mojom::CorsError cors_error) {
     case network::mojom::CorsError::kRedirectContainsCredentials:
       return protocol::Network::CorsErrorEnum::RedirectContainsCredentials;
 
-    case network::mojom::CorsError::kInsecurePrivateNetwork:
-      return protocol::Network::CorsErrorEnum::InsecurePrivateNetwork;
+    case network::mojom::CorsError::kInsecureLocalNetwork:
+      return protocol::Network::CorsErrorEnum::InsecureLocalNetwork;
 
-    case network::mojom::CorsError::kInvalidPrivateNetworkAccess:
-      return protocol::Network::CorsErrorEnum::InvalidPrivateNetworkAccess;
+    case network::mojom::CorsError::kInvalidLocalNetworkAccess:
+      return protocol::Network::CorsErrorEnum::InvalidLocalNetworkAccess;
 
     case network::mojom::CorsError::kLocalNetworkAccessPermissionDenied:
       return protocol::Network::CorsErrorEnum::
@@ -906,7 +921,7 @@ static bool FormDataToString(
 
 static String StringFromASCII(const std::string& str) {
   String ret(str);
-  DCHECK(ret.ContainsOnlyASCIIOrEmpty());
+  DCHECK(ret.ContainsOnlyAsciiOrEmpty());
   return ret;
 }
 
@@ -927,8 +942,7 @@ static std::unique_ptr<protocol::Network::SecurityDetails> BuildSecurityDetails(
                 .setOrigin(
                     StringFromASCII(net::ct::OriginToString(sct.sct->origin)))
                 .setLogDescription(String::FromUTF8(sct.sct->log_description))
-                .setLogId(StringFromASCII(base::HexEncode(
-                    sct.sct->log_id.c_str(), sct.sct->log_id.length())))
+                .setLogId(StringFromASCII(base::HexEncode(sct.sct->log_id)))
                 .setTimestamp(sct.sct->timestamp.InMillisecondsSinceUnixEpoch())
                 .setHashAlgorithm(
                     StringFromASCII(net::ct::HashAlgorithmToString(
@@ -936,9 +950,8 @@ static std::unique_ptr<protocol::Network::SecurityDetails> BuildSecurityDetails(
                 .setSignatureAlgorithm(
                     StringFromASCII(net::ct::SignatureAlgorithmToString(
                         sct.sct->signature.signature_algorithm)))
-                .setSignatureData(StringFromASCII(base::HexEncode(
-                    sct.sct->signature.signature_data.c_str(),
-                    sct.sct->signature.signature_data.length())))
+                .setSignatureData(StringFromASCII(
+                    base::HexEncode(sct.sct->signature.signature_data)))
                 .build();
     signed_certificate_timestamp_list->emplace_back(
         std::move(signed_certificate_timestamp));
@@ -1041,7 +1054,7 @@ BuildObjectForResourceRequest(const ResourceRequest& request,
           .setReferrerPolicy(GetReferrerPolicy(request.GetReferrerPolicy()))
           .build();
   if (url.HasFragmentIdentifier()) {
-    result->setUrlFragment(StrCat({"#", url.FragmentIdentifier().ToString()}));
+    result->setUrlFragment(StrCat({"#", url.FragmentIdentifier()}));
   }
   if (!data_string.empty()) {
     result->setPostData(data_string);
@@ -1525,7 +1538,7 @@ void InspectorNetworkAgent::PrepareRequest(DocumentLoader* loader,
       // for this request to assure the request will be allowed.
       // TODO: Should we store the referrer header somewhere other than
       // |extra_request_headers_|?
-      if (EqualIgnoringASCIICase(header_name, http_names::kReferer)) {
+      if (EqualIgnoringAsciiCase(header_name, http_names::kReferer)) {
         request.SetReferrerString(value);
         request.SetReferrerPolicy(network::mojom::ReferrerPolicy::kAlways);
       } else {
@@ -2121,7 +2134,7 @@ void InspectorNetworkAgent::DidReceiveWebSocketMessage(
   Vector<uint8_t> flatten;
   flatten.reserve(base::checked_cast<wtf_size_t>(size));
   for (const auto& span : data) {
-    flatten.AppendSpan(span);
+    flatten.append_range(span);
   }
   GetFrontend()->webSocketFrameReceived(
       IdentifiersFactory::SubresourceRequestId(identifier),

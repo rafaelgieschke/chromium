@@ -96,6 +96,8 @@ void EmbeddedWorkerInstanceClientImpl::StartWorker(
   start_data->policy_container =
       ToWebPolicyContainer(std::move(params->policy_container));
 
+  start_data->is_cross_origin_isolated = params->cross_origin_isolated;
+
   for (const auto& feature : params->forced_enabled_runtime_features) {
     blink::WebRuntimeFeatures::EnableFeatureFromString(feature, true);
   }
@@ -138,9 +140,6 @@ void EmbeddedWorkerInstanceClientImpl::StartWorker(
             std::move(params->installed_scripts_info->manager_host_remote));
   }
 
-  // Wait for the process has processed the security settings before starting
-  // the worker thread.
-  GetContentClient()->renderer()->WaitForProcessReady();
   auto worker =
       blink::WebEmbeddedWorker::Create(service_worker_context_client_.get());
   service_worker_context_client_->StartWorkerContextOnInitiatorThread(

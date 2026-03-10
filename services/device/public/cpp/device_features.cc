@@ -8,14 +8,14 @@
 
 namespace features {
 
-// Enables mitigation algorithm to prevent attempt of calibration from an
-// attacker.
-BASE_FEATURE(kComputePressureBreakCalibrationMitigation,
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 // Enables an extra set of concrete sensors classes based on Generic Sensor API,
 // which expose previously unexposed platform features, e.g. ALS or Magnetometer
 BASE_FEATURE(kGenericSensorExtraClasses, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// Enables an Allow/Ask/Block set of default permissions for sensors.
+BASE_FEATURE(kSensorsAllowAskBlockPermissionModel,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Expose serial port logical connection state and dispatch connection events
 // for Bluetooth serial ports when the Bluetooth device connection state
 // changes.
@@ -63,12 +63,6 @@ BASE_FEATURE(kLocationProviderManager, base::FEATURE_ENABLED_BY_DEFAULT);
 #else
 BASE_FEATURE(kLocationProviderManager, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
-
-#if BUILDFLAG(IS_CHROMEOS)
-// Enables crash key logging for USB device open operations on ChromeOS. See
-// crbug.com/332722607. Can be disabled as a kill switch if needed.
-BASE_FEATURE(kUsbDeviceLinuxOpenCrashKey, base::FEATURE_ENABLED_BY_DEFAULT);
-#endif  // BUILDFLAG(IS_CHROMEOS)
 
 #if BUILDFLAG(IS_ANDROID)
 // Enables registering & unregistering of the Battery Status Manager broadcast
@@ -134,6 +128,12 @@ BASE_FEATURE(kAutomaticUsbDetach, base::FEATURE_ENABLED_BY_DEFAULT);
 #elif BUILDFLAG(IS_LINUX)
 BASE_FEATURE(kAutomaticUsbDetach, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_ANDROID)
+
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+// Controls whether we report the product name (like macOS and Win)
+// over the HID_NAME in the WebHID API.
+BASE_FEATURE(kProductNameOverHidName, base::FEATURE_ENABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
 #if !BUILDFLAG(IS_WIN)
 // Splits DTR and RTS control signals. See crbug.com/420689824.

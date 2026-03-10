@@ -81,7 +81,6 @@ class WebNNContextProviderImpl;
 namespace viz {
 
 class VulkanContextProvider;
-class MetalContextProvider;
 
 // This runs in the GPU process, and communicates with the gpu host (which is
 // the window server) over the mojom APIs. This is responsible for setting up
@@ -201,7 +200,9 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
   void BindWebNNContextProvider(
       mojo::PendingReceiver<webnn::mojom::WebNNContextProvider>
           pending_receiver,
-      int client_id) override;
+      int client_id,
+      uint64_t client_tracing_id,
+      bool is_incognito) override;
 
   void GetVideoMemoryUsageStats(
       GetVideoMemoryUsageStatsCallback callback) override;
@@ -226,9 +227,6 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
   void OnBackgroundCleanup() override;
   void OnBackgrounded() override;
   void OnForegrounded() override;
-#if !BUILDFLAG(IS_ANDROID)
-  void OnMemoryPressure(base::MemoryPressureLevel level) override;
-#endif
 #if BUILDFLAG(IS_APPLE)
   void BeginCATransaction() override;
   void CommitCATransaction(CommitCATransactionCallback callback) override;
@@ -352,14 +350,6 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
   VulkanContextProvider* vulkan_context_provider() const { return nullptr; }
 #endif
 
-#if BUILDFLAG(SKIA_USE_METAL)
-  MetalContextProvider* metal_context_provider() const {
-    return metal_context_provider_.get();
-  }
-#else
-  MetalContextProvider* metal_context_provider() const { return nullptr; }
-#endif
-
 #if BUILDFLAG(SKIA_USE_DAWN)
   gpu::DawnContextProvider* dawn_context_provider() const {
     return dawn_context_provider_.get();
@@ -374,9 +364,9 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
   void SetHostProcessId(base::ProcessId pid);
 #endif
 
-  using VisibilityChangedCallback =
-      base::RepeatingCallback<void(bool /*visible*/)>;
-  void SetVisibilityChangedCallback(VisibilityChangedCallback);
+  using PriorityChangedCallback =
+      base::RepeatingCallback<void(base::Process::Priority /*priority*/)>;
+  void SetPriorityChangedCallback(PriorityChangedCallback);
 
  private:
   void InitializeWithHostInternal(
@@ -513,9 +503,7 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
   raw_ptr<gpu::VulkanImplementation> vulkan_implementation_;
   scoped_refptr<VulkanContextProvider> vulkan_context_provider_;
 #endif
-#if BUILDFLAG(SKIA_USE_METAL)
-  std::unique_ptr<MetalContextProvider> metal_context_provider_;
-#endif
+
 #if BUILDFLAG(SKIA_USE_DAWN)
   std::unique_ptr<gpu::DawnContextProvider> dawn_context_provider_;
 #endif
@@ -541,7 +529,7 @@ class VIZ_SERVICE_EXPORT GpuServiceImpl
   // Should only be accessed on the IO thread after creation.
   mojo::Receiver<mojom::GpuService> receiver_{this};
 
-  VisibilityChangedCallback visibility_changed_callback_;
+  PriorityChangedCallback priority_changed_callback_;
 
   base::ProcessId host_process_id_ = base::kNullProcessId;
 

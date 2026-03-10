@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/platform/peerconnection/rtc_video_encoder.h"
 
+#include <algorithm>
 #include <array>
 #include <memory>
 #include <numeric>
@@ -11,7 +12,6 @@
 
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/feature_list.h"
 #include "base/functional/callback_helpers.h"
 #include "base/location.h"
@@ -191,6 +191,9 @@ class RefCountedWritableSharedMemoryMapping
       const RefCountedWritableSharedMemoryMapping&) = delete;
   RefCountedWritableSharedMemoryMapping& operator=(
       const RefCountedWritableSharedMemoryMapping&) = delete;
+
+  const base::span<const uint8_t> AsSpan() const { return mapping_; }
+  const base::span<uint8_t> AsSpan() { return mapping_; }
 
   const unsigned char* front() const {
     return static_cast<const unsigned char*>(mapping_.memory());
@@ -610,22 +613,7 @@ void RecordEncoderStatusUMA(const media::EncoderStatus& status,
 
 bool IsZeroCopyEnabled(webrtc::VideoContentType content_type) {
   if (content_type == webrtc::VideoContentType::SCREENSHARE) {
-    // Zero copy screen capture.
-#if BUILDFLAG(IS_CHROMEOS)
-    // The zero-copy capture is available for all sources in ChromeOS
-    // Ash-chrome.
-    return base::FeatureList::IsEnabled(blink::features::kZeroCopyTabCapture);
-#else
-    // Currently, zero copy capture screenshare is available only for tabs.
-    // Since it is impossible to determine the content source, tab, window or
-    // monitor, we don't configure VideoEncodeAccelerator with NV12
-    // GpuMemoryBuffer instead we configure I420 SHMEM as if it is not zero
-    // copy, and we convert the NV12 GpuMemoryBuffer to I420 SHMEM in
-    // RtcVideoEncoder::Impl::Encode().
-    // TODO(b/267995715): Solve this problem by calling Initialize() in the
-    // first frame.
     return false;
-#endif
   }
   // Zero copy video capture from other sources (e.g. camera).
   return !base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -784,7 +772,7 @@ class RTCVideoEncoder::Impl : public media::VideoEncodeAccelerator::Client {
 
   void SetSimulcastToSvcConverter(std::optional<webrtc::SimulcastToSvcConverter>
                                       simulcast_to_svc_converter);
-  void UpdateSharedImageSupport(bool supports_shared_images);
+  void UpdateEncoderInfo(media::VideoEncoderInfo encoder_info);
 
  private:
   enum {
@@ -993,7 +981,7 @@ class RTCVideoEncoder::Impl : public media::VideoEncodeAccelerator::Client {
   // The content type, as reported to WebRTC (screenshare vs realtime video).
   const webrtc::VideoContentType video_content_type_;
 
-  bool vea_supports_shared_images_ = false;
+  media::VideoEncoderInfo encoder_info_;
 
   // This has the same information as |encoder_info_.preferred_pixel_formats|
   // but can be used on |sequence_checker_| without acquiring the lock.
@@ -1185,16 +1173,17 @@ void RTCVideoEncoder::Impl::Enqueue(FrameChunk frame_chunk) {
     DVLOG(1) << "VAE drops the input frame to reduce latency";
     base::AutoLock lock(lock_);
     if (encoded_image_callback_) {
-      encoded_image_callback_->OnDroppedFrame(
-          webrtc::EncodedImageCallback::DropReason::kDroppedByEncoder);
+      encoded_image_callback_->OnFrameDropped(frame_chunk.timestamp,
+                                              /*spatial_id=*/0,
+                                              /*is_end_of_temporal_unit=*/true);
     }
     return;
   }
 
-// On Windows it is possible that RtcVideoEncoder is configured to only accept
-// native inputs, but the incoming frame is not backed by GpuMemoryBuffer and
-// is not a black frame.
-#if BUILDFLAG(IS_WIN)
+// On Windows and Android it is possible that RtcVideoEncoder is configured to
+// only accept native inputs, but the incoming frame is not backed by
+// GpuMemoryBuffer and is not a black frame.
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ANDROID)
   {
     // Check if the incoming frame is backed by owned or unowned memory type.
     // This could happen when: 1. Zero-copy capture feature is turned on but
@@ -1211,13 +1200,12 @@ void RTCVideoEncoder::Impl::Enqueue(FrameChunk frame_chunk) {
       frame = static_cast<WebRtcVideoFrameAdapterInterface*>(frame_buffer.get())
                   ->getMediaVideoFrame();
       if (frame->storage_type() == media::VideoFrame::STORAGE_UNOWNED_MEMORY ||
-          frame->storage_type() == media::VideoFrame::STORAGE_OWNED_MEMORY) {
+          frame->storage_type() == media::VideoFrame::STORAGE_OWNED_MEMORY ||
+          frame->storage_type() == media::VideoFrame::STORAGE_SHMEM) {
         if (use_native_input_) {
           use_native_input_ = false;
         }
-      } else if (frame->storage_type() ==
-                     media::VideoFrame::STORAGE_MAPPABLE_SHARED_IMAGE ||
-                 frame->HasSharedImage()) {
+      } else if (frame->HasSharedImage()) {
         if (!use_native_input_) {
           use_native_input_ = true;
           // TODO(https://issuetracker.google.com/issues/337130619): Ideally
@@ -1298,9 +1286,9 @@ void RTCVideoEncoder::Impl::SetSimulcastToSvcConverter(
   simulcast_to_svc_converter_ = std::move(simulcast_to_svc_converter);
 }
 
-void RTCVideoEncoder::Impl::UpdateSharedImageSupport(
-    bool vea_supports_shared_image) {
-  vea_supports_shared_images_ = vea_supports_shared_image;
+void RTCVideoEncoder::Impl::UpdateEncoderInfo(
+    media::VideoEncoderInfo encoder_info) {
+  encoder_info_ = std::move(encoder_info);
 }
 
 void RTCVideoEncoder::Impl::UseOutputBitstreamBuffer(
@@ -1612,39 +1600,6 @@ void RTCVideoEncoder::Impl::BitstreamBufferReady(
     return;
   }
 
-  // An encoder drops a frame.
-  if (metadata.dropped_frame()) {
-    BitstreamBufferAvailable(bitstream_buffer_id);
-    // Invoke OnDroppedFrame() only in the end of picture. How to call
-    // OnDroppedFrame() in spatial layers is not defined in the webrtc encoder
-    // API. We call once in spatial layers. This point will be fixed in a
-    // new WebRTC encoder API.
-    if (metadata.end_of_picture()) {
-      base::AutoLock lock(lock_);
-      if (!encoded_image_callback_) {
-        return;
-      }
-      encoded_image_callback_->OnDroppedFrame(
-          webrtc::EncodedImageCallback::DropReason::kDroppedByEncoder);
-    }
-    return;
-  }
-
-  scoped_refptr<RefCountedWritableSharedMemoryMapping> output_mapping =
-      output_buffers_[bitstream_buffer_id].second;
-  if (metadata.payload_size_bytes >
-      output_buffers_[bitstream_buffer_id].second->size()) {
-    NotifyErrorStatus({media::EncoderStatus::Codes::kInvalidOutputBuffer,
-                       "invalid payload_size: " +
-                           base::NumberToString(metadata.payload_size_bytes)});
-    return;
-  }
-
-  if (metadata.end_of_picture()) {
-    CHECK(encoder_metrics_provider_);
-    encoder_metrics_provider_->IncrementEncodedFrameCount();
-  }
-
   // Find RTP and capture timestamps by going through |pending_timestamps_|.
   // Derive it from current time otherwise.
   std::optional<uint32_t> rtp_timestamp;
@@ -1689,6 +1644,34 @@ void RTCVideoEncoder::Impl::BitstreamBufferReady(
     DCHECK(rtp_timestamp.has_value());
   }
 
+  // An encoder drops a frame.
+  if (metadata.dropped_frame()) {
+    BitstreamBufferAvailable(bitstream_buffer_id);
+    base::AutoLock lock(lock_);
+    if (encoded_image_callback_) {
+      encoded_image_callback_->OnFrameDropped(
+          *rtp_timestamp, metadata.spatial_idx().value_or(0),
+          metadata.end_of_picture());
+    }
+
+    return;
+  }
+
+  scoped_refptr<RefCountedWritableSharedMemoryMapping> output_mapping =
+      output_buffers_[bitstream_buffer_id].second;
+  if (metadata.payload_size_bytes >
+      output_buffers_[bitstream_buffer_id].second->size()) {
+    NotifyErrorStatus({media::EncoderStatus::Codes::kInvalidOutputBuffer,
+                       "invalid payload_size: " +
+                           base::NumberToString(metadata.payload_size_bytes)});
+    return;
+  }
+
+  if (metadata.end_of_picture()) {
+    CHECK(encoder_metrics_provider_);
+    encoder_metrics_provider_->IncrementEncodedFrameCount();
+  }
+
   if (!rtp_timestamp.has_value() || !capture_timestamp_ms.has_value()) {
     failed_timestamp_match_ = true;
     submitted_frames_.clear();
@@ -1706,8 +1689,8 @@ void RTCVideoEncoder::Impl::BitstreamBufferReady(
 #if BUILDFLAG(RTC_USE_H265)
   if (ps_tracker_.get()) {
     H265ParameterSetsTracker::FixedBitstream fixed =
-        ps_tracker_->MaybeFixBitstream(webrtc::MakeArrayView(
-            output_mapping->front(), metadata.payload_size_bytes));
+        ps_tracker_->MaybeFixBitstream(
+            output_mapping->AsSpan().first(metadata.payload_size_bytes));
     if (fixed.action == H265ParameterSetsTracker::PacketAction::kInsert) {
       image.SetEncodedData(fixed.bitstream);
       BitstreamBufferAvailable(bitstream_buffer_id);
@@ -1730,14 +1713,16 @@ void RTCVideoEncoder::Impl::BitstreamBufferReady(
   image._encodedHeight = encoded_size.height();
   image.SetRtpTimestamp(rtp_timestamp.value());
   image.capture_time_ms_ = capture_timestamp_ms.value();
-  image._frameType =
-      (metadata.key_frame ? webrtc::VideoFrameType::kVideoFrameKey
-                          : webrtc::VideoFrameType::kVideoFrameDelta);
+  image.set_frame_type((metadata.key_frame
+                            ? webrtc::VideoFrameType::kVideoFrameKey
+                            : webrtc::VideoFrameType::kVideoFrameDelta));
   image.content_type_ = video_content_type_;
   // Default invalid qp value is -1 in webrtc::EncodedImage and
   // media::BitstreamBufferMetadata, and libwebrtc would parse bitstream to get
   // the qp if |qp_| is less than zero.
   image.qp_ = metadata.qp;
+
+  image.set_end_of_temporal_unit(metadata.end_of_picture());
 
   webrtc::CodecSpecificInfo info;
   info.codecType = video_codec_type_;
@@ -2006,7 +1991,7 @@ bool RTCVideoEncoder::Impl::NeedConvertToMemoryFrame(
       STORAGE_OWNED_MEMORY,
       STORAGE_SHMEM,
   };
-  if (!base::Contains(kStorageTypeSupportedByMojo, storage_type)) {
+  if (!std::ranges::contains(kStorageTypeSupportedByMojo, storage_type)) {
     // We need to convert to I420 memory frame if mojo doesn't support it.
     return true;
   }
@@ -2273,8 +2258,8 @@ void RTCVideoEncoder::Impl::EncodeOneFrame(FrameChunk frame_chunk) {
   frame->set_timestamp(timestamp);
 
   if (!failed_timestamp_match_) {
-    DCHECK(!base::Contains(submitted_frames_, timestamp,
-                           &FrameInfo::media_timestamp_));
+    DCHECK(!std::ranges::contains(submitted_frames_, timestamp,
+                                  &FrameInfo::media_timestamp_));
     submitted_frames_.emplace_back(timestamp, frame_chunk.timestamp,
                                    frame_chunk.render_time_ms,
                                    GetActiveSpatialLayers());
@@ -2367,8 +2352,9 @@ void RTCVideoEncoder::Impl::EncodeOneFrameWithNativeInput(
     // A SI-backed video frame can be sent to the VEA encoder directly if VEA
     // reports it as supported, we just need to verify the sync token.
     bool shared_image_encoding =
-        vea_supports_shared_images_ && !frame->HasNativeGpuMemoryBuffer() &&
-        !frame->HasMappableSharedImage() && frame->HasSharedImage();
+        !frame->HasMappableSharedImage() && frame->HasSharedImage() &&
+        encoder_info_.DoesSupportGpuSharedImages(frame->shared_image()->usage(),
+                                                 frame->format());
     if (shared_image_encoding) {
       TRACE_EVENT0("webrtc",
                    "RTCVideoEncoder::Impl::EncodeOneFrameWithNativeInput::"
@@ -2380,9 +2366,8 @@ void RTCVideoEncoder::Impl::EncodeOneFrameWithNativeInput(
             token);
         frame->UpdateAcquireSyncToken(token);
       }
-    } else if (frame->storage_type() !=
-               media::VideoFrame::STORAGE_MAPPABLE_SHARED_IMAGE) {
-      // If the frame is not backed by a GPU memory buffer and the VEA does not
+    } else if (!frame->HasMappableSharedImage()) {
+      // If the frame is not backed by a mappable SI and the VEA does not
       // support SI encoding, we need to guarantee the frame must be converted
       // to a mappable frame.
       if (MaybeConvertRGBAToNV12AndEncode(frame_chunk, frame)) {
@@ -2393,8 +2378,7 @@ void RTCVideoEncoder::Impl::EncodeOneFrameWithNativeInput(
       if (!frame) {
         return;
       }
-      CHECK_EQ(frame->storage_type(),
-               media::VideoFrame::STORAGE_MAPPABLE_SHARED_IMAGE);
+      CHECK(frame->HasMappableSharedImage());
     }
   }
   DoNativeEncodeWithNativeInput(frame_chunk, frame);
@@ -2406,8 +2390,8 @@ void RTCVideoEncoder::Impl::DoNativeEncodeWithNativeInput(
   frame->set_timestamp(base::Microseconds(frame_chunk.timestamp_us));
 
   if (!failed_timestamp_match_) {
-    DCHECK(!base::Contains(submitted_frames_, frame->timestamp(),
-                           &FrameInfo::media_timestamp_));
+    DCHECK(!std::ranges::contains(submitted_frames_, frame->timestamp(),
+                                  &FrameInfo::media_timestamp_));
     submitted_frames_.emplace_back(frame->timestamp(), frame_chunk.timestamp,
                                    frame_chunk.render_time_ms,
                                    GetActiveSpatialLayers());
@@ -2440,7 +2424,6 @@ bool RTCVideoEncoder::Impl::CreateBlackMappableSIFrame(
   auto mapping = shared_image->Map();
   if (!mapping) {
     LOG(ERROR) << "Mapping shared image failed.";
-    sii->DestroySharedImage(gpu::SyncToken(), std::move(shared_image));
     return false;
   }
   // Fills the NV12 frame with YUV black (0x00, 0x80, 0x80).
@@ -3050,11 +3033,7 @@ void RTCVideoEncoder::UpdateEncoderInfo(
     }
   }
 
-  if (vea_supports_shared_images_ !=
-      media_enc_info.supports_gpu_shared_images) {
-    vea_supports_shared_images_ = media_enc_info.supports_gpu_shared_images;
-    impl_->UpdateSharedImageSupport(vea_supports_shared_images_);
-  }
+  impl_->UpdateEncoderInfo(media_enc_info);
   encoder_info_.requested_resolution_alignment =
       media_enc_info.requested_resolution_alignment;
   encoder_info_.apply_alignment_to_all_simulcast_layers =

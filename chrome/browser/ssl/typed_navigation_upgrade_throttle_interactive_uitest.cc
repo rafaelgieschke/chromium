@@ -2,15 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/ssl/typed_navigation_upgrade_throttle.h"
-
+#include <algorithm>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/single_thread_task_runner.h"
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -18,6 +17,7 @@
 #include "chrome/browser/interstitials/security_interstitial_page_test_utils.h"
 #include "chrome/browser/preloading/scoped_prewarm_feature_list.h"
 #include "chrome/browser/ssl/https_upgrades_interceptor.h"
+#include "chrome/browser/ssl/typed_navigation_upgrade_throttle.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
@@ -268,7 +268,8 @@ class TypedNavigationUpgradeThrottleBrowserTest
           ->OnFocusChanged(OMNIBOX_FOCUS_VISIBLE,
                            OMNIBOX_FOCUS_CHANGE_EXPLICIT);
     } else {
-      browser()->window()->GetLocationBar()->FocusLocation(false);
+      browser()->window()->GetLocationBar()->FocusLocation(
+          /*is_user_initiated=*/false, /*clear_focus_if_failed=*/false);
     }
   }
 
@@ -296,6 +297,11 @@ class TypedNavigationUpgradeThrottleBrowserTest
         ui::ClipboardBuffer::kCopyPaste);
     SetClipboardText(base::UTF8ToUTF16(hostname));
     EXPECT_TRUE(chrome::ExecuteCommand(browser(), IDC_PASTE));
+
+    // Wait for the asynchronous paste to complete.
+    ASSERT_TRUE(base::test::RunUntil(
+        [&]() { return omnibox()->GetText() == base::UTF8ToUTF16(hostname); }));
+
     WaitForAutocompleteControllerDone();
     // Hit enter and wait for the navigation(s).
     content::TestNavigationObserver navigation_observer(contents,
@@ -430,16 +436,16 @@ class TypedNavigationUpgradeThrottleBrowserTest
 
       // Should have either the HTTP or the HTTPS URL in history, but not both.
       if (expectation == NavigationExpectation::kExpectHttp) {
-        EXPECT_TRUE(base::Contains(enumerator.urls(), http_url));
-        EXPECT_FALSE(base::Contains(enumerator.urls(), https_url));
+        EXPECT_TRUE(std::ranges::contains(enumerator.urls(), http_url));
+        EXPECT_FALSE(std::ranges::contains(enumerator.urls(), https_url));
       } else {
-        EXPECT_TRUE(base::Contains(enumerator.urls(), https_url));
-        EXPECT_FALSE(base::Contains(enumerator.urls(), http_url));
+        EXPECT_TRUE(std::ranges::contains(enumerator.urls(), https_url));
+        EXPECT_FALSE(std::ranges::contains(enumerator.urls(), http_url));
       }
     } else {
       // The user entered a search query.
       EXPECT_EQ("www.google.com", contents->GetLastCommittedURL().GetHost());
-      EXPECT_FALSE(base::Contains(enumerator.urls(), https_url));
+      EXPECT_FALSE(std::ranges::contains(enumerator.urls(), https_url));
     }
 
     // This is needed to sync histograms recorded in renderers and the browser,
@@ -489,7 +495,7 @@ IN_PROC_BROWSER_TEST_P(TypedNavigationUpgradeThrottleBrowserTest,
   histograms.ExpectTotalCount(kEventHistogram, 0);
 
   ui_test_utils::HistoryEnumerator enumerator(browser()->profile());
-  EXPECT_TRUE(base::Contains(enumerator.urls(), url));
+  EXPECT_TRUE(std::ranges::contains(enumerator.urls(), url));
 }
 
 // If the user types a full HTTPS URL, the navigation should end up on that
@@ -511,7 +517,7 @@ IN_PROC_BROWSER_TEST_P(TypedNavigationUpgradeThrottleBrowserTest,
   histograms.ExpectTotalCount(kEventHistogram, 0);
 
   ui_test_utils::HistoryEnumerator enumerator(browser()->profile());
-  EXPECT_TRUE(base::Contains(enumerator.urls(), url));
+  EXPECT_TRUE(std::ranges::contains(enumerator.urls(), url));
 }
 
 // If the user types a full HTTPS URL, the navigation should end up on that
@@ -539,7 +545,7 @@ IN_PROC_BROWSER_TEST_P(TypedNavigationUpgradeThrottleBrowserTest,
   // Broken SSL results in an interstitial and interstitial pages aren't added
   // to history.
   ui_test_utils::HistoryEnumerator enumerator(browser()->profile());
-  EXPECT_FALSE(base::Contains(enumerator.urls(), url));
+  EXPECT_FALSE(std::ranges::contains(enumerator.urls(), url));
 }
 
 // If the feature is disabled, typing a URL in the omnibox without a scheme
@@ -627,8 +633,8 @@ IN_PROC_BROWSER_TEST_P(TypedNavigationUpgradeThrottleBrowserTest,
   const GURL https_url("https://www.site-with-http.com");
 
   EXPECT_EQ(http_url, contents->GetLastCommittedURL());
-  EXPECT_TRUE(base::Contains(enumerator.urls(), http_url));
-  EXPECT_FALSE(base::Contains(enumerator.urls(), https_url));
+  EXPECT_TRUE(std::ranges::contains(enumerator.urls(), http_url));
+  EXPECT_FALSE(std::ranges::contains(enumerator.urls(), https_url));
 
   // This is needed to sync histograms recorded in renderers and the browser,
   // as kNetErrorHistogram is recorded by the renderer.
@@ -659,8 +665,8 @@ IN_PROC_BROWSER_TEST_P(TypedNavigationUpgradeThrottleBrowserTest,
   const GURL https_url("https://www.site-with-good-https.com");
 
   EXPECT_EQ(https_url, contents->GetLastCommittedURL());
-  EXPECT_FALSE(base::Contains(enumerator.urls(), http_url));
-  EXPECT_TRUE(base::Contains(enumerator.urls(), https_url));
+  EXPECT_FALSE(std::ranges::contains(enumerator.urls(), http_url));
+  EXPECT_TRUE(std::ranges::contains(enumerator.urls(), https_url));
 
   // This is needed to sync histograms recorded in renderers and the browser,
   // as kNetErrorHistogram is recorded by the renderer.
@@ -707,8 +713,8 @@ IN_PROC_BROWSER_TEST_P(TypedNavigationUpgradeThrottleBrowserTest,
   const GURL https_url = MakeHttpsURL(kSiteWithGoodHttps);
 
   EXPECT_EQ(https_url, contents->GetLastCommittedURL());
-  EXPECT_TRUE(base::Contains(enumerator.urls(), https_url));
-  EXPECT_FALSE(base::Contains(enumerator.urls(), http_url));
+  EXPECT_TRUE(std::ranges::contains(enumerator.urls(), https_url));
+  EXPECT_FALSE(std::ranges::contains(enumerator.urls(), http_url));
 
   // This is needed to sync histograms recorded in renderers and the browser, as
   // kNetErrorHistogram is recorded by the renderer.
@@ -749,8 +755,8 @@ IN_PROC_BROWSER_TEST_P(
   const GURL https_url = MakeHttpsURL(kSiteWithBadHttps);
 
   EXPECT_EQ(http_url, contents->GetLastCommittedURL());
-  EXPECT_FALSE(base::Contains(enumerator.urls(), https_url));
-  EXPECT_TRUE(base::Contains(enumerator.urls(), http_url));
+  EXPECT_FALSE(std::ranges::contains(enumerator.urls(), https_url));
+  EXPECT_TRUE(std::ranges::contains(enumerator.urls(), http_url));
 
   // This is needed to sync histograms recorded in renderers and the browser, as
   // kNetErrorHistogram is recorded by the renderer.
@@ -793,8 +799,8 @@ IN_PROC_BROWSER_TEST_P(TypedNavigationUpgradeThrottleBrowserTest,
   const GURL https_url = MakeHttpsURL(kSiteWithGoodHttps);
 
   EXPECT_EQ(https_url, contents->GetLastCommittedURL());
-  EXPECT_TRUE(base::Contains(enumerator.urls(), https_url));
-  EXPECT_FALSE(base::Contains(enumerator.urls(), http_url));
+  EXPECT_TRUE(std::ranges::contains(enumerator.urls(), https_url));
+  EXPECT_FALSE(std::ranges::contains(enumerator.urls(), http_url));
 
   // This is needed to sync histograms recorded in renderers and the browser, as
   // kNetErrorHistogram is recorded by the renderer.
@@ -1031,8 +1037,8 @@ class TypedNavigationUpgradeThrottleRedirectBrowserTest
                                  error_page::NETWORK_ERROR_PAGE_SHOWN, 0);
     // The http or https version of the URL shouldn't be in history because
     // of the redirect.
-    EXPECT_FALSE(base::Contains(enumerator.urls(), https_url));
-    EXPECT_FALSE(base::Contains(enumerator.urls(), http_url));
+    EXPECT_FALSE(std::ranges::contains(enumerator.urls(), https_url));
+    EXPECT_FALSE(std::ranges::contains(enumerator.urls(), http_url));
   }
 
   // Type |url_without_scheme| in the omnibox, press enter and expect a redirect
@@ -1057,8 +1063,8 @@ class TypedNavigationUpgradeThrottleRedirectBrowserTest
     // Neither the https nor the http version of the URL should be in history.
     // - https URL eventually failed to load and we fell back to the http URL.
     // - http URL redirected to an SSL error or a net error.
-    EXPECT_FALSE(base::Contains(enumerator.urls(), https_url));
-    EXPECT_FALSE(base::Contains(enumerator.urls(), http_url));
+    EXPECT_FALSE(std::ranges::contains(enumerator.urls(), https_url));
+    EXPECT_FALSE(std::ranges::contains(enumerator.urls(), http_url));
   }
 
   void SetUpMockCertVerifierWithErrorForHttpsServer(
@@ -1259,8 +1265,8 @@ IN_PROC_BROWSER_TEST_P(
   EXPECT_EQ(http_url, contents->GetLastCommittedURL());
   // Since the navigation results in a fallback, https_url isn't added to
   // history.
-  EXPECT_TRUE(base::Contains(enumerator.urls(), http_url));
-  EXPECT_FALSE(base::Contains(enumerator.urls(), https_url));
+  EXPECT_TRUE(std::ranges::contains(enumerator.urls(), http_url));
+  EXPECT_FALSE(std::ranges::contains(enumerator.urls(), https_url));
   histograms.ExpectTotalCount(SSLErrorHandler::GetHistogramNameForTesting(), 4);
   histograms.ExpectBucketCount(kNetErrorHistogram,
                                error_page::NETWORK_ERROR_PAGE_SHOWN, 2);

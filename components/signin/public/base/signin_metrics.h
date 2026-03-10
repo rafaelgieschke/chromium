@@ -159,11 +159,11 @@ enum class ProfileSignout {
 // LINT.IfChange
 enum class AccessPoint : int {
   kStartPage = 0,
-  kNtpLink = 1,
+  // kNtpLink = 1, no longer used.
   // Access point from the three dot app menu.
   kMenu = 2,
   kSettings = 3,
-  kSupervisedUser = 4,
+  // kSupervisedUser = 4, no longer used.
   kExtensionInstallBubble = 5,
   kExtensions = 6,
   // kAppsPageLink = 7, no longer used.
@@ -171,30 +171,29 @@ enum class AccessPoint : int {
   kBookmarkManager = 9,
   kAvatarBubbleSignIn = 10,
   kUserManager = 11,
-  kDevicesPage = 12,
+  // kDevicesPage = 12, no longer used.
   // kCloudPrint = 13, no longer used.
   // kContentArea = 14, no longer used.
   kFullscreenSigninPromo = 15,
   kRecentTabs = 16,
-  // This should never have been used to get signin URL.
-  kUnknown = 17,
+  // kUnknown = 17, no longer used.
   kPasswordBubble = 18,
   kAutofillDropdown = 19,
   // kNtpContentSuggestions = 20, no longer used.
   kResigninInfobar = 21,
-  kTabSwitcher = 22,
+  // kTabSwitcher = 22, no longer used.
   // kForceSigninWarning = 23, no longer used.
   // kSaveCardBubble = 24, no longer used
   // kManageCardsBubble = 25, no longer used
   kMachineLogon = 26,
-  kGoogleServicesSettings = 27,
-  kSyncErrorCard = 28,
+  // kGoogleServicesSettings = 27, no longer used.
+  // kSyncErrorCard = 28, no longer used.
   kForcedSignin = 29,
-  kAccountRenamed = 30,
+  // kAccountRenamed = 30, no longer used.
   kWebSignin = 31,
   kSafetyCheck = 32,
-  kKaleidoscope = 33,
-  kEnterpriseSignoutCoordinator = 34,
+  // kKaleidoscope = 33, no longer used.
+  // kEnterpriseSignoutCoordinator = 34, no longer used.
   kSigninInterceptFirstRunExperience = 35,
   kSendTabToSelfPromo = 36,
   kNtpFeedTopPromo = 37,
@@ -217,9 +216,8 @@ enum class AccessPoint : int {
   kReauthInfoBar = 48,
   // Access point for the consistency service.
   kAccountConsistencyService = 49,
-  // Access point for the search companion sign-in promo.
-  kSearchCompanion = 50,
-  // Access point for the IOS Set Up List on the NTP.
+  // kSearchCompanion = 50, no longer used.
+  // Access point for the Set Up List on the NTP (Mobile only).
   kSetUpList = 51,
   // Access point for the local password migration warning on Android.
   // Deprecated: kPasswordMigrationWarningAndroid = 52,
@@ -246,7 +244,7 @@ enum class AccessPoint : int {
   kSettingsSignoutConfirmationPrompt = 62,
   // The identity disc (avatar) on the New Tab page. Note that this only covers
   // SignedIn avatars - interactions with the signed-out avatar are instead
-  kNtpIdentityDisc = 63,
+  // kNtpIdentityDisc = 63, no longer used.
   // The identity is received through an interception of a 3rd party OIDC auth
   // redirection.
   kOidcRedirectionInterception = 64,
@@ -322,10 +320,22 @@ enum class AccessPoint : int {
   // Triggered when the user attempts to import credentials through the
   // ASCredentialImportManager without being signed in.
   kCredentialExchangeImport = 92,
+  // Set sync consent from sync internals.
+  kSetSyncConsentFromSyncInternals = 93,
+  kIosChromeWebView = 94,
+  kAshUserSessionManager = 95,
+  kAshChromeSessionManager = 96,
+  // Avatar pill button expands to show a sign in promo. Access point is
+  // propagated to the Profile Menu sign in button.
+  kAvatarPillExpandPromo = 97,
   // Add values above this line with a corresponding label to the
   // "SigninAccessPoint" enum in
   // tools/metrics/histograms/metadata/signin/enums.xml.
-  kMaxValue = kCredentialExchangeImport,  // This must be last.
+  kSearchAIModeBubble = 98,
+  // Add values above this line with a corresponding label to the
+  // "SigninAccessPoint" enum in
+  // tools/metrics/histograms/metadata/signin/enums.xml.
+  kMaxValue = kSearchAIModeBubble,  // This must be last.
 };
 // LINT.ThenChange(/tools/metrics/histograms/metadata/signin/enums.xml)
 
@@ -428,10 +438,6 @@ enum class AccountConsistencyPromoAction : int {
 #endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
 
 // Enum values which enumerates all reasons to start sign in process.
-// These values are persisted to logs. Entries should not be renumbered and
-// numeric values should never be reused.
-// Please keep in sync with "SigninReason" in
-// src/tools/metrics/histograms/enums.xml.
 enum class Reason : int {
   // Used only for the Sync flows, i.e. the user will be proposed to enable Sync
   // after sign-in.
@@ -443,7 +449,9 @@ enum class Reason : int {
   // REASON_UNLOCK = 3,  // DEPRECATED, profile unlocking was removed.
   // This should never have been used to get signin URL.
   kUnknownReason = 4,
-  kForcedSigninPrimaryAccount = 5,
+  // kForcedSigninPrimaryAccount = 5, // DEPRECATED, force signin follows the
+  // regular flow in the profile picker.
+
   // Used to simply login and acquire a login scope token without actually
   // signing into any profiles on Chrome. This allows the Chrome sign-in page to
   // work in incognito mode.
@@ -513,7 +521,8 @@ enum class SourceForRefreshTokenOperation {
   kTokenService_LoadCredentials = 1,
   // DEPRECATED
   // kSupervisedUser_InitSync = 2,
-  kInlineLoginHandler_Signin = 3,
+  // DEPRECATED
+  // kInlineLoginHandler_Signin = 3,
   kPrimaryAccountManager_ClearAccount = 4,
   // DEPRECATED
   // kPrimaryAccountManager_LegacyPreDiceSigninFlow = 5,
@@ -647,10 +656,14 @@ enum class ReauthFlowEvent : int {
 enum class ReauthAccessPoint : int {
   // Error card in the account menu.
   kAccountMenu = 0,
-  kMaxValue = kAccountMenu,
+  kAccountSettings = 1,
+  kRecentTabs = 2,
+  kMaxValue = kRecentTabs,
 };
 // LINT.ThenChange(//tools/metrics/histograms/metadata/signin/enums.xml:ReauthAccessPoint)
 #endif  // BUILDFLAG(IS_IOS)
+
+std::optional<AccessPoint> AccessPointFromInt(int access_point);
 
 // -----------------------------------------------------------------------------
 // Histograms
@@ -741,10 +754,6 @@ void LogCookieJarCounts(const int signed_in,
 // account(s) present in the cookie jar.
 void LogAccountRelation(const AccountRelation relation,
                         const ReportingType type);
-
-// Records if the best guess is that this profile is currently shared or not
-// between multiple users.
-void LogIsShared(const bool is_shared, const ReportingType type);
 
 // Records the number of signed-in accounts in the cookie jar for the given
 // (potentially unconsented) primary account type, characterized by sync being

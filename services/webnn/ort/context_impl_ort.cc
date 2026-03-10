@@ -4,10 +4,16 @@
 
 #include "services/webnn/ort/context_impl_ort.h"
 
+#include "base/containers/fixed_flat_map.h"
+#include "base/feature_list.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/notreached.h"
+#include "base/strings/cstring_view.h"
 #include "services/webnn/ort/graph_impl_ort.h"
 #include "services/webnn/ort/ort_data_type.h"
 #include "services/webnn/ort/ort_status.h"
 #include "services/webnn/ort/tensor_impl_ort.h"
+#include "services/webnn/public/cpp/execution_providers_info.h"
 #include "services/webnn/public/cpp/supported_data_types.h"
 #include "services/webnn/public/mojom/webnn_context_provider.mojom.h"
 #include "services/webnn/public/mojom/webnn_graph.mojom.h"
@@ -22,6 +28,82 @@ namespace webnn::ort {
 namespace {
 
 using Microsoft::WRL::ComPtr;
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+//
+// Additions to this enum should also be reflected in RecordFirstSelectedEP().
+//
+// LINT.IfChange(WebNNOrtEPUma)
+enum class WebNNOrtEPUma {
+  kOther = 0,
+  kCPU = 1,
+  kDml = 2,
+  kWebGpu = 3,
+  kMIGraphX = 4,
+  kNvTensorRT = 5,
+  kOpenVINO = 6,
+  kQNN = 7,
+  kVitisAI = 8,
+  kMaxValue = kVitisAI,
+};
+// LINT.ThenChange(//tools/metrics/histograms/metadata/webnn/enums.xml:WebNNOrtEPUma)
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+//
+// LINT.IfChange(WebNNOrtDeviceUma)
+enum class WebNNOrtDeviceUma {
+  kCPU = 0,
+  kGPU = 1,
+  kNPU = 2,
+  kMaxValue = kNPU,
+};
+// LINT.ThenChange(//tools/metrics/histograms/metadata/webnn/enums.xml:WebNNOrtDeviceUma)
+
+void RecordFirstSelectedEP(base::cstring_view ep_name) {
+  // It is expected that `ep_name` is one of the execution providers defined in
+  // `services/webnn/public/cpp/execution_providers_info.h`. If a new EP is
+  // added, it should be added to this map as well. Otherwise, it will be
+  // recorded as `kOther`.
+  static constexpr auto kEPUmaMap =
+      base::MakeFixedFlatMap<base::cstring_view, WebNNOrtEPUma>({
+          {kCPUExecutionProvider, WebNNOrtEPUma::kCPU},
+          {kDmlExecutionProvider, WebNNOrtEPUma::kDml},
+          {kWebGpuExecutionProvider, WebNNOrtEPUma::kWebGpu},
+          {kMIGraphXExecutionProvider, WebNNOrtEPUma::kMIGraphX},
+          {kNvTensorRTRTXExecutionProvider, WebNNOrtEPUma::kNvTensorRT},
+          {kOpenVINOExecutionProvider, WebNNOrtEPUma::kOpenVINO},
+          {kQNNExecutionProvider, WebNNOrtEPUma::kQNN},
+          {kVitisAIExecutionProvider, WebNNOrtEPUma::kVitisAI},
+      });
+  static_assert(
+      kEPUmaMap.size() == static_cast<size_t>(WebNNOrtEPUma::kMaxValue),
+      "All EP enum values (except kOther) must be in kEPUmaMap.");
+
+  auto it = kEPUmaMap.find(ep_name);
+  WebNNOrtEPUma uma_value = WebNNOrtEPUma::kOther;
+  if (it != kEPUmaMap.end()) {
+    uma_value = it->second;
+  }
+  base::UmaHistogramEnumeration("WebNN.ORT.FirstSelectedEP", uma_value);
+}
+
+void RecordFirstSelectedDevice(OrtHardwareDeviceType device_type) {
+  WebNNOrtDeviceUma uma_value;
+  switch (device_type) {
+    case OrtHardwareDeviceType_CPU:
+      uma_value = WebNNOrtDeviceUma::kCPU;
+      break;
+    case OrtHardwareDeviceType_GPU:
+      uma_value = WebNNOrtDeviceUma::kGPU;
+      break;
+    case OrtHardwareDeviceType_NPU:
+      uma_value = WebNNOrtDeviceUma::kNPU;
+      break;
+  }
+  base::UmaHistogramEnumeration("WebNN.ORT.FirstSelectedDevice", uma_value);
+}
 
 // The feature flag allows us to try using device allocator to create device
 // tensors for EPs, e.g. OpenVINO EP.
@@ -67,15 +149,26 @@ std::unique_ptr<WebNNContextImpl, OnTaskRunnerDeleter> ContextImplOrt::Create(
   scoped_refptr<SessionOptions> session_options =
       SessionOptions::Create(device_type, env);
 
+  // The ONNX Runtime default CPU EP has a limitation that DequantizeLinear with
+  // type int32 should have no zero point or all zero points should be 0. This
+  // limitation will result in context lost triggered by ONNX Runtime session
+  // run failure. To avoid this issue, we should remove int32 from supported
+  // data types if the default CPU EP is selected first.
+  // TODO(crbug.com/488090100): Remove this workaround when int32 is supported
+  // by ORT 1.24.
+  bool dequantize_linear_input_support_int32 =
+      !Environment::IsDefaultCpuEpDevice(
+          session_options->first_selected_device());
+
   std::unique_ptr<WebNNContextImpl, OnTaskRunnerDeleter> context_impl(
-      new ContextImplOrt(std::move(receiver), std::move(context_provider),
-                         std::move(ep_workarounds), std::move(options),
-                         std::move(session_options),
-                         std::move(write_tensor_consumer),
-                         std::move(read_tensor_producer), std::move(env),
-                         std::move(gpu_sequence), std::move(memory_tracker),
-                         std::move(owning_task_runner), shared_image_manager,
-                         std::move(main_task_runner)),
+      new ContextImplOrt(
+          std::move(receiver), std::move(context_provider),
+          std::move(ep_workarounds), dequantize_linear_input_support_int32,
+          std::move(options), std::move(session_options),
+          std::move(write_tensor_consumer), std::move(read_tensor_producer),
+          std::move(env), std::move(gpu_sequence), std::move(memory_tracker),
+          std::move(owning_task_runner), shared_image_manager,
+          std::move(main_task_runner)),
       OnTaskRunnerDeleter(std::move(task_runner)));
   return context_impl;
 }
@@ -84,6 +177,7 @@ ContextImplOrt::ContextImplOrt(
     mojo::PendingReceiver<mojom::WebNNContext> receiver,
     base::WeakPtr<WebNNContextProviderImpl> context_provider,
     const EpWorkarounds& ep_workarounds,
+    bool dequantize_linear_input_support_int32,
     mojom::CreateContextOptionsPtr options,
     scoped_refptr<SessionOptions> session_options,
     mojo::ScopedDataPipeConsumerHandle write_tensor_consumer,
@@ -97,7 +191,9 @@ ContextImplOrt::ContextImplOrt(
     : WebNNContextImpl(
           std::move(receiver),
           std::move(context_provider),
-          GetContextProperties(ep_workarounds.resample2d_limit_to_nchw),
+          ContextBackendUma::kONNXRuntime,
+          GetContextProperties(ep_workarounds.resample2d_limit_to_nchw,
+                               dequantize_linear_input_support_int32),
           std::move(options),
           std::move(write_tensor_consumer),
           std::move(write_tensor_producer),
@@ -108,6 +204,17 @@ ContextImplOrt::ContextImplOrt(
           std::move(main_task_runner)),
       env_(std::move(env)),
       session_options_(std::move(session_options)) {
+  const OrtApi* ort_api = PlatformFunctions::GetInstance()->ort_api();
+  const OrtEpDevice* first_selected_device =
+      session_options_->first_selected_device();
+
+  const char* ep_name = ort_api->EpDevice_EpName(first_selected_device);
+  RecordFirstSelectedEP(UNSAFE_BUFFERS(base::cstring_view(ep_name)));
+
+  OrtHardwareDeviceType hardware_device_type = ort_api->HardwareDevice_Type(
+      ort_api->EpDevice_Device(first_selected_device));
+  RecordFirstSelectedDevice(hardware_device_type);
+
   if (base::FeatureList::IsEnabled(kUseDeviceTensor)) {
     device_allocator_ = DeviceAllocator::Create(session_options_, env_);
   }
@@ -117,7 +224,8 @@ ContextImplOrt::~ContextImplOrt() = default;
 
 // static
 ContextProperties ContextImplOrt::GetContextProperties(
-    bool resample2d_limit_to_nchw) {
+    bool resample2d_limit_to_nchw,
+    bool dequantize_linear_input_support_int32) {
   // TODO(crbug.com/412844034): Investigate how to set the tensor byte length
   // limit and supported tensor ranks.
   static constexpr uint64_t kTensorByteLengthLimit =
@@ -186,9 +294,11 @@ ContextProperties ContextImplOrt::GetContextProperties(
        {DataTypeConstraint::kFloat16To32, SupportedRanks::Exactly(1)},
        /*cumulative_sum_input=*/{kFloat16To32Int32To64, kMaxNonScalarRank},
        /*dequantize_linear_input=*/
-       {DataTypeConstraint::kInts4ToInts8, kMaxRank},
+       {dequantize_linear_input_support_int32
+            ? kInts4To8Int32
+            : DataTypeConstraint::kInts4ToInts8,
+        kMaxRank},
        /*dequantize_linear_scale=*/{DataTypeConstraint::kFloat16To32, kMaxRank},
-       /*dequantize_linear_zero_point=*/{kInts4To8Int32, kMaxRank},
        /*add_input=*/
        {DataTypeConstraint::kAllDataTypesAtLeast8bits, kMaxRank},
        /*sub_input=*/
@@ -248,6 +358,8 @@ ContextProperties ContextImplOrt::GetContextProperties(
        /*gather_indices=*/{DataTypeConstraint::kInt32To64, kMaxRank},
        /*gather_elements_input=*/
        {DataTypeConstraint::kAllDataTypesAtLeast8bits, kMaxNonScalarRank},
+       // TODO(crbug.com/470357751): Support uint32 indices when ORT CPU EP
+       // implements it.
        /*gather_elements_indices=*/
        {DataTypeConstraint::kInt32To64, kMaxNonScalarRank},
        /*gather_nd_input=*/
@@ -369,7 +481,14 @@ void ContextImplOrt::HandleContextLostOrCrash(const std::string& error_message,
   // any error code.
   // TODO(crbug.com/462937875): Handle errors differently when ORT can report a
   // device-removal error code in the future.
-  DestroyAllContextsAndKillGpuProcess(error_message);
+  //
+  // Currently, we decide to not broadcast the lost reason across all contexts
+  // especially for contexts created from different origins as it may leak
+  // information about one origin to another.
+  // TODO(crbug.com/474141334): Broadcast the context lost reason across all
+  // contexts from the same origin.
+  OnLost(error_message);
+  DestroyAllContextsAndKillGpuProcess();
 }
 
 void ContextImplOrt::CreateGraphImpl(
@@ -378,12 +497,13 @@ void ContextImplOrt::CreateGraphImpl(
     WebNNGraphImpl::ComputeResourceInfo compute_resource_info,
     base::flat_map<OperandId, std::unique_ptr<WebNNConstantOperand>>
         constant_operands,
-    base::flat_map<OperandId, WebNNTensorImpl*> constant_tensor_operands,
+    base::flat_map<OperandId, scoped_refptr<WebNNTensorImpl>>
+        constant_tensor_operands,
     CreateGraphImplCallback callback) {
   GraphImplOrt::CreateAndBuild(
       std::move(receiver), std::move(graph_info),
       std::move(compute_resource_info), std::move(constant_operands),
-      std::move(constant_tensor_operands), this, std::move(callback));
+      std::move(constant_tensor_operands), *this, std::move(callback));
 }
 
 base::expected<scoped_refptr<WebNNTensorImpl>, mojom::ErrorPtr>
@@ -434,7 +554,7 @@ ContextImplOrt::CreateTensorImpl(
   CHECK(base::IsValueInRangeForNumericType<int>(size));
 
   return base::MakeRefCounted<TensorImplOrt>(
-      std::move(receiver), AsWeakPtr(), std::move(tensor_info), size,
+      std::move(receiver), *this, std::move(tensor_info), size,
       std::move(tensor), can_access_on_cpu, device_allocator_);
 }
 
@@ -443,62 +563,52 @@ ContextImplOrt::CreateTensorFromSharedImageImpl(
     mojo::PendingAssociatedReceiver<mojom::WebNNTensor> receiver,
     mojom::TensorInfoPtr tensor_info,
     WebNNTensorImpl::RepresentationPtr representation) {
-  // Shared image representation must be retrieved on the main thread. If WebNN
-  // runs on its own thread, a task is posted to the main thread and waits to
-  // retrieve the backend representation. Otherwise, if WebNN is already running
-  // on the main thread, it directly gets the backend representation.
   ComPtr<ID3D12Resource> d3d12_buffer;
-  WebNNTensorImpl::RunOrPostTaskAndWaitOnSequence(
-      main_task_runner(),
-      base::BindOnce(
-          [](gpu::WebNNTensorRepresentation* representation,
-             ComPtr<ID3D12Resource>* out_buffer) {
-            *out_buffer = representation->GetD3D12Buffer();
-          },
-          // Safe to use base::Unretained because we must run or wait for the
-          // post task to complete and `representation` cannot destruct while
-          // the task is running.
-          base::Unretained(representation.get()), &d3d12_buffer));
+  // Shared image is thread-safe, directly get the backend representation.
+  if (representation->is_thread_safe()) {
+    d3d12_buffer = representation->GetD3D12Buffer();
+  } else {
+    // Shared image representation must be retrieved on the main thread. If
+    // WebNN runs on its own thread, a task is posted to the main thread and
+    // waits to retrieve the backend representation. Otherwise, if WebNN is
+    // already running on the main thread, it directly gets the backend
+    // representation.
+    WebNNTensorImpl::RunOrPostTaskAndWaitOnSequence(
+        main_task_runner(),
+        base::BindOnce(
+            [](gpu::WebNNTensorRepresentation* representation,
+               ComPtr<ID3D12Resource>* out_buffer) {
+              *out_buffer = representation->GetD3D12Buffer();
+            },
+            // Safe to use base::Unretained because we must run or wait for the
+            // post task to complete and `representation` cannot destruct while
+            // the task is running.
+            base::Unretained(representation.get()), &d3d12_buffer));
+  }
 
   CHECK(d3d12_buffer)
       << "[WebNN] Failed to get D3D12 buffer from shared image.";
 
-  // Validate D3D12 buffer size matches TensorInfo.
-  if (d3d12_buffer->GetDesc().Width !=
-      static_cast<uint64_t>(tensor_info->descriptor.PackedByteLength())) {
+  // Validate the shared image matches TensorInfo.
+  // Note: Shared image size is guaranteed to be at-least the required size for
+  // the D3D buffer (may be larger due to alignment requirements).
+  const size_t buffer_size =
+      base::checked_cast<size_t>(representation->size().width());
+  if (buffer_size < tensor_info->descriptor.PackedByteLength()) {
     return base::unexpected(mojom::Error::New(mojom::Error::Code::kUnknownError,
                                               "Failed to create tensor."));
   }
 
-  D3D12_HEAP_PROPERTIES heap_properties = {};
-  HRESULT hr = d3d12_buffer->GetHeapProperties(&heap_properties, nullptr);
-  CHECK_EQ(hr, S_OK) << "[WebNN] Failed to get D3D12 buffer heap properties.";
-  ComPtr<ID3D12Device> device;
-  hr = d3d12_buffer->GetDevice(IID_PPV_ARGS(&device));
-  CHECK_EQ(hr, S_OK) << "[WebNN] Failed to get D3D12 device from buffer.";
-
-  if (heap_properties.Type != D3D12_HEAP_TYPE_CUSTOM) {
-    heap_properties = device->GetCustomHeapProperties(0, heap_properties.Type);
-  }
-
-  if (heap_properties.CPUPageProperty !=
-          D3D12_CPU_PAGE_PROPERTY_WRITE_COMBINE &&
-      heap_properties.CPUPageProperty != D3D12_CPU_PAGE_PROPERTY_WRITE_BACK) {
+  // CreateTensorWithDataAsOrtValue only allows CPU memory.
+  void* mapped_ptr = nullptr;
+  HRESULT hr = d3d12_buffer->Map(0, nullptr, &mapped_ptr);
+  if (FAILED(hr)) {
+    LOG(ERROR) << "[WebNN] Failed to map D3D12 buffer: "
+               << logging::SystemErrorCodeToString(hr);
     return base::unexpected(
         mojom::Error::New(mojom::Error::Code::kNotSupportedError,
                           "WebGPU interop is not supported."));
   }
-
-  void* mapped_ptr = nullptr;
-  hr = d3d12_buffer->Map(0, nullptr, &mapped_ptr);
-  if (FAILED(hr)) {
-    LOG(ERROR) << "[WebNN] Failed to map D3D12 buffer: "
-               << logging::SystemErrorCodeToString(hr);
-    return base::unexpected(mojom::Error::New(mojom::Error::Code::kUnknownError,
-                                              "Failed to create tensor."));
-  }
-  size_t size = d3d12_buffer->GetDesc().Width;
-  CHECK(base::IsValueInRangeForNumericType<int>(size));
 
   const OrtApi* ort_api = PlatformFunctions::GetInstance()->ort_api();
 
@@ -514,14 +624,13 @@ ContextImplOrt::CreateTensorFromSharedImageImpl(
 
   ScopedOrtValue tensor;
   CHECK_STATUS(ort_api->CreateTensorWithDataAsOrtValue(
-      memory_info.get(), mapped_ptr, size, ort_shape.data(), ort_shape.size(),
-      ort_data_type, ScopedOrtValue::Receiver(tensor).get()));
+      memory_info.get(), mapped_ptr, buffer_size, ort_shape.data(),
+      ort_shape.size(), ort_data_type, ScopedOrtValue::Receiver(tensor).get()));
   CHECK(tensor.get());
 
   return base::MakeRefCounted<TensorImplOrt>(
-      std::move(receiver), AsWeakPtr(), std::move(tensor_info),
-      std::move(representation), size, std::move(tensor),
-      std::move(d3d12_buffer));
+      std::move(receiver), *this, std::move(tensor_info),
+      std::move(representation), buffer_size, std::move(tensor));
 }
 
 }  // namespace webnn::ort

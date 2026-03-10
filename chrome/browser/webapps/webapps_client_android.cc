@@ -73,7 +73,8 @@ WebappInstallSource WebappsClientAndroid::GetInstallSource(
 
 AppBannerManager* WebappsClientAndroid::GetAppBannerManager(
     content::WebContents* web_contents) {
-  return AppBannerManagerAndroid::FromWebContents(web_contents);
+  return AppBannerManagerAndroid::FromWebContents(web_contents)
+      ->app_banner_manager();
 }
 
 void WebappsClientAndroid::DoesNewWebAppConflictWithExistingInstallation(
@@ -165,7 +166,7 @@ bool WebappsClientAndroid::IsInstallationInProgress(
 
 bool WebappsClientAndroid::CanShowAppBanners(
     const content::WebContents* web_contents) {
-  TabAndroid* tab = TabAndroid::FromWebContents(web_contents);
+  const TabAndroid* tab = TabAndroid::FromWebContents(web_contents);
   return tab && static_cast<android::TabWebContentsDelegateAndroid*>(
                     tab->web_contents()->GetDelegate())
                     ->CanShowAppBanners();

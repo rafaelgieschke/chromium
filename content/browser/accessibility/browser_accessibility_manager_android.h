@@ -145,8 +145,9 @@ class CONTENT_EXPORT BrowserAccessibilityManagerAndroid
   // forwards or backwards by character, word, or line. This part is
   // unit-tested; the Java interfaces above are just wrappers. Both of these
   // take a single cursor index as input and return the boundaries surrounding
-  // the next word or line. If moving by character, the output start and
-  // end index will be the same.
+  // the next character, word or line.
+  // The function returns false if the cursor cannot be moved further in the
+  // given direction and granularity.
   bool NextAtGranularity(int32_t granularity,
                          int cursor_index,
                          BrowserAccessibilityAndroid* node,
@@ -169,6 +170,8 @@ class CONTENT_EXPORT BrowserAccessibilityManagerAndroid
   std::unique_ptr<ui::BrowserAccessibility> CreateBrowserAccessibility(
       ui::AXNode* node) override;
 
+  void OnAccessibilityEventsProcessedForExperiment();
+
  private:
   // AXTreeObserver overrides.
   void OnAtomicUpdateStarting(
@@ -188,6 +191,8 @@ class CONTENT_EXPORT BrowserAccessibilityManagerAndroid
 
   // Handle a hover event from the renderer process.
   void HandleHoverEvent(ui::BrowserAccessibility* node);
+
+  void FireDocumentSelectionChangedEvent(WebContentsAccessibilityAndroid* wcax);
 
   // A weak reference to WebContentsAccessibility for reaching Java layer.
   // Only the root manager has the reference. Should be accessed through

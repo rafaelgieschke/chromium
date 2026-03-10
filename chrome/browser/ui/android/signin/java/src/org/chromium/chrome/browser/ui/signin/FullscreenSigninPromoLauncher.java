@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.ui.signin;
 
+import static org.chromium.build.NullUtil.assumeNonNull;
+
 import android.content.Context;
 import android.content.Intent;
 import android.text.TextUtils;
@@ -14,6 +16,8 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.chrome.browser.profiles.Profile;
+import org.chromium.chrome.browser.signin.services.IdentityServicesProvider;
+import org.chromium.chrome.browser.signin.services.SigninManager;
 import org.chromium.chrome.browser.signin.services.SigninPreferencesManager;
 import org.chromium.chrome.browser.ui.signin.fullscreen_signin.FullscreenSigninConfig;
 import org.chromium.components.signin.AccountManagerFacade;
@@ -34,7 +38,7 @@ import java.util.concurrent.TimeUnit;
 @NullMarked
 public final class FullscreenSigninPromoLauncher {
     /**
-     * Launches the {@link SigninAndHistoryOptInActivity} if it needs to be displayed.
+     * Launches the {@link SigninAndHistorySyncActivity} if it needs to be displayed.
      *
      * @param context The {@link Context} to launch the {@link SigninAndHistorySyncActivity}.
      * @param profile The active user profile.
@@ -53,22 +57,14 @@ public final class FullscreenSigninPromoLauncher {
             return false;
         }
 
-        FullscreenSigninAndHistorySyncConfig config =
-                new FullscreenSigninAndHistorySyncConfig.Builder(
-                                context.getString(R.string.signin_fre_title),
-                                context.getString(R.string.signin_fre_subtitle),
-                                FullscreenSigninConfig.DISMISS_TEXT_NOT_INITIALIZED,
-                                context.getString(R.string.history_sync_title),
-                                context.getString(R.string.history_sync_subtitle))
-                        .build();
-        @Nullable Intent intent =
-                signinAndHistorySyncActivityLauncher.createFullscreenSigninIntent(
-                        context, profile, config, SigninAccessPoint.FULLSCREEN_SIGNIN_PROMO);
-        if (intent == null) {
+        if (!createAndLaunchActivity(
+                context,
+                profile,
+                signinAndHistorySyncActivityLauncher,
+                SigninAccessPoint.FULLSCREEN_SIGNIN_PROMO)) {
             return false;
         }
 
-        context.startActivity(intent);
         prefManager.setSigninPromoNextShowTime(
                 TimeUtils.currentTimeMillis()
                         + TimeUnit.DAYS.toMillis(getDurationBetweenPromoTriggers()));
@@ -81,12 +77,63 @@ public final class FullscreenSigninPromoLauncher {
         return true;
     }
 
+    /**
+     * Launches the {@link SigninAndHistorySyncActivity} when forcing the display.
+     *
+     * @param context The {@link Context} to launch the {@link SigninAndHistorySyncActivity}.
+     * @param profile The active user profile.
+     * @param signinAndHistorySyncActivityLauncher launcher used to launch the {@link
+     *     SigninAndHistorySyncActivity}.
+     * @return Whether the signin promo is shown.
+     */
+    public static boolean launchPromoIfForced(
+            Context context,
+            Profile profile,
+            SigninAndHistorySyncActivityLauncher signinAndHistorySyncActivityLauncher) {
+        final SigninManager signinManager =
+                assumeNonNull(IdentityServicesProvider.get().getSigninManager(profile));
+        final boolean shouldDisplayForForcedSigninPolicy =
+                SigninFeatureMap.isEnabled(SigninFeatures.SUPPORT_FORCED_SIGNIN_POLICY)
+                        && signinManager.isForceSigninEnabled()
+                        && signinManager.isSigninAllowed();
+        if (!SigninFeatureMap.isEnabled(SigninFeatures.FORCE_STARTUP_SIGNIN_PROMO)
+                && !shouldDisplayForForcedSigninPolicy) {
+            return false;
+        }
+        return createAndLaunchActivity(
+                context,
+                profile,
+                signinAndHistorySyncActivityLauncher,
+                shouldDisplayForForcedSigninPolicy
+                        ? SigninAccessPoint.FORCED_SIGNIN
+                        : SigninAccessPoint.FULLSCREEN_SIGNIN_PROMO);
+    }
+
+    private static boolean createAndLaunchActivity(
+            Context context,
+            Profile profile,
+            SigninAndHistorySyncActivityLauncher signinAndHistorySyncActivityLauncher,
+            @SigninAccessPoint int accessPoint) {
+        FullscreenSigninAndHistorySyncConfig config =
+                new FullscreenSigninAndHistorySyncConfig.Builder(
+                                context.getString(R.string.signin_fre_title),
+                                context.getString(R.string.signin_fre_subtitle),
+                                FullscreenSigninConfig.DISMISS_TEXT_NOT_INITIALIZED,
+                                context.getString(R.string.history_sync_title),
+                                context.getString(R.string.history_sync_subtitle))
+                        .build();
+        @Nullable Intent intent =
+                signinAndHistorySyncActivityLauncher.createFullscreenSigninIntent(
+                        context, profile, config, accessPoint);
+        if (intent == null) {
+            return false;
+        }
+        context.startActivity(intent);
+        return true;
+    }
+
     private static boolean shouldLaunchPromo(
             Profile profile, SigninPreferencesManager prefManager, final int currentMajorVersion) {
-        if (SigninFeatureMap.isEnabled(SigninFeatures.FORCE_STARTUP_SIGNIN_PROMO)) {
-            return true;
-        }
-
         if (DeviceInfo.isAutomotive()) {
             return false;
         }

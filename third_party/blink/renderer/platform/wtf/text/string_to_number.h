@@ -30,9 +30,6 @@ WTF_EXPORT int CharactersToInt(base::span<const LChar>,
 WTF_EXPORT int CharactersToInt(base::span<const UChar>,
                                NumberParsingOptions,
                                bool* ok);
-WTF_EXPORT int CharactersToInt(const StringView&,
-                               NumberParsingOptions,
-                               bool* ok);
 
 // string -> unsigned.
 WTF_EXPORT unsigned HexCharactersToUInt(base::span<const LChar>,
@@ -141,6 +138,88 @@ WTF_EXPORT float CharactersToFloat(base::span<const LChar>,
                                    size_t& parsed_length);
 WTF_EXPORT float CharactersToFloat(base::span<const UChar>,
                                    size_t& parsed_length);
+
+// Parse `input` as a signed decimal number.
+// If the input string is not acceptable, std::nullopt is returned.
+WTF_EXPORT std::optional<int32_t> StringToInt(const StringView& input,
+                                              NumberParsingOptions);
+// Parse `input` as an unsigned decimal number.
+// If the input string is not acceptable, std::nullopt is returned.
+WTF_EXPORT std::optional<uint32_t> StringToUint(const StringView& input,
+                                                NumberParsingOptions);
+// Parse `input` as a signed decimal number.
+// If the input string is not acceptable, std::nullopt is returned.
+WTF_EXPORT std::optional<int64_t> StringToInt64(const StringView& input,
+                                                NumberParsingOptions);
+// Parse `input` as an unsigned decimal number.
+// If the input string is not acceptable, std::nullopt is returned.
+WTF_EXPORT std::optional<uint64_t> StringToUint64(const StringView& input,
+                                                  NumberParsingOptions);
+// Parse `input` as a hexadecimal number.
+// If the input string is not acceptable, std::nullopt is returned.
+WTF_EXPORT std::optional<uint32_t> HexStringToUint(const StringView& input,
+                                                   NumberParsingOptions);
+// Parse `input` as a hexadecimal number.
+// If the input string is not acceptable, std::nullopt is returned.
+WTF_EXPORT std::optional<uint64_t> HexStringToUint64(const StringView& input,
+                                                     NumberParsingOptions);
+
+// The following StringTo*Strict() and StringTo*Loose() exist for a historical
+// reason. We should not use them for new code.
+
+// The following StringToFooStrict functions accept:
+//  - leading '+'
+//  - leading Unicode whitespace
+//  - trailing Unicode whitespace
+//  - no "-0" (only for StringToUintStrict)
+//  - no out-of-range numbers which the resultant type can't represent
+//
+// If the input string is not acceptable, std::nullopt is returned.
+//
+// We can use these functions to implement a Web Platform feature only if the
+// input string is already valid according to the specification of the
+// feature.
+WTF_EXPORT std::optional<int32_t> StringToIntStrict(const StringView& input);
+WTF_EXPORT std::optional<uint32_t> StringToUintStrict(const StringView& input);
+
+// The following StringToFooLoose() functions accept:
+//  - leading '+'
+//  - leading Unicode whitespace
+//  - trailing garbage
+//  - no "-0" (only for StringToUint)
+//  - no out-of-range numbers which the resultant type can't represent
+//
+// If the input string is not acceptable, std::nullopt is returned.
+//
+// We can use these functions to implement a Web Platform feature only if the
+// input string is already valid according to the specification of the
+// feature.
+WTF_EXPORT std::optional<int32_t> StringToIntLoose(const StringView& input);
+WTF_EXPORT std::optional<uint32_t> StringToUintLoose(const StringView& input);
+
+// StringToDouble() and StringToFloat() functions accept:
+//  - leading '+'
+//  - numbers without leading zeros such as ".5"
+//  - numbers ending with "." such as "3."
+//  - scientific notation
+//  - leading whitespace (IsASCIISpace, not IsHTMLSpace)
+//  - no trailing whitespace
+//  - no trailing garbage
+//  - no numbers such as "NaN" "Infinity"
+//
+// A huge absolute number which a double/float can't represent is accepted,
+// and +Infinity or -Infinity is returned.
+//
+// A small absolute numbers which a double/float can't represent is accepted,
+// and 0 is returned
+//
+// If the input string is not acceptable, std::nullopt is returned.
+//
+// We can use these functions to implement a Web Platform feature only if the
+// input string is already valid according to the specification of the
+// feature.
+WTF_EXPORT std::optional<double> StringToDouble(const StringView& input);
+WTF_EXPORT std::optional<float> StringToFloat(const StringView& input);
 
 }  // namespace blink
 

@@ -238,8 +238,8 @@ bool StructTraits<
 
   out->set_form_control_ax_id(data.form_control_ax_id());
   out->set_max_length(data.max_length());
-  out->set_is_user_edited(data.is_user_edited());
-  out->set_is_autofilled(data.is_autofilled());
+  out->set_is_autofilled_according_to_renderer(
+      data.is_autofilled_according_to_renderer());
 
   {
     autofill::FormFieldData::CheckStatus check_status;
@@ -539,8 +539,6 @@ bool StructTraits<autofill::mojom::PasswordFormFillDataDataView,
   }
 
   out->wait_for_username = data.wait_for_username();
-  out->notify_browser_of_successful_filling =
-      data.notify_browser_of_successful_filling();
 
   return true;
 }

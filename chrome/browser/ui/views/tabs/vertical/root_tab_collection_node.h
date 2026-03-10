@@ -17,15 +17,33 @@
 
 class TabStripModel;
 
-// The viewmodel for the VerticalTabStrip.
+// The view model for the tab strip. It is responsible for observing
+// the tab collection hierarchy changes and tab selection and activation changes
+// and creates the view hierarchy.
 class RootTabCollectionNode : public TabCollectionNode,
                               public tabs::TabCollectionObserver,
                               public TabStripModelObserver {
  public:
   explicit RootTabCollectionNode(
       TabStripModel* tab_strip_model,
-      CustomAddChildViewCallback add_node_view_to_parent);
+      CustomAddChildViewCallback add_node_view_to_parent,
+      CustomRemoveChildViewCallback remove_node_view_from_parent);
   ~RootTabCollectionNode() override;
+
+  void Init();
+  void Reset();
+
+  base::CallbackListSubscription RegisterOnChildrenAddedCallback(
+      base::RepeatingClosure callback);
+  base::CallbackListSubscription RegisterOnChildRemovedCallback(
+      base::RepeatingClosure callback);
+  base::CallbackListSubscription RegisterOnChildMovedCallback(
+      base::RepeatingClosure callback);
+
+  typedef base::RepeatingCallback<void(const tabs::TabInterface*)>
+      ActiveTabChangedCallback;
+  base::CallbackListSubscription RegisterOnActiveTabChangedCallback(
+      ActiveTabChangedCallback callback);
 
  private:
   using SelectionHandles = base::flat_set<tabs::TabHandle>;
@@ -45,18 +63,28 @@ class RootTabCollectionNode : public TabCollectionNode,
       const TabStripModelChange& change,
       const TabStripSelectionChange& selection) override;
   void OnTabGroupChanged(const TabGroupChange& change) override;
+  void OnTabGroupFocusChanged(
+      std::optional<tab_groups::TabGroupId> new_focused_group_id,
+      std::optional<tab_groups::TabGroupId> old_focused_group_id) override;
   void OnTabChangedAt(tabs::TabInterface* tab,
                       int model_index,
                       TabChangeType change_type) override;
-  void OnTabPinnedStateChanged(tabs::TabInterface* tab,
-                               int model_index) override;
-  void OnTabBlockedStateChanged(tabs::TabInterface* tab,
-                                int model_index) override;
 
-  void UpdateTabData(tabs::TabInterface* tab, int model_index);
+  void UpdateTabsData(const std::set<tabs::TabInterface*>& changed_tabs);
+
+  void NotifyOnChildrenAdded();
 
   raw_ptr<TabStripModel> tab_strip_model_;
   SelectionHandles selected_tabs_;
+  CustomAddChildViewCallback add_node_view_to_parent_;
+  CustomRemoveChildViewCallback remove_node_view_from_parent_;
+  base::RepeatingClosureList on_children_added_callback_list_;
+  base::RepeatingClosureList on_children_removed_callback_list_;
+  base::RepeatingClosureList on_child_moved_callback_list_;
+  using ActiveTabChangedCallbackList =
+      base::RepeatingCallbackList<void(const tabs::TabInterface*)>;
+  ActiveTabChangedCallbackList on_active_tab_changed_callback_list_;
+
   base::WeakPtrFactory<RootTabCollectionNode> weak_ptr_factory_{this};
 };
 

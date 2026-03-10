@@ -18,6 +18,7 @@
 #include "services/webnn/public/mojom/webnn_error.mojom-forward.h"
 #include "services/webnn/public/mojom/webnn_graph.mojom-forward.h"
 #include "services/webnn/queueable_resource_state.h"
+#include "services/webnn/tflite/graph_builder_tflite.h"
 #include "services/webnn/webnn_context_impl.h"
 #include "services/webnn/webnn_graph_impl.h"
 
@@ -41,20 +42,22 @@ class GraphImplTflite final : public WebNNGraphImpl {
       ComputeResourceInfo compute_resource_info,
       base::flat_map<OperandId, std::unique_ptr<WebNNConstantOperand>>
           constant_operands,
-      base::flat_map<OperandId, WebNNTensorImpl*> constant_tensor_operands,
-      ContextImplTflite* context,
+      base::flat_map<OperandId, scoped_refptr<WebNNTensorImpl>>
+          constant_tensor_operands,
+      ContextImplTflite& context,
       base::File weights_file,
       WebNNContextImpl::CreateGraphImplCallback callback);
 
   class ComputeResources;
-  GraphImplTflite(mojo::PendingAssociatedReceiver<mojom::WebNNGraph> receiver,
-                  ComputeResourceInfo compute_resource_info,
-                  base::flat_map<std::string, int> input_name_to_index,
-                  base::flat_map<std::string, int> output_name_to_index,
-                  scoped_refptr<QueueableResourceState<ComputeResources>>
-                      compute_resources_state,
-                  base::WeakPtr<WebNNContextImpl> context,
-                  std::vector<mojom::Device> devices);
+  GraphImplTflite(
+      mojo::PendingAssociatedReceiver<mojom::WebNNGraph> receiver,
+      ComputeResourceInfo compute_resource_info,
+      base::flat_map<std::string, TensorDescriptor> input_name_to_descriptor,
+      base::flat_map<std::string, TensorDescriptor> output_name_to_descriptor,
+      scoped_refptr<QueueableResourceState<ComputeResources>>
+          compute_resources_state,
+      WebNNContextImpl& context,
+      std::vector<mojom::Device> devices);
 
   GraphImplTflite(const GraphImplTflite&) = delete;
   GraphImplTflite& operator=(const GraphImplTflite&) = delete;
@@ -91,8 +94,8 @@ class GraphImplTflite final : public WebNNGraphImpl {
 
   scoped_refptr<QueueableResourceState<ComputeResources>>
       compute_resources_state_;
-  base::flat_map<std::string, int> input_name_to_index_;
-  base::flat_map<std::string, int> output_name_to_index_;
+  base::flat_map<std::string, TensorDescriptor> input_name_to_descriptor_;
+  base::flat_map<std::string, TensorDescriptor> output_name_to_descriptor_;
 
   base::WeakPtrFactory<GraphImplTflite> weak_factory_{this};
 };

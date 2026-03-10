@@ -7,8 +7,8 @@
 
 #include "base/memory/raw_ref.h"
 #include "base/observer_list.h"
-#include "chrome/browser/ui/tabs/tab_list_interface.h"
-#include "chrome/browser/ui/tabs/tab_list_interface_observer.h"
+#include "chrome/browser/tab_list/tab_list_interface.h"
+#include "chrome/browser/tab_list/tab_list_interface_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
@@ -34,8 +34,6 @@
 // case of a tab being missing (if it's expected).
 class TabListBridge : public TabListInterface, public TabStripModelObserver {
  public:
-  DECLARE_USER_DATA(TabListBridge);
-
   TabListBridge(TabStripModel& tab_strip_model,
                 ui::UnownedUserDataHost& unowned_data_host);
   TabListBridge(const TabListBridge&) = delete;
@@ -51,7 +49,14 @@ class TabListBridge : public TabListInterface, public TabStripModelObserver {
   tabs::TabInterface* GetActiveTab() override;
   void ActivateTab(tabs::TabHandle tab) override;
   tabs::TabInterface* OpenTab(const GURL& url, int index) override;
-  void DiscardTab(tabs::TabHandle tab) override;
+  void SetOpenerForTab(tabs::TabHandle target, tabs::TabHandle opener) override;
+  tabs::TabInterface* GetOpenerForTab(tabs::TabHandle target) override;
+  tabs::TabInterface* InsertWebContentsAt(
+      int index,
+      std::unique_ptr<content::WebContents> web_contents,
+      bool should_pin,
+      std::optional<tab_groups::TabGroupId> group) override;
+  content::WebContents* DiscardTab(tabs::TabHandle tab) override;
   tabs::TabInterface* DuplicateTab(tabs::TabHandle tab) override;
   tabs::TabInterface* GetTab(int index) override;
   int GetIndexOfTab(tabs::TabHandle tab) override;
@@ -64,8 +69,14 @@ class TabListBridge : public TabListInterface, public TabStripModelObserver {
   void UnpinTab(tabs::TabHandle tab) override;
   bool ContainsTabGroup(tab_groups::TabGroupId group_id) override;
   std::vector<tab_groups::TabGroupId> ListTabGroups() override;
+  std::optional<tab_groups::TabGroupVisualData> GetTabGroupVisualData(
+      tab_groups::TabGroupId group_id) override;
+  gfx::Range GetTabGroupTabIndices(tab_groups::TabGroupId group_id) override;
   std::optional<tab_groups::TabGroupId> CreateTabGroup(
       const std::vector<tabs::TabHandle>& tabs) override;
+  void SetTabGroupVisualData(
+      tab_groups::TabGroupId group_id,
+      const tab_groups::TabGroupVisualData& visual_data) override;
   std::optional<tab_groups::TabGroupId> AddTabsToGroup(
       std::optional<tab_groups::TabGroupId> group_id,
       const std::set<tabs::TabHandle>& tabs) override;
@@ -77,6 +88,8 @@ class TabListBridge : public TabListInterface, public TabStripModelObserver {
   void MoveTabGroupToWindow(tab_groups::TabGroupId group_id,
                             SessionID destination_window_id,
                             int destination_index) override;
+  bool IsThisTabListEditable() override;
+  bool IsClosingAllTabs() override;
 
  private:
   // TabStripModelObserver:
@@ -84,6 +97,7 @@ class TabListBridge : public TabListInterface, public TabStripModelObserver {
       TabStripModel* tab_strip_model,
       const TabStripModelChange& change,
       const TabStripSelectionChange& selection) override;
+  void WillCloseAllTabs(TabStripModel* model) override;
 
   // The underlying TabStripModel that this serves as a bridge for.
   // Must outlive this object.
@@ -91,7 +105,7 @@ class TabListBridge : public TabListInterface, public TabStripModelObserver {
 
   base::ObserverList<TabListInterfaceObserver> observers_;
 
-  ui::ScopedUnownedUserData<TabListBridge> scoped_data_holder_;
+  ui::ScopedUnownedUserData<TabListInterface> scoped_data_holder_;
 };
 
 #endif  // CHROME_BROWSER_UI_TABS_TAB_LIST_BRIDGE_H_

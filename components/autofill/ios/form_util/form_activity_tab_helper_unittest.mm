@@ -11,6 +11,7 @@
 #import "base/test/bind.h"
 #import "base/test/ios/wait_util.h"
 #import "base/test/metrics/histogram_tester.h"
+#import "base/test/scoped_feature_list.h"
 #import "base/test/with_feature_override.h"
 #import "base/time/time.h"
 #import "base/unguessable_token.h"
@@ -20,7 +21,6 @@
 #import "components/autofill/core/common/unique_ids.h"
 #import "components/autofill/ios/browser/autofill_java_script_feature.h"
 #import "components/autofill/ios/browser/autofill_util.h"
-#import "components/autofill/ios/browser/test_autofill_java_script_feature_container.h"
 #import "components/autofill/ios/common/features.h"
 #import "components/autofill/ios/common/javascript_feature_util.h"
 #import "components/autofill/ios/form_util/autofill_form_features_java_script_feature.h"
@@ -94,8 +94,6 @@ constexpr NSString* kTestHTMLFormWithIframes =
   test_field_data.set_host_form_id(test_form_data.renderer_id());
   test_field_data.set_renderer_id(FieldRendererId(2));
   test_field_data.set_id_attribute(u"text");
-  // user_edited is true when the sources of inputs are not being tracked.
-  test_field_data.set_is_user_edited(true);
   test_field_data.set_max_length(kTextInputFieldMaxLength);
 
   test_form_data.set_fields({test_field_data});
@@ -162,9 +160,103 @@ class FormActivityTabHelperTest : public AutofillTestWithWebState {
     EXPECT_EQ(params, expected_activity_params);
   }
 
+  // Returns the value of `__gCrHasBeenPassword` symbol for the specified HTML
+  // element
+  id GetHasBeenPasswordForElement(NSString* element_id) {
+    NSString* script =
+        [NSString stringWithFormat:@"document.getElementById('%@')[Symbol.for('"
+                                   @"__gCrHasBeenPassword')]",
+                                   element_id];
+    return ExecuteJavaScript(script);
+  }
+
   base::HistogramTester histogram_tester_;
   std::unique_ptr<TestFormActivityObserver> observer_;
 };
+
+// Tests that a password input element added dynamically is marked as has been
+// password.
+TEST_F(FormActivityTabHelperTest, TestPasswordSymbolSetOnNewElement) {
+  base::test::ScopedFeatureList feature_list(kAutofillTrackPasswordFieldsIos);
+
+  // Load an empty page so main_frame exists.
+  LoadHtml(@"<div />");
+
+  web::WebFramesManager* frames_manager =
+      autofill::AutofillJavaScriptFeature::GetInstance()->GetWebFramesManager(
+          web_state());
+  web::WebFrame* main_frame = frames_manager->GetMainWebFrame();
+  ASSERT_TRUE(main_frame);
+
+  autofill::FormHandlersJavaScriptFeature::GetInstance()->TrackFormMutations(
+      main_frame, /*mutation_tracking_delay=*/200);
+
+  // Adds a password input in the page to see if the mutation callback
+  // will set the attribute correctly.
+  ExecuteJavaScript(
+      @"document.body.innerHTML = '<input type=\"password\" id=\"pw\"/>';");
+
+  EXPECT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^bool {
+    return [GetHasBeenPasswordForElement(@"pw") isEqual:@YES];
+  }));
+}
+
+// Tests that an input is marked as has been password when the type changes to
+// password.
+TEST_F(FormActivityTabHelperTest, TestPasswordSymbolSetOnTypeChange) {
+  base::test::ScopedFeatureList feature_list(kAutofillTrackPasswordFieldsIos);
+
+  LoadHtml(@"<input type='text' id='user'/>"
+            "<input type='email' id='email'/>"
+            "<input type='password' id='pw'/>");
+
+  web::WebFramesManager* frames_manager =
+      autofill::AutofillJavaScriptFeature::GetInstance()->GetWebFramesManager(
+          web_state());
+  web::WebFrame* main_frame = frames_manager->GetMainWebFrame();
+  ASSERT_TRUE(main_frame);
+
+  autofill::FormHandlersJavaScriptFeature::GetInstance()->TrackFormMutations(
+      main_frame, /*mutation_tracking_delay=*/200);
+
+  // Loading the page should have set the attribute since the input is a
+  // password.
+  EXPECT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^bool {
+    return [GetHasBeenPasswordForElement(@"pw") isEqual:@YES];
+  }));
+
+  // Change the type to text to simulate `Show Password`.
+  ExecuteJavaScript(@"document.getElementById('pw').type = 'text';"
+                     "document.getElementById('email').remove();");
+
+  // The input still have the attribute set correctly.
+  EXPECT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^bool {
+    return [GetHasBeenPasswordForElement(@"pw") isEqual:@YES];
+  }));
+}
+
+// Tests that a password input is not marked as has been password if the feature
+// is disabled.
+TEST_F(FormActivityTabHelperTest, TestPasswordSymbolFeatureDisabled) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndDisableFeature(kAutofillTrackPasswordFieldsIos);
+
+  LoadHtml(@"<input type='password' id='pw'/>");
+
+  web::WebFramesManager* frames_manager =
+      autofill::AutofillJavaScriptFeature::GetInstance()->GetWebFramesManager(
+          web_state());
+  web::WebFrame* main_frame = frames_manager->GetMainWebFrame();
+  ASSERT_TRUE(main_frame);
+
+  autofill::FormHandlersJavaScriptFeature::GetInstance()->TrackFormMutations(
+      main_frame, /*mutation_tracking_delay=*/200);
+
+  // The Has Been Password symbol is not set since the feature is disabled
+  EXPECT_TRUE(WaitUntilConditionOrTimeout(kWaitForJSCompletionTimeout, ^bool {
+    return GetHasBeenPasswordForElement(@"pw") == nil;
+  }));
+}
 
 // Tests that observer is called on form submission using submit control.
 TEST_F(FormActivityTabHelperTest, TestObserverDocumentSubmitted) {
@@ -714,17 +806,14 @@ TEST_F(FormMutationTest, RemoveFormlessFields) {
   const FieldRendererId phone_id = FieldRendererId(4);
   const FieldRendererId url_id = FieldRendererId(5);
   const FieldRendererId number_id = FieldRendererId(6);
-  const FieldRendererId checkbox_id = FieldRendererId(7);
-  const FieldRendererId radio_id = FieldRendererId(8);
-  const FieldRendererId select_id = FieldRendererId(9);
-  const FieldRendererId textarea_id = FieldRendererId(10);
+  const FieldRendererId select_id = FieldRendererId(7);
+  const FieldRendererId textarea_id = FieldRendererId(8);
 
   EXPECT_THAT(form_removal_params.value().removed_forms, IsEmpty());
 
   EXPECT_THAT(form_removal_params.value().removed_unowned_fields,
               UnorderedElementsAre(password_id, text_id, email_id, phone_id,
-                                   url_id, number_id, checkbox_id, radio_id,
-                                   select_id, textarea_id));
+                                   url_id, number_id, select_id, textarea_id));
 }
 
 // Tests that a new form triggers form_changed event.
@@ -829,8 +918,8 @@ class FormSubmittedHookTest : public FormActivityTabHelperTest {
         autofill::test::CreateRendererIdTestJavaScriptFeature();
 
     web_client->SetJavaScriptFeatures({
-        feature_container_.form_handlers_java_script_feature(),
-        feature_container_.autofill_java_script_feature(),
+        FormHandlersJavaScriptFeature::GetInstance(),
+        AutofillJavaScriptFeature::GetInstance(),
         ProgrammaticFormSubmissionHandlerJavaScriptFeature::GetInstance(),
         renderer_id_feature_.get(),
     });
@@ -845,7 +934,7 @@ class FormSubmittedHookTest : public FormActivityTabHelperTest {
       return false;
     }
     __block bool finished = false;
-    feature_container_.autofill_java_script_feature()->FetchForms(
+    AutofillJavaScriptFeature::GetInstance()->FetchForms(
         main_frame, base::BindOnce(^(NSString* result) {
           finished = true;
         }));
@@ -855,13 +944,7 @@ class FormSubmittedHookTest : public FormActivityTabHelperTest {
     });
   }
 
-  //  Test instances of JavaScriptFeature's that are injected in a different
-  //  content world depending on kAutofillIsolatedWorldForJavascriptIos.
-  //  TODO(crbug.com/359538514): Remove this variable and use
-  //  the statically stored instances once Autofill in the isolated
-  //  world is launched.
-  TestAutofillJavaScriptFeatureContainer feature_container_;
-
+ private:
   std::unique_ptr<web::JavaScriptFeature> renderer_id_feature_;
 };
 
@@ -884,7 +967,7 @@ TEST_F(FormSubmittedHookTest, TestFormSubmittedHook) {
        "var input = document.getElementById('text');"
        "__gCrWeb.getRegisteredApi('renderer_id_test').getFunction('"
        "setUniqueIDIfNeeded')(input);",
-      feature_container_.autofill_java_script_feature());
+      AutofillJavaScriptFeature::GetInstance());
 
   ASSERT_FALSE(observer_->submit_document_info());
 

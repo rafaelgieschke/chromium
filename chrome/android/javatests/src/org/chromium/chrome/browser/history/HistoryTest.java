@@ -17,11 +17,11 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
+import static org.chromium.base.test.transit.ViewFinder.waitForNoView;
+import static org.chromium.base.test.transit.ViewFinder.waitForView;
 import static org.chromium.chrome.browser.url_constants.UrlConstantResolver.getOriginalNativeHistoryUrl;
 import static org.chromium.chrome.browser.url_constants.UrlConstantResolver.getOriginalNonNativeHistoryUrl;
-import static org.chromium.ui.test.util.ViewUtils.VIEW_NULL;
 import static org.chromium.ui.test.util.ViewUtils.onViewWaiting;
-import static org.chromium.ui.test.util.ViewUtils.waitForViewCheckingState;
 
 import android.graphics.Bitmap;
 
@@ -148,20 +148,19 @@ public class HistoryTest {
         mActivityTestRule.loadUrlInNewTab(getOriginalNonNativeHistoryUrl());
 
         // Verify that the promo is shown.
-        onViewWaiting(withId(R.id.signin_promo_view_container));
+        waitForView(withId(R.id.signin_promo_view_container));
         // Click on the promo CTA.
         onView(withId(R.id.sync_promo_signin_button)).perform(click());
 
         // Verify that the history sync screen is shown.
-        onViewWaiting(withId(R.id.history_sync_illustration), /* checkRootDialog= */ true)
-                .check(matches(isDisplayed()));
+        waitForView(withId(R.id.history_sync_illustration));
 
         // Opt-in history sync and finish the opt-in activity.
         onViewWaiting(withId(R.id.button_primary)).perform(click());
         SyncTestUtil.waitForHistorySyncEnabled();
 
         // Verify that the content is still shown and the promo is dismissed.
-        waitForViewCheckingState(withId(R.id.signin_promo_view_container), VIEW_NULL);
+        waitForNoView(withId(R.id.signin_promo_view_container));
         onView(withId(R.id.history_page_recycler_view)).check(matches(isDisplayed()));
         onView(withId(R.id.empty_state_container)).check(matches(not(isDisplayed())));
     }
@@ -189,20 +188,19 @@ public class HistoryTest {
         mActivityTestRule.loadUrlInNewTab(getOriginalNonNativeHistoryUrl());
 
         // Verify that the promo is shown.
-        onViewWaiting(withId(R.id.signin_promo_view_container));
+        waitForView(withId(R.id.signin_promo_view_container));
         // Click on the promo CTA.
         onView(withId(R.id.sync_promo_signin_button)).perform(click());
 
         // Verify that the history sync screen is shown.
-        onViewWaiting(withId(R.id.history_sync_illustration), /* checkRootDialog= */ true)
-                .check(matches(isDisplayed()));
+        waitForView(withId(R.id.history_sync_illustration));
 
         // Opt-in history sync and finish the opt-in activity.
         onViewWaiting(withId(R.id.button_primary)).perform(click());
         SyncTestUtil.waitForHistorySyncEnabled();
 
         // Verify that the empty state is shown when the promo is dismissed.
-        onViewWaiting(withId(R.id.empty_state_container)).check(matches(isDisplayed()));
+        waitForView(withId(R.id.empty_state_container));
         onView(withId(R.id.history_page_recycler_view)).check(matches(not(isDisplayed())));
     }
 

@@ -9,6 +9,7 @@
 #include "base/memory/raw_ref.h"
 #include "base/memory/weak_ptr.h"
 #include "base/values.h"
+#include "components/media_router/browser/logger_impl.h"
 #include "components/media_router/browser/media_router_debugger.h"
 #include "components/media_router/common/mojom/media_router.mojom.h"
 #include "content/public/browser/web_ui_message_handler.h"
@@ -21,10 +22,11 @@ class MediaRouter;
 // page.
 class MediaRouterInternalsWebUIMessageHandler
     : public content::WebUIMessageHandler,
-      public MediaRouterDebugger::MirroringStatsObserver {
+      public MediaRouterDebugger::MirroringStatsObserver,
+      public LoggerImpl::Observer {
  public:
   explicit MediaRouterInternalsWebUIMessageHandler(
-      const MediaRouter* router,
+      MediaRouter* router,
       MediaRouterDebugger& debugger);
   ~MediaRouterInternalsWebUIMessageHandler() override;
 
@@ -33,21 +35,24 @@ class MediaRouterInternalsWebUIMessageHandler
   void RegisterMessages() override;
 
   // Handlers for JavaScript messages.
-  void HandleGetState(const base::Value::List& args);
-  void HandleGetProviderState(const base::Value::List& args);
-  void HandleGetLogs(const base::Value::List& args);
+  void HandleGetState(const base::ListValue& args);
+  void HandleGetProviderState(const base::ListValue& args);
+  void HandleGetLogs(const base::ListValue& args);
 
-  void HandleGetMirroringStats(const base::Value::List& args);
-  void HandleSetMirroringStatsEnabled(const base::Value::List& args);
-  void HandleIsMirroringStatsEnabled(const base::Value::List& args);
+  void HandleGetMirroringStats(const base::ListValue& args);
+  void HandleSetMirroringStatsEnabled(const base::ListValue& args);
+  void HandleIsMirroringStatsEnabled(const base::ListValue& args);
 
   // MirroringStatsObserver implementation.
-  void OnMirroringStatsUpdated(const base::Value::Dict& json_logs) override;
+  void OnMirroringStatsUpdated(const base::DictValue& json_logs) override;
+
+  // LoggerImpl::Observer implementation.
+  void OnLogAdded(const LoggerImpl::Entry& entry) override;
 
   void OnProviderState(base::Value callback_id, mojom::ProviderStatePtr state);
 
   // Pointer to the MediaRouter.
-  const raw_ptr<const MediaRouter> router_;
+  const raw_ptr<MediaRouter> router_;
   const raw_ref<MediaRouterDebugger> debugger_;
 
   base::WeakPtrFactory<MediaRouterInternalsWebUIMessageHandler> weak_factory_{

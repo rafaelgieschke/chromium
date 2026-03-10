@@ -12,8 +12,8 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/interaction/browser_elements.h"
 #include "chrome/browser/ui/omnibox/omnibox_next_features.h"
+#include "chrome/browser/ui/side_panel/side_panel_entry_id.h"
 #include "chrome/browser/ui/tabs/tab_strip_api/tab_strip_service_feature.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_entry_id.h"
 #include "chrome/browser/ui/webui/cr_components/searchbox/searchbox_handler.h"
 #include "chrome/browser/ui/webui/searchbox/realbox_handler.h"
 #include "chrome/browser/ui/webui_browser/bookmark_bar_page_handler.h"
@@ -30,6 +30,7 @@
 #include "components/contextual_search/contextual_search_service.h"
 #include "components/contextual_search/contextual_search_session_handle.h"
 #include "components/guest_contents/browser/guest_contents_host_impl.h"
+#include "components/surface_embed/buildflags/buildflags.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
@@ -39,6 +40,11 @@
 #include "ui/webui/tracked_element/tracked_element_handler.h"
 #include "ui/webui/webui_util.h"
 
+#if BUILDFLAG(ENABLE_SURFACE_EMBED)
+#include "components/surface_embed/common/features.h"
+#include "services/network/public/mojom/content_security_policy.mojom.h"
+#endif  // BUILDFLAG(ENABLE_SURFACE_EMBED)
+
 #if BUILDFLAG(IS_MAC)
 #include "base/mac/mac_util.h"
 #endif
@@ -47,7 +53,7 @@ namespace {
 
 std::string SidePanelEntryIdToTitle(SidePanelEntryId id) {
   // TODO(webium): Ideally, the titles should be added to SIDE_PANEL_ENTRY_IDS
-  // macros in chrome/browser/ui/views/side_panel/side_panel_entry_id.h, and
+  // macros in chrome/browser/ui/side_panel/side_panel_entry_id.h, and
   // then this conversion function would be written in that same file,
   // analogously to the other functions it contains. But it appears that some
   // of the entry  ids there are stale and no longer have a matching generated
@@ -84,7 +90,9 @@ bool WebUIBrowserUIConfig::IsWebUIEnabled(
 // enable_chrome_send to MojoWebUIController constructor, since they're
 // a package deal via BindingsPolicyValue::kWebUi.
 WebUIBrowserUI::WebUIBrowserUI(content::WebUI* web_ui)
-    : ui::MojoWebUIController(web_ui, /*enable_chrome_send=*/true) {
+    : ui::MojoWebUIController(web_ui,
+                              /*enable_chrome_send=*/true,
+                              /*enable_chrome_histograms=*/true) {
   WebUIBrowserWindow* webui_browser_window =
       WebUIBrowserWindow::FromWebShellWebContents(web_ui->GetWebContents());
   browser_ = webui_browser_window->browser();
@@ -111,7 +119,20 @@ WebUIBrowserUI::WebUIBrowserUI(content::WebUI* web_ui)
 
   SearchboxHandler::SetupWebUIDataSource(source, Profile::FromWebUI(web_ui));
   source->AddBoolean("composeboxContextDragAndDropEnabled", false);
-  source->AddBoolean("expandedSearchboxShowVoiceSearch", false);
+
+#if BUILDFLAG(ENABLE_SURFACE_EMBED)
+  source->AddBoolean(
+      "enableSurfaceEmbed",
+      base::FeatureList::IsEnabled(surface_embed::features::kSurfaceEmbed));
+  if (base::FeatureList::IsEnabled(surface_embed::features::kSurfaceEmbed)) {
+    // Allow <embed> elements for the surface embed plugin. Using 'self'
+    // is the most restrictive policy that works since the embed has no src.
+    source->OverrideContentSecurityPolicy(
+        network::mojom::CSPDirectiveName::ObjectSrc, "object-src 'self';");
+  }
+#else
+  source->AddBoolean("enableSurfaceEmbed", false);
+#endif  // BUILDFLAG(ENABLE_SURFACE_EMBED)
 
   // TODO(crbug.com/445510209): Uncomment after installing WebUIOmniboxHandler.
   // source->AddBoolean("reportMetrics", true);
@@ -217,7 +238,7 @@ void WebUIBrowserUI::CreatePageHandler(
     mojo::PendingRemote<extensions_bar::mojom::Page> page,
     mojo::PendingReceiver<extensions_bar::mojom::PageHandler> receiver) {
   static_cast<WebUIBrowserExtensionsContainer*>(
-      browser_window()->GetExtensionsContainer())
+      ExtensionsContainer::From(*browser()))
       ->Bind(std::move(page), std::move(receiver));
 }
 
@@ -268,7 +289,8 @@ WebUIBrowserUI::GetOrCreateContextualSessionHandle() {
       // TODO(crbug.com/445510209): Use appropriate config and source
       session_handle_ = service->CreateSession(
           omnibox::CreateQueryControllerConfigParams(),
-          contextual_search::ContextualSearchSource::kOmnibox);
+          contextual_search::ContextualSearchSource::kOmnibox,
+          lens::LensOverlayInvocationSource::kOmniboxContextualQuery);
       // TODO(crbug.com/469877646): Determine what to do with the return value
       // of this call, or move this call to a different location.
       session_handle_->CheckSearchContentSharingSettings(

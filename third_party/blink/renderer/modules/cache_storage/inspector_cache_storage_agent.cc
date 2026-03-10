@@ -46,6 +46,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "third_party/perfetto/include/perfetto/tracing/track_event_args.h"
 
 using blink::protocol::Array;
 // Renaming Cache since there is another blink::Cache.
@@ -76,7 +77,7 @@ namespace {
 String BuildCacheId(const String& storage_key,
                     const std::optional<String>& storage_bucket_name,
                     const String& cache_name) {
-  DCHECK(storage_key.find('|') == kNotFound);
+  DCHECK(!storage_key.contains('|'));
   StringBuilder id;
   id.Append(storage_key);
   if (storage_bucket_name.has_value()) {
@@ -92,8 +93,7 @@ ProtocolResponse ParseCacheId(const String& id,
                               String* storage_key,
                               std::optional<String>* storage_bucket_name,
                               String* cache_name) {
-  Vector<String> id_parts;
-  id.Split('|', true, id_parts);
+  Vector<String> id_parts = id.Split('|');
   if (id_parts.size() == 2) {
     *storage_key = id_parts[0];
     *storage_bucket_name = std::nullopt;
@@ -251,9 +251,8 @@ class ResponsesAccumulator : public RefCounted<ResponsesAccumulator> {
 
   void Dispatch(Vector<mojom::blink::FetchAPIRequestPtr> old_requests) {
     int64_t trace_id = blink::cache_storage::CreateTraceId();
-    TRACE_EVENT_WITH_FLOW0("CacheStorage", "ResponsesAccumulator::Dispatch",
-                           TRACE_ID_GLOBAL(trace_id),
-                           TRACE_EVENT_FLAG_FLOW_OUT);
+    TRACE_EVENT("CacheStorage", "ResponsesAccumulator::Dispatch",
+                perfetto::Flow::Global(trace_id));
 
     Vector<mojom::blink::FetchAPIRequestPtr> requests;
     if (params_.path_filter.empty()) {
@@ -378,9 +377,10 @@ class ResponsesAccumulator : public RefCounted<ResponsesAccumulator> {
 
   void SendFailure(const mojom::blink::CacheStorageError& error) {
     callback_wrapper_->SendFailure(ProtocolResponse::ServerError(
-        String::Format("Error requesting responses for cache %s : %s",
-                       params_.cache_name.Latin1().c_str(),
-                       CacheStorageErrorString(error))
+        UNSAFE_TODO(
+            String::Format("Error requesting responses for cache %s : %s",
+                           params_.cache_name.Latin1().c_str(),
+                           CacheStorageErrorString(error)))
             .Utf8()));
   }
 
@@ -425,9 +425,8 @@ class GetCacheKeysForRequestData {
 
   void Dispatch(std::unique_ptr<GetCacheKeysForRequestData> self) {
     int64_t trace_id = blink::cache_storage::CreateTraceId();
-    TRACE_EVENT_WITH_FLOW0(
-        "CacheStorage", "GetCacheKeysForRequestData::Dispatch",
-        TRACE_ID_GLOBAL(trace_id), TRACE_EVENT_FLAG_FLOW_OUT);
+    TRACE_EVENT("CacheStorage", "GetCacheKeysForRequestData::Dispatch",
+                perfetto::Flow::Global(trace_id));
     cache_remote_->Keys(
         nullptr /* request */, mojom::blink::CacheQueryOptions::New(), trace_id,
         BindOnce(
@@ -437,10 +436,11 @@ class GetCacheKeysForRequestData {
               if (!result.has_value()) {
                 self->callback_wrapper_->SendFailure(
                     ProtocolResponse::ServerError(
-                        String::Format(
-                            "Error requesting requests for cache %s: %s",
-                            params.cache_name.Latin1().c_str(),
-                            CacheStorageErrorString(result.error()))
+                        UNSAFE_TODO(
+                            String::Format(
+                                "Error requesting requests for cache %s: %s",
+                                params.cache_name.Latin1().c_str(),
+                                CacheStorageErrorString(result.error())))
                             .Utf8()));
               } else {
                 if (result.value().empty()) {
@@ -635,9 +635,8 @@ void InspectorCacheStorageAgent::requestCacheNames(
     std::unique_ptr<protocol::Storage::StorageBucket> maybe_storage_bucket,
     std::unique_ptr<RequestCacheNamesCallback> callback) {
   int64_t trace_id = blink::cache_storage::CreateTraceId();
-  TRACE_EVENT_WITH_FLOW0("CacheStorage",
-                         "InspectorCacheStorageAgent::requestCacheNames",
-                         TRACE_ID_GLOBAL(trace_id), TRACE_EVENT_FLAG_FLOW_OUT);
+  TRACE_EVENT("CacheStorage", "InspectorCacheStorageAgent::requestCacheNames",
+              perfetto::Flow::Global(trace_id));
   if (!!maybe_security_origin + !!maybe_storage_key + !!maybe_storage_bucket !=
       1) {
     callback->sendFailure(ProtocolResponse::InvalidParams(
@@ -732,9 +731,8 @@ void InspectorCacheStorageAgent::requestEntries(
     std::optional<String> path_filter,
     std::unique_ptr<RequestEntriesCallback> callback) {
   int64_t trace_id = blink::cache_storage::CreateTraceId();
-  TRACE_EVENT_WITH_FLOW0("CacheStorage",
-                         "InspectorCacheStorageAgent::requestEntries",
-                         TRACE_ID_GLOBAL(trace_id), TRACE_EVENT_FLAG_FLOW_OUT);
+  TRACE_EVENT("CacheStorage", "InspectorCacheStorageAgent::requestEntries",
+              perfetto::Flow::Global(trace_id));
 
   auto callback_wrapper =
       RequestCallbackWrapper<RequestEntriesCallback>::Wrap(std::move(callback));
@@ -762,9 +760,10 @@ void InspectorCacheStorageAgent::requestEntries(
              mojom::blink::CacheStorage::OpenResult result) {
             if (!result.has_value()) {
               callback_wrapper->SendFailure(ProtocolResponse::ServerError(
-                  String::Format("Error requesting cache %s: %s",
-                                 params.cache_name.Latin1().c_str(),
-                                 CacheStorageErrorString(result.error()))
+                  UNSAFE_TODO(
+                      String::Format("Error requesting cache %s: %s",
+                                     params.cache_name.Latin1().c_str(),
+                                     CacheStorageErrorString(result.error())))
                       .Utf8()));
             } else {
               auto request = std::make_unique<GetCacheKeysForRequestData>(
@@ -781,9 +780,8 @@ void InspectorCacheStorageAgent::deleteCache(
     const String& cache_id,
     std::unique_ptr<DeleteCacheCallback> callback) {
   int64_t trace_id = blink::cache_storage::CreateTraceId();
-  TRACE_EVENT_WITH_FLOW0("CacheStorage",
-                         "InspectorCacheStorageAgent::deleteCache",
-                         TRACE_ID_GLOBAL(trace_id), TRACE_EVENT_FLAG_FLOW_OUT);
+  TRACE_EVENT("CacheStorage", "InspectorCacheStorageAgent::deleteCache",
+              perfetto::Flow::Global(trace_id));
 
   auto callback_wrapper =
       RequestCallbackWrapper<DeleteCacheCallback>::Wrap(std::move(callback));
@@ -805,8 +803,8 @@ void InspectorCacheStorageAgent::deleteCache(
               callback_wrapper->SendSuccess();
             } else {
               callback_wrapper->SendFailure(ProtocolResponse::ServerError(
-                  String::Format("Error requesting cache names: %s",
-                                 CacheStorageErrorString(error))
+                  UNSAFE_TODO(String::Format("Error requesting cache names: %s",
+                                             CacheStorageErrorString(error)))
                       .Utf8()));
             }
           },
@@ -818,9 +816,8 @@ void InspectorCacheStorageAgent::deleteEntry(
     const String& request,
     std::unique_ptr<DeleteEntryCallback> callback) {
   int64_t trace_id = blink::cache_storage::CreateTraceId();
-  TRACE_EVENT_WITH_FLOW0("CacheStorage",
-                         "InspectorCacheStorageAgent::deleteEntry",
-                         TRACE_ID_GLOBAL(trace_id), TRACE_EVENT_FLAG_FLOW_OUT);
+  TRACE_EVENT("CacheStorage", "InspectorCacheStorageAgent::deleteEntry",
+              perfetto::Flow::Global(trace_id));
 
   auto callback_wrapper =
       RequestCallbackWrapper<DeleteEntryCallback>::Wrap(std::move(callback));
@@ -841,9 +838,10 @@ void InspectorCacheStorageAgent::deleteEntry(
              String cache_name, mojom::blink::CacheStorage::OpenResult result) {
             if (!result.has_value()) {
               callback_wrapper->SendFailure(ProtocolResponse::ServerError(
-                  String::Format("Error requesting cache %s: %s",
-                                 cache_name.Latin1().c_str(),
-                                 CacheStorageErrorString(result.error()))
+                  UNSAFE_TODO(
+                      String::Format("Error requesting cache %s: %s",
+                                     cache_name.Latin1().c_str(),
+                                     CacheStorageErrorString(result.error())))
                       .Utf8()));
             } else {
               Vector<mojom::blink::BatchOperationPtr> batch_operations;
@@ -870,9 +868,11 @@ void InspectorCacheStorageAgent::deleteEntry(
                             mojom::blink::CacheStorageError::kSuccess) {
                           callback_wrapper->SendFailure(
                               ProtocolResponse::ServerError(
-                                  String::Format(
-                                      "Error deleting cache entry: %s",
-                                      CacheStorageErrorString(error->value))
+                                  UNSAFE_TODO(
+                                      String::Format(
+                                          "Error deleting cache entry: %s",
+                                          CacheStorageErrorString(
+                                              error->value)))
                                       .Utf8()));
                         } else {
                           callback_wrapper->SendSuccess();
@@ -891,9 +891,9 @@ void InspectorCacheStorageAgent::requestCachedResponse(
         request_headers,
     std::unique_ptr<RequestCachedResponseCallback> callback) {
   int64_t trace_id = blink::cache_storage::CreateTraceId();
-  TRACE_EVENT_WITH_FLOW0("CacheStorage",
-                         "InspectorCacheStorageAgent::requestCachedResponse",
-                         TRACE_ID_GLOBAL(trace_id), TRACE_EVENT_FLAG_FLOW_OUT);
+  TRACE_EVENT("CacheStorage",
+              "InspectorCacheStorageAgent::requestCachedResponse",
+              perfetto::Flow::Global(trace_id));
 
   auto callback_wrapper =
       RequestCallbackWrapper<RequestCachedResponseCallback>::Wrap(
@@ -931,8 +931,9 @@ void InspectorCacheStorageAgent::requestCachedResponse(
              mojom::blink::CacheStorage::MatchResult result) {
             if (!result.has_value()) {
               callback_wrapper->SendFailure(ProtocolResponse::ServerError(
-                  String::Format("Unable to read cached response: %s",
-                                 CacheStorageErrorString(result.error()))
+                  UNSAFE_TODO(
+                      String::Format("Unable to read cached response: %s",
+                                     CacheStorageErrorString(result.error())))
                       .Utf8()));
             } else {
               std::unique_ptr<protocol::DictionaryValue> headers =

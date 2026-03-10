@@ -15,7 +15,6 @@
 
 #include "base/base64.h"
 #include "base/command_line.h"
-#include "base/containers/contains.h"
 #include "base/containers/map_util.h"
 #include "base/files/file_path.h"
 #include "base/i18n/rtl.h"
@@ -25,6 +24,7 @@
 #include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/timer/elapsed_timer.h"
 #include "base/version.h"
@@ -81,7 +81,7 @@ bool ContainsReservedCharacters(const base::FilePath& path) {
   // Extensions are cross-platform.
   // Since FilePath uses backslash '\\' as file path separator on Windows, so we
   // need to check manually.
-  if (base::Contains(path.value(), '\\')) {
+  if (path.value().contains('\\')) {
     return true;
   }
   return !net::IsSafePortableRelativePath(path);
@@ -153,7 +153,7 @@ bool IsManifestSupported(int manifest_version,
 
 // Computes the |extension_id| from the given parameters. On success, returns
 // true. On failure, populates |error| and returns false.
-bool ComputeExtensionID(const base::Value::Dict& manifest,
+bool ComputeExtensionID(const base::DictValue& manifest,
                         const base::FilePath& path,
                         int creation_flags,
                         std::u16string* error,
@@ -235,7 +235,7 @@ void Extension::set_silence_deprecated_manifest_version_warnings_for_testing(
 // static
 scoped_refptr<Extension> Extension::Create(const base::FilePath& path,
                                            ManifestLocation location,
-                                           const base::Value::Dict& value,
+                                           const base::DictValue& value,
                                            int flags,
                                            std::u16string* error) {
   return Extension::Create(path, location, value, flags,
@@ -245,7 +245,7 @@ scoped_refptr<Extension> Extension::Create(const base::FilePath& path,
 
 scoped_refptr<Extension> Extension::Create(const base::FilePath& path,
                                            ManifestLocation location,
-                                           const base::Value::Dict& value,
+                                           const base::DictValue& value,
                                            int flags,
                                            const ExtensionId& explicit_id,
                                            std::u16string* error) {
@@ -272,6 +272,9 @@ scoped_refptr<Extension> Extension::Create(const base::FilePath& path,
   manifest->ValidateManifest(&install_warnings);
 
   scoped_refptr<Extension> extension = new Extension(path, std::move(manifest));
+  if (!extension->LoadRequiredFeatures(&install_warnings, error)) {
+    return nullptr;
+  }
   extension->install_warnings_.swap(install_warnings);
 
   // Some manifest parsing may require the dynamic URL to be present on the
@@ -328,7 +331,7 @@ bool Extension::ResourceMatches(const URLPatternSet& pattern_set,
 
 ExtensionResource Extension::GetResource(std::string_view relative_path) const {
   // We have some legacy data where resources have leading slashes.
-  // See: http://crbug.com/121164
+  // See: http://crbug.com/40767705
   if (!relative_path.empty() && relative_path[0] == '/') {
     relative_path.remove_prefix(1);
   }
@@ -484,10 +487,10 @@ Extension::ManifestData* Extension::GetManifestData(
 
 void Extension::SetManifestData(std::string_view key,
                                 std::unique_ptr<Extension::ManifestData> data) {
-  DCHECK(!finished_parsing_manifest_);
-  DCHECK(thread_checker_.CalledOnValidThread());
+  CHECK(!finished_parsing_manifest_);
+  CHECK(thread_checker_.CalledOnValidThread());
   bool inserted = manifest_data_.emplace(key, std::move(data)).second;
-  DCHECK(inserted);
+  CHECK(inserted);
 }
 
 void Extension::SetGUID(const ExtensionGuid& guid) {
@@ -622,10 +625,6 @@ bool Extension::InitFromValue(int flags, std::u16string* error) {
     return false;
   }
 
-  if (!LoadRequiredFeatures(error)) {
-    return false;
-  }
-
   if (const std::string* temp = manifest()->FindStringPath(keys::kPublicKey)) {
     // We don't need to validate because ComputeExtensionId() already did that.
     public_key_ = *temp;
@@ -662,8 +661,10 @@ bool Extension::InitFromValue(int flags, std::u16string* error) {
   return true;
 }
 
-bool Extension::LoadRequiredFeatures(std::u16string* error) {
-  if (!LoadName(error) || !LoadVersion(error)) {
+bool Extension::LoadRequiredFeatures(
+    std::vector<InstallWarning>* install_warnings,
+    std::u16string* error) {
+  if (!LoadName(error) || !LoadVersion(install_warnings, error)) {
     return false;
   }
   return true;
@@ -685,7 +686,8 @@ bool Extension::LoadName(std::u16string* error) {
   return true;
 }
 
-bool Extension::LoadVersion(std::u16string* error) {
+bool Extension::LoadVersion(std::vector<InstallWarning>* install_warnings,
+                            std::u16string* error) {
   const std::string* version_str = manifest_->FindStringPath(keys::kVersion);
   if (version_str == nullptr) {
     *error = errors::kInvalidVersion;
@@ -695,6 +697,16 @@ bool Extension::LoadVersion(std::u16string* error) {
   if (!version_.IsValid() || version_.components().size() > 4) {
     *error = errors::kInvalidVersion;
     return false;
+  }
+  // If specified extension version can be parsed into a valid base::Version,
+  // but the representation in manifest is not the "canonical" one, warn
+  // developer. For example, warn that "1.0.02.5" is interpreted as "1.0.2.5" in
+  // case developer meant to write "1.0.20.5" and made a typo.
+  if (*version_str != version_.GetString()) {
+    install_warnings->emplace_back(
+        base::StringPrintf(errors::kVersionFormatting,
+                           version_.GetString().c_str()),
+        keys::kVersion);
   }
   if (const base::Value* temp = manifest_->FindKey(keys::kVersionName)) {
     if (!temp->is_string()) {
@@ -728,7 +740,7 @@ bool Extension::LoadExtent(const char* key,
     *error = base::ASCIIToUTF16(list_error);
     return false;
   }
-  const base::Value::List& pattern_list = temp_pattern_value->GetList();
+  const base::ListValue& pattern_list = temp_pattern_value->GetList();
   for (size_t i = 0; i < pattern_list.size(); ++i) {
     std::string pattern_string;
     if (pattern_list[i].is_string()) {
@@ -771,7 +783,7 @@ bool Extension::LoadExtent(const char* key,
 
     // We do not allow authors to put wildcards in their paths. Instead, we
     // imply one at the end.
-    if (base::Contains(pattern.path(), '*')) {
+    if (pattern.path().contains('*')) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
           value_error, base::NumberToString(i), errors::kNoWildCardsInPaths);
       return false;
@@ -855,13 +867,13 @@ bool Extension::LoadShortName(std::u16string* error) {
   return true;
 }
 
-ExtensionInfo::ExtensionInfo(const base::Value::Dict* manifest,
+ExtensionInfo::ExtensionInfo(const base::DictValue* manifest,
                              const ExtensionId& id,
                              const base::FilePath& path,
                              ManifestLocation location)
     : extension_id(id), extension_path(path), extension_location(location) {
   if (manifest) {
-    extension_manifest = std::make_unique<base::Value::Dict>(manifest->Clone());
+    extension_manifest = std::make_unique<base::DictValue>(manifest->Clone());
   }
 }
 

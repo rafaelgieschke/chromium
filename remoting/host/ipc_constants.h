@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "base/files/file_path.h"
+#include "base/strings/cstring_view.h"
 #include "build/buildflag.h"
 #include "mojo/public/cpp/platform/named_platform_channel.h"
 
@@ -37,6 +38,15 @@ extern const char kAgentProcessBrokerMessagePipeId[];
 // Returns the server name for AgentProcessBroker.
 const mojo::NamedPlatformChannel::ServerName& GetAgentProcessBrokerServerName();
 #endif
+
+#if BUILDFLAG(IS_LINUX)
+// Message pipe ID used for LoginSessionReporter.
+extern const char kLoginSessionReporterMessagePipeId[];
+
+// Returns the server name for the login session reporter.
+const mojo::NamedPlatformChannel::ServerName&
+GetLoginSessionReporterServerName();
+#endif  // BUILDFLAG(IS_LINUX)
 
 }  // namespace remoting
 

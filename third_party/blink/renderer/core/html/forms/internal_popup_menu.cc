@@ -45,6 +45,7 @@
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/strcat.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_to_number.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -61,8 +62,37 @@ const char* FontStyleToString(FontSelectionValue slope) {
   return "normal";
 }
 
-StringView TextTransformToString(ETextTransform transform) {
-  return GetCSSValueNameAs<StringView>(PlatformEnumToCSSValueID(transform));
+String TextTransformToString(ETextTransform transform) {
+  if (transform == ETextTransform::kNone) {
+    return "none";
+  }
+  if (transform == ETextTransform::kMathAuto) {
+    return "math-auto";
+  }
+
+  StringBuilder result;
+  if (EnumHasFlags(transform, ETextTransform::kCapitalize)) {
+    result.Append("capitalize");
+  } else if (EnumHasFlags(transform, ETextTransform::kUppercase)) {
+    result.Append("uppercase");
+  } else if (EnumHasFlags(transform, ETextTransform::kLowercase)) {
+    result.Append("lowercase");
+  }
+
+  if (EnumHasFlags(transform, ETextTransform::kFullWidth)) {
+    if (!result.empty()) {
+      result.Append(' ');
+    }
+    result.Append("full-width");
+  }
+  if (EnumHasFlags(transform, ETextTransform::kFullSizeKana)) {
+    if (!result.empty()) {
+      result.Append(' ');
+    }
+    result.Append("full-size-kana");
+  }
+
+  return result.ReleaseString();
 }
 
 StringView TextAlignToString(ETextAlign align) {
@@ -74,8 +104,8 @@ const String SerializeComputedStyleForProperty(const ComputedStyle& style,
   const CSSProperty& property = CSSProperty::Get(id);
   const CSSValue* value = property.CSSValueFromComputedStyle(
       style, nullptr, false, CSSValuePhase::kResolvedValue);
-  return String::Format("%s : %s;\n", property.GetPropertyName(),
-                        value->CssText().Utf8().c_str());
+  return UNSAFE_TODO(String::Format("%s : %s;\n", property.GetPropertyName(),
+                                    value->CssText().Utf8().c_str()));
 }
 
 const String SerializeColorScheme(const ComputedStyle& style) {
@@ -383,15 +413,25 @@ void InternalPopupMenu::WriteDocument(SegmentedBuffer& data) {
   const HeapVector<Member<HTMLElement>>& items = owner_element.GetListItems();
   for (; context.list_index_ < items.size(); ++context.list_index_) {
     Element& child = *items[context.list_index_];
-    // TODO this shouldn't just look at parentNode right??
-    if (!IsA<HTMLOptGroupElement>(child.parentNode()))
-      context.FinishGroupIfNecessary();
-    if (auto* option = DynamicTo<HTMLOptionElement>(child))
+    if (auto* option = DynamicTo<HTMLOptionElement>(child)) {
+      if (!option->NearestAncestorOptgroup()) {
+        context.FinishGroupIfNecessary();
+      }
       AddOption(context, *option);
-    else if (auto* optgroup = DynamicTo<HTMLOptGroupElement>(child))
+    } else if (auto* optgroup = DynamicTo<HTMLOptGroupElement>(child)) {
+      // Nested optgroups are not supported, so we can always end any existing
+      // optgroup before starting the next one.
+      context.FinishGroupIfNecessary();
       AddOptGroup(context, *optgroup);
-    else if (auto* hr = DynamicTo<HTMLHRElement>(child))
+    } else if (auto* hr = DynamicTo<HTMLHRElement>(child)) {
+      // The parser doesn't allow <hr> inside <optgroup>, but the popup seems to
+      // support rendering it, so only close the active optgroup if there is an
+      // optgroup ancestor.
+      if (!hr->NearestAncestorOptgroup()) {
+        context.FinishGroupIfNecessary();
+      }
       AddSeparator(context, *hr);
+    }
   }
   context.FinishGroupIfNecessary();
   PagePopupClient::AddString("],\n", data);
@@ -582,9 +622,9 @@ void InternalPopupMenu::SetValueAndClosePopup(int num_value,
   DCHECK(popup_);
   DCHECK(owner_element_);
   if (!string_value.empty()) {
-    bool success;
-    int list_index = string_value.ToInt(&success);
-    DCHECK(success);
+    auto result = StringToIntLoose(string_value);
+    int list_index = result.value_or(0);
+    DCHECK(result.has_value());
 
     EventQueueScope scope;
     owner_element_->SelectOptionByPopup(list_index);
@@ -625,9 +665,9 @@ void InternalPopupMenu::SetValueAndClosePopup(int num_value,
 
 void InternalPopupMenu::SetValue(const String& value) {
   DCHECK(owner_element_);
-  bool success;
-  int list_index = value.ToInt(&success);
-  DCHECK(success);
+  auto result = StringToIntLoose(value);
+  int list_index = result.value_or(0);
+  DCHECK(result.has_value());
   owner_element_->ProvisionalSelectionChanged(list_index);
 }
 

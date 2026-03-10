@@ -638,6 +638,23 @@ void InlineLayoutAlgorithm::ApplyTextBoxTrim(LineInfo& line_info,
   InlineBoxState::AdjustEdges(line_style, *line_style.GetFont(), baseline_type_,
                               should_apply_over, should_apply_under,
                               intrinsic_metrics);
+  if (RuntimeEnabledFeatures::CssFitWidthTextEnabled() && apply_fit_text_) {
+    float scale = line_info.TextFitScale();
+    if (scale < 1.0f) {
+      std::optional<float> min_size = Node().MinimumFontPhysicalSize();
+      if (min_size) {
+        float original_size =
+            line_style.GetFont()->GetFontDescription().ComputedSize();
+        if (original_size * scale < *min_size) {
+          scale = *min_size / original_size;
+        }
+      }
+    }
+    if (scale != 1.0f) {
+      intrinsic_metrics.ascent *= scale;
+      intrinsic_metrics.descent *= scale;
+    }
+  }
 
   if (should_apply_start) {
     // Apply `text-box-trim: start` if this is the first formatted line.
@@ -729,13 +746,8 @@ void InlineLayoutAlgorithm::PlaceOutOfFlowObjects(
   DCHECK(line_info.IsEmptyLine() || !line_box_metrics.IsEmpty())
       << "Non-empty lines must have a valid set of linebox metrics.";
 
-  // All children within the linebox are positioned relative to the baseline,
-  // then shifted later using LineBoxFragmentBuilder::MoveInBlockDirection.
-  LayoutUnit baseline_adjustment =
-      line_info.IsEmptyLine() ? LayoutUnit() : -line_box_metrics.ascent;
-
-  LayoutUnit line_height =
-      line_info.IsEmptyLine() ? LayoutUnit() : line_box_metrics.LineHeight();
+  const FontHeight metrics =
+      line_info.IsEmptyLine() ? FontHeight() : line_box_metrics;
 
   // The location of the "next" line.
   //
@@ -771,7 +783,9 @@ void InlineLayoutAlgorithm::PlaceOutOfFlowObjects(
     if (!box)
       continue;
 
-    LogicalOffset static_offset(LayoutUnit(), baseline_adjustment);
+    // All children within the linebox are positioned relative to the baseline,
+    // then shifted later using LineBoxFragmentBuilder::MoveInBlockDirection.
+    LogicalOffset static_offset(LayoutUnit(), -metrics.ascent);
     if (box->StyleRef().IsOriginalDisplayInlineType()) {
       // An inline-level OOF element positions itself within the line, at the
       // position it would have been if it was in-flow.
@@ -790,7 +804,7 @@ void InlineLayoutAlgorithm::PlaceOutOfFlowObjects(
       static_offset.inline_offset = block_level_inline_offset;
       if (is_ltr) {
         if (has_preceding_inline_level_content)
-          static_offset.block_offset += line_height;
+          static_offset.block_offset += metrics.LineHeight();
       } else {
         // "Preceding" is in logical order, but this loop is in visual order. In
         // RTL, move objects down in the reverse-order loop below.
@@ -811,7 +825,7 @@ void InlineLayoutAlgorithm::PlaceOutOfFlowObjects(
       }
       if (has_preceding_inline_level_content &&
           !box->StyleRef().IsOriginalDisplayInlineType()) {
-        child.rect.offset.block_offset += line_height;
+        child.rect.offset.block_offset += metrics.LineHeight();
       }
     }
   }
@@ -826,18 +840,13 @@ void InlineLayoutAlgorithm::PlaceFloatingObjects(
   DCHECK(line_info->IsEmptyLine() || !line_box_metrics.IsEmpty())
       << "Non-empty lines must have a valid set of linebox metrics.";
 
-  // All children within the linebox are positioned relative to the baseline,
-  // then shifted later using LineBoxFragmentBuilder::MoveInBlockDirection.
-  LayoutUnit baseline_adjustment =
-      line_info->IsEmptyLine() ? LayoutUnit() : -line_box_metrics.ascent;
-
-  LayoutUnit line_height =
-      line_info->IsEmptyLine() ? LayoutUnit() : line_box_metrics.LineHeight();
+  const FontHeight metrics =
+      line_info->IsEmptyLine() ? FontHeight() : line_box_metrics;
 
   // Any unpositioned floats we encounter need to be placed on the "next" line.
   // This BFC block-offset represents the start of the "next" line.
   LayoutUnit origin_bfc_block_offset =
-      opportunity.bfc_block_offset + line_height;
+      opportunity.bfc_block_offset + metrics.LineHeight();
 
   LayoutUnit bfc_line_offset = container_builder_.BfcLineOffset();
   LayoutUnit bfc_block_offset =
@@ -866,6 +875,11 @@ void InlineLayoutAlgorithm::PlaceFloatingObjects(
         if (positioned_float.minimum_space_shortage) {
           line_info->PropagateMinimumSpaceShortage(
               positioned_float.minimum_space_shortage);
+          DCHECK_EQ(positioned_float.tallest_unbreakable_block_size,
+                    LayoutUnit());
+        } else if (positioned_float.tallest_unbreakable_block_size) {
+          line_info->PropagateTallestUnbreakableBlockSize(
+              positioned_float.tallest_unbreakable_block_size);
         }
       }
       if (!break_token || !break_token->IsBreakBefore()) {
@@ -881,15 +895,19 @@ void InlineLayoutAlgorithm::PlaceFloatingObjects(
       continue;
     }
 
-    LayoutUnit block_offset =
-        child.bfc_offset.block_offset - bfc_block_offset + baseline_adjustment;
+    // All children within the linebox are positioned relative to the baseline,
+    // then shifted later using LineBoxFragmentBuilder::MoveInBlockDirection.
+    LayoutUnit block_offset;
 
     // We need to manually account for the flipped-lines writing mode here :(.
     if (IsFlippedLinesWritingMode(GetConstraintSpace().GetWritingMode())) {
       LogicalFragment fragment(GetConstraintSpace().GetWritingDirection(),
                                child.layout_result->GetPhysicalFragment());
-
-      block_offset = -fragment.BlockSize() - block_offset;
+      block_offset = -fragment.BlockSize() - child.bfc_offset.block_offset +
+                     bfc_block_offset + metrics.descent;
+    } else {
+      block_offset =
+          child.bfc_offset.block_offset - bfc_block_offset - metrics.ascent;
     }
 
     child.rect.offset = {child.bfc_offset.line_offset - bfc_line_offset,
@@ -1439,6 +1457,11 @@ const LayoutResult* InlineLayoutAlgorithm::Layout() {
     if (std::optional<LayoutUnit> minimum_space_shortage =
             line_info.MinimumSpaceShortage()) {
       container_builder_.PropagateSpaceShortage(minimum_space_shortage);
+      DCHECK(!line_info.TallestUnbreakableBlockSize());
+    } else if (LayoutUnit tallest_unbreakable_block_size =
+                   line_info.TallestUnbreakableBlockSize()) {
+      container_builder_.PropagateTallestUnbreakableBlockSize(
+          tallest_unbreakable_block_size);
     }
 
     if (line_info.IsEmptyLine()) {
@@ -1469,8 +1492,7 @@ const LayoutResult* InlineLayoutAlgorithm::Layout() {
           if (constraint_space.GetLineClampData().IsClampByLines()) {
             *lines_until_clamp_ = *lines_until_clamp_ - 1;
           } else {
-            DCHECK(
-                constraint_space.GetLineClampData().IsMeasureUntilBfcOffset());
+            DCHECK(constraint_space.GetLineClampData().IsCountLines());
             *lines_until_clamp_ = *lines_until_clamp_ + 1;
           }
         }
@@ -1767,6 +1789,10 @@ PositionedFloat InlineLayoutAlgorithm::PositionFloat(
   if (positioned_float.minimum_space_shortage) {
     container_builder_.PropagateSpaceShortage(
         positioned_float.minimum_space_shortage);
+    DCHECK_EQ(positioned_float.tallest_unbreakable_block_size, LayoutUnit());
+  } else if (positioned_float.tallest_unbreakable_block_size) {
+    container_builder_.PropagateTallestUnbreakableBlockSize(
+        positioned_float.tallest_unbreakable_block_size);
   }
 
   return positioned_float;

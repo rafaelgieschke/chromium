@@ -47,7 +47,6 @@
 #include "ash/user_education/welcome_tour/welcome_tour_metrics.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/window_state.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/rtl.h"
@@ -224,7 +223,7 @@ bool IsSubstringCaseInsensitive(std::u16string haystack_expr,
   std::u16string needle = base::i18n::ToLower(needle_expr);
 
   // Find substring in the given string
-  return base::Contains(haystack, needle);
+  return haystack.contains(needle);
 }
 
 void RecordAutocompleteMatchMetric(SearchBoxTextMatch match_type) {
@@ -596,14 +595,14 @@ void SearchBoxView::ResetForShow() {
   ClearSearchAndDeactivateSearchBox();
 }
 
-void SearchBoxView::UpdateSearchTextfieldAccessibleActiveDescendantId() {
+void SearchBoxView::UpdateSearchTextfieldAccessibleActiveDescendantId(
+    views::View* active_descendant) {
   auto* const textfield = search_box();
   if (!textfield) {
     return;
   }
-  if (a11y_active_descendant_) {
-    textfield->GetViewAccessibility().SetActiveDescendant(
-        *a11y_active_descendant_);
+  if (active_descendant) {
+    textfield->GetViewAccessibility().SetActiveDescendant(*active_descendant);
   } else {
     textfield->GetViewAccessibility().ClearActiveDescendant();
   }
@@ -1318,8 +1317,7 @@ bool SearchBoxView::HasAutocompleteText() {
 }
 
 void SearchBoxView::OnBeforeUserAction(views::Textfield* sender) {
-  if (a11y_active_descendant_)
-    SetA11yActiveDescendant(std::nullopt);
+  SetA11yActiveDescendant(nullptr);
 }
 
 void SearchBoxView::SetAutocompleteText(
@@ -1415,7 +1413,7 @@ void SearchBoxView::ClearSearchAndDeactivateSearchBox() {
   if (!is_search_box_active())
     return;
 
-  SetA11yActiveDescendant(std::nullopt);
+  SetA11yActiveDescendant(nullptr);
   // Set search box as inactive first, because ClearSearch() eventually calls
   // into AppListMainView::QueryChanged() which will hide search results based
   // on `is_search_box_active_`.
@@ -1424,10 +1422,8 @@ void SearchBoxView::ClearSearchAndDeactivateSearchBox() {
   MaybeSetAutocompleteGhostText(std::u16string(), std::u16string());
 }
 
-void SearchBoxView::SetA11yActiveDescendant(
-    const std::optional<ui::AXPlatformNodeId>& active_descendant) {
-  a11y_active_descendant_ = active_descendant;
-  UpdateSearchTextfieldAccessibleActiveDescendantId();
+void SearchBoxView::SetA11yActiveDescendant(views::View* active_descendant) {
+  UpdateSearchTextfieldAccessibleActiveDescendantId(active_descendant);
 }
 
 void SearchBoxView::UseFixedPlaceholderTextForTest() {
@@ -1566,7 +1562,7 @@ bool SearchBoxView::HandleKeyEvent(views::Textfield* sender,
       DCHECK(close_button()->GetVisible());
       close_button()->RequestFocus();
 
-      SetA11yActiveDescendant(std::nullopt);
+      SetA11yActiveDescendant(nullptr);
       break;
     case ResultSelectionController::MoveResult::kSelectionCycleAfterLastResult:
       // If move was about to cycle, clear the selection and move the focus to
@@ -1582,7 +1578,7 @@ bool SearchBoxView::HandleKeyEvent(views::Textfield* sender,
       } else {
         close_button()->RequestFocus();
       }
-      SetA11yActiveDescendant(std::nullopt);
+      SetA11yActiveDescendant(nullptr);
       break;
     case ResultSelectionController::MoveResult::kResultChanged:
       UpdateSearchBoxForSelectedResult(

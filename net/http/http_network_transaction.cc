@@ -102,6 +102,10 @@ namespace {
 // we give up and show an error page.
 const size_t kMaxRetryAttempts = 2;
 
+// Max number of `retry_attempts_on_connection_errors_` for connection errors,
+// after which we give up and crash early.
+const size_t kMaxRetryAttemptsOnConnectionErrors = 50;
+
 // Max number of calls to RestartWith* allowed for a single connection. A single
 // HttpNetworkTransaction should not signal very many restartable errors, but it
 // may occur due to a bug (e.g. https://crbug.com/823387 or
@@ -2081,6 +2085,13 @@ int HttpNetworkTransaction::HandleIOError(int error) {
     // preconnected but failed to be used before the server timed it out.
     case RetryReason::kEmptyResponse:
       if (ShouldResendRequest()) {
+        if (retry_attempts_on_connection_errors_ >=
+            kMaxRetryAttemptsOnConnectionErrors) {
+          NOTREACHED() << "Failed after "
+                       << retry_attempts_on_connection_errors_
+                       << " retry attempts for connection errors.";
+        }
+        retry_attempts_on_connection_errors_++;
         net_log_.AddEventWithNetErrorCode(
             NetLogEventType::HTTP_TRANSACTION_RESTART_AFTER_ERROR, error);
         ResetConnectionAndRequestForResend(*retry_reason);
@@ -2217,8 +2228,6 @@ void HttpNetworkTransaction::ResetConnectionAndRequestForResend(
   TRACE_EVENT("net",
               "HttpNetworkTransaction::ResetConnectionAndRequestForResend",
               NetLogWithSourceToFlow(net_log_), "retry_reason", retry_reason);
-
-  reset_connection_and_request_for_resend_start_time_ = base::TimeTicks::Now();
 
   // TODO:(crbug.com/1495705): Remove this CHECK after fixing the bug.
   CHECK(request_);
@@ -2383,23 +2392,23 @@ bool HttpNetworkTransaction::ContentEncodingsValid() const {
 }
 
 void HttpNetworkTransaction::RecordStreamRequestResult(int result) {
-  // Do not record the elapsed time when this restarted. Restarting usually
-  // involves user interaction and we can't predict how long the interaction
-  // took time.
-  if (num_restarts_ == 0) {
-    base::TimeDelta elapsed = base::TimeTicks::Now() - start_timeticks_;
-    base::UmaHistogramTimes(
-        base::StrCat({"Net.NetworkTransaction.StreamRequestCompleteTime2.",
-                      IsGoogleHostWithAlpnH3(url_.host()) ? "GoogleHost." : "",
-                      result == OK ? "Success" : "Failure"}),
-        elapsed);
+  // Only record the first time the stream request completes.
+  if (num_restarts_ > 0) {
+    return;
   }
+
+  base::TimeDelta elapsed = base::TimeTicks::Now() - start_timeticks_;
+  base::UmaHistogramTimes(
+      base::StrCat({"Net.NetworkTransaction.StreamRequestCompleteTime3.",
+                    IsGoogleHostWithAlpnH3(url_.host()) ? "GoogleHost." : "",
+                    result == OK ? "Success" : "Failure"}),
+      elapsed);
 
   if (result == OK) {
     CHECK(stream_);
     base::UmaHistogramEnumeration(
         base::StrCat({
-            "Net.NetworkTransaction.NegotiatedProtocol",
+            "Net.NetworkTransaction.NegotiatedProtocol2",
             IsGoogleHostWithAlpnH3(url_.host()) ? ".GoogleHost" : "",
         }),
         negotiated_protocol_);
@@ -2408,7 +2417,7 @@ void HttpNetworkTransaction::RecordStreamRequestResult(int result) {
     int get_endpoint_result = stream_->GetRemoteEndpoint(&endpoint);
     if (get_endpoint_result == OK) {
       base::UmaHistogramEnumeration(
-          "Net.NetworkTransaction.StreamAddressFamily", endpoint.GetFamily(),
+          "Net.NetworkTransaction.StreamAddressFamily2", endpoint.GetFamily(),
           static_cast<AddressFamily>(ADDRESS_FAMILY_LAST + 1));
     }
 
@@ -2418,8 +2427,8 @@ void HttpNetworkTransaction::RecordStreamRequestResult(int result) {
         create_stream_end_time_ - create_stream_start_time_;
 
     const std::string_view histogram_base_name =
-        ForWebSocketHandshake() ? "CreateWebSocketStreamTime2"
-                                : "CreateHttpStreamTime2";
+        ForWebSocketHandshake() ? "CreateWebSocketStreamTime3"
+                                : "CreateHttpStreamTime3";
     const std::string_view host_suffix =
         IsGoogleHostWithAlpnH3(url_.host()) ? ".GoogleHost" : "";
     const std::string_view protocol_suffix =
@@ -2434,18 +2443,11 @@ void HttpNetworkTransaction::RecordStreamRequestResult(int result) {
     base::UmaHistogramTimes(base::StrCat({histogram_name, ".", address_suffix}),
                             create_time);
 
-    if (!reset_connection_and_request_for_resend_start_time_.is_null()) {
-      base::UmaHistogramTimes(
-          "Net.NetworkTransaction.ResetConnectionAndResendRequestTime",
-          base::TimeTicks::Now() -
-              reset_connection_and_request_for_resend_start_time_);
-    }
-
     CHECK(stream_request_completion_details_.has_value());
     if (stream_request_completion_details_->session_source.has_value()) {
       base::UmaHistogramEnumeration(
           base::StrCat(
-              {"Net.NetworkTransaction.SessionSource2.", protocol_suffix}),
+              {"Net.NetworkTransaction.SessionSource3.", protocol_suffix}),
           *stream_request_completion_details_->session_source);
     }
 
@@ -2466,12 +2468,12 @@ void HttpNetworkTransaction::RecordStreamRequestResult(int result) {
       };
       base::UmaHistogramTimes(
           base::StrCat({"Net.NetworkTransaction.", protocol_suffix,
-                        "StreamCreationTime.",
+                        "StreamCreationTime2.",
                         is_existing() ? "Existing" : "New"}),
           create_time);
     }
   } else {
-    base::UmaHistogramSparse("Net.NetworkTransaction.StreamRequestErrorCode2",
+    base::UmaHistogramSparse("Net.NetworkTransaction.StreamRequestErrorCode3",
                              -result);
   }
 }

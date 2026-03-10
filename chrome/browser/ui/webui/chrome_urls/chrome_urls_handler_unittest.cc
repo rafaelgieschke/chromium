@@ -4,6 +4,8 @@
 
 #include "chrome/browser/ui/webui/chrome_urls/chrome_urls_handler.h"
 
+#include <algorithm>
+
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_feature_list.h"
 #include "chrome/common/webui_url_constants.h"
@@ -23,8 +25,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if BUILDFLAG(IS_CHROMEOS)
+#include "ash/constants/webui_url_constants.h"
 #include "ash/webui/file_manager/url_constants.h"
-#include "ash/webui/sanitize_ui/url_constants.h"
 #endif  // BUILDFLAG(IS_CHROMEOS)
 
 using testing::_;
@@ -207,7 +209,7 @@ TEST_F(ChromeUrlsHandlerTest, GetUrls) {
   base::span<const base::cstring_view> expected_urls =
       chrome::ChromeDebugURLs();
   for (const GURL& url : url_data->command_urls) {
-    EXPECT_TRUE(base::Contains(expected_urls, url.spec()));
+    EXPECT_TRUE(std::ranges::contains(expected_urls, url.spec()));
   }
 }
 

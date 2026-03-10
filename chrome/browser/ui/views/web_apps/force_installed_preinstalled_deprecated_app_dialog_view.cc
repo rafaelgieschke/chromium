@@ -8,7 +8,6 @@
 
 #include "ash/constants/web_app_id_constants.h"
 #include "base/auto_reset.h"
-#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
 #include "base/functional/bind.h"
 #include "base/memory/ptr_util.h"
@@ -17,7 +16,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/web_applications/extension_status_utils.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
@@ -112,7 +110,7 @@ void ForceInstalledPreinstalledDeprecatedAppDialogView::CreateAndShowDialog(
   if (GetLinkConfigForTesting()) {                    // IN-TEST
     link_config = GetLinkConfigForTesting().value();  // IN-TEST
   } else {
-    CHECK(base::Contains(GetChromeAppConfigs(), extension_id));
+    CHECK(GetChromeAppConfigs().contains(extension_id));
     link_config = GetChromeAppConfigs().at(extension_id);
   }
 

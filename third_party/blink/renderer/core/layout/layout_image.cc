@@ -75,6 +75,21 @@ void LayoutImage::WillBeDestroyed() {
   LayoutReplaced::WillBeDestroyed();
 }
 
+void LayoutImage::InsertedIntoTree() {
+  NOT_DESTROYED();
+  ImageResourceContent* image_content = image_resource_->CachedImage();
+  LocalDOMWindow* window = GetDocument().domWindow();
+
+  // If the image content was ready before attaching to the layout image, and
+  // and it did not have a node, it would not be possible to know if the node
+  // would be required for timing. Notify at this point now it is attached to
+  // its parent.
+  if (!GetNode() && window && image_content && image_content->IsLoaded()) {
+    ImageElementTiming::From(*window).NotifyImageFinished(*this, image_content);
+  }
+  LayoutReplaced::InsertedIntoTree();
+}
+
 void GetImageSizeChangeTracingData(perfetto::TracedValue context,
                                    Node* node,
                                    LocalFrame* frame) {
@@ -97,11 +112,8 @@ void LayoutImage::StyleDidChange(
     NaturalSizeChanged();
   }
 
-  bool tracing_enabled;
-  TRACE_EVENT_CATEGORY_GROUP_ENABLED(
-      TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), &tracing_enabled);
-
-  if (tracing_enabled) {
+  if (TRACE_EVENT_CATEGORY_ENABLED(
+          TRACE_DISABLED_BY_DEFAULT("devtools.timeline"))) {
     bool is_unsized = this->IsUnsizedImage();
     if (is_unsized) {
       Node* node = GetNode();
@@ -126,8 +138,6 @@ void LayoutImage::ImageChanged(WrappedImagePtr new_image,
   NOT_DESTROYED();
   DCHECK(View());
   DCHECK(View()->GetFrameView());
-  if (DocumentBeingDestroyed())
-    return;
 
   if (HasBoxDecorationBackground() || HasMask() || HasShapeOutside() ||
       HasReflection())
@@ -140,10 +150,14 @@ void LayoutImage::ImageChanged(WrappedImagePtr new_image,
     return;
 
   auto* html_image_element = DynamicTo<HTMLImageElement>(GetNode());
-  if (IsGeneratedContent() && html_image_element &&
-      image_resource_->ErrorOccurred()) {
-    html_image_element->EnsureFallbackForGeneratedContent();
-    return;
+  if (html_image_element) {
+    if (RuntimeEnabledFeatures::CSSImageAnimationEnabled()) {
+      html_image_element->PseudoStateChanged(CSSSelector::kPseudoAnimatedImage);
+    }
+    if (IsGeneratedContent() && image_resource_->ErrorOccurred()) {
+      html_image_element->EnsureFallbackForGeneratedContent();
+      return;
+    }
   }
 
   // If error occurred, image marker should be replaced by a LayoutText.

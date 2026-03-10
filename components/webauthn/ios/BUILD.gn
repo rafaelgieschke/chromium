@@ -8,6 +8,7 @@ source_set("ios") {
   sources = [
     "ios_passkey_client.h",
     "ios_passkey_client.mm",
+    "ios_passkey_client_commands.h",
     "ios_webauthn_credentials_delegate.h",
     "ios_webauthn_credentials_delegate.mm",
     "ios_webauthn_credentials_delegate_factory.h",
@@ -32,10 +33,31 @@ source_set("ios") {
     "//components/password_manager/core/browser:passkey_credential",
     "//components/password_manager/ios",
     "//components/webauthn/core/browser:client_data",
+    "//components/webauthn/core/browser:common_utils",
     "//components/webauthn/core/browser:passkey_model",
     "//device/fido",
     "//ios/web/public",
     "//ios/web/public/js_messaging",
+    "//services/network/public/cpp",
+    "//services/network/public/mojom",
+  ]
+}
+
+static_library("test_support") {
+  testonly = true
+  sources = [
+    "fake_ios_passkey_client.h",
+    "fake_ios_passkey_client.mm",
+    "passkey_test_util.h",
+    "passkey_test_util.mm",
+  ]
+  deps = [
+    ":ios",
+    "//base",
+    "//components/sync/protocol",
+    "//components/webauthn/core/browser:passkey_model",
+    "//components/webauthn/ios",
+    "//ios/web/public/test/fakes",
   ]
 }
 
@@ -75,6 +97,8 @@ source_set("utils") {
     "//base",
     "//components/autofill/ios/browser",
     "//components/password_manager/core/browser:passkey_credential",
+    "//components/strings",
+    "//ui/base",
   ]
 }
 
@@ -82,19 +106,23 @@ source_set("unit_tests") {
   testonly = true
   sources = [
     "ios_webauthn_credentials_delegate_factory_unittest.mm",
+    "passkey_request_parser_unittest.mm",
     "passkey_suggestion_utils_unittest.mm",
     "passkey_tab_helper_unittest.mm",
   ]
   deps = [
     ":ios",
     ":js_tests",
+    ":test_support",
     ":utils",
     "//base/test:test_support",
     "//components/autofill/ios/browser",
     "//components/password_manager/core/browser:test_support",
     "//components/password_manager/ios",
+    "//components/strings",
     "//components/webauthn/core/browser:passkey_model",
     "//components/webauthn/core/browser:test_support",
+    "//device/fido/public",
     "//ios/web/public/test",
     "//testing/gtest",
     "//third_party/ocmock",

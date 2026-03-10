@@ -23,26 +23,6 @@ namespace optimization_guide::model_execution::prefs {
 
 namespace {
 
-struct LegacyUsagePref {
-  const char* path;
-  mojom::OnDeviceFeature feature;
-};
-
-constexpr LegacyUsagePref kLegacyUsagePrefs[] = {
-    {"optimization_guide.last_time_on_device_eligible_feature_used",
-     mojom::OnDeviceFeature::kCompose},
-    {"optimization_guide.model_execution.last_time_prompt_api_used",
-     mojom::OnDeviceFeature::kPromptApi},
-    {"optimization_guide.model_execution.last_time_summarize_api_used",
-     mojom::OnDeviceFeature::kSummarize},
-    {"optimization_guide.model_execution.last_time_test_used",
-     mojom::OnDeviceFeature::kTest},
-    {"optimization_guide.model_execution.last_time_history_search_used",
-     mojom::OnDeviceFeature::kHistorySearch},
-    {"optimization_guide.model_execution.last_time_history_query_intent_used",
-     mojom::OnDeviceFeature::kHistoryQueryIntent},
-};
-
 std::string PrefKey(mojom::OnDeviceFeature feature) {
   return base::NumberToString(
       (static_cast<uint64_t>(ToModelExecutionFeatureProto(feature))));
@@ -98,6 +78,9 @@ const char kOnDevicePerformanceClass[] =
 const char kOnDevicePerformanceClassVersion[] =
     "optimization_guide.on_device.performance_class_version";
 
+// Stores the device VRAM in MB.
+const char kOnDeviceVramMb[] = "optimization_guide.on_device.vram_mb";
+
 // Timestamps for the last time each features was used while on-device eligible.
 // Used to decide which models are worth fetching.
 const char kLastUsageByFeature[] =
@@ -116,6 +99,10 @@ const char kModelQualityLoggingClientId[] =
 const char kGenAILocalFoundationalModelEnterprisePolicySettings[] =
     "optimization_guide.gen_ai_local_foundational_model_settings";
 
+// A boolean pref for the on-device GenAI foundational model user settings.
+const char kOnDeviceAiUserSettingsEnabled[] =
+    "optimization_guide.on_device_foundational_model_user_settings";
+
 }  // namespace localstate
 
 void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
@@ -125,6 +112,7 @@ void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
   registry->RegisterIntegerPref(localstate::kOnDevicePerformanceClass, 0);
   registry->RegisterStringPref(localstate::kOnDevicePerformanceClassVersion,
                                std::string());
+  registry->RegisterUint64Pref(localstate::kOnDeviceVramMb, 0);
   registry->RegisterTimePref(
       localstate::kLastTimeEligibleForOnDeviceModelDownload, base::Time::Min());
   registry->RegisterDictionaryPref(localstate::kOnDeviceModelValidationResult);
@@ -133,23 +121,8 @@ void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
                               PrefRegistry::LOSSY_PREF);
   registry->RegisterIntegerPref(
       localstate::kGenAILocalFoundationalModelEnterprisePolicySettings, 0);
-}
-
-void RegisterLegacyUsagePrefsForMigration(PrefRegistrySimple* registry) {
-  for (auto& pref : kLegacyUsagePrefs) {
-    registry->RegisterTimePref(pref.path, base::Time::Min());
-  }
-}
-
-void MigrateLegacyUsagePrefs(PrefService* local_state) {
-  for (auto& pref : kLegacyUsagePrefs) {
-    if (local_state->HasPrefPath(pref.path)) {
-      DCHECK(!local_state->GetDict(localstate::kLastUsageByFeature)
-                  .Find(PrefKey(pref.feature)));
-      SetLastUsage(local_state, pref.feature, local_state->GetTime(pref.path));
-      local_state->ClearPref(pref.path);
-    }
-  }
+  registry->RegisterBooleanPref(localstate::kOnDeviceAiUserSettingsEnabled,
+                                true);
 }
 
 void PruneOldUsagePrefs(PrefService* local_state) {

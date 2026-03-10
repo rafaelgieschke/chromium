@@ -802,14 +802,14 @@ class SharedDictionaryDevToolsBrowserTest
     SendCommandSync("Network.enable");
     SendCommandSync("Audits.enable");
   }
-  base::Value::Dict WaitForSharedDictionaryIssueAdded(
+  base::DictValue WaitForSharedDictionaryIssueAdded(
       const std::string& expected_error_type) {
-    auto matcher = [](const base::Value::Dict& params) {
+    auto matcher = [](const base::DictValue& params) {
       const std::string* maybe_issue_code =
           params.FindStringByDottedPath("issue.code");
       return maybe_issue_code && *maybe_issue_code == "SharedDictionaryIssue";
     };
-    base::Value::Dict notification = WaitForMatchingNotification(
+    base::DictValue notification = WaitForMatchingNotification(
         "Audits.issueAdded", base::BindRepeating(matcher));
     EXPECT_EQ(*notification.FindStringByDottedPath("issue.code"),
               "SharedDictionaryIssue");
@@ -877,26 +877,6 @@ class DevToolsSharedDictionaryFeatureDisabledBrowserTest
       : SharedDictionaryDevToolsBrowserTest(/*enable_feature=*/false) {}
   ~DevToolsSharedDictionaryFeatureDisabledBrowserTest() override = default;
 };
-
-IN_PROC_BROWSER_TEST_F(SharedDictionaryDevToolsBrowserTest,
-                       UseErrorCrossOriginNoCorsRequest) {
-  const std::string kHostName = "www.example.com";
-  const std::string kCrossOriginHostName = "other.example.com";
-  embedded_https_test_server().SetCertHostnames(
-      {kHostName, kCrossOriginHostName});
-  ASSERT_TRUE(embedded_https_test_server().Start());
-  NavigateAndEnableAudits(embedded_https_test_server().GetURL(
-      kHostName, "/shared_dictionary/blank.html"));
-  content::RenderFrameHost* rfh = GetPrimaryMainFrame();
-  EXPECT_TRUE(
-      ExecJs(rfh, FetchUrlScript(embedded_https_test_server().GetURL(
-                      kCrossOriginHostName, "/shared_dictionary/test.dict"))));
-  WaitUntilDictionaryRegistered();
-  EXPECT_TRUE(ExecJs(
-      rfh, FetchUrlWithNoCorsModeScript(embedded_https_test_server().GetURL(
-               kCrossOriginHostName, "/shared_dictionary/path/target"))));
-  WaitForSharedDictionaryIssueAdded("UseErrorCrossOriginNoCorsRequest");
-}
 
 // Can't cause the dictionary load failure by deletaing the disk cache directory
 // on Windows.

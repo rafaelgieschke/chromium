@@ -24,9 +24,11 @@
 #import "ios/chrome/browser/favicon/model/ios_chrome_favicon_loader_factory.h"
 #import "ios/chrome/browser/incognito_reauth/ui_bundled/incognito_reauth_commands.h"
 #import "ios/chrome/browser/incognito_reauth/ui_bundled/incognito_reauth_scene_agent.h"
+#import "ios/chrome/browser/intelligence/bwg/metrics/gemini_metrics.h"
 #import "ios/chrome/browser/intelligence/bwg/model/bwg_service.h"
 #import "ios/chrome/browser/intelligence/bwg/model/bwg_service_factory.h"
-#import "ios/chrome/browser/intelligence/bwg/utils/bwg_constants.h"
+#import "ios/chrome/browser/intelligence/bwg/model/bwg_tab_helper.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/lens/ui_bundled/lens_availability.h"
 #import "ios/chrome/browser/lens/ui_bundled/lens_entrypoint.h"
@@ -50,13 +52,13 @@
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/shared/public/commands/activity_service_commands.h"
 #import "ios/chrome/browser/shared/public/commands/activity_service_share_url_command.h"
-#import "ios/chrome/browser/shared/public/commands/application_commands.h"
 #import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/enhanced_calendar_commands.h"
 #import "ios/chrome/browser/shared/public/commands/lens_commands.h"
 #import "ios/chrome/browser/shared/public/commands/mini_map_commands.h"
 #import "ios/chrome/browser/shared/public/commands/reading_list_add_command.h"
+#import "ios/chrome/browser/shared/public/commands/scene_commands.h"
 #import "ios/chrome/browser/shared/public/commands/search_image_with_lens_command.h"
 #import "ios/chrome/browser/shared/public/commands/unit_conversion_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
@@ -311,7 +313,7 @@ NSString* const kAlertAccessibilityIdentifier = @"AlertAccessibilityIdentifier";
 #pragma mark - Properties
 
 - (web::WebState*)webState {
-  if (base::FeatureList::IsEnabled(kEnableLensOverlay) && _baseWebState) {
+  if (_baseWebState) {
     return _baseWebState.get();
   }
   web::WebState* activeWebState =
@@ -530,27 +532,6 @@ NSString* const kAlertAccessibilityIdentifier = @"AlertAccessibilityIdentifier";
 
   __weak __typeof(self) weakSelf = self;
 
-  // Launch the Gemini experience with an image attached.
-  BOOL canShowGeminiElement =
-      IsImageContextMenuGeminiEntryPointEnabled() &&
-      BwgServiceFactory::GetForProfile(self.browser->GetProfile())
-          ->IsBwgAvailableForWebState(webState);
-  if (canShowGeminiElement) {
-    ProceduralBlock geminiElementCallback = ^{
-      [weakSelf openGeminiWithImageURL:imageURL referrer:referrer];
-    };
-    UIMenuElement* geminiElement = [actionFactory
-        actionToOpenImageInGeminiWithBlock:geminiElementCallback];
-
-    // Wrap the Gemini element in an inline menu to create a distinct section.
-    UIMenu* geminiSection = [UIMenu menuWithTitle:@""
-                                            image:nil
-                                       identifier:nil
-                                          options:UIMenuOptionsDisplayInline
-                                         children:@[ geminiElement ]];
-    [imageMenuElements addObject:geminiSection];
-  }
-
   // Image saving.
   NSArray<UIMenuElement*>* imageSavingElements =
       [self imageSavingElementsWithURL:imageURL
@@ -580,7 +561,41 @@ NSString* const kAlertAccessibilityIdentifier = @"AlertAccessibilityIdentifier";
       [self imageSearchingElementsWithURL:imageURL
                                  scenario:scenario
                                  referrer:referrer];
+
+  // Launch the Gemini experience with an image attached.
+  UIMenuElement* geminiElement = nil;
+  BwgService* geminiService =
+      BwgServiceFactory::GetForProfile(self.browser->GetProfile());
+  BwgTabHelper* geminiTabHelper = BwgTabHelper::FromWebState(webState);
+  BOOL canShowGeminiElement =
+      IsGeminiImageRemixToolEnabled() && geminiTabHelper &&
+      geminiTabHelper->IsGeminiAvailableForWebState() && geminiService &&
+      geminiService->IsProfileEligibleForGemini();
+  BOOL geminiAboveSearch = IsGeminiImageRemixToolShowAboveSearchImageEnabled();
+  BOOL geminiBelowSearch = IsGeminiImageRemixToolShowBelowSearchImageEnabled();
+
+  if (canShowGeminiElement && (geminiAboveSearch || geminiBelowSearch)) {
+    RecordImageRemixContextMenuEntryPointShown();
+
+    ProceduralBlock geminiElementCallback = ^{
+      [weakSelf openGeminiWithImageURL:imageURL referrer:referrer];
+    };
+    geminiElement = [actionFactory
+        actionToOpenImageInGeminiWithBlock:geminiElementCallback];
+  }
+
+  // Display the gemini element either above or below the search image
+  // element based on the flags.
+  if (geminiElement && geminiAboveSearch) {
+    [imageMenuElements addObject:geminiElement];
+  }
+
   [imageMenuElements addObjectsFromArray:imageSearchingElements];
+
+  // Ensure we don't show gemini twice if both flags are enabled.
+  if (geminiElement && geminiBelowSearch && !geminiAboveSearch) {
+    [imageMenuElements addObject:geminiElement];
+  }
 
   // Share Image.
   // Shares the URL of the image and not the image itself.
@@ -835,36 +850,35 @@ NSString* const kAlertAccessibilityIdentifier = @"AlertAccessibilityIdentifier";
 
   [imageSavingElements addObject:saveImage];
 
+  if (!saveToPhotosAvailable) {
+    return imageSavingElements;
+  }
+
   // Save Image to Photos.
-  if (saveToPhotosAvailable) {
-    base::RecordAction(base::UserMetricsAction(
-        "MobileWebContextMenuImageWithSaveToPhotosImpression"));
-    UIAction* saveImageToPhotosAction = [actionFactory
-        actionToSaveToPhotosWithImageURL:imageURL
-                                referrer:referrer
-                                webState:webState
-                                   block:^{
-                                     base::UmaHistogramEnumeration(
-                                         kSaveToPhotosContextMenuActionsHistogram,
-                                         SaveToPhotosContextMenuActions::
-                                             kAvailableDidSaveImageToGooglePhotos);
-                                   }];
-    [imageSavingElements addObject:saveImageToPhotosAction];
-  }
+  base::RecordAction(base::UserMetricsAction(
+      "MobileWebContextMenuImageWithSaveToPhotosImpression"));
+  UIAction* saveImageToPhotosAction = [actionFactory
+      actionToSaveToPhotosWithImageURL:imageURL
+                              referrer:referrer
+                              webState:webState
+                                 block:^{
+                                   base::UmaHistogramEnumeration(
+                                       kSaveToPhotosContextMenuActionsHistogram,
+                                       SaveToPhotosContextMenuActions::
+                                           kAvailableDidSaveImageToGooglePhotos);
+                                 }];
+  [imageSavingElements addObject:saveImageToPhotosAction];
 
-  if (saveToPhotosAvailable) {
-    UIImage* image = DefaultSymbolWithPointSize(kPhotoBadgeArrowDownSymbol,
-                                                kSymbolActionPointSize);
-    UIMenu* saveImageInMenu = [UIMenu
-        menuWithTitle:l10n_util::GetNSString(IDS_IOS_TOOLS_MENU_SAVE_IMAGE_IN)
-                image:image
-           identifier:nil
-              options:UIMenuOptionsSingleSelection
-             children:imageSavingElements];
-    return @[ saveImageInMenu ];
-  }
-
-  return imageSavingElements;
+  // Save Image Menu.
+  UIImage* image = DefaultSymbolWithPointSize(kPhotoBadgeArrowDownSymbol,
+                                              kSymbolActionPointSize);
+  UIMenu* saveImageInMenu = [UIMenu
+      menuWithTitle:l10n_util::GetNSString(IDS_IOS_TOOLS_MENU_SAVE_IMAGE_IN)
+              image:image
+         identifier:nil
+            options:UIMenuOptionsSingleSelection
+           children:imageSavingElements];
+  return @[ saveImageInMenu ];
 }
 
 // Returns the context menu elements for image searching.
@@ -1074,8 +1088,7 @@ NSString* const kAlertAccessibilityIdentifier = @"AlertAccessibilityIdentifier";
   }
 
   auto* data_controls_tab_helper =
-      data_controls::DataControlsTabHelper::GetOrCreateForWebState(
-          self.webState);
+      data_controls::DataControlsTabHelper::FromWebState(self.webState);
   return data_controls_tab_helper->ShouldAllowShare();
 }
 
@@ -1105,11 +1118,18 @@ NSString* const kAlertAccessibilityIdentifier = @"AlertAccessibilityIdentifier";
 // Opens the Gemini overlay with an image attached. The sanitized `image` is
 // passed to Gemini.
 - (void)openGeminiWithImage:(UIImage*)image {
+  double aspectRatio = 0.0;
+  if (image.size.width > 0 && image.size.height > 0) {
+    aspectRatio = image.size.width / image.size.height;
+  }
+  RecordImageRemixContextMenuEntryPointTapped(aspectRatio);
+
   id<BWGCommands> handler =
       HandlerForProtocol(_browser->GetCommandDispatcher(), BWGCommands);
-  [handler
-      startGeminiFlowWithImageAttachment:image
-                              entryPoint:gemini::EntryPoint::ImageContextMenu];
+  GeminiStartupState* state = [[GeminiStartupState alloc]
+      initWithEntryPoint:gemini::EntryPoint::ImageContextMenu];
+  state.imageAttachment = image;
+  [handler startGeminiFlowWithStartupState:state];
 }
 
 @end

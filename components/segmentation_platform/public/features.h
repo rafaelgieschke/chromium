@@ -121,34 +121,8 @@ extern const char kEphemeralCardRankerForceHideCardParam[];
 // Feature flag for enabling the Ephemeral Card ranker.
 BASE_DECLARE_FEATURE(kSegmentationPlatformEphemeralCardRanker);
 
-// Feature flag for enabling the Tips Ephemeral Card.
-BASE_DECLARE_FEATURE(kSegmentationPlatformTipsEphemeralCard);
-
-// Defines the sequence of tips variations for the experimental train. The
-// sequence uses the underlying variation labels defined in
-// `home_modules/constants`.
-extern const char kTipsEphemeralCardExperimentTrainParam[];
-
-// Returns the enabled experimental train for the Tips Ephemeral Card
-// experiment, as a comma-separated string of variation labels. The order of the
-// labels in the string determines the order in which the corresponding Tips
-// Ephemeral Card variations will be considered for display.
-std::string TipsExperimentTrainEnabled();
-
-// Defines the maximum number of times an ephemeral tips card can be visible
-// to the user.
-extern const char kTipsEphemeralCardModuleMaxImpressionCount[];
-
-// Returns the maximum number of times an ephemeral tips card can be visible
-// to the user.
-int GetTipsEphemeralCardModuleMaxImpressionCount();
-
 BASE_DECLARE_FEATURE(kSegmentationSurveyPage);
 extern const base::FeatureParam<bool> kSegmentationSurveyInternalsPage;
-
-// Feature flag for enabling the Educational tip module in the home modules on
-// chrome android.
-BASE_DECLARE_FEATURE(kEducationalTipModule);
 
 // The maximum number of times the auxiliary search promo card can be visible to
 // the user.
@@ -183,11 +157,11 @@ BASE_DECLARE_FEATURE(kDefaultBrowserMagicStackIos);
 // card should be hidden.
 extern const base::FeatureParam<int> kMaxDefaultBrowserMagicStackIosImpressions;
 
-// Whether the Default Browser promo module should be shown in the Magic Stack.
-bool IsDefaultBrowserMagicStackEnabled();
-
 // Feature flag for enabling the tips notifications ranker.
 BASE_DECLARE_FEATURE(kAndroidTipsNotifications);
+
+// Feature flag for enabling the tips notifications ranker V2.
+BASE_DECLARE_FEATURE(kAndroidTipsNotificationsV2);
 
 // The prioritization of tips notifications based on trust and safety.
 extern const base::FeatureParam<bool> kTrustAndSafety;
@@ -199,6 +173,29 @@ extern const base::FeatureParam<bool> kNewFeatures;
 extern const base::FeatureParam<int> kStartTimeMinutes;
 // The window time in minutes for the elapsed time since the start time.
 extern const base::FeatureParam<int> kWindowTimeMinutes;
+// The control param for the Enhanced Safe Browsing tip.
+extern const base::FeatureParam<bool> kEnableEnhancedSafeBrowsingTip;
+// The control param for the Quick Delete tip.
+extern const base::FeatureParam<bool> kEnableQuickDeleteTip;
+// The control param for the Google Lens tip.
+extern const base::FeatureParam<bool> kEnableGoogleLensTip;
+// The control param for the Bottom Omnibox tip.
+extern const base::FeatureParam<bool> kEnableBottomOmniboxTip;
+
+// The prioritization of tips notifications based on ecosystem lock-in.
+extern const base::FeatureParam<bool> kEcosystemLockIn;
+// The prioritization of tips notifications based on utility and organization.
+extern const base::FeatureParam<bool> kUtilityAndOrganization;
+// The control param for the Password Autofill tip.
+extern const base::FeatureParam<bool> kEnablePasswordAutofillTip;
+// The control param for the Signin tip.
+extern const base::FeatureParam<bool> kEnableSigninTip;
+// The control param for the Create Tab Groups tip.
+extern const base::FeatureParam<bool> kEnableCreateTabGroupsTip;
+// The control param for the Customize MVT tip.
+extern const base::FeatureParam<bool> kEnableCustomizeMVTTip;
+// The control param for the Recent Tabs tip.
+extern const base::FeatureParam<bool> kEnableRecentTabsTip;
 
 }  // namespace segmentation_platform::features
 

@@ -207,4 +207,19 @@ public interface ExternalNavigationDelegate {
      * @param params The parameters describing the navigation.
      */
     boolean shouldSelfNavigationLaunchAsMultipleTask(ExternalNavigationParams params);
+
+    /**
+     * Sets the {@link ExternalNavigationHelper} to use.
+     *
+     * @param helper The {@link ExternalNavigationHelper} to set.
+     */
+    void setExternalNavigationHelper(ExternalNavigationHelper helper);
+
+    /**
+     * Returns whether the external navigation should be blocked now because an app should be set
+     * for the current page to be opened by the user on demand at a later time.
+     *
+     * @param url The {@link GURL} of the current page.
+     */
+    boolean allowExternalNavigationForHttpProtocols(GURL url);
 }

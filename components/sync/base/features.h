@@ -33,9 +33,6 @@ BASE_DECLARE_FEATURE(kSyncMakeAutofillValuableNonEncryptable);
 // Enables syncing of usage metadata from Google Wallet passes.
 BASE_DECLARE_FEATURE(kSyncAutofillValuableMetadata);
 
-// Enables storing valuables in the profile db instead of the account db.
-BASE_DECLARE_FEATURE(kSyncMoveValuablesToProfileDb);
-
 // Enables syncing account-local metadata for shared tab groups.
 BASE_DECLARE_FEATURE(kSyncSharedTabGroupAccountData);
 
@@ -47,6 +44,18 @@ BASE_DECLARE_FEATURE(kSyncAIThread);
 
 // Enables syncing of contextual tasks.
 BASE_DECLARE_FEATURE(kSyncContextualTask);
+
+// Enables syncing of Gemini threads across devices.
+BASE_DECLARE_FEATURE(kSyncGeminiThread);
+
+// Enables syncing of themes across iOS devices.
+BASE_DECLARE_FEATURE(kSyncThemesIos);
+
+// Enables syncing of usage metadata for loyalty cards.
+BASE_DECLARE_FEATURE(kSyncLoyaltyCardMetadata);
+
+// Enables syncing of accessibility annotations to devices.
+BASE_DECLARE_FEATURE(kSyncAccessibilityAnnotation);
 
 #if !BUILDFLAG(IS_CHROMEOS)
 // Flag that controls Uno fast-follow features which are:
@@ -64,13 +73,6 @@ BASE_DECLARE_FEATURE(kUnoPhase2FollowUp);
 // Controls whether to enable syncing of Autofill Wallet Credential Data.
 BASE_DECLARE_FEATURE(kSyncAutofillWalletCredentialData);
 
-// If enabled, the bookmarks count limit is controlled by a Finch parameter.
-BASE_DECLARE_FEATURE(kSyncBookmarksLimit);
-
-constexpr size_t kDefaultSyncBookmarksLimit = 100000;
-inline constexpr base::FeatureParam<size_t> kSyncBookmarksLimitValue{
-    &kSyncBookmarksLimit, "sync-bookmarks-limit-value",
-    kDefaultSyncBookmarksLimit};
 // If enabled, the error that the bookmarks count exceeded the limit during the
 // last initial merge is reset after a certain period.
 BASE_DECLARE_FEATURE(kSyncResetBookmarksInitialMergeLimitExceededError);
@@ -87,6 +89,16 @@ BASE_DECLARE_FEATURE(kSeparateLocalAndAccountSearchEngines);
 
 // Feature flag to replace all sync-related UI with sign-in ones.
 BASE_DECLARE_FEATURE(kReplaceSyncPromosWithSignInPromos);
+
+// Enables syncing extensions only if the user newly signs in to Chrome, not if
+// they were already signed in by the time `kReplaceSyncPromosWithSignInPromos`
+// was enabled.
+BASE_DECLARE_FEATURE_PARAM(bool, kExplicitSigninForExtensions);
+
+// Enables syncing bookmarks and reading list only if the user newly signs in to
+// Chrome, not if they were already signed in by the time
+// `kReplaceSyncPromosWithSignInPromos` was enabled.
+BASE_DECLARE_FEATURE_PARAM(bool, kExplicitSigninForBookmarks);
 
 // If enabled, allowlisted priority preferences will be synced even if the
 // preferences user toggle is off. Note that this flag is only meaningful if
@@ -126,21 +138,6 @@ constexpr bool IsReadingListAccountStorageEnabled() {
   return true;
 }
 #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
-
-// Flag to enable clean up of password deletions that may be unintentional.
-BASE_DECLARE_FEATURE(kSyncPasswordCleanUpAccidentalBatchDeletions);
-// The minimum number of deletions that can be considered a batch deletion.
-inline constexpr base::FeatureParam<int>
-    kSyncPasswordCleanUpAccidentalBatchDeletionsCountThreshold{
-        &kSyncPasswordCleanUpAccidentalBatchDeletions,
-        "SyncPasswordCleanUpAccidentalBatchDeletionsCountThreshold", 3};
-// The maximum time between earliest and latest deletion to be considered an
-// accidental batch deletion.
-inline constexpr base::FeatureParam<base::TimeDelta>
-    kSyncPasswordCleanUpAccidentalBatchDeletionsTimeThreshold{
-        &kSyncPasswordCleanUpAccidentalBatchDeletions,
-        "SyncPasswordCleanUpAccidentalBatchDeletionsTimeThreshold",
-        base::Milliseconds(100)};
 
 // If enabled, sync-the-transport will auto-start (avoid deferring startup) if
 // sync metadata isn't available (i.e. initial sync never completed).
@@ -192,6 +189,9 @@ BASE_DECLARE_FEATURE(kSyncEnablePasswordsSyncErrorMessageAlternative);
 inline constexpr base::FeatureParam<int>
     kSyncEnablePasswordsSyncErrorMessageAlternativeVersion{
         &kSyncEnablePasswordsSyncErrorMessageAlternative, "version", 3};
+
+// If enabled, the error message to unlock passwords is shown for longer.
+BASE_DECLARE_FEATURE(kSyncTrustedVaultErrorMessageDuration);
 #endif  // BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(IS_IOS)
@@ -205,10 +205,6 @@ BASE_DECLARE_FEATURE(kSyncTrustedVaultInfobarMessageImprovements);
 // determine whether the pref values should be set in the account storage.
 BASE_DECLARE_FEATURE(kSyncPreferencesUseSelectedTypes);
 
-// When enabled, Sync will use OSCryptAsync for encryption/decryption instead
-// of OSCrypt within the sync code.
-BASE_DECLARE_FEATURE(kSyncUseOsCryptAsync);
-
 BASE_DECLARE_FEATURE(kSyncDetermineAccountManagedStatus);
 BASE_DECLARE_FEATURE_PARAM(base::TimeDelta,
                            kSyncDetermineAccountManagedStatusTimeout);
@@ -216,6 +212,27 @@ BASE_DECLARE_FEATURE_PARAM(base::TimeDelta,
 // If enabled, the new sync dashboard URL will be opened when the user clicks
 // on the "Review your synced data" (or equivalent) entrypoint in settings.
 BASE_DECLARE_FEATURE(kSyncEnableNewSyncDashboardUrl);
+
+// If enabled, Sync will fetch device statistics for all accounts on the device,
+// and record summary metrics about them.
+BASE_DECLARE_FEATURE(kSyncRecordDeviceStatisticsMetrics);
+// Delay before downloading device statistics and recording related metrics. The
+// exact number is somewhat arbitrary, chosen to ensure that refresh tokens are
+// loaded, the local cache GUID is up to date, and to avoid interfering with
+// general (sync or browser) startup.
+BASE_DECLARE_FEATURE_PARAM(base::TimeDelta,
+                           kSyncRecordDeviceStatisticsMetricsDelay);
+// Controls how often device statistics are collected and recorded in metrics,
+// as the minimum number of days between recordings.
+BASE_DECLARE_FEATURE_PARAM(int, kSyncRecordDeviceStatisticsMetricsPeriodDays);
+
+// If enabled, DeviceInfoSyncBridge uses WallClockTimer for pulse updates,
+// which is more resilient to device suspension.
+BASE_DECLARE_FEATURE(kSyncDeviceInfoUseWallClockTimer);
+
+// If enabled, validate the access token before sending the request to the
+// server.
+BASE_DECLARE_FEATURE(kSyncValidateAccessToken);
 
 }  // namespace syncer
 

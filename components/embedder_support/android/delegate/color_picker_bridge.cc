@@ -12,7 +12,7 @@
 #include "ui/android/window_android.h"
 
 // Must come after all headers that specialize FromJniType() / ToJniType().
-#include "components/embedder_support/android/web_contents_delegate_jni_headers/ColorPickerBridge_jni.h"
+#include "components/embedder_support/android/web_contents_delegate_jni/ColorPickerBridge_jni.h"
 
 using base::android::ConvertUTF8ToJavaString;
 using base::android::JavaRef;
@@ -69,7 +69,7 @@ void ColorPickerBridge::SetSelectedColor(SkColor color) {
   // we don't support that for now.
 }
 
-void ColorPickerBridge::OnColorChosen(JNIEnv* env, jint color) {
+void ColorPickerBridge::OnColorChosen(JNIEnv* env, int32_t color) {
   web_contents_->DidChooseColorInColorChooser(color);
   web_contents_->DidEndColorChooser();
 }

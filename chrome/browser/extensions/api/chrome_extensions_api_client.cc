@@ -28,11 +28,12 @@
 #include "chrome/browser/extensions/extension_action_dispatcher.h"
 #include "chrome/browser/extensions/extension_action_runner.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
+#include "chrome/browser/extensions/system_display/display_info_provider.h"
 #include "chrome/browser/favicon/favicon_utils.h"
 #include "chrome/browser/supervised_user/supervised_user_extensions_delegate_impl.h"
+#include "chrome/browser/tab_list/tab_list_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
-#include "chrome/browser/ui/tabs/tab_list_interface.h"
 #include "chrome/browser/ui/webui/devtools/devtools_ui.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/url_constants.h"
@@ -47,6 +48,7 @@
 #include "extensions/browser/api/messaging/messaging_delegate.h"
 #include "extensions/browser/api/messaging/native_message_host.h"
 #include "extensions/browser/api/messaging/native_message_port.h"
+#include "extensions/browser/api/system_display/display_info_provider.h"
 #include "extensions/browser/api/virtual_keyboard_private/virtual_keyboard_delegate.h"
 #include "extensions/browser/api/web_request/web_request_info.h"
 #include "extensions/browser/extension_action.h"
@@ -63,15 +65,23 @@
 #include "url/gurl.h"
 
 #if BUILDFLAG(ENABLE_GUEST_VIEW)
+
+#if BUILDFLAG(ENABLE_PLATFORM_APPS)
 #include "chrome/browser/guest_view/app_view/chrome_app_view_guest_delegate.h"
+#endif
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+#include "chrome/browser/guest_view/mime_handler_view/chrome_mime_handler_view_guest_delegate.h"
+#endif
+
 #include "chrome/browser/guest_view/chrome_guest_view_manager_delegate.h"
 #include "chrome/browser/guest_view/extension_options/chrome_extension_options_guest_delegate.h"
-#include "chrome/browser/guest_view/mime_handler_view/chrome_mime_handler_view_guest_delegate.h"
 #include "chrome/browser/guest_view/web_view/chrome_web_view_guest_delegate.h"
 #include "chrome/browser/guest_view/web_view/chrome_web_view_permission_helper_delegate.h"
 #include "extensions/browser/guest_view/web_view/web_view_guest.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper.h"
-#endif
+
+#endif  // BUILDFLAG(ENABLE_GUEST_VIEW)
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/extensions/api/feedback_private/chrome_feedback_private_delegate.h"
@@ -222,7 +232,7 @@ void ChromeExtensionsAPIClient::NotifyWebRequestWithheld(
   // invoking the extension on a site grants access to the tab's origin if
   // and only if the extension requested it; without requesting the tab,
   // clicking on the extension won't grant access to the resource.
-  // https://crbug.com/891586.
+  // https://crbug.com/41418607.
   // TODO(crbug.com/40076508): We can remove this if extensions require host
   // permissions to the initiator, since then we'll never get into this type
   // of circumstance (the request would be blocked, rather than withheld).
@@ -320,10 +330,13 @@ void ChromeExtensionsAPIClient::OpenFileUrlForTesting(
 }
 
 #if BUILDFLAG(ENABLE_GUEST_VIEW)
+
+#if BUILDFLAG(ENABLE_PLATFORM_APPS)
 std::unique_ptr<AppViewGuestDelegate>
 ChromeExtensionsAPIClient::CreateAppViewGuestDelegate() const {
   return std::make_unique<ChromeAppViewGuestDelegate>();
 }
+#endif
 
 std::unique_ptr<ExtensionOptionsGuestDelegate>
 ChromeExtensionsAPIClient::CreateExtensionOptionsGuestDelegate(
@@ -336,11 +349,13 @@ ChromeExtensionsAPIClient::CreateGuestViewManagerDelegate() const {
   return std::make_unique<ChromeGuestViewManagerDelegate>();
 }
 
+#if BUILDFLAG(ENABLE_EXTENSIONS)
 std::unique_ptr<MimeHandlerViewGuestDelegate>
 ChromeExtensionsAPIClient::CreateMimeHandlerViewGuestDelegate(
     MimeHandlerViewGuest* guest) const {
   return std::make_unique<ChromeMimeHandlerViewGuestDelegate>();
 }
+#endif
 
 std::unique_ptr<WebViewGuestDelegate>
 ChromeExtensionsAPIClient::CreateWebViewGuestDelegate(
@@ -381,11 +396,11 @@ ChromeExtensionsAPIClient::CreateContentRulesRegistry(
 #if BUILDFLAG(IS_CHROMEOS)
 bool ChromeExtensionsAPIClient::ShouldAllowDetachingUsb(int vid,
                                                         int pid) const {
-  const base::Value::List* policy_list;
+  const base::ListValue* policy_list;
   if (ash::CrosSettings::Get()->GetList(ash::kUsbDetachableAllowlist,
                                         &policy_list)) {
     for (const auto& entry : *policy_list) {
-      const base::Value::Dict* entry_dict = entry.GetIfDict();
+      const base::DictValue* entry_dict = entry.GetIfDict();
       if (entry_dict &&
           entry_dict->FindInt(ash::kUsbDetachableAllowlistKeyVid) == vid &&
           entry_dict->FindInt(ash::kUsbDetachableAllowlistKeyPid) == pid) {
@@ -508,6 +523,11 @@ ChromeExtensionsAPIClient::CreateNativeMessagePortDispatcher(
     scoped_refptr<base::SingleThreadTaskRunner> message_service_task_runner) {
   return std::make_unique<ChromeNativeMessagePortDispatcher>(
       std::move(host), std::move(port), std::move(message_service_task_runner));
+}
+
+std::unique_ptr<DisplayInfoProvider>
+ChromeExtensionsAPIClient::CreateDisplayInfoProvider() const {
+  return CreateChromeDisplayInfoProvider();
 }
 
 }  // namespace extensions

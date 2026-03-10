@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import {html} from '//resources/lit/v3_0/lit.rollup.js';
+
 import type {DiceWebSigninInterceptAppElement} from './dice_web_signin_intercept_app.js';
 
 export function getHtml(this: DiceWebSigninInterceptAppElement) {
@@ -77,10 +78,13 @@ export function getHtml(this: DiceWebSigninInterceptAppElement) {
     ${this.acceptButtonClicked_ ? html`<div class="spinner"></div>` : ''}
     <div class="action-container">
       <cr-button id="acceptButton" class="action-button" autofocus
-          @click="${this.onAccept_}" ?disabled="${this.acceptButtonClicked_}">
+          @click="${this.onAcceptClick_}"
+          ?disabled="${this.acceptButtonClicked_}">
         ${this.interceptionParameters_.confirmButtonLabel}
       </cr-button>
-      <cr-button id="cancelButton" @click="${this.onCancel_}"
+      <cr-button id="cancelButton"
+          class="${this.getCancelButtonClass_()}"
+          @click="${this.onCancelClick_}"
           ?disabled="${this.acceptButtonClicked_}">
         ${this.interceptionParameters_.cancelButtonLabel}
       </cr-button>

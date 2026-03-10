@@ -5,6 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_TRUSTEDTYPES_TRUSTED_TYPES_UTIL_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_TRUSTEDTYPES_TRUSTED_TYPES_UTIL_H_
 
+#include "third_party/blink/renderer/bindings/core/v8/v8_set_html_options.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_set_html_unsafe_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_typedefs.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/script/script_element_base.h"
@@ -16,6 +18,7 @@ namespace blink {
 
 class ExceptionState;
 class ExecutionContext;
+class FragmentParserOptions;
 class QualifiedName;
 class ScriptValue;
 class ScriptState;
@@ -31,6 +34,8 @@ enum class SpecificTrustedType {
   kScript,
   kScriptURL,
 };
+
+enum class MarkupInsertionMode { kFragment, kStream };
 
 // Perform Trusted Type checks, with the IDL union types as input. All of these
 // will call String& versions below to do the heavy lifting.
@@ -100,6 +105,14 @@ TrustedTypesCheckForScriptURL(const String&,
                               const AtomicString& interface_name,
                               const AtomicString& property_name,
                               ExceptionState&);
+
+[[nodiscard]] CORE_EXPORT std::optional<FragmentParserOptions>
+TrustedTypesCheckForParserOptions(FragmentParserOptions options,
+                                  MarkupInsertionMode insertion_mode,
+                                  const ExecutionContext*,
+                                  const AtomicString& interface_name,
+                                  const AtomicString& property_name,
+                                  ExceptionState&);
 
 // Functionally equivalent to TrustedTypesCheckForScript(const String&, ...),
 // but with setup & error handling suitable for the asynchronous execution

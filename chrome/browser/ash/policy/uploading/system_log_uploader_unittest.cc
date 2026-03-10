@@ -4,10 +4,10 @@
 
 #include "chrome/browser/ash/policy/uploading/system_log_uploader.h"
 
+#include <algorithm>
 #include <map>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/memory/raw_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -16,7 +16,6 @@
 #include "base/time/time.h"
 #include "chrome/browser/ash/settings/scoped_cros_settings_test_helper.h"
 #include "chrome/browser/prefs/browser_prefs.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "components/policy/core/common/remote_commands/remote_command_job.h"
 #include "components/prefs/testing_pref_service.h"
@@ -154,7 +153,7 @@ class MockSystemLogDelegate : public SystemLogUploader::Delegate {
   void ZipSystemLogs(std::unique_ptr<SystemLogUploader::SystemLogs> system_logs,
                      ZippedLogUploadCallback upload_callback) override {
     for (const auto& log : system_logs_)
-      EXPECT_TRUE(base::Contains(*system_logs, log));
+      EXPECT_TRUE(std::ranges::contains(*system_logs, log));
     std::move(upload_callback).Run(std::string(kZippedData));
   }
 

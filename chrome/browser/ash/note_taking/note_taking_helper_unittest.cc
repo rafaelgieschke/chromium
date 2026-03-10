@@ -52,6 +52,7 @@
 #include "chromeos/ash/components/dbus/session_manager/session_manager_client.h"
 #include "chromeos/ash/components/disks/disk.h"
 #include "chromeos/ash/components/disks/disk_mount_manager.h"
+#include "chromeos/ash/components/login/session/session_termination_manager.h"
 #include "chromeos/ash/experiences/arc/arc_prefs.h"
 #include "chromeos/ash/experiences/arc/mojom/file_system.mojom.h"
 #include "chromeos/ash/experiences/arc/mojom/intent_common.mojom.h"
@@ -271,7 +272,15 @@ class NoteTakingHelperTest : public BrowserWithTestWindowTest {
     // TODO(derat): Sigh, something in ArcAppTest appears to be re-enabling ARC.
     profile()->GetPrefs()->SetBoolean(arc::prefs::kArcEnabled,
                                       flags & ENABLE_PLAY_STORE);
+
     NoteTakingHelper::Initialize();
+
+    // NOTE: In production, NoteTakingHelper is created before a profile.
+    // These simulate observer calls of ProfileManagerObserver and
+    // ArcIntentHelperObserver.
+    NoteTakingHelper::Get()->OnProfileAdded(profile());
+    NoteTakingHelper::Get()->OnIntentFiltersUpdated(std::nullopt);
+
     NoteTakingHelper::Get()->set_launch_chrome_app_callback_for_test(
         base::BindRepeating(&NoteTakingHelperTest::LaunchChromeApp,
                             base::Unretained(this)));
@@ -286,18 +295,18 @@ class NoteTakingHelperTest : public BrowserWithTestWindowTest {
   scoped_refptr<const extensions::Extension> CreateExtension(
       const extensions::ExtensionId& id,
       const std::string& name,
-      std::optional<base::Value::List> permissions,
-      std::optional<base::Value::List> action_handlers) {
-    base::Value::Dict manifest =
-        base::Value::Dict()
+      std::optional<base::ListValue> permissions,
+      std::optional<base::ListValue> action_handlers) {
+    base::DictValue manifest =
+        base::DictValue()
             .Set("name", name)
             .Set("version", "1.0")
             .Set("manifest_version", 2)
-            .Set("app", base::Value::Dict().Set(
-                            "background",
-                            base::Value::Dict().Set(
-                                "scripts",
-                                base::Value::List().Append("background.js"))));
+            .Set("app",
+                 base::DictValue().Set(
+                     "background",
+                     base::DictValue().Set("scripts", base::ListValue().Append(
+                                                          "background.js"))));
 
     if (action_handlers)
       manifest.Set("action_handlers", std::move(*action_handlers));
@@ -447,6 +456,7 @@ class NoteTakingHelperTest : public BrowserWithTestWindowTest {
   // Has Init() been called?
   bool initialized_ = false;
 
+  ash::SessionTerminationManager session_termination_manager_;
   ArcAppTest arc_app_test_{ArcAppTest::UserManagerMode::kDoNothing};
   std::unique_ptr<arc::FakeIntentHelperHost> intent_helper_host_;
   base::test::ScopedFeatureList feature_list_;
@@ -739,7 +749,7 @@ TEST_F(NoteTakingHelperTest, AddProfileWithPlayStoreEnabled) {
   // Add a second profile with the ARC-enabled pref already set. The Play Store
   // should be immediately regarded as being enabled and the observer should be
   // notified, since OnArcPlayStoreEnabledChanged() apparently isn't called in
-  // this case: http://crbug.com/700554
+  // this case: http://crbug.com/41306817
   auto prefs = std::make_unique<sync_preferences::TestingPrefServiceSyncable>();
   RegisterUserProfilePrefs(prefs->registry());
   prefs->SetBoolean(arc::prefs::kArcEnabled, true);
@@ -752,7 +762,7 @@ TEST_F(NoteTakingHelperTest, AddProfileWithPlayStoreEnabled) {
 
   // TODO(derat|hidehiko): Check that NoteTakingHelper adds itself as an
   // observer of the ArcIntentHelperBridge corresponding to the new profile:
-  // https://crbug.com/748763
+  // https://crbug.com/41335664
 
   // Notification of updated intent filters should result in the apps being
   // refreshed.

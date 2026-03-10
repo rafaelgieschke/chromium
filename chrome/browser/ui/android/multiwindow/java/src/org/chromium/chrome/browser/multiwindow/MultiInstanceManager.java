@@ -12,16 +12,16 @@ import androidx.annotation.IntDef;
 import androidx.annotation.VisibleForTesting;
 
 import org.chromium.base.CommandLine;
-import org.chromium.base.ObserverList;
+import org.chromium.base.UnownedUserDataHost;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.browser.flags.ChromeSwitches;
 import org.chromium.chrome.browser.multiwindow.UiUtils.NameWindowDialogSource;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tabmodel.SupportedProfileType;
 import org.chromium.chrome.browser.tabmodel.TabGroupMetadata;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabModelObserver;
-import org.chromium.components.messages.MessageDispatcher;
 import org.chromium.content_public.browser.LoadUrlParams;
 
 import java.lang.annotation.Retention;
@@ -38,31 +38,50 @@ import java.util.List;
 @NullMarked
 public abstract class MultiInstanceManager {
     public static final int INVALID_TASK_ID = -1; // Defined in android.app.ActivityTaskManager.
+    public static final int INVALID_WINDOW_ID = -1;
     public static final String NEW_WINDOW_APP_SOURCE_HISTOGRAM =
-            "Android.MultiWindowMode.NewWindow.AppSource";
+            "Android.MultiWindowMode.NewWindow.AppSource3";
 
     @VisibleForTesting
     static final String CLOSE_WINDOW_APP_SOURCE_HISTOGRAM =
-            "Android.MultiWindowMode.CloseWindow.AppSource";
+            "Android.MultiWindowMode.CloseWindow.AppSource2";
 
     // These values are persisted to logs. Entries should not be renumbered and numeric values
-    // should never be reused.
+    // should never be reused. If none of the existing values are suitable for a feature that
+    // creates a new window, update the enum.
     // LINT.IfChange(NewWindowAppSource)
     @IntDef({
-        NewWindowAppSource.OTHER,
+        NewWindowAppSource.UNKNOWN,
         NewWindowAppSource.MENU,
         NewWindowAppSource.WINDOW_MANAGER,
         NewWindowAppSource.KEYBOARD_SHORTCUT,
-        NewWindowAppSource.RECENT_TABS
+        NewWindowAppSource.RECENT_TABS,
+        NewWindowAppSource.DRAG_DROP_LAUNCHER,
+        NewWindowAppSource.TAB_REPARENTING_TO_INSTANCE_WITH_NO_ACTIVITY,
+        NewWindowAppSource.URL_LAUNCH,
+        NewWindowAppSource.NEW_TAB_FOR_DIFFERENT_PROFILE_TYPE,
+        NewWindowAppSource.EXTERNAL_NAVIGATION,
+        NewWindowAppSource.DEV_TOOLS,
+        NewWindowAppSource.BROWSER_WINDOW_CREATOR,
+        NewWindowAppSource.ANDROID_S_UPDATE
     })
     public @interface NewWindowAppSource {
-        int OTHER = 0;
+        int UNKNOWN = 0;
         int MENU = 1;
         int WINDOW_MANAGER = 2;
         int KEYBOARD_SHORTCUT = 3;
         int RECENT_TABS = 4;
-        int NUM_ENTRIES = 5;
+        int DRAG_DROP_LAUNCHER = 5;
+        int TAB_REPARENTING_TO_INSTANCE_WITH_NO_ACTIVITY = 6;
+        int URL_LAUNCH = 7;
+        int NEW_TAB_FOR_DIFFERENT_PROFILE_TYPE = 8;
+        int EXTERNAL_NAVIGATION = 9;
+        int DEV_TOOLS = 10;
+        int BROWSER_WINDOW_CREATOR = 11;
+        int ANDROID_S_UPDATE = 12;
+        int NUM_ENTRIES = 13;
     }
+
     // LINT.ThenChange(//tools/metrics/histograms/metadata/android/enums.xml)
 
     // These values are persisted to logs. Entries should not be renumbered and
@@ -138,21 +157,6 @@ public abstract class MultiInstanceManager {
 
     protected static List<Integer> sTestDisplayIds = new ArrayList<>();
 
-    /** The type of tab/profile the activity supports. */
-    @IntDef({
-        SupportedProfileType.UNSET,
-        SupportedProfileType.REGULAR,
-        SupportedProfileType.OFF_THE_RECORD,
-        SupportedProfileType.MIXED
-    })
-    @Retention(RetentionPolicy.SOURCE)
-    public @interface SupportedProfileType {
-        int UNSET = 0;
-        int REGULAR = 1;
-        int OFF_THE_RECORD = 2;
-        int MIXED = 3;
-    }
-
     /**
      * Called during activity startup to check whether the activity is recreated because the
      * secondary display is removed.
@@ -195,19 +199,19 @@ public abstract class MultiInstanceManager {
      *
      * <ul>
      *   <li>The caller doesn't (need to) know the specifics of the {@link Intent}, such as flags,
-     *       Extras, the target {@link Activity}, the new window's instance ID, etc. An example of
-     *       this is the "open new window" option in the app menu.
-     *   <li>The caller is in a modularized target and can't depend on code at the "glue" layer,
-     *       such as {@link MultiWindowUtils#createNewWindowIntent}. In this case, the caller should
-     *       inject {@link MultiInstanceManager} at the "glue" layer, then use it in the caller's
-     *       internal logic to create the {@link Intent}.
+     *       Extras, the target {@link Activity}, the new window's instance ID, etc.
+     *   <li>The caller is in a modularized target and can't depend on code at the "glue" layer. In
+     *       this case, the caller should inject {@link MultiInstanceManager} at the "glue" layer,
+     *       then use it in the caller's internal logic to create the {@link Intent}.
      * </ul>
      *
      * @param isIncognito Whether the new window should be in the incognito mode.
+     * @param source The source of new window creation used for metrics.
      * @return The new {@link Intent} as described above, or {@code null} if the new window cannot
      *     be created.
      */
-    public abstract @Nullable Intent createNewWindowIntent(boolean isIncognito);
+    public abstract @Nullable Intent createNewWindowIntent(
+            boolean isIncognito, @NewWindowAppSource int source);
 
     /**
      * Merges tabs from a second ChromeTabbedActivity instance if necessary and calls
@@ -217,21 +221,55 @@ public abstract class MultiInstanceManager {
     public abstract void maybeMergeTabs();
 
     /**
-     * Open a new instance of the ChromeTabbedActivity window and move the specified tabs from
-     * existing instance to the new one.
+     * Moves the specified tabs to a new ChromeTabbedActivity instance.
      *
-     * @param tabs Tabs that are to be moved to a new Chrome instance.
+     * @param tabs The list of tabs to move.
+     * @param finalizeCallback A runnable that will be invoked after the tabs have finished
+     *     reparenting to the new window.
      * @param source The new window creation source used for metrics.
      */
-    public void moveTabsToNewWindow(List<Tab> tabs, @NewWindowAppSource int source) {
+    public void moveTabsToNewWindow(
+            List<Tab> tabs, @Nullable Runnable finalizeCallback, @NewWindowAppSource int source) {
         // Not implemented
     }
 
     /**
-     * Open a new instance of the ChromeTabbedActivity window and move the specified tab group from
-     * existing instance to the new one.
+     * Moves the specified tabs to the specified ChromeTabbedActivity instance. This accepts inputs
+     * to determine the position of the moved tabs in the destination window. The operation will
+     * fail if the instance is not found.
      *
-     * @param tabGroupMetadata The object containing the metadata of the tab group.
+     * @param destWindowId The id of the destination window.
+     * @param tabs The list of tabs to move.
+     * @param destTabIndex The tab index in the destination window where the tabs will be
+     *     positioned. This will be ignored if {@code destGroupTabId} is set. To use the default tab
+     *     index, set this to {@code TabList.INVALID_TAB_INDEX}.
+     * @param destGroupTabId The id of the tab in the destination tab group, if the tabs need to be
+     *     moved to a specific tab group in the destination window. The tabs will be added to the
+     *     end of the destination tab group. A tab with this id must exist in the destination
+     *     window, otherwise this operation will fail. If there is no tab group to move the
+     *     specified tabs to, set this to {@code TabList.INVALID_TAB_INDEX}.
+     */
+    public void moveTabsToWindowByIdChecked(
+            int destWindowId, List<Tab> tabs, int destTabIndex, int destGroupTabId) {
+        // Not implemented
+    }
+
+    /**
+     * Moves the specified tabs to a selected ChromeTabbedActivity instance. If there is only one
+     * eligible window currently, tabs will be moved to a new window. Otherwise, the user will be
+     * presented with a UI to select a window to move the tabs to.
+     *
+     * @param tabs The list of tabs to move.
+     * @param source The new window creation source used for metrics.
+     */
+    public void moveTabsToOtherWindow(List<Tab> tabs, @NewWindowAppSource int source) {
+        // Not implemented
+    }
+
+    /**
+     * Moves the specified tab group to a new ChromeTabbedActivity instance.
+     *
+     * @param tabGroupMetadata The {@link TabGroupMetadata} describing the tab group being moved.
      * @param source The new window creation source used for metrics.
      */
     public void moveTabGroupToNewWindow(
@@ -240,79 +278,29 @@ public abstract class MultiInstanceManager {
     }
 
     /**
-     * Move the specified tabs to the current instance of the ChromeTabbedActivity window.
+     * Moves a tab group to the specified position in the specified ChromeTabbedActivity instance.
+     * The operation will fail if the instance is not found.
      *
-     * @param activity Activity of the Chrome Window in which the tab is to be moved.
-     * @param tabs The list of tabs that is to be moved to the current instance.
-     * @param atIndex Tab position index in the destination window instance.
+     * @param destWindowId The id of the destination window.
+     * @param tabGroupMetadata The {@link TabGroupMetadata} describing the tab group being moved.
+     * @param destTabIndex The tab index in the destination window where the tab group will be
+     *     positioned. To use the default tab index, set this to {@code TabList.INVALID_TAB_INDEX}.
      */
-    public void moveTabsToWindow(@Nullable Activity activity, List<Tab> tabs, int atIndex) {
+    public void moveTabGroupToWindowByIdChecked(
+            int destWindowId, TabGroupMetadata tabGroupMetadata, int destTabIndex) {
         // Not implemented
     }
 
     /**
-     * Move the specified tabs to the specified instance of the ChromeTabbedActivity window.
+     * Moves the specified tab group to a selected ChromeTabbedActivity instance. If there is only
+     * one eligible window currently, the tab group will be moved to a new window. Otherwise, the
+     * user will be presented with a UI to select a window to move the tab group to.
      *
-     * @param info {@link InstanceInfo} describing the destination window.
-     * @param tabs The list of tabs that is to be moved to the current instance.
-     * @param atIndex Tab position index in the destination window instance.
+     * @param tabGroupMetadata The {@link TabGroupMetadata} describing the tab group being moved.
      * @param source The new window creation source used for metrics.
      */
-    public void moveTabsToWindow(
-            InstanceInfo info, List<Tab> tabs, int atIndex, @NewWindowAppSource int source) {
-        // Not implemented
-    }
-
-    /**
-     * Move the specified tabs to the specified instance of the ChromeTabbedActivity window and
-     * merge with the destination tab group. The tabs are added to the end of the destination tab
-     * group. If the activity from {@code info} does not exist, this will not create a new window.
-     *
-     * @param info {@link InstanceInfo} describing the destination window.
-     * @param tabs The list of ungrouped tabs that is to be moved to the current instance.
-     * @param destTabId The id of the tab in the destination tab group. The tab with this ID must
-     *     exist in the destination window, otherwise this operation will fail.
-     */
-    public void moveTabsToWindowAndMergeToDest(InstanceInfo info, List<Tab> tabs, int destTabId) {
-        // Not implemented
-    }
-
-    /**
-     * Move an entire tab group to the current instance of the ChromeTabbedActivity window.
-     *
-     * @param activity Activity of the Chrome Window in which the tab group is to be moved.
-     * @param tabGroupMetadata The object containing the metadata of the tab group.
-     * @param atIndex Tab position index in the destination window instance.
-     */
-    public void moveTabGroupToWindow(
-            @Nullable Activity activity, TabGroupMetadata tabGroupMetadata, int atIndex) {
-        // Not implemented
-    }
-
-    /**
-     * Move an entire tab group to the specified instance of the ChromeTabbedActivity window.
-     *
-     * @param info {@link InstanceInfo} describing the destination window.
-     * @param tabGroupMetadata The object containing the metadata of the tab group.
-     * @param atIndex Tab position index in the destination window instance.
-     * @param source The new window creation source used for metrics.
-     */
-    public void moveTabGroupToWindow(
-            InstanceInfo info,
-            TabGroupMetadata tabGroupMetadata,
-            int atIndex,
-            @NewWindowAppSource int source) {
-        // Not implemented
-    }
-
-    /**
-     * If there's only one window currently, moves {@param tabs} to a new window. Otherwise, opens a
-     * dialog to select which window to move {@param tabs} to.
-     *
-     * @param tabs The list of tabs to move.
-     * @param source The new window creation source used for metrics.
-     */
-    public void moveTabsToOtherWindow(List<Tab> tabs, @NewWindowAppSource int source) {
+    public void moveTabGroupToOtherWindow(
+            TabGroupMetadata tabGroupMetadata, @NewWindowAppSource int source) {
         // Not implemented
     }
 
@@ -334,22 +322,19 @@ public abstract class MultiInstanceManager {
     }
 
     /**
-     * If there's only one window currently, moves the matching group to a new window. Otherwise,
-     * opens a dialog to select which window to move the matching group to.
-     *
-     * @param tabGroupMetadata The metadata for the group to move.
-     * @param source The new window creation source used for metrics.
+     * @return A list of {@link InstanceInfo} structs for the specified {@link
+     *     PersistedInstanceType}. This excludes unusable instances that are marked for deletion.
      */
-    public void moveTabGroupToOtherWindow(
-            TabGroupMetadata tabGroupMetadata, @NewWindowAppSource int source) {
-        // Not implemented
+    public List<InstanceInfo> getInstanceInfo(@PersistedInstanceType int type) {
+        return Collections.emptyList();
     }
 
     /**
-     * @return List of {@link InstanceInfo} structs with {@link PersistedInstanceType} {@param type}
-     *     for an activity that can be switched to, or newly launched.
+     * @return A list of {@link InstanceInfo} structs for inactive instances, including currently
+     *     unusable instances that are marked for deletion. This excludes {@link
+     *     PersistedInstanceType#OFF_THE_RECORD} type instances.
      */
-    public List<InstanceInfo> getInstanceInfo(@PersistedInstanceType int type) {
+    public List<InstanceInfo> getRecentlyClosedInstances() {
         return Collections.emptyList();
     }
 
@@ -366,13 +351,19 @@ public abstract class MultiInstanceManager {
             int windowId, int taskId, boolean preferNew, boolean isIncognitoIntent);
 
     /**
-     * Initialize the manager with the allocated instance ID.
+     * Initialize the manager with the allocated instance ID, and perform other post-inflation
+     * activity startup tasks.
      *
      * @param instanceId Instance ID of the activity.
      * @param taskId Task ID of the activity.
-     * @param profileType The type of tab/profile the activity supports
+     * @param profileType The type of tab/profile the activity supports.
+     * @param host The {@link UnownedUserDataHost} to attach the current manager to.
      */
-    public void initialize(int instanceId, int taskId, @SupportedProfileType int profileType) {}
+    public void initialize(
+            int instanceId,
+            int taskId,
+            @SupportedProfileType int profileType,
+            UnownedUserDataHost host) {}
 
     /** Perform initialization tasks for the manager after the tab state is initialized. */
     public void onTabStateInitialized() {}
@@ -436,21 +427,17 @@ public abstract class MultiInstanceManager {
      * running activities have been finished after an instance limit downgrade causing existence of
      * more active instances than the instance limit.
      *
-     * @param messageDispatcher The {@link MessageDispatcher} to enqueue the instance restoration
-     *     message.
      * @return {@code true} if the instance restoration message was shown, {@code false} otherwise.
      */
-    public boolean showInstanceRestorationMessage(@Nullable MessageDispatcher messageDispatcher) {
+    public boolean showInstanceRestorationMessage() {
         return false;
     }
 
     /**
      * Shows a message to notify the user that a new window cannot be created because {@link
      * MultiWindowUtils#getMaxInstances()} activities already exist.
-     *
-     * @param messageDispatcher The {@link MessageDispatcher} to enqueue the instance limit message.
      */
-    public void showInstanceCreationLimitMessage(@Nullable MessageDispatcher messageDispatcher) {
+    public void showInstanceCreationLimitMessage() {
         // Not implemented
     }
 
@@ -476,35 +463,6 @@ public abstract class MultiInstanceManager {
 
     public abstract void setTabModelObserverForTesting(
             TabModelSelectorTabModelObserver tabModelObserver);
-
-    protected ObserverList<InstanceStateObserver> mInstanceStateObservers = new ObserverList<>();
-
-    /** Observer interface to notify about instance closure events. */
-    public interface InstanceStateObserver {
-        /**
-         * Notifies when an instance is closed due to activity destruction and / or an explicit user
-         * request.
-         */
-        void onInstanceClosed();
-    }
-
-    /**
-     * Registers an observer to receive notifications about changes to the instance state.
-     *
-     * @param instanceStateObserver The observer to be added.
-     */
-    public void addInstanceStateObserver(InstanceStateObserver instanceStateObserver) {
-        mInstanceStateObservers.addObserver(instanceStateObserver);
-    }
-
-    /**
-     * Unregisters an observer, stopping notifications about changes to the instance state.
-     *
-     * @param instanceStateObserver The observer to be removed.
-     */
-    public void removeInstanceStateObserver(InstanceStateObserver instanceStateObserver) {
-        mInstanceStateObservers.removeObserver(instanceStateObserver);
-    }
 
     // The instance types are defined as bit flags, so they can be or-ed to reflect
     // more than one value. Or-ed values should be validated at points of access.

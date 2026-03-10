@@ -40,6 +40,8 @@ extended = true
 tools = [
     "cargo",
     "clippy",
+    "rustc-dev",
+    "rustdoc",
     "rustfmt",
     "rust-analyzer",
     "rust-analyzer-proc-macro-srv",

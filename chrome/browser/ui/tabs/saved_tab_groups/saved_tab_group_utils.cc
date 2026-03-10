@@ -6,7 +6,6 @@
 
 #include <numeric>
 #include <optional>
-#include <unordered_set>
 
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
@@ -22,6 +21,7 @@
 #include "chrome/browser/sync/sync_service_factory.h"
 #include "chrome/browser/tab_group_sync/tab_group_sync_service_factory.h"
 #include "chrome/browser/tab_group_sync/tab_group_sync_utils.h"
+#include "chrome/browser/ui/bookmarks/bookmark_utils_desktop.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
@@ -36,6 +36,7 @@
 #include "chrome/browser/ui/tabs/tab_group_theme.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/data_sharing/collaboration_controller_delegate_desktop.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tabs/recent_activity_bubble_dialog_view.h"
@@ -453,6 +454,44 @@ void SavedTabGroupUtils::ToggleGroupPinState(
 }
 
 // static
+std::optional<tab_groups::LocalTabGroupID>
+SavedTabGroupUtils::OpenSavedTabGroup(BrowserWindowInterface* browser,
+                                      const base::Uuid& saved_group_guid,
+                                      OpeningSource opening_source,
+                                      TabGroupSyncService* tab_group_service) {
+  if (!tab_group_service) {
+    if (!browser) {
+      return std::nullopt;
+    }
+    tab_group_service =
+        TabGroupSyncServiceFactory::GetForProfile(browser->GetProfile());
+    if (!tab_group_service) {
+      return std::nullopt;
+    }
+  }
+
+  Browser* browser_ptr =
+      browser ? browser->GetBrowserForMigrationOnly() : nullptr;
+
+  std::optional<LocalTabGroupID> opened_group_id =
+      tab_group_service->OpenTabGroup(
+          saved_group_guid, std::make_unique<TabGroupActionContextDesktop>(
+                                browser_ptr, opening_source));
+
+  if (opened_group_id.has_value() &&
+      base::FeatureList::IsEnabled(features::kTabGroupsFocusing) &&
+      features::kTabGroupsFocusingDefaultToFocused.Get()) {
+    if (browser) {
+      if (auto* model = browser->GetTabStripModel()) {
+        model->SetFocusedGroup(opened_group_id.value());
+      }
+    }
+  }
+
+  return opened_group_id;
+}
+
+// static
 SavedTabGroupTab SavedTabGroupUtils::CreateSavedTabGroupTabFromWebContents(
     content::WebContents* contents,
     base::Uuid saved_tab_group_id) {
@@ -574,26 +613,6 @@ SavedTabGroup SavedTabGroupUtils::CreateSavedTabGroupFromLocalId(
   }
 
   return saved_tab_group;
-}
-
-// static
-std::unordered_set<std::string> SavedTabGroupUtils::GetURLsInSavedTabGroup(
-    Profile* profile,
-    const base::Uuid& saved_id) {
-  TabGroupSyncService* tab_group_service =
-      tab_groups::TabGroupSyncServiceFactory::GetForProfile(profile);
-
-  const std::optional<SavedTabGroup> saved_group =
-      tab_group_service->GetGroup(saved_id);
-  CHECK(saved_group.has_value());
-
-  std::unordered_set<std::string> saved_urls;
-  for (const tab_groups::SavedTabGroupTab& saved_tab :
-       saved_group->saved_tabs()) {
-    saved_urls.emplace(saved_tab.url().spec());
-  }
-
-  return saved_urls;
 }
 
 // static
@@ -856,9 +875,7 @@ void SavedTabGroupUtils::PerformTabGroupMenuAction(
                                  saved_group->is_shared_tab_group();
       }
 
-      tab_group_service->OpenTabGroup(
-          uuid, std::make_unique<TabGroupActionContextDesktop>(
-                    browser, OpeningSource::kOpenedFromRevisitUi));
+      OpenSavedTabGroup(browser, uuid, OpeningSource::kOpenedFromRevisitUi);
 
       if (will_open_shared_group) {
         RecordOpenSharedGroupMetrics(context);
@@ -890,6 +907,12 @@ void SavedTabGroupUtils::PerformTabGroupMenuAction(
       break;
     case TabGroupMenuAction::Type::LEAVE_GROUP:
       SavedTabGroupUtils::LeaveSharedGroup(browser, uuid);
+      break;
+    case TabGroupMenuAction::Type::CONVERT_TO_BOOKMARK:
+      if (std::optional<tab_groups::SavedTabGroup> group =
+              tab_group_service->GetGroup(uuid)) {
+        bookmarks::ShowBookmarkSavedTabGroupDialog(browser, group.value());
+      }
       break;
     case TabGroupMenuAction::Type::OPEN_URL:
     case TabGroupMenuAction::Type::DEFAULT:

@@ -163,8 +163,8 @@ static String BuildCSSText(const String& expression) {
   // “If a result of this serialization starts with a "(" (open parenthesis) and
   // ends with a ")" (close parenthesis), remove those characters from the
   // result.”
-  if (expression.StartsWith('(')) {
-    DCHECK(expression.EndsWith(')'));
+  if (expression.starts_with('(')) {
+    DCHECK(expression.ends_with(')'));
     result.Append(expression);
   } else {
     result.Append('(');
@@ -247,19 +247,6 @@ const CSSMathFunctionValue* CSSMathFunctionValue::TransformAnchors(
   if (transformed != expression_) {
     return MakeGarbageCollected<CSSMathFunctionValue>(
         transformed, value_range_in_target_context_);
-  }
-  return this;
-}
-
-const CSSValue*
-CSSMathFunctionValue::CopyRandomValueWithPropertyNameAndValueIndexIfNeeded(
-    const CSSPropertyName& property_name,
-    wtf_size_t property_value_index) const {
-  if (expression_ && expression_->NeedsPropertyNameAndValueIndexForRandom()) {
-    return MakeGarbageCollected<CSSMathFunctionValue>(
-        expression_->CopyRandomWithPropertyNameAndValueIndexIfNeeded(
-            property_name, property_value_index),
-        value_range_in_target_context_);
   }
   return this;
 }

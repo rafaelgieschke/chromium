@@ -12,19 +12,17 @@
 #include "extensions/buildflags/buildflags.h"
 #include "ui/base/unowned_user_data/user_data_factory.h"
 
-#if BUILDFLAG(ENABLE_GLIC)
 namespace glic {
 class GlicButtonController;
 class GlicIphController;
-class GlicLegacySidePanelCoordinator;
 }  // namespace glic
 
 namespace tabs {
 class GlicActorNudgeController;
 }  // namespace tabs
-#endif
 
 class ActorUiWindowController;
+class ContextHighlightWindowFeature;
 
 class ActorBorderViewController;
 class ActorTaskListBubbleController;
@@ -42,12 +40,14 @@ class BrowserSyncedWindowDelegate;
 class BrowserUserEducationInterface;
 class BrowserView;
 class BrowserWindowInterface;
+class CallToActionLock;
 class ChromeLabsCoordinator;
 class ColorProviderBrowserHelper;
 class LocationBar;
 class CommentsSidePanelCoordinator;
 class ContentsBorderController;
 class ContextualTasksEphemeralButtonController;
+class ContextualTasksCloseButtonController;
 class CookieControlsBubbleCoordinator;
 class DataSharingBubbleController;
 class DesktopBrowserWindowCapabilities;
@@ -65,6 +65,7 @@ class IncognitoClearBrowsingDataDialogCoordinator;
 class ImmersiveModeController;
 class IOSPromoController;
 class InitialWebUIManager;
+class InitialWebUIWindowMetricsManager;
 class LocationBarModel;
 class MemorySaverOptInIPHController;
 class PinnedToolbarActionsController;
@@ -89,6 +90,7 @@ class ToastController;
 class ToastService;
 class TranslateBubbleController;
 class UpgradeNotificationController;
+class VerticalTabIphController;
 class WebUIBrowserExclusiveAccessContext;
 class WebUIBrowserSidePanelUI;
 class ZoomBubbleCoordinator;
@@ -113,6 +115,12 @@ class SessionRestoreInfobarController;
 }
 #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 
+#if BUILDFLAG(IS_CHROMEOS)
+namespace ash::boca {
+class OnTaskLockedController;
+}
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
 #if !BUILDFLAG(IS_CHROMEOS)
 class DownloadToolbarUIController;
 #endif
@@ -120,6 +128,10 @@ class DownloadToolbarUIController;
 #if defined(USE_AURA)
 class OverscrollPrefManager;
 #endif  // defined(USE_AURA)
+
+#if BUILDFLAG(ENABLE_EXTENSIONS) && (BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC))
+class DefaultSearchExtensionControlledController;
+#endif
 
 namespace extensions {
 class BrowserExtensionWindowController;
@@ -131,17 +143,12 @@ class Mv2DisabledDialogController;
 }  // namespace extensions
 
 namespace tabs {
-class TabDeclutterController;
 class VerticalTabStripStateController;
 }  // namespace tabs
 
 namespace chrome {
 class BrowserCommandController;
 }  // namespace chrome
-
-namespace commerce {
-class ProductSpecificationsEntryPointController;
-}  // namespace commerce
 
 namespace contextual_tasks {
 class ActiveTaskContextProvider;
@@ -205,6 +212,10 @@ class AiModePageActionController;
 class OmniboxPopupCloser;
 }  // namespace omnibox
 
+namespace skills {
+class SkillsUiWindowController;
+}  // namespace skills
+
 // This class owns the core controllers for features that are scoped to a given
 // browser window on desktop.
 //
@@ -212,6 +223,10 @@ class OmniboxPopupCloser;
 // feature compatible with `UnownedUserDataHost` and then use
 // `GetUserDataFactoryForTesting()` to inject your test-specific feature
 // object(s).
+//
+// Do not add more public accessors. Instead use the UnownedUserData design
+// pattern, see ui/base/unowned_user_data/README.md.
+// TODO(crbug.com/481268779a): Remove existing public accessors.
 class BrowserWindowFeatures {
  public:
   BrowserWindowFeatures();
@@ -238,7 +253,7 @@ class BrowserWindowFeatures {
 
   BrowserActions* browser_actions() { return browser_actions_.get(); }
 
-  chrome::BrowserCommandController* browser_command_controller() {
+  chrome::BrowserCommandController* browser_command_controller() const {
     return browser_command_controller_.get();
   }
 
@@ -251,9 +266,8 @@ class BrowserWindowFeatures {
     return chrome_labs_coordinator_.get();
   }
 
-  contextual_tasks::ActiveTaskContextProvider*
-  contextual_tasks_active_task_context_provider() {
-    return contextual_tasks_active_task_context_provider_.get();
+  ImmersiveModeController* immersive_mode_controller() {
+    return immersive_mode_controller_.get();
   }
 
   media_router::CastBrowserController* cast_browser_controller() {
@@ -276,15 +290,9 @@ class BrowserWindowFeatures {
     return extension_installed_watcher_.get();
   }
 
-#if BUILDFLAG(ENABLE_GLIC)
-  glic::GlicLegacySidePanelCoordinator* glic_side_panel_coordinator() {
-    return glic_side_panel_coordinator_.get();
-  }
-
   glic::GlicIphController* glic_iph_controller() {
     return glic_iph_controller_.get();
   }
-#endif
 
   PinnedToolbarActionsController* pinned_toolbar_actions_controller() {
     return pinned_toolbar_actions_controller_.get();
@@ -313,10 +321,6 @@ class BrowserWindowFeatures {
 
   lens::LensRegionSearchController* lens_region_search_controller() {
     return lens_region_search_controller_.get();
-  }
-
-  tabs::TabDeclutterController* tab_declutter_controller() {
-    return tab_declutter_controller_.get();
   }
 
   tabs::GlicNudgeController* glic_nudge_controller() {
@@ -510,8 +514,6 @@ class BrowserWindowFeatures {
   GetUserDataFactoryForTesting();
 
  private:
-  class ExtensionKeybindingRegistryDelegateTabStrip;
-
   static ui::UserDataFactoryWithOwner<BrowserWindowInterface>&
   GetUserDataFactory();
 
@@ -542,9 +544,6 @@ class BrowserWindowFeatures {
 
   std::unique_ptr<ChromeLabsCoordinator> chrome_labs_coordinator_;
 
-  std::unique_ptr<commerce::ProductSpecificationsEntryPointController>
-      product_specifications_entry_point_controller_;
-
   std::unique_ptr<ImmersiveModeController> immersive_mode_controller_;
 
   std::unique_ptr<WebUIBrowserExclusiveAccessContext>
@@ -556,6 +555,9 @@ class BrowserWindowFeatures {
 
   std::unique_ptr<InitialWebUIManager> initial_web_ui_manager_;
 
+  std::unique_ptr<InitialWebUIWindowMetricsManager>
+      initial_webui_window_metrics_manager_;
+
   std::unique_ptr<IOSPromoController> ios_promo_controller_;
 
   std::unique_ptr<lens::LensOverlayEntryPointController>
@@ -566,8 +568,6 @@ class BrowserWindowFeatures {
 
   std::unique_ptr<extensions::Mv2DisabledDialogController>
       mv2_disabled_dialog_controller_;
-
-  std::unique_ptr<tabs::TabDeclutterController> tab_declutter_controller_;
 
   std::unique_ptr<tabs::VerticalTabStripStateController>
       vertical_tab_strip_state_controller_;
@@ -619,8 +619,6 @@ class BrowserWindowFeatures {
 
   // The class that registers for keyboard shortcuts for extension commands,
   // and its delegate.
-  std::unique_ptr<ExtensionKeybindingRegistryDelegateTabStrip>
-      extension_keybinding_delegate_;
   std::unique_ptr<ExtensionKeybindingRegistryViews>
       extension_keybinding_registry_;
 
@@ -635,6 +633,8 @@ class BrowserWindowFeatures {
   std::unique_ptr<ActorUiWindowController> actor_ui_window_controller_;
 
   std::unique_ptr<ActorBorderViewController> actor_border_view_controller_;
+
+  std::unique_ptr<CallToActionLock> call_to_action_lock_;
 
   std::unique_ptr<BrowserSelectFileDialogController>
       browser_select_file_dialog_controller_;
@@ -653,23 +653,22 @@ class BrowserWindowFeatures {
   std::unique_ptr<ContextualTasksEphemeralButtonController>
       contextual_tasks_ephemeral_button_controller_;
 
+  std::unique_ptr<ContextualTasksCloseButtonController>
+      contextual_tasks_close_button_controller_;
+
   std::unique_ptr<tabs::GlicNudgeController> glic_nudge_controller_;
 
-#if BUILDFLAG(ENABLE_GLIC)
   std::unique_ptr<tabs::GlicActorNudgeController> glic_actor_nudge_controller_;
   std::unique_ptr<ActorTaskListBubbleController>
       actor_task_list_bubble_controller_;
   std::unique_ptr<glic::GlicButtonController> glic_button_controller_;
   std::unique_ptr<glic::GlicIphController> glic_iph_controller_;
-  std::unique_ptr<glic::GlicLegacySidePanelCoordinator>
-      glic_side_panel_coordinator_;
-#endif
-
-  std::unique_ptr<contextual_tasks::ContextualTasksSidePanelCoordinator>
-      contextual_tasks_side_panel_coordinator_;
 
   std::unique_ptr<contextual_tasks::ActiveTaskContextProvider>
       contextual_tasks_active_task_context_provider_;
+
+  std::unique_ptr<contextual_tasks::ContextualTasksSidePanelCoordinator>
+      contextual_tasks_side_panel_coordinator_;
 
   std::unique_ptr<tab_groups::MostRecentSharedTabUpdateStore>
       most_recent_shared_tab_update_store_;
@@ -756,7 +755,12 @@ class BrowserWindowFeatures {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   std::unique_ptr<extensions::ExtensionBrowserWindowHelper>
       extension_browser_window_helper_;
-#endif
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+  std::unique_ptr<DefaultSearchExtensionControlledController>
+      default_search_extension_controlled_controller_;
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
   // Listens for browser-related breadcrumb events to be added to crash reports.
   std::unique_ptr<BreadcrumbManagerBrowserAgent>
@@ -769,6 +773,8 @@ class BrowserWindowFeatures {
       split_tab_highlight_controller_;
 
   std::unique_ptr<SplitViewIphController> split_view_iph_controller_;
+
+  std::unique_ptr<VerticalTabIphController> vertical_tab_iph_controller_;
 
   std::unique_ptr<RecentActivityBubbleCoordinator>
       recent_activity_bubble_coordinator_;
@@ -794,6 +800,16 @@ class BrowserWindowFeatures {
   std::unique_ptr<SearchboxContextData> searchbox_context_data_;
 
   std::unique_ptr<omnibox::OmniboxPopupCloser> omnibox_popup_closer_;
+
+  std::unique_ptr<skills::SkillsUiWindowController>
+      skills_ui_window_controller_;
+
+#if BUILDFLAG(IS_CHROMEOS)
+  std::unique_ptr<ash::boca::OnTaskLockedController> on_task_locked_controller_;
+#endif  // BUILDFLAG(IS_CHROMEOS)
+
+  std::unique_ptr<ContextHighlightWindowFeature>
+      context_highlight_window_feature_;
 
   // Keep this member last to ensure embedder features are torn down first, in
   // reverse order of initialization.

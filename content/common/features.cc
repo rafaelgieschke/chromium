@@ -13,6 +13,11 @@ namespace features {
 
 // Please keep features in alphabetical order.
 
+// When enabled, the full accessibility tree will be exposed for non-atomic
+// text fields, such as contenteditables.
+BASE_FEATURE(kAccessibilityExposeNonAtomicTextFieldChildren,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // Enables content-initiated, main frame navigations to data URLs.
 // TODO(meacer): Remove when the deprecation is complete.
 //               https://www.chromestatus.com/feature/5669602927312896
@@ -62,8 +67,6 @@ BASE_FEATURE(kAvoidUnnecessaryBeforeUnloadCheckSync,
 
 constexpr base::FeatureParam<AvoidUnnecessaryBeforeUnloadCheckSyncMode>::Option
     kAvoidUnnecessaryBeforeUnloadCheckSyncModeOption[] = {
-        {AvoidUnnecessaryBeforeUnloadCheckSyncMode::kDumpWithoutCrashing,
-         "DumpWithoutCrashing"},
         {AvoidUnnecessaryBeforeUnloadCheckSyncMode::kWithSendBeforeUnload,
          "WithSendBeforeUnload"},
         {AvoidUnnecessaryBeforeUnloadCheckSyncMode::kWithoutSendBeforeUnload,
@@ -107,19 +110,14 @@ BASE_FEATURE(kHoldbackDebugReasonStringRemoval,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_MAC)
+
+BASE_FEATURE(kBlockThirdPartyInProcessPlugins,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
 BASE_FEATURE(kCancelCompositionWhenWindowLosesFocus,
              base::FEATURE_ENABLED_BY_DEFAULT);
-#endif  // BUILDFLAG(IS_MAC)
 
-// If Canvas2D Image Chromium is allowed, this feature controls whether it is
-// enabled.
-BASE_FEATURE(kCanvas2DImageChromium,
-#if BUILDFLAG(IS_APPLE)
-             base::FEATURE_ENABLED_BY_DEFAULT
-#else
-             base::FEATURE_DISABLED_BY_DEFAULT
-#endif
-);
+#endif  // BUILDFLAG(IS_MAC)
 
 // When enabled, CDP method Page.captureScreenshot will increment
 // the LocalSurfaceId instead of waiting for ForceRedraw to complete.
@@ -154,6 +152,22 @@ BASE_FEATURE(kCopyFromSurfaceAlwaysCallCallback,
 // Enables support for the `Critical-CH` response header.
 // https://github.com/WICG/client-hints-infrastructure/blob/master/reliability.md#critical-ch
 BASE_FEATURE(kCriticalClientHint, base::FEATURE_ENABLED_BY_DEFAULT);
+
+// This feature controls whether Dev Tools supports debugging Device Bound
+// Sessions.
+BASE_FEATURE(kDeviceBoundSessionsDevTools, base::FEATURE_ENABLED_BY_DEFAULT);
+
+#if BUILDFLAG(IS_ANDROID)
+// Disables the auto_resize_output_surface feature in the Viz process.
+// This prevents visual artifacts (blue gutters) during window resizing on
+// large form factor devices.
+BASE_FEATURE(kDisableAutoResizeOutputSurface, base::FEATURE_ENABLED_BY_DEFAULT);
+#endif
+
+// Enable DocumentIsolationPolicy even if the platform does not support full
+// SiteIsolation.
+BASE_FEATURE(kDocumentIsolationPolicyWithoutSiteIsolation,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enable document policy negotiation mechanism.
 BASE_FEATURE(kDocumentPolicyNegotiation, base::FEATURE_DISABLED_BY_DEFAULT);
@@ -254,7 +268,7 @@ const base::FeatureParam<double>
 // Windows and Linux (via separate features and experiments). See
 // crbug.com/335680565.
 #if BUILDFLAG(IS_WIN)
-BASE_FEATURE(kFontDataServiceAllWebContents, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kFontDataServiceAllWebContents, base::FEATURE_ENABLED_BY_DEFAULT);
 const base::FeatureParam<FontDataServiceTypefaceType>::Option
     font_data_service_typeface[] = {
         {FontDataServiceTypefaceType::kDwrite, "DWrite"},
@@ -267,26 +281,38 @@ BASE_FEATURE_ENUM_PARAM(FontDataServiceTypefaceType,
                         FontDataServiceTypefaceType::kDwrite,
                         &font_data_service_typeface);
 #endif  // BUILDFLAG(IS_WIN)
-#if BUILDFLAG(IS_LINUX)
-BASE_FEATURE(kFontDataServiceLinux, base::FEATURE_DISABLED_BY_DEFAULT);
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 const base::FeatureParam<FontDataServiceTypefaceType>::Option
     font_data_service_typeface[] = {
         {FontDataServiceTypefaceType::kFreetype, "Freetype"},
         {FontDataServiceTypefaceType::kFontations, "Fontations"}};
+#if BUILDFLAG(IS_LINUX)
+BASE_FEATURE(kFontDataServiceLinux, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE_ENUM_PARAM(FontDataServiceTypefaceType,
                         kFontDataServiceTypefaceType,
                         &kFontDataServiceLinux,
                         "typeface",
                         FontDataServiceTypefaceType::kFontations,
                         &font_data_service_typeface);
+#else
+BASE_FEATURE(kFontDataServiceChromeOS, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE_ENUM_PARAM(FontDataServiceTypefaceType,
+                        kFontDataServiceTypefaceType,
+                        &kFontDataServiceChromeOS,
+                        "typeface",
+                        FontDataServiceTypefaceType::kFontations,
+                        &font_data_service_typeface);
 #endif  // BUILDFLAG(IS_LINUX)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 bool IsFontDataServiceEnabled() {
 #if BUILDFLAG(IS_WIN)
   return base::FeatureList::IsEnabled(features::kFontDataServiceAllWebContents);
 #elif BUILDFLAG(IS_LINUX)
   return base::FeatureList::IsEnabled(features::kFontDataServiceLinux);
+#elif BUILDFLAG(IS_CHROMEOS)
+  return base::FeatureList::IsEnabled(features::kFontDataServiceChromeOS);
 #else
   return false;
 #endif
@@ -538,26 +564,10 @@ BASE_FEATURE(kProcessReuseOnPrerenderCOOPSwap,
 #endif
 );
 
-// Causes the browser to progressively enable accessibility for WebContents as
-// they are unhidden and, optionally, disable accessibility some time after they
-// become hidden.
-BASE_FEATURE(kProgressiveAccessibility, base::FEATURE_ENABLED_BY_DEFAULT);
-
-namespace {
-
-constexpr base::FeatureParam<ProgressiveAccessibilityMode>::Option
-    kProgressiveAccessibilityModeOptions[] = {
-        {ProgressiveAccessibilityMode::kOnlyEnable, "only_enable"},
-        {ProgressiveAccessibilityMode::kDisableOnHide, "disable_on_hide"}};
-
-}  // namespace
-
-BASE_FEATURE_ENUM_PARAM(ProgressiveAccessibilityMode,
-                        kProgressiveAccessibilityModeParam,
-                        &kProgressiveAccessibility,
-                        "progressive_accessibility_mode",
-                        ProgressiveAccessibilityMode::kOnlyEnable,
-                        &kProgressiveAccessibilityModeOptions);
+// Causes the browser to progressively disable accessibility for WebContents
+// some time after they become hidden.
+BASE_FEATURE(kProgressiveAccessibilityPhase2,
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Causes hidden tabs with crashed subframes to be marked for reload, meaning
 // that if a user later switches to that tab, the current page will be
@@ -641,6 +651,11 @@ BASE_FEATURE(kServiceWorkerStaticRouterRaceRequestFix2,
 BASE_FEATURE(kServiceWorkerStaticRouterStartServiceWorker,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
+// When enabled, suppresses the service worker timeout when a payment handler
+// window is open.
+BASE_FEATURE(kServiceWorkerSuppressTimeoutWhenPaymentWindowOpen,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+
 // (crbug.com/41337436): Enabled feature will have the ServiceWorker Client.url
 // property be the creation URL. This means it does not reflect changes to the
 // URL made by history.pushState() or similar history APIs.
@@ -649,37 +664,43 @@ BASE_FEATURE(kServiceWorkerStaticRouterStartServiceWorker,
 BASE_FEATURE(kServiceWorkerClientUrlIsCreationUrl,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
-// Handles blocking the file picker when a visible but inactive tab in a split
-// triggers it. This serves as a kill switch for crbug.com/444653104.
-BASE_FEATURE(kSideBySideFilePickerCancelling, base::FEATURE_ENABLED_BY_DEFAULT);
+// (crbug.com/454162508): Enabled feature will have ServiceWorker
+// WindowClient.Navigate() calls set the right initiator.
+BASE_FEATURE(kServiceWorkerWindowClientInitiator,
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enables skipping the early call to CommitPending when navigating away from a
 // crashed frame.
 BASE_FEATURE(kSkipEarlyCommitPendingForCrashedFrame,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-// Feature to skip a redundant NotifyNavigationStateChanged call during
-// RendererDidNavigate.
-BASE_FEATURE(kSkipRedundantNavigationStateNotification,
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 // When enabled, skips registration of RendererCancellationThrottle and instead
 // keeps navigation cancellation behavior by reusing the requester
 // NavigationClient.
 BASE_FEATURE(kSkipRendererCancellationThrottle,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_ANDROID)
 // When enabled, ensure high-rank processes are on the LRU list while app is in
 // background or the effective binding state is in conflict with low rank
 // processes.
-BASE_FEATURE(kStrictHighRankProcessLRU, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kStrictHighRankProcessLRU, base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
 
 #if BUILDFLAG(IS_MAC)
 BASE_FEATURE(kTextInputClient, base::FEATURE_ENABLED_BY_DEFAULT);
-const base::FeatureParam<base::TimeDelta> kTextInputClientIPCTimeout{
-    &kTextInputClient, "ipc_timeout", base::Milliseconds(1500)};
+BASE_FEATURE_PARAM(base::TimeDelta,
+                   kTextInputClientIPCTimeout,
+                   &kTextInputClient,
+                   "ipc_timeout",
+                   base::Milliseconds(1500));
+
+BASE_FEATURE(kTextInputClientUseNestedLoop, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE_PARAM(bool,
+                   kTextInputClientNestedLoopEventMask,
+                   &kTextInputClientUseNestedLoop,
+                   "enable_event_mask",
+                   true);
 #endif
 
 // Allows swipe left/right from touchpad change browser navigation. Currently
@@ -701,7 +722,7 @@ BASE_FEATURE(kTrustedTypesFromLiteral, base::FEATURE_DISABLED_BY_DEFAULT);
 // optimization.
 #if BUILDFLAG(IS_WIN)
 BASE_FEATURE(kUpdateDirectManipulationHelperOnParentChange,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 #endif
 
 // Validate the code signing identity of the network process before establishing

@@ -8,6 +8,7 @@
 
 #include "base/functional/bind.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/strings/strcat.h"
 #include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/profiles/profile.h"
@@ -26,7 +27,7 @@
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/input/native_web_keyboard_event.h"
-#include "components/zoom/zoom_controller.h"
+#include "components/permissions/permission_request_manager.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
@@ -98,21 +99,18 @@ void OmniboxPopupWebUIBaseContent::ShowUI() {
   // the content URL and create a new renderer.
   if (contents_wrapper_->web_contents() &&
       contents_wrapper_->web_contents()->IsCrashed()) {
-    base::UmaHistogramBoolean("Omnibox.Popup.WebUI.CrashRecovery", true);
+    base::UmaHistogramBoolean(
+        base::StrCat({GetMetricPrefix(), ".CrashRecovery"}), true);
     LoadContent();
   } else {
-    base::UmaHistogramBoolean("Omnibox.Popup.WebUI.CrashRecovery", false);
+    base::UmaHistogramBoolean(
+        base::StrCat({GetMetricPrefix(), ".CrashRecovery"}), false);
   }
   SetWebContents(contents_wrapper_->web_contents());
 
-  // The content height is reset to 1 in OmniboxPopupPresenter::Hide(), so we
-  // need to manually restore it from the cached preferred size of the WebView
-  // if the renderer doesn't trigger a new auto-resize event (which it won't
-  // if the size hasn't changed).
-  const gfx::Size preferred_size = GetPreferredSize();
-  if (!preferred_size.IsEmpty()) {
-    popup_presenter_->OnContentHeightChanged(preferred_size.height());
-  }
+  // The View may have changed, so this reinstates auto-resizing to prevent
+  // the omnibox from staying collapsed until a resize is observed.
+  OnViewBoundsChanged(location_bar_view_);
 
   is_shown_ = true;
 }
@@ -135,9 +133,27 @@ void OmniboxPopupWebUIBaseContent::ResizeDueToAutoResize(
     content::WebContents* source,
     const gfx::Size& new_size) {
   WebView::ResizeDueToAutoResize(source, new_size);
-  if (GetVisible()) {
-    popup_presenter_->OnContentHeightChanged(new_size.height());
-  }
+  // Debounce the resize event by 2 frame's time (assuming 60 Hz) to avoid
+  // flickering issues when the renderer sends a transient initial size.
+  // The issue is manifested as the popup being clipped at the top.
+  // This happens when:
+  // 1. Widget::Show() is called, then
+  // 2. SetBounds() is called with a smaller height.
+  // 3. a new frame is not generated timely after resize.
+  // As a result, the widget displays an old image that has an taller height,
+  // hence clipped.
+  //
+  // This debouncer suppresses the resize in step #2. The resize comes
+  // from the state when the WebUI document briefly contains empty suggestion
+  // result.
+  //
+  // TODO(crbug.com/474369306): there is a race condition between widget show
+  // and WebUI document update. The widget is shown too early. Remove the
+  // debouncer after making the JS initiate the widget show.
+  debounce_resize_timer_.Start(
+      FROM_HERE, base::Seconds(2) / 60,
+      base::BindOnce(&OmniboxPopupPresenterBase::OnContentHeightChanged,
+                     base::Unretained(popup_presenter_), new_size.height()));
 }
 
 bool OmniboxPopupWebUIBaseContent::HandleKeyboardEvent(
@@ -155,7 +171,8 @@ void OmniboxPopupWebUIBaseContent::RequestMediaAccessPermission(
     content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
     content::MediaResponseCallback callback) {
-  // Note: This is needed for voice search in the AIM popup.
+  // Handle the media access requests for voice search by routing them through
+  // `MediaCaptureDevicesDispatcher`.
   MediaCaptureDevicesDispatcher::GetInstance()->ProcessMediaAccessRequest(
       web_contents, request, std::move(callback), /*extension=*/nullptr);
 }
@@ -171,35 +188,34 @@ void OmniboxPopupWebUIBaseContent::LoadContent() {
       content_url_, location_bar_view_->profile(), IDS_TASK_MANAGER_OMNIBOX);
   contents_wrapper_->SetHost(weak_factory_.GetWeakPtr());
   SetWebContents(contents_wrapper_->web_contents());
-  extensions::SetViewType(contents_wrapper_->web_contents(),
-                          extensions::mojom::ViewType::kComponent);
-  webui::SetBrowserWindowInterface(contents_wrapper_->web_contents(),
-                                   location_bar_view_->browser());
-
-  tab_selection_listener_ = std::make_unique<OmniboxPopupTabSelectionListener>(
-      weak_factory_.GetWeakPtr(),
-      location_bar_view_->browser()->tab_strip_model());
+  // LocationBarView can be instantiated in windows that do not have a
+  // Browser object (i.e Captive Portal). In that case, features depending on
+  // the browser are not supported and should be skipped.
+  if (Browser* browser = location_bar_view_->browser()) {
+    webui::SetBrowserWindowInterface(contents_wrapper_->web_contents(),
+                                     browser);
+    tab_selection_listener_ =
+        std::make_unique<OmniboxPopupTabSelectionListener>(
+            weak_factory_.GetWeakPtr(), browser->tab_strip_model());
+  }
   // Make the OmniboxController available to the OmniboxPopupUI.
   OmniboxPopupWebContentsHelper::CreateForWebContents(GetWebContents());
   OmniboxPopupWebContentsHelper::FromWebContents(GetWebContents())
       ->set_omnibox_controller(controller_);
 
-  // Manually set zoom level, since any zooming is undesirable in the omnibox.
-  auto* zoom_controller =
-      zoom::ZoomController::FromWebContents(GetWebContents());
-  if (!zoom_controller) {
-    // Create ZoomController manually, if not already exists, because it is
-    // not automatically created when the WebUI has not been opened in a tab.
-    zoom_controller =
-        zoom::ZoomController::CreateForWebContents(GetWebContents());
-  }
-  zoom_controller->SetZoomMode(zoom::ZoomController::ZOOM_MODE_ISOLATED);
-  zoom_controller->SetZoomLevel(0);
+  // Set ViewType::kComponent so `ChromeSpeechRecognitionManagerDelegate`
+  // allows speech recognition in `CheckRenderFrameType()`.
+  extensions::SetViewType(contents_wrapper_->web_contents(),
+                          extensions::mojom::ViewType::kComponent);
+  // Create PermissionRequestManager explicitly for this WebContents.
+  // The permission bubble will anchor to the browser window via
+  // BrowserWindowInterface.
+  permissions::PermissionRequestManager::CreateForWebContents(GetWebContents());
 
   OnViewBoundsChanged(location_bar_view_);
 }
 
-void OmniboxPopupWebUIBaseContent::OnPopupHidden() {
+void OmniboxPopupWebUIBaseContent::Detach() {
   // This removes the content from being considered for rendering by the
   // compositor while the popup is closed. The content is re-inserted right
   // before the view is displayed. This has the effect of tossing out old,
@@ -226,8 +242,9 @@ void OmniboxPopupWebUIBaseContent::PrimaryMainFrameRenderProcessGone(
     return;
   }
 
-  base::UmaHistogramEnumeration("Omnibox.Popup.WebUI.RendererProcessGoneStatus",
-                                status, base::TERMINATION_STATUS_MAX_ENUM);
+  base::UmaHistogramEnumeration(
+      base::StrCat({GetMetricPrefix(), ".RendererProcessGoneStatus"}), status,
+      base::TERMINATION_STATUS_MAX_ENUM);
 }
 
 BEGIN_METADATA(OmniboxPopupWebUIBaseContent)

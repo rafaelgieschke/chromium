@@ -26,6 +26,7 @@
 
 #include "base/containers/heap_array.h"
 #include "base/containers/span.h"
+#include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/numerics/byte_conversions.h"
 #include "base/numerics/safe_conversions.h"
@@ -36,7 +37,7 @@
 #include "third_party/blink/public/common/buildflags.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/renderer/platform/image-decoders/bmp/bmp_image_decoder.h"
+#include "third_party/blink/renderer/platform/image-decoders/bmp/bmp_decoder_factory.h"
 #include "third_party/blink/renderer/platform/image-decoders/fast_shared_buffer_reader.h"
 #include "third_party/blink/renderer/platform/image-decoders/gif/gif_image_decoder.h"
 #include "third_party/blink/renderer/platform/image-decoders/ico/ico_image_decoder.h"
@@ -49,7 +50,11 @@
 #include "ui/gfx/geometry/size_conversions.h"
 
 #if BUILDFLAG(ENABLE_AV1_DECODER)
-#include "third_party/blink/renderer/platform/image-decoders/avif/crabbyavif_image_decoder.h"
+#include "third_party/blink/renderer/platform/image-decoders/avif/avif_image_decoder.h"
+#endif
+
+#if BUILDFLAG(ENABLE_JXL_DECODER)
+#include "third_party/blink/renderer/platform/image-decoders/jxl/jxl_image_decoder.h"
 #endif
 
 namespace blink {
@@ -78,6 +83,12 @@ cc::ImageType FileExtensionToImageType(String image_extension) {
 #if BUILDFLAG(ENABLE_AV1_DECODER)
   if (image_extension == "avif") {
     return cc::ImageType::kAVIF;
+  }
+#endif
+#if BUILDFLAG(ENABLE_JXL_DECODER)
+  if (base::FeatureList::IsEnabled(features::kJXLImageFormat) &&
+      image_extension == "jxl") {
+    return cc::ImageType::kJXL;
   }
 #endif
   return cc::ImageType::kInvalid;
@@ -205,8 +216,14 @@ String SniffMimeTypeInternal(scoped_refptr<SegmentReader> reader) {
     return "image/bmp";
   }
 #if BUILDFLAG(ENABLE_AV1_DECODER)
-  if (CrabbyAVIFImageDecoder::MatchesAVIFSignature(fast_reader)) {
+  if (AVIFImageDecoder::MatchesAVIFSignature(fast_reader)) {
     return "image/avif";
+  }
+#endif
+#if BUILDFLAG(ENABLE_JXL_DECODER)
+  if (base::FeatureList::IsEnabled(features::kJXLImageFormat) &&
+      JXLImageDecoder::MatchesJXLSignature(fast_reader)) {
+    return "image/jxl";
   }
 #endif
 
@@ -217,21 +234,21 @@ String SniffMimeTypeInternal(scoped_refptr<SegmentReader> reader) {
 // size will be restricted via the 'lossy-images-max-bpp' document
 // policy. (JPEG)
 bool IsLossyImageMIMEType(const String& mime_type) {
-  return EqualIgnoringASCIICase(mime_type, "image/jpeg") ||
-         EqualIgnoringASCIICase(mime_type, "image/jpg") ||
-         EqualIgnoringASCIICase(mime_type, "image/pjpeg");
+  return EqualIgnoringAsciiCase(mime_type, "image/jpeg") ||
+         EqualIgnoringAsciiCase(mime_type, "image/jpg") ||
+         EqualIgnoringAsciiCase(mime_type, "image/pjpeg");
 }
 
 // Checks to see if a mime type is an image type with lossless (or no)
 // compression, whose size may be restricted via the
 // 'lossless-images-max-bpp' document policy. (BMP, GIF, PNG, WEBP)
 bool IsLosslessImageMIMEType(const String& mime_type) {
-  return EqualIgnoringASCIICase(mime_type, "image/bmp") ||
-         EqualIgnoringASCIICase(mime_type, "image/gif") ||
-         EqualIgnoringASCIICase(mime_type, "image/png") ||
-         EqualIgnoringASCIICase(mime_type, "image/webp") ||
-         EqualIgnoringASCIICase(mime_type, "image/x-xbitmap") ||
-         EqualIgnoringASCIICase(mime_type, "image/x-png");
+  return EqualIgnoringAsciiCase(mime_type, "image/bmp") ||
+         EqualIgnoringAsciiCase(mime_type, "image/gif") ||
+         EqualIgnoringAsciiCase(mime_type, "image/png") ||
+         EqualIgnoringAsciiCase(mime_type, "image/webp") ||
+         EqualIgnoringAsciiCase(mime_type, "image/x-xbitmap") ||
+         EqualIgnoringAsciiCase(mime_type, "image/x-png");
 }
 
 }  // namespace
@@ -311,11 +328,19 @@ std::unique_ptr<ImageDecoder> ImageDecoder::CreateByMimeType(
     decoder = std::make_unique<ICOImageDecoder>(alpha_option, color_behavior,
                                                 max_decoded_bytes);
   } else if (mime_type == "image/bmp" || mime_type == "image/x-xbitmap") {
-    decoder = std::make_unique<BMPImageDecoder>(alpha_option, color_behavior,
-                                                max_decoded_bytes);
+    decoder =
+        CreateBmpImageDecoder(alpha_option, high_bit_depth_decoding_option,
+                              color_behavior, max_decoded_bytes);
 #if BUILDFLAG(ENABLE_AV1_DECODER)
   } else if (mime_type == "image/avif") {
-    decoder = std::make_unique<CrabbyAVIFImageDecoder>(
+    decoder = std::make_unique<AVIFImageDecoder>(
+        alpha_option, high_bit_depth_decoding_option, color_behavior, aux_image,
+        max_decoded_bytes, animation_option);
+#endif
+#if BUILDFLAG(ENABLE_JXL_DECODER)
+  } else if (mime_type == "image/jxl" &&
+             base::FeatureList::IsEnabled(features::kJXLImageFormat)) {
+    decoder = std::make_unique<JXLImageDecoder>(
         alpha_option, high_bit_depth_decoding_option, color_behavior, aux_image,
         max_decoded_bytes, animation_option);
 #endif
@@ -393,7 +418,7 @@ ImageDecoder::CompressionFormat ImageDecoder::GetCompressionFormat(
   // compression algorithm. Note: Will return kWebPAnimationFormat in the case
   // of an animated WebP image.
   size_t available_data = image_data ? image_data->size() : 0;
-  if (EqualIgnoringASCIICase(mime_type, "image/webp") && available_data >= 16) {
+  if (EqualIgnoringAsciiCase(mime_type, "image/webp") && available_data >= 16) {
     // Attempt to sniff only 8 bytes (the second half of the first 16). This
     // will be sufficient to determine lossy vs. lossless in most WebP images
     // (all but the extended format).
@@ -440,7 +465,7 @@ ImageDecoder::CompressionFormat ImageDecoder::GetCompressionFormat(
   // compression algorithm.
   // TODO(wtc): Implement this. Figure out whether to return kUndefinedFormat or
   // a new kAVIFAnimationFormat in the case of an animated AVIF image.
-  if (EqualIgnoringASCIICase(mime_type, "image/avif")) {
+  if (EqualIgnoringAsciiCase(mime_type, "image/avif")) {
     return kLossyFormat;
   }
 #endif

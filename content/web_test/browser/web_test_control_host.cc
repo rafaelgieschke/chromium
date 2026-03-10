@@ -21,7 +21,6 @@
 #include "base/base64.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
@@ -48,13 +47,14 @@
 #include "components/viz/common/frame_sinks/copy_output_result.h"
 #include "content/browser/aggregation_service/aggregation_service.h"
 #include "content/browser/attribution_reporting/attribution_manager.h"
+#include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/in_memory_federated_permission_context.h"
 #include "content/browser/renderer_host/frame_tree.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/renderer_host/navigation_request.h"
+#include "content/browser/screen_orientation/screen_orientation_provider.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/child_process_termination_info.h"
 #include "content/public/browser/client_hints_controller_delegate.h"
 #include "content/public/browser/content_index_context.h"
@@ -71,6 +71,7 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/bindings_policy.h"
+#include "content/public/common/child_process_id.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/blink_test_browser_support.h"
@@ -79,6 +80,7 @@
 #include "content/shell/browser/shell_content_browser_client.h"
 #include "content/shell/browser/shell_content_index_provider.h"
 #include "content/shell/browser/shell_devtools_frontend.h"
+#include "content/test/mock_clipboard_host.h"
 #include "content/test/mock_platform_notification_service.h"
 #include "content/test/storage_partition_test_helpers.h"
 #include "content/web_test/browser/devtools_protocol_test_bindings.h"
@@ -269,7 +271,6 @@ void ApplyWebTestDefaultPreferences(blink::web_pref::WebPreferences* prefs) {
   prefs->allow_running_insecure_content = false;
   prefs->disable_reading_from_canvas = false;
   prefs->strict_mixed_content_checking = false;
-  prefs->strict_powerful_feature_restrictions = false;
   prefs->webgl_errors_to_console_enabled = false;
   prefs->enable_scroll_animator =
       !command_line.HasSwitch(switches::kDisableSmoothScrolling);
@@ -930,7 +931,7 @@ void WebTestControlHost::EnqueueSurfaceCopyRequest() {
   }
 
   auto* rwhv = main_window_->web_contents()->GetRenderWidgetHostView();
-  rwhv->CopyFromSurface(gfx::Rect(), gfx::Size(),
+  rwhv->CopyFromSurface(gfx::Rect(), gfx::Size(), base::TimeDelta(),
                         base::BindOnce(&WebTestControlHost::OnPixelDumpCaptured,
                                        weak_factory_.GetWeakPtr()));
 }
@@ -1254,8 +1255,8 @@ void WebTestControlHost::HandleNewRenderFrameHost(RenderFrameHost* frame) {
   // TODO(rakina): Understand the fetch tests to figure out if it's possible to
   // remove RenderProcessHost tracking here.
   if (main_window &&
-      (!base::Contains(main_window_render_view_hosts_, view_host) ||
-       !base::Contains(main_window_render_process_hosts_, process_host))) {
+      (!main_window_render_view_hosts_.contains(view_host) ||
+       !main_window_render_process_hosts_.contains(process_host))) {
     // When we find the main window's main frame for the first time, we mark the
     // test as starting for the renderer.
     const bool starting_test = main_window_render_process_hosts_.empty();
@@ -1356,7 +1357,7 @@ void WebTestControlHost::OnTestFinished() {
       content::StoragePartition::REMOVE_DATA_MASK_ALL & ~exclusion_mask;
 
   storage_partition->ClearData(
-      removal_mask, content::StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL,
+      removal_mask,
       /*filter_builder=*/nullptr,
       content::StoragePartition::StorageKeyPolicyMatcherFunction(),
       /*cookie_deletion_filter=*/nullptr,
@@ -1540,6 +1541,27 @@ void WebTestControlHost::SimulateScreenOrientationChanged() {
   content::WebContentsImpl* web_contents =
       static_cast<WebContentsImpl*>(main_window_->web_contents());
   web_contents->DidChangeScreenOrientation();
+}
+
+void WebTestControlHost::SimulateScreenOrientationLockChanged(
+    const blink::LocalFrameToken& frame_token,
+    bool locked,
+    device::mojom::ScreenOrientationLockType orientation) {
+  auto* web_contents = static_cast<WebContentsImpl*>(
+      GetWebContentsFromCurrentContext(frame_token));
+  if (!web_contents) {
+    return;
+  }
+
+  auto* provider = web_contents->GetScreenOrientationProviderForTesting();
+  if (!provider) {
+    return;
+  }
+
+  provider->NotifyOrientationLockChanged(
+      locked, locked
+                  ? std::make_optional(orientation)
+                  : std::optional<device::mojom::ScreenOrientationLockType>());
 }
 
 void WebTestControlHost::SetPermission(const std::string& name,
@@ -1750,7 +1772,7 @@ void WebTestControlHost::SimulateWebContentIndexDelete(const std::string& id) {
 }
 
 void WebTestControlHost::WebTestRuntimeFlagsChanged(
-    base::Value::Dict changed_web_test_runtime_flags) {
+    base::DictValue changed_web_test_runtime_flags) {
   const int render_process_id = receiver_bindings_.current_context();
 
   // Stash the accumulated changes for future, not-yet-created renderers.
@@ -1784,10 +1806,10 @@ void WebTestControlHost::WebTestRuntimeFlagsChanged(
 void WebTestControlHost::RegisterIsolatedFileSystem(
     const std::vector<base::FilePath>& file_paths,
     RegisterIsolatedFileSystemCallback callback) {
-  const int render_process_id = receiver_bindings_.current_context();
+  const ChildProcessId render_process_id(receiver_bindings_.current_context());
 
-  ChildProcessSecurityPolicy* policy =
-      ChildProcessSecurityPolicy::GetInstance();
+  ChildProcessSecurityPolicyImpl* policy =
+      ChildProcessSecurityPolicyImpl::GetInstance();
 
   storage::IsolatedContext::FileInfoSet file_info_set;
   for (auto& path : file_paths) {
@@ -1844,7 +1866,7 @@ void WebTestControlHost::RequestWorkItem() {
 }
 
 void WebTestControlHost::WorkQueueStatesChanged(
-    base::Value::Dict changed_work_queue_states) {
+    base::DictValue changed_work_queue_states) {
   work_queue_states_.Merge(std::move(changed_work_queue_states));
 }
 
@@ -1869,6 +1891,28 @@ void WebTestControlHost::EnableAutoResize(const gfx::Size& min_size,
 void WebTestControlHost::DisableAutoResize(const gfx::Size& new_size) {
   web_contents()->GetRenderWidgetHostView()->DisableAutoResize(new_size);
   main_window_->ResizeWebContentForTests(new_size);
+}
+
+void WebTestControlHost::GetClipboardReadState(
+    GetClipboardReadStateCallback callback) {
+  MockClipboardHost* mock =
+      WebTestContentBrowserClient::Get()->GetMockClipboardHost();
+  if (mock) {
+    std::move(callback).Run(
+        mock->read_text_called(), mock->read_html_called(),
+        mock->read_unsanitized_custom_format_called(),
+        mock->read_available_custom_and_standard_formats_called());
+  } else {
+    std::move(callback).Run(false, false, false, false);
+  }
+}
+
+void WebTestControlHost::ResetClipboardReadTracking() {
+  MockClipboardHost* mock =
+      WebTestContentBrowserClient::Get()->GetMockClipboardHost();
+  if (mock) {
+    mock->ResetReadTracking();
+  }
 }
 
 void WebTestControlHost::SetLCPPNavigationHint(
@@ -2192,7 +2236,7 @@ mojo::AssociatedRemote<mojom::WebTestRenderFrame>&
 WebTestControlHost::GetWebTestRenderFrameRemote(RenderFrameHost* frame) {
   GlobalRenderFrameHostId key(frame->GetProcess()->GetDeprecatedID(),
                               frame->GetRoutingID());
-  if (!base::Contains(web_test_render_frame_map_, key)) {
+  if (!web_test_render_frame_map_.contains(key)) {
     mojo::AssociatedRemote<mojom::WebTestRenderFrame>& new_ptr =
         web_test_render_frame_map_[key];
     frame->GetRemoteAssociatedInterfaces()->GetInterface(&new_ptr);

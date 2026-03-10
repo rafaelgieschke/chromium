@@ -20,6 +20,7 @@ import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
+import org.chromium.chrome.browser.signin.services.DisplayableProfileData;
 import org.chromium.chrome.browser.signin.services.ProfileDataCache;
 import org.chromium.chrome.browser.signin.services.SigninFlowTimestampsLogger;
 import org.chromium.chrome.browser.signin.services.SigninFlowTimestampsLogger.Event;
@@ -344,8 +345,8 @@ public class AccountPickerBottomSheetMediator
 
     /** Implements {@link ProfileDataCache.Observer}. */
     @Override
-    public void onProfileDataUpdated(String accountEmail) {
-        updateSelectedAccountData(accountEmail);
+    public void onProfileDataUpdated(DisplayableProfileData profileData) {
+        updateSelectedAccountData(profileData);
     }
 
     /** Implements {@link AccountPickerDelegate.SigninStateController controller}. */
@@ -498,18 +499,17 @@ public class AccountPickerBottomSheetMediator
 
     private void setSelectedAccount(CoreAccountInfo account) {
         mSelectedAccount = account;
-        updateSelectedAccountData(account.getEmail());
+        final var profileData = mProfileDataCache.getProfileDataOrDefault(account.getEmail());
+        updateSelectedAccountData(profileData);
     }
 
-    private void updateSelectedAccountData(String accountEmail) {
+    private void updateSelectedAccountData(DisplayableProfileData profileData) {
         if (mSelectedAccount != null
-                && TextUtils.equals(mSelectedAccount.getEmail(), accountEmail)) {
-            mModel.set(
-                    AccountPickerBottomSheetProperties.SELECTED_ACCOUNT_DATA,
-                    mProfileDataCache.getProfileDataOrDefault(accountEmail));
+                && TextUtils.equals(mSelectedAccount.getEmail(), profileData.getAccountEmail())) {
+            mModel.set(AccountPickerBottomSheetProperties.SELECTED_ACCOUNT_DATA, profileData);
             mModel.set(
                     AccountPickerBottomSheetProperties.SELECTED_ACCOUNT_DOMAIN,
-                    mSigninManager.extractDomainName(accountEmail));
+                    mSigninManager.extractDomainName(profileData.getAccountEmail()));
         }
     }
 
@@ -567,6 +567,7 @@ public class AccountPickerBottomSheetMediator
             mDismissalLogger.logDismissedButtonClick();
             // Seamless sign-in does not have an initial account picker view. Hide the bottom sheet.
             mDismissBottomSheet.run();
+            mAccountPickerDelegate.onSignInCancel();
         } else {
             mModel.set(AccountPickerBottomSheetProperties.VIEW_STATE, mInitialViewState);
         }
@@ -580,18 +581,26 @@ public class AccountPickerBottomSheetMediator
         assert !mIsSeamlessSignin : "Account picker sheet is not supported for seamless sign-in";
         mDismissalLogger.logDismissedButtonClick();
         mDismissBottomSheet.run();
+        mAccountPickerDelegate.onSignInCancel();
     }
 
     void launchDeviceLockIfNeededAndSignIn() {
         if (DeviceInfo.isAutomotive()) {
+            var selectedAccountId =
+                    mSelectedAccount == null ? null : assertNonNull(mSelectedAccount).getId();
             mDeviceLockActivityLauncher.launchDeviceLockActivity(
                     mActivity,
-                    CoreAccountInfo.getEmailFrom(mSelectedAccount),
+                    selectedAccountId,
                     /* requireDeviceLockReauthentication= */ true,
                     mWindowAndroid,
                     (resultCode, data) -> {
                         if (resultCode == Activity.RESULT_OK) {
                             signIn();
+                        } else if (mIsSeamlessSignin) {
+                            // Act like the sign-in has been cancelled.
+                            // In non seamless mode, a bottomsheet should still be shown on the
+                            // screen and sign-in is not yet cancelled at this stage.
+                            abandonSeamlessSignin();
                         }
                     },
                     DeviceLockActivityLauncher.Source.ACCOUNT_PICKER);
@@ -661,10 +670,8 @@ public class AccountPickerBottomSheetMediator
                     .clearWebSigninAccountPickerActiveDismissalCount();
         }
 
-        // TODO(crbug.com/435381574): Investigate whether this sign-out is still needed, and remove
-        // it if possible.
         if (mIdentityManager.hasPrimaryAccount(ConsentLevel.SIGNIN)) {
-            mAccountPickerDelegate.onSignoutBeforeSignin();
+            // Signout before sign-in is from web sign-in traffic (crbug.com/435381574)
             mSigninManager.signOut(SignoutReason.SIGNIN_RETRIGGERED);
         }
 
@@ -712,7 +719,9 @@ public class AccountPickerBottomSheetMediator
             mSigninTimestampsLogger.recordTimestamp(Event.SIGNIN_ABORTED);
         }
 
-        mAccountPickerDelegate.onSeamlessSigninAbandoned();
+        // Dismisses the bottom sheet, if shown.
+        mDismissBottomSheet.run();
+        mAccountPickerDelegate.onSignInCancel();
     }
 
     private void updateCredentials() {
@@ -726,9 +735,7 @@ public class AccountPickerBottomSheetMediator
                 };
         assertNonNull(mSelectedAccount);
         mAccountManagerFacade.updateCredentials(
-                CoreAccountInfo.getAndroidAccountFrom(mSelectedAccount),
-                mActivity,
-                onUpdateCredentialsCompleted);
+                mSelectedAccount, mActivity, onUpdateCredentialsCompleted);
     }
 
     private void startSigninTimestampLogging() {

@@ -7,7 +7,6 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/picture_in_picture_browser_frame_view.h"
 #include "chrome/browser/ui/views/permissions/permission_prompt_chip.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/save_desktop_snapshot.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -107,7 +106,8 @@ class PermissionPromptPreviewBrowserTest : public UiBrowserTest {
   }
 
   void WaitForUserDismissal() override {
-    ui_test_utils::WaitForBrowserToClose();
+    ui_test_utils::BrowserDestroyedObserver observer;
+    observer.Wait();
   }
 };
 

@@ -8,6 +8,7 @@
 #include <optional>
 #include <utility>
 
+#include "base/trace_event/trace_event.h"
 #include "services/network/public/mojom/permissions_policy/permissions_policy_feature.mojom-forward.h"
 #include "third_party/blink/public/mojom/webid/digital_identity_request.mojom-shared.h"
 #include "third_party/blink/public/platform/platform.h"
@@ -25,6 +26,8 @@
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/scoped_abort_state.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/modules/credentialmanagement/credential.h"
 #include "third_party/blink/renderer/modules/credentialmanagement/credential_manager_proxy.h"
@@ -61,15 +64,12 @@ void AbortRequest(ScriptState* script_state) {
 // Converts a base::Value to a ScriptObject.
 // Returns an empty ScriptObject on failure.
 ScriptObject ValueToScriptObject(ScriptState* script_state,
-                                 std::optional<base::Value> response) {
-  if (!response.has_value()) {
-    return ScriptObject();
-  }
+                                 base::Value response) {
   std::unique_ptr<WebV8ValueConverter> converter =
       Platform::Current()->CreateWebV8ValueConverter();
   ScriptState::Scope script_state_scope(script_state);
   v8::Local<v8::Value> v8_response =
-      converter->ToV8Value(response.value(), script_state->GetContext());
+      converter->ToV8Value(response, script_state->GetContext());
   if (v8_response.IsEmpty() || !v8_response->IsObject()) {
     // Parsed value is not an object.
     return ScriptObject();
@@ -82,7 +82,10 @@ void OnCompleteRequest(ScriptPromiseResolver<IDLNullable<Credential>>* resolver,
                        DigitalIdentityRequestType request_type,
                        RequestDigitalIdentityStatus status,
                        const String& protocol,
-                       std::optional<base::Value> token) {
+                       base::Value token) {
+  TRACE_EVENT("content.digitalcredentials", "OnCompleteRequest", "status",
+              status, "request_type", request_type, "protocol", protocol);
+
   switch (status) {
     case RequestDigitalIdentityStatus::kErrorTooManyRequests: {
       resolver->Reject(MakeGarbageCollected<DOMException>(
@@ -116,10 +119,11 @@ void OnCompleteRequest(ScriptPromiseResolver<IDLNullable<Credential>>* resolver,
     case RequestDigitalIdentityStatus::kErrorNoTransientUserActivation:
       resolver->Reject(MakeGarbageCollected<DOMException>(
           DOMExceptionCode::kNotAllowedError,
-          String::Format("The '%s' feature requires transient activation.",
-                         request_type == DigitalIdentityRequestType::kCreate
-                             ? "digital-credentials-create"
-                             : "digital-credentials-get")));
+          UNSAFE_TODO(
+              String::Format("The '%s' feature requires transient activation.",
+                             request_type == DigitalIdentityRequestType::kCreate
+                                 ? "digital-credentials-create"
+                                 : "digital-credentials-get"))));
       return;
 
     case RequestDigitalIdentityStatus::kError: {
@@ -191,6 +195,8 @@ bool IsDigitalIdentityCredentialType(const CredentialCreationOptions& options) {
 void DiscoverDigitalIdentityCredentialFromExternalSource(
     ScriptPromiseResolver<IDLNullable<Credential>>* resolver,
     const CredentialRequestOptions& options) {
+  TRACE_EVENT("content.digitalcredentials",
+              "DiscoverDigitalIdentityCredentialFromExternalSource");
   CHECK(IsDigitalIdentityCredentialType(options));
   CHECK(RuntimeEnabledFeatures::WebIdentityDigitalCredentialsEnabled(
       resolver->GetExecutionContext()));
@@ -253,6 +259,16 @@ void DiscoverDigitalIdentityCredentialFromExternalSource(
     scoped_abort_state = std::make_unique<ScopedAbortState>(signal, handle);
   }
 
+  if (!LocalFrame::ConsumeTransientUserActivation(
+          To<LocalDOMWindow>(resolver->GetExecutionContext())->GetFrame(),
+          UserActivationUpdateSource::kRenderer)) {
+    resolver->Reject(MakeGarbageCollected<DOMException>(
+        DOMExceptionCode::kNotAllowedError,
+        "The 'digital-credentials-get' feature requires transient "
+        "activation."));
+    return;
+  }
+
   auto* request =
       CredentialManagerProxy::From(script_state)->DigitalIdentityRequest();
   request->Get(std::move(requests),
@@ -264,6 +280,8 @@ void DiscoverDigitalIdentityCredentialFromExternalSource(
 void CreateDigitalIdentityCredentialInExternalSource(
     ScriptPromiseResolver<IDLNullable<Credential>>* resolver,
     const CredentialCreationOptions& options) {
+  TRACE_EVENT("content.digitalcredentials",
+              "CreateDigitalIdentityCredentialInExternalSource");
   CHECK(IsDigitalIdentityCredentialType(options));
   CHECK(RuntimeEnabledFeatures::WebIdentityDigitalCredentialsCreationEnabled(
       resolver->GetExecutionContext()));
@@ -326,6 +344,16 @@ void CreateDigitalIdentityCredentialInExternalSource(
     auto callback = BindOnce(&AbortRequest, WrapPersistent(script_state));
     auto* handle = signal->AddAlgorithm(std::move(callback));
     scoped_abort_state = std::make_unique<ScopedAbortState>(signal, handle);
+  }
+
+  if (!LocalFrame::ConsumeTransientUserActivation(
+          To<LocalDOMWindow>(resolver->GetExecutionContext())->GetFrame(),
+          UserActivationUpdateSource::kRenderer)) {
+    resolver->Reject(MakeGarbageCollected<DOMException>(
+        DOMExceptionCode::kNotAllowedError,
+        "The 'digital-credentials-create' feature requires transient "
+        "activation."));
+    return;
   }
 
   CredentialManagerProxy::From(script_state)

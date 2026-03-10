@@ -4,7 +4,7 @@
 
 import {html} from '//resources/lit/v3_0/lit.rollup.js';
 
-import type {EventListElement} from './event_list.js';
+import type {EventEntry, EventListElement} from './event_list.js';
 
 export function getHtml(this: EventListElement) {
   // clang-format off
@@ -21,38 +21,32 @@ export function getHtml(this: EventListElement) {
     </cr-button>
   </div>
 </div>
-<ul class="event-list">
-  ${this.events.map(item => html`
-    ${item.shouldShowBreak ? html`
-      <li class="event-list-break">
-        <span class="event-list-break-line"></span>
-          <span role="heading" aria-level="2" class="event-list-break-label">
-            ${item.formattedEventDate} (${item.formattedRelativeEventDate})
-          </span>
-        <span class="event-list-break-line"></span>
-      </li>
-    `: ''}
-    <li>
-      <event-list-item .event="${item.event}" .eventDate="${item.eventDate}"
-        .processMap="${this.processMap}"
-        @expanded-changed="${this.onEventItemExpandedChanged}">
-      </event-list-item>
-    </li>
-  `)}
-</ul>
-${this.eventsWithoutDates.length > 0 ? html`
-  <div>
-    <div>${this.eventsWithoutDatesLabel}</div>
-    <raw-event-details .events="${this.eventsWithoutDates}"></raw-event-details>
-  </div>
-` : ''}
-${this.eventsWithParseErrors.length > 0 ? html`
-  <div>
-    <div>${this.eventsWithParseErrorsLabel}</div>
-    <raw-event-details .events="${this.eventsWithParseErrors}">
-    </raw-event-details>
-  </div>
-` : ''}
+<div class="event-count">
+  <span>${this.numDisplayedEventsLabel}</span>
+  ${this.eventsWithoutDatesLabel ? html`
+    <span>&bull;</span>
+    <span class="events-without-dates-label">
+      ${this.eventsWithoutDatesLabel}
+    </span>
+  ` : ''}
+  ${this.eventsWithParseErrorsLabel ? html`
+    <span>&bull;</span>
+    <span class="events-with-parse-errors-label">
+      ${this.eventsWithParseErrorsLabel}
+    </span>
+  ` : ''}
+</div>
+<cr-infinite-list class="event-list" .items="${this.events}" item-size="36"
+    chunk-size="100" aria-rowcount="${this.events.length}"
+    .scrollTarget="${this.scrollTarget}"
+    .template="${(item: EventEntry) => html`
+      <div>
+        <event-list-item .event="${item.event}" .eventDate="${item.eventDate}"
+            .processMap="${this.processMap}" .policies="${item.policies}"
+            @expanded-changed="${this.onEventItemExpandedChanged}">
+        </event-list-item>
+      </div>`}">
+</cr-infinite-list>
 <!--_html_template_end_-->`;
   // clang-format on
 }

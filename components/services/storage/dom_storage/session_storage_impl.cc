@@ -10,7 +10,6 @@
 
 #include "base/barrier_closure.h"
 #include "base/compiler_specific.h"
-#include "base/containers/contains.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/memory/ptr_util.h"
@@ -90,15 +89,13 @@ void RecordSessionStorageCachePurgedHistogram(
 }  // namespace
 
 SessionStorageImpl::SessionStorageImpl(
-    const base::FilePath& partition_directory,
+    const base::FilePath& storage_partition_directory,
     BackingMode backing_mode,
-    std::string database_name,
     DestructSessionStorageCallback destruct_callback,
     mojo::PendingReceiver<mojom::SessionStorageControl> receiver)
     : destruct_callback_(std::move(destruct_callback)),
       backing_mode_(backing_mode),
-      database_name_(std::move(database_name)),
-      partition_directory_(partition_directory),
+      storage_partition_directory_(storage_partition_directory),
       memory_dump_id_(base::StringPrintf("SessionStorage/0x%" PRIXPTR,
                                          reinterpret_cast<uintptr_t>(this))),
       receiver_(this, std::move(receiver)) {
@@ -177,8 +174,6 @@ void SessionStorageImpl::BindStorageArea(
 }
 
 void SessionStorageImpl::CreateNamespace(const std::string& namespace_id) {
-  CHECK_NE(connection_state_, CONNECTION_IN_PROGRESS,
-           base::NotFatalUntil::M146);
   if (namespaces_.find(namespace_id) != namespaces_.end())
     return;
 
@@ -190,8 +185,6 @@ void SessionStorageImpl::CloneNamespace(
     const std::string& clone_from_namespace_id,
     const std::string& clone_to_namespace_id,
     mojom::SessionStorageCloneType clone_type) {
-  CHECK_NE(connection_state_, CONNECTION_IN_PROGRESS,
-           base::NotFatalUntil::M146);
   if (namespaces_.find(clone_to_namespace_id) != namespaces_.end()) {
     // Non-immediate clones expect to be paired with a |Clone| from the mojo
     // namespace object. If that clone has already happened, then we don't need
@@ -225,10 +218,10 @@ void SessionStorageImpl::CloneNamespace(
             clone_from_namespace_id);
         clone_from_ns->second->AddChildNamespaceWaitingForClone(
             clone_to_namespace_id);
-      } else if (base::Contains(metadata_.namespace_storage_key_map(),
-                                clone_from_namespace_id)) {
-        CHECK_EQ(connection_state_, CONNECTION_FINISHED,
-                 base::NotFatalUntil::M146);
+      } else if (metadata_.namespace_storage_key_map().contains(
+                     clone_from_namespace_id)) {
+        CHECK_EQ(connection_state_, CONNECTION_FINISHED);
+
         // The namespace exists on disk but is not in-use, so do the appropriate
         // metadata operations to clone the namespace and set up the new object.
         auto source_namespace_entry =
@@ -257,8 +250,6 @@ void SessionStorageImpl::CloneNamespace(
 
 void SessionStorageImpl::DeleteNamespace(const std::string& namespace_id,
                                          bool should_persist) {
-  CHECK_NE(connection_state_, CONNECTION_IN_PROGRESS,
-           base::NotFatalUntil::M146);
   auto namespace_it = namespaces_.find(namespace_id);
   // If the namespace has pending clones, do the clone now before destroying it.
   if (namespace_it != namespaces_.end()) {
@@ -361,16 +352,9 @@ void SessionStorageImpl::DeleteStorage(const blink::StorageKey& storage_key,
   database_->DeleteStorageKeysFromSession(
       namespace_id, /*metadata_to_delete=*/{storage_key},
       std::move(maps_to_delete),
-      base::BindOnce(
-          [](base::OnceClosure callback,
-             base::OnceCallback<void(DbStatus)> status_result_callback,
-             DbStatus status) {
-            std::move(status_result_callback).Run(status);
-            std::move(callback).Run();
-          },
-          std::move(callback),
-          base::BindOnce(&SessionStorageImpl::OnCommitResult,
-                         weak_ptr_factory_.GetWeakPtr())));
+      base::BindOnce(&SessionStorageImpl::OnCommitResult,
+                     weak_ptr_factory_.GetWeakPtr())
+          .Then(std::move(callback)));
 }
 
 void SessionStorageImpl::CleanUpStorage(CleanUpStorageCallback callback) {
@@ -381,9 +365,11 @@ void SessionStorageImpl::CleanUpStorage(CleanUpStorageCallback callback) {
     return;
   }
   if (database_) {
-    for (const auto& it : data_maps_)
+    for (const auto& it : data_maps_) {
       it.second->storage_area()->ScheduleImmediateCommit();
-    database_->RewriteDB(base::IgnoreArgs<DbStatus>(std::move(callback)));
+    }
+    database_->CleanUpStaleData(
+        base::IgnoreArgs<DbStatus>(std::move(callback)));
   } else {
     std::move(callback).Run();
   }
@@ -538,8 +524,8 @@ bool SessionStorageImpl::OnMemoryDump(
   return true;
 }
 
-void SessionStorageImpl::PretendToConnectForTesting() {
-  OnDatabaseOpened(DbStatus::OK());
+const base::FilePath& SessionStorageImpl::GetStoragePartitionDirectory() const {
+  return storage_partition_directory_;
 }
 
 void SessionStorageImpl::FlushAreaForTesting(
@@ -558,9 +544,16 @@ void SessionStorageImpl::SetDatabaseOpenCallbackForTesting(
   RunWhenConnected(std::move(callback));
 }
 
+base::FilePath SessionStorageImpl::GetDatabasePath() const {
+  return DomStorageDatabase::GetPath(StorageType::kSessionStorage,
+                                     storage_partition_directory_);
+}
+
 scoped_refptr<DomStorageDatabase::SharedMapLocator>
 SessionStorageImpl::RegisterNewAreaMap(const std::string& namespace_id,
                                        const blink::StorageKey& storage_key) {
+  CHECK_EQ(connection_state_, CONNECTION_FINISHED);
+
   scoped_refptr<DomStorageDatabase::SharedMapLocator> map_entry =
       metadata_.RegisterNewMap(namespace_id, storage_key);
   if (database_) {
@@ -596,11 +589,18 @@ void SessionStorageImpl::OnDataMapDestruction(int64_t map_id) {
 }
 
 void SessionStorageImpl::OnCommitResult(DbStatus status) {
-  CHECK_EQ(connection_state_, CONNECTION_FINISHED, base::NotFatalUntil::M146);
   if (status.ok()) {
     commit_error_count_ = 0;
     return;
   }
+
+  if (connection_state_ != CONNECTION_FINISHED) {
+    // Previous commit errors deleted and recreated the database below.  Ignore
+    // additional errors from the old database while waiting for the new
+    // database to open.
+    return;
+  }
+
   commit_error_count_++;
   if (commit_error_count_ > kSessionStorageCommitErrorThreshold) {
     if (tried_to_recover_from_commit_errors_) {
@@ -641,8 +641,8 @@ void SessionStorageImpl::RegisterShallowClonedNamespace(
     }
   }
 
-  CHECK_EQ(connection_state_, CONNECTION_FINISHED, base::NotFatalUntil::M146);
-  DCHECK_EQ(connection_state_, CONNECTION_FINISHED);
+  CHECK_EQ(connection_state_, CONNECTION_FINISHED);
+
   auto source_namespace_entry =
       metadata_.GetOrCreateNamespaceEntry(source_namespace_id);
   auto namespace_entry = metadata_.GetOrCreateNamespaceEntry(new_namespace_id);
@@ -683,7 +683,7 @@ SessionStorageImpl::CreateSessionStorageNamespaceImpl(
 
 void SessionStorageImpl::DeleteNamespacesFromMetadataAndDatabase(
     std::vector<std::string> namespace_ids) {
-  CHECK_EQ(connection_state_, CONNECTION_FINISHED, base::NotFatalUntil::M146);
+  CHECK_EQ(connection_state_, CONNECTION_FINISHED);
 
   // Remove each namespace from `metadata_`.
   std::vector<DomStorageDatabase::MapLocator> maps_to_delete;
@@ -730,24 +730,18 @@ void SessionStorageImpl::RunWhenConnected(base::OnceClosure callback) {
 }
 
 void SessionStorageImpl::InitiateConnection(bool in_memory_only) {
-  CHECK_EQ(connection_state_, CONNECTION_IN_PROGRESS,
-           base::NotFatalUntil::M146);
+  CHECK_EQ(connection_state_, CONNECTION_IN_PROGRESS);
 
   if (backing_mode_ != BackingMode::kNoDisk && !in_memory_only &&
-      !partition_directory_.empty()) {
+      !storage_partition_directory_.empty()) {
     // We were given a subdirectory to write to, so use a disk backed database.
     if (backing_mode_ == BackingMode::kClearDiskStateOnOpen) {
-      DomStorageDatabaseFactory::Destroy(
-          partition_directory_, database_name_,
-          AsyncDomStorageDatabase::GetTaskRunnerForDb(partition_directory_,
-                                                      database_name_),
-          base::DoNothing());
+      DomStorageDatabaseFactory::Destroy(GetDatabasePath(), base::DoNothing());
     }
 
     in_memory_ = false;
     database_ = AsyncDomStorageDatabase::Open(
-        StorageType::kSessionStorage, partition_directory_, database_name_,
-        memory_dump_id_,
+        StorageType::kSessionStorage, GetDatabasePath(), memory_dump_id_,
         base::BindOnce(&SessionStorageImpl::OnDatabaseOpened,
                        weak_ptr_factory_.GetWeakPtr()));
     return;
@@ -757,7 +751,7 @@ void SessionStorageImpl::InitiateConnection(bool in_memory_only) {
   in_memory_ = true;
   database_ = AsyncDomStorageDatabase::Open(
       StorageType::kSessionStorage,
-      /*directory=*/base::FilePath(), "SessionStorageDatabase", memory_dump_id_,
+      /*database_path=*/base::FilePath(), memory_dump_id_,
       base::BindOnce(&SessionStorageImpl::OnDatabaseOpened,
                      weak_ptr_factory_.GetWeakPtr()));
 }
@@ -795,8 +789,7 @@ void SessionStorageImpl::OnGotDatabaseMetadata(
 }
 
 void SessionStorageImpl::OnConnectionFinished() {
-  CHECK(!database_ || connection_state_ == CONNECTION_IN_PROGRESS,
-        base::NotFatalUntil::M146);
+  CHECK_EQ(connection_state_, CONNECTION_IN_PROGRESS);
 
   // If connection was opened successfully, reset tried_to_recreate_during_open_
   // to enable recreating the database on future errors.
@@ -853,9 +846,7 @@ void SessionStorageImpl::DeleteAndRecreateDatabase() {
   // Destroy database, and try again.
   if (!in_memory_) {
     DomStorageDatabaseFactory::Destroy(
-        partition_directory_, database_name_,
-        AsyncDomStorageDatabase::GetTaskRunnerForDb(partition_directory_,
-                                                    database_name_),
+        GetDatabasePath(),
         base::BindOnce(&SessionStorageImpl::OnDBDestroyed,
                        weak_ptr_factory_.GetWeakPtr(), recreate_in_memory));
   } else {

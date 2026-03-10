@@ -20,6 +20,8 @@ import java.util.Set;
 @NullMarked
 public class BaseSearchIndexProvider implements SearchIndexProvider {
 
+    public static int INDEX_OPT_OUT = -1;
+
     private final int mXmlRes;
     private final String mPrefFragment;
 
@@ -43,11 +45,6 @@ public class BaseSearchIndexProvider implements SearchIndexProvider {
         mXmlRes = xmlRes;
     }
 
-    /** Returns the Preference XML resource. */
-    public @XmlRes int getXmlRes() {
-        return mXmlRes;
-    }
-
     /**
      * Returns the unique id for a child pref.
      *
@@ -62,6 +59,12 @@ public class BaseSearchIndexProvider implements SearchIndexProvider {
     @Override
     public String getPrefFragmentName() {
         return mPrefFragment;
+    }
+
+    /** Returns the Preference XML resource. */
+    @Override
+    public @XmlRes int getXmlRes() {
+        return mXmlRes;
     }
 
     @Override
@@ -79,7 +82,7 @@ public class BaseSearchIndexProvider implements SearchIndexProvider {
             Context context,
             SettingsIndexData indexData,
             Map<String, SearchIndexProvider> providerMap) {
-        if (mXmlRes != 0) {
+        if (mXmlRes != 0 && mXmlRes != INDEX_OPT_OUT) {
             PreferenceParser.parseAndPopulate(
                     context, mXmlRes, indexData, mPrefFragment, getExtras(), providerMap);
         }

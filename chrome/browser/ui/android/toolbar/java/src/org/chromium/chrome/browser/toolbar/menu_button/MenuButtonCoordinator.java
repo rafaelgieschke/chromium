@@ -18,7 +18,7 @@ import android.view.View;
 import androidx.annotation.DrawableRes;
 import androidx.annotation.IdRes;
 
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
@@ -150,7 +150,7 @@ public class MenuButtonCoordinator extends ToolbarChildButton {
                         isWebApp);
         mMediator
                 .getMenuButtonHelperSupplier()
-                .addObserver((helper) -> mAppMenuButtonHelper = helper);
+                .addSyncObserverAndPostIfNonNull((helper) -> mAppMenuButtonHelper = helper);
         if (mMenuButton != null) {
             mChangeProcessor =
                     PropertyModelChangeProcessor.create(
@@ -276,7 +276,8 @@ public class MenuButtonCoordinator extends ToolbarChildButton {
         return mMediator != null ? mMediator::updateStateChanged : null;
     }
 
-    public @Nullable ObservableSupplier<AppMenuButtonHelper> getMenuButtonHelperSupplier() {
+    public @Nullable MonotonicObservableSupplier<AppMenuButtonHelper>
+            getMenuButtonHelperSupplier() {
         if (mMediator == null) return null;
         return mMediator.getMenuButtonHelperSupplier();
     }

@@ -65,11 +65,6 @@ export class SettingsPrivacyPageElement extends SettingsPrivacyPageElementBase {
       showClearBrowsingDataDialog_: Boolean,
       showPrivacyGuideDialog_: Boolean,
 
-      enableDeleteBrowsingDataRevamp_: {
-        type: Boolean,
-        value: () => loadTimeData.getBoolean('enableDeleteBrowsingDataRevamp'),
-      },
-
       isPrivacySandboxRestricted_: {
         type: Boolean,
         value: () => loadTimeData.getBoolean('isPrivacySandboxRestricted'),
@@ -97,7 +92,6 @@ export class SettingsPrivacyPageElement extends SettingsPrivacyPageElementBase {
 
   declare private showClearBrowsingDataDialog_: boolean;
   declare private showPrivacyGuideDialog_: boolean;
-  declare private enableDeleteBrowsingDataRevamp_: boolean;
   declare private isPrivacySandboxRestricted_: boolean;
   declare private isPrivacySandboxRestrictedNoticeEnabled_: boolean;
   declare private dbdDeletionConfirmationToastLabel_: string;
@@ -292,7 +286,9 @@ export class SettingsPrivacyPageElement extends SettingsPrivacyPageElementBase {
       case 'siteSettingsJavascriptOptimizer':
       case 'siteSettingsKeyboardLock':
       case 'siteSettingsLocalFonts':
+      case 'siteSettingsLocalNetwork':
       case 'siteSettingsLocalNetworkAccess':
+      case 'siteSettingsLoopbackNetwork':
       case 'siteSettingsLocation':
       case 'siteSettingsMicrophone':
       case 'siteSettingsMidiDevices':
@@ -308,13 +304,13 @@ export class SettingsPrivacyPageElement extends SettingsPrivacyPageElementBase {
       case 'siteSettingsSiteDetails':
       // <if expr="is_chromeos">
       case 'siteSettingsSmartCardReaders':
+      case 'siteSettingsWebPrinting':
       // </if>
       case 'siteSettingsSound':
       case 'siteSettingsStorageAccess':
       case 'siteSettingsUsbDevices':
       case 'siteSettingsVr':
       case 'siteSettingsWebAppInstallation':
-      case 'siteSettingsWebPrinting':
       case 'siteSettingsWindowManagement':
       case 'siteSettingsZoomLevels':
         triggerId = 'siteSettingsLinkRow';

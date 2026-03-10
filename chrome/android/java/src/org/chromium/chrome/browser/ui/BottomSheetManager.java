@@ -6,7 +6,7 @@ package org.chromium.chrome.browser.ui;
 
 import org.chromium.base.Callback;
 import org.chromium.base.CallbackController;
-import org.chromium.base.supplier.ObservableSupplier;
+import org.chromium.base.supplier.MonotonicObservableSupplier;
 import org.chromium.base.supplier.OneshotSupplier;
 import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
@@ -41,7 +41,7 @@ import java.util.function.Supplier;
 @NullMarked
 class BottomSheetManager extends EmptyBottomSheetObserver implements DestroyObserver {
     /** A means of accessing the focus state of the omnibox. */
-    private final ObservableSupplier<Boolean> mOmniboxFocusStateSupplier;
+    private final MonotonicObservableSupplier<Boolean> mOmniboxFocusStateSupplier;
 
     /** An observer of the omnibox that suppresses the sheet when the omnibox is focused. */
     private final Callback<Boolean> mOmniboxFocusObserver;
@@ -71,7 +71,7 @@ class BottomSheetManager extends EmptyBottomSheetObserver implements DestroyObse
     private final ActivityTabProvider mTabProvider;
 
     /** A supplier of a snackbar manager for the bottom sheet. */
-    private final Supplier<SnackbarManager> mSnackbarManager;
+    private final MonotonicObservableSupplier<SnackbarManager> mSnackbarManager;
 
     /** The manager for overlay panels to attach listeners to. */
     private final Supplier<OverlayPanelManager> mOverlayPanelManager;
@@ -96,8 +96,8 @@ class BottomSheetManager extends EmptyBottomSheetObserver implements DestroyObse
             ActivityTabProvider tabProvider,
             BrowserControlsVisibilityManager controlsVisibilityManager,
             ExpandedSheetHelper expandedSheetHelper,
-            Supplier<SnackbarManager> snackbarManagerSupplier,
-            ObservableSupplier<Boolean> omniboxFocusStateSupplier,
+            MonotonicObservableSupplier<SnackbarManager> snackbarManagerSupplier,
+            MonotonicObservableSupplier<Boolean> omniboxFocusStateSupplier,
             Supplier<OverlayPanelManager> overlayManager,
             OneshotSupplier<LayoutStateProvider> layoutStateProviderSupplier) {
         mSheetController = controller;
@@ -175,11 +175,11 @@ class BottomSheetManager extends EmptyBottomSheetObserver implements DestroyObse
                     @Override
                     public void onBottomControlsHeightChanged(
                             int bottomControlsHeight, int bottomControlsMinHeight) {
-                        mSheetController.setBottomControlsHeight(bottomControlsHeight);
+                        mSheetController.setBottomControlsOffset(bottomControlsHeight);
                     }
                 };
         mBrowserControlsVisibilityManager.addObserver(mBrowserControlsObserver);
-        mSheetController.setBottomControlsHeight(
+        mSheetController.setBottomControlsOffset(
                 controlsVisibilityManager.getBottomControlsHeight());
 
         mOmniboxFocusObserver =
@@ -198,7 +198,7 @@ class BottomSheetManager extends EmptyBottomSheetObserver implements DestroyObse
                         }
                     }
                 };
-        mOmniboxFocusStateSupplier.addObserver(mOmniboxFocusObserver);
+        mOmniboxFocusStateSupplier.addSyncObserverAndPostIfNonNull(mOmniboxFocusObserver);
     }
 
     private void setActivityTab(@Nullable Tab tab) {
@@ -270,8 +270,9 @@ class BottomSheetManager extends EmptyBottomSheetObserver implements DestroyObse
 
     @Override
     public void onSheetOffsetChanged(float heightFraction, float offsetPx) {
-        if (mSnackbarManager.get() != null) {
-            mSnackbarManager.get().dismissAllSnackbars();
+        SnackbarManager snackbarManager = mSnackbarManager.get();
+        if (snackbarManager != null) {
+            snackbarManager.dismissAllSnackbars();
         }
     }
 

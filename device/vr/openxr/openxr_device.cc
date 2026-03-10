@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-#include "base/containers/contains.h"
 #include "base/functional/callback_helpers.h"
 #include "base/no_destructor.h"
 #include "build/build_config.h"
@@ -91,15 +90,19 @@ OpenXrDevice::OpenXrDevice(
         mojom::XRSessionFeature::WEBGPU);
   }
 
-  // Only support hit test if the feature flag is enabled.
+  // Only support AR features if AR is enabled.
   if (device::features::IsOpenXrArEnabled()) {
     device_data.supported_features.emplace_back(
         mojom::XRSessionFeature::HIT_TEST);
     device_data.supported_features.emplace_back(
         mojom::XRSessionFeature::LIGHT_ESTIMATION);
     device_data.supported_features.emplace_back(mojom::XRSessionFeature::DEPTH);
-    device_data.supported_features.emplace_back(
-        mojom::XRSessionFeature::PLANE_DETECTION);
+
+    // Only support Plane Detection if the feature flag is enabled.
+    if (base::FeatureList::IsEnabled(features::kWebXRPlaneDetection)) {
+      device_data.supported_features.emplace_back(
+          mojom::XRSessionFeature::PLANE_DETECTION);
+    }
   }
 
   SetDeviceData(std::move(device_data));
@@ -136,8 +139,12 @@ void OpenXrDevice::RequestSession(
   request_session_callback_ = std::move(callback);
 
   OpenXrCreateInfo create_info;
-  create_info.render_process_id = options->render_process_id;
-  create_info.render_frame_id = options->render_frame_id;
+  if (options->renderer_information) {
+    create_info.render_process_id =
+        options->renderer_information->render_process_id;
+    create_info.render_frame_id =
+        options->renderer_information->render_frame_id;
+  }
   create_info.needs_separate_activity =
       OpenXrApiWrapper::NeedsSeparateActivity();
   platform_helper_->CreateInstanceWithCreateInfo(

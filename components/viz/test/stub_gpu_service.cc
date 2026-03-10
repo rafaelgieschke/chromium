@@ -63,7 +63,9 @@ void StubGpuService::CreateVideoEncodeAcceleratorProvider(
 
 void StubGpuService::BindWebNNContextProvider(
     mojo::PendingReceiver<webnn::mojom::WebNNContextProvider> receiver,
-    int32_t client_id) {}
+    int32_t client_id,
+    uint64_t client_tracing_id,
+    bool is_incognito) {}
 
 void StubGpuService::GetVideoMemoryUsageStats(
     GetVideoMemoryUsageStatsCallback callback) {}
@@ -93,10 +95,6 @@ void StubGpuService::OnBackgroundCleanup() {}
 void StubGpuService::OnBackgrounded() {}
 
 void StubGpuService::OnForegrounded() {}
-
-#if !BUILDFLAG(IS_ANDROID)
-void StubGpuService::OnMemoryPressure(base::MemoryPressureLevel level) {}
-#endif
 
 #if BUILDFLAG(IS_APPLE)
 void StubGpuService::BeginCATransaction() {}

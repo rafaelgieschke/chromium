@@ -308,7 +308,7 @@ void OfflinePageDownloadBridge::Destroy(JNIEnv* env) {
 static void JNI_OfflinePageDownloadBridge_StartDownload(
     JNIEnv* env,
     const JavaRef<jobject>& j_tab,
-    std::string& origin) {
+    const std::string& origin) {
   TabAndroid* tab = TabAndroid::GetNativeTab(env, j_tab);
   if (!tab)
     return;
@@ -348,14 +348,14 @@ static void JNI_OfflinePageDownloadBridge_StartDownload(
                      origin));
 }
 
-static jlong JNI_OfflinePageDownloadBridge_Init(
+static int64_t JNI_OfflinePageDownloadBridge_Init(
     JNIEnv* env,
     const base::android::JavaRef<jobject>& obj) {
   ProfileKey* key = ::android::GetLastUsedRegularProfileKey();
   FullBrowserTransitionManager::Get()->RegisterCallbackOnProfileCreation(
       key, base::BindOnce(&InitializeBackendOnProfileCreated));
 
-  return reinterpret_cast<jlong>(new OfflinePageDownloadBridge(env, obj));
+  return reinterpret_cast<int64_t>(new OfflinePageDownloadBridge(env, obj));
 }
 
 // static

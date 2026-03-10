@@ -78,6 +78,7 @@
 #include "third_party/blink/renderer/core/layout/forms/layout_fieldset.h"
 #include "third_party/blink/renderer/core/layout/forms/layout_text_control.h"
 #include "third_party/blink/renderer/core/layout/fragmentation_utils.h"
+#include "third_party/blink/renderer/core/layout/gap/gap_geometry.h"
 #include "third_party/blink/renderer/core/layout/geometry/box_strut.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
@@ -235,16 +236,24 @@ LayoutUnit TextAreaIntrinsicBlockSize(const HTMLTextAreaElement& textarea,
   }
 
   const auto* inner_editor = textarea.InnerEditorElement();
-  const auto* reference_box =
+  const LayoutBox* editor_box =
       inner_editor ? inner_editor->GetLayoutBox() : nullptr;
-  if (RuntimeEnabledFeatures::TextareaMultipleIfcsEnabled() && reference_box &&
-      reference_box->FirstChildBox()) {
-    reference_box = reference_box->FirstChildBox();
-  }
-  const LayoutUnit line_height =
-      reference_box ? reference_box->FirstLineHeight() : box.FirstLineHeight();
+  const LayoutBox* inner_box =
+      editor_box ? DynamicTo<LayoutBox>(editor_box->SlowFirstChild()) : nullptr;
 
-  return line_height * textarea.rows() + scrollbar_thickness;
+  const LayoutBox& target_box = ([&]() -> const LayoutBox& {
+    if (inner_box) {
+      return *inner_box;
+    }
+    if (editor_box) {
+      return *editor_box;
+    }
+    return box;
+  })();
+
+  return target_box.FirstLineStyleRef().ComputedLineHeightAsFixed() *
+             textarea.rows() +
+         scrollbar_thickness;
 }
 
 LayoutUnit TextFieldIntrinsicBlockSize(const HTMLInputElement& input,
@@ -255,7 +264,7 @@ LayoutUnit TextFieldIntrinsicBlockSize(const HTMLInputElement& input,
   const LayoutBox& target_box = (inner_editor && inner_editor->GetLayoutBox())
                                     ? *inner_editor->GetLayoutBox()
                                     : box;
-  return target_box.FirstLineHeight();
+  return target_box.FirstLineStyleRef().ComputedLineHeightAsFixed();
 }
 
 LayoutUnit FileUploadControlIntrinsicInlineSize(const HTMLInputElement& input,
@@ -471,6 +480,7 @@ LayoutBoxRareData::LayoutBoxRareData()
 
 void LayoutBoxRareData::Trace(Visitor* visitor) const {
   visitor->Trace(layout_child_);
+  visitor->Trace(previous_gap_geometries_);
 }
 
 LayoutBox::LayoutBox(ContainerNode* node) : LayoutBoxModelObject(node) {
@@ -491,7 +501,11 @@ LayoutBox::~LayoutBox() = default;
 
 PaintLayerType LayoutBox::LayerTypeRequired() const {
   NOT_DESTROYED();
-  if (IsStacked() || HasHiddenBackface()) {
+  if (IsStacked() || HasHiddenBackface() ||
+      // A normal flow replaced stacking context is not stacked by itself,
+      // but needs a PaintLayer to manage stacked children.
+      (RuntimeEnabledFeatures::StackingContextIsNotStackedEnabled() &&
+       IsReplacedNormalFlowStackingContext(StyleRef()))) {
     return kNormalPaintLayer;
   }
 
@@ -499,7 +513,7 @@ PaintLayerType LayoutBox::LayerTypeRequired() const {
     return kOverflowClipPaintLayer;
   }
 
-  if (Style()->HasOverscrollArea()) {
+  if (Style()->IsInternalOverscrollAreaAuto()) {
     return kForcedPaintLayer;
   }
 
@@ -521,17 +535,17 @@ bool LayoutBox::TransformsChangeMayRequireLayout() const {
 
 void LayoutBox::WillBeDestroyed() {
   NOT_DESTROYED();
-  ClearOverrideContainingBlockContentSize();
 
   ShapeOutsideInfo::RemoveInfo(*this);
 
-  if (!DocumentBeingDestroyed()) {
-    DisassociatePhysicalFragments();
-  }
+  DisassociatePhysicalFragments();
 
-  if (Style() && StyleRef().HasOutOfFlowPosition()) {
-    if (auto* display_locks = DisplayLocksAffectedByAnchors()) {
-      NotifyContainingDisplayLocksForAnchorPositioning(display_locks, nullptr);
+  if (!RuntimeEnabledFeatures::LayoutReinsertOnInFlowStateChangeEnabled()) {
+    if (Style() && StyleRef().HasOutOfFlowPosition()) {
+      if (auto* display_locks = DisplayLocksAffectedByAnchors()) {
+        NotifyContainingDisplayLocksForAnchorPositioning(display_locks,
+                                                         nullptr);
+      }
     }
   }
 
@@ -561,6 +575,15 @@ void LayoutBox::InsertedIntoTree() {
 void LayoutBox::WillBeRemovedFromTree() {
   NOT_DESTROYED();
   ClearCustomLayoutChild();
+
+  if (RuntimeEnabledFeatures::LayoutReinsertOnInFlowStateChangeEnabled()) {
+    // Notify the display-locks that anchors within a sub-tree may disappear.
+    if (Style() && StyleRef().HasOutOfFlowPosition()) {
+      NotifyContainingDisplayLocksForAnchorPositioning(
+          DisplayLocksAffectedByAnchors(), nullptr);
+    }
+  }
+
   LayoutBoxModelObject::WillBeRemovedFromTree();
 }
 
@@ -574,7 +597,7 @@ void LayoutBox::StyleWillChange(StyleDifference diff,
       // The background of the root element or the body element could propagate
       // up to the canvas. Just dirty the entire canvas when our style changes
       // substantially.
-      if (diff.NeedsNormalPaintInvalidation() || diff.NeedsLayout()) {
+      if (diff.NeedsNormalPaintInvalidation()) {
         View()->SetShouldDoFullPaintInvalidation();
       }
     }
@@ -585,7 +608,9 @@ void LayoutBox::StyleWillChange(StyleDifference diff,
     if (diff.NeedsFullLayout() && Parent()) {
       bool will_move_out_of_ifc = false;
       if (old_style->GetPosition() != new_style.GetPosition()) {
-        if (!old_style->HasOutOfFlowPosition() &&
+        if (!RuntimeEnabledFeatures::
+                LayoutReinsertOnInFlowStateChangeEnabled() &&
+            !old_style->HasOutOfFlowPosition() &&
             new_style.HasOutOfFlowPosition()) {
           // We're about to go out of flow. Before that takes place, we need to
           // mark the current containing block chain for preferred widths
@@ -618,12 +643,14 @@ void LayoutBox::StyleWillChange(StyleDifference diff,
       }
 
       bool will_become_inflow = false;
-      if ((old_style->IsFloating() || old_style->HasOutOfFlowPosition()) &&
-          !new_style.IsFloating() && !new_style.HasOutOfFlowPosition()) {
-        // As a float or OOF, this object may have been part of an inline
-        // formatting context, but that's definitely no longer the case.
-        will_become_inflow = true;
-        will_move_out_of_ifc = true;
+      if (!RuntimeEnabledFeatures::LayoutReinsertOnInFlowStateChangeEnabled()) {
+        if ((old_style->IsFloating() || old_style->HasOutOfFlowPosition()) &&
+            !new_style.IsFloating() && !new_style.HasOutOfFlowPosition()) {
+          // As a float or OOF, this object may have been part of an inline
+          // formatting context, but that's definitely no longer the case.
+          will_become_inflow = true;
+          will_move_out_of_ifc = true;
+        }
       }
 
       if (will_move_out_of_ifc && FirstInlineFragmentItemIndex()) {
@@ -658,11 +685,14 @@ void LayoutBox::StyleDidChange(StyleDifference diff,
   if (HasReflection() && !HasLayer())
     SetHasReflection(false);
 
-  if (auto* parent_flow_block = DynamicTo<LayoutBlockFlow>(Parent())) {
-    if (IsFloatingOrOutOfFlowPositioned() && old_style &&
-        !old_style->IsFloating() && !old_style->HasOutOfFlowPosition()) {
-      // Note that |parent_flow_block| may have been destroyed after this call.
-      parent_flow_block->ChildBecameFloatingOrOutOfFlow(this);
+  if (!RuntimeEnabledFeatures::LayoutReinsertOnInFlowStateChangeEnabled()) {
+    if (auto* parent_flow_block = DynamicTo<LayoutBlockFlow>(Parent())) {
+      if (IsFloatingOrOutOfFlowPositioned() && old_style &&
+          !old_style->IsFloating() && !old_style->HasOutOfFlowPosition()) {
+        // Note that |parent_flow_block| may have been destroyed after this
+        // call.
+        parent_flow_block->ChildBecameFloatingOrOutOfFlow(this);
+      }
     }
   }
 
@@ -706,12 +736,21 @@ void LayoutBox::StyleDidChange(StyleDifference diff,
       //
       // For some controls, it depends on paddings.
       if (!old_style->BorderSizeEquals(new_style) ||
-          diff.BorderRadiusChanged() ||
-          (diff.BorderShapeChanged() &&
+          diff.border_radius_changed ||
+          (diff.border_shape_changed &&
            (new_style.HasBorderShape() || old_style->HasBorderShape())) ||
           (HasControlClip() && !old_style->PaddingEqual(new_style))) {
         SetNeedsPaintPropertyUpdate();
       }
+    }
+
+    // When box-shadow changes while border-shape is active, force a paint
+    // property update to ensure the InnerBorderShapeClip overflow hierarchy is
+    // re-evaluated consistently with the visual overflow recomputation.
+    if (!base::ValuesEquivalent(old_style->BoxShadow(),
+                                new_style.BoxShadow()) &&
+        (new_style.HasBorderShape() || old_style->HasBorderShape())) {
+      SetNeedsPaintPropertyUpdate();
     }
 
     if (old_style->OverscrollBehaviorX() != new_style.OverscrollBehaviorX() ||
@@ -727,7 +766,7 @@ void LayoutBox::StyleDidChange(StyleDifference diff,
     if (old_style->OverflowClipMargin() != new_style.OverflowClipMargin())
       SetNeedsPaintPropertyUpdate();
 
-    if (IsInLayoutNGInlineFormattingContext() && IsAtomicInlineLevel() &&
+    if (IsInLayoutNGInlineFormattingContext() && IsInline() &&
         old_style->Direction() != new_style.Direction()) {
       SetNeedsCollectInlines();
     }
@@ -746,7 +785,7 @@ void LayoutBox::StyleDidChange(StyleDifference diff,
     }
   }
 
-  if (diff.TransformChanged() && TransformsChangeMayRequireLayout()) {
+  if (diff.transform_changed && TransformsChangeMayRequireLayout()) {
     SetNeedsLayoutAndFullPaintInvalidation(
         layout_invalidation_reason::kStyleChange);
   }
@@ -754,9 +793,6 @@ void LayoutBox::StyleDidChange(StyleDifference diff,
   // Update the script style map, from the new computed style.
   if (IsCustomItem())
     GetCustomLayoutChild()->styleMap()->UpdateStyle(GetDocument(), StyleRef());
-
-  // Non-atomic inlines should be LayoutInline or LayoutText, not LayoutBox.
-  DCHECK(!IsInline() || IsAtomicInlineLevel());
 }
 
 void LayoutBox::UpdateShapeOutsideInfoAfterStyleChange(
@@ -1227,8 +1263,11 @@ void LayoutBox::UpdateAfterLayout() {
   if (IsPositioned())
     GetFrame()->GetInputMethodController().DidLayoutSubtree(*this);
 
-  if (StyleRef().HasColumnRule() && IsFragmentationContextRoot()) {
+  if (StyleRef().HasColumnRule() && IsFragmentationContextRoot() &&
+      !RuntimeEnabledFeatures::CSSGapDecorationEnabled()) {
     // Issue full invalidation, in case the number of column rules have changed.
+    // When CSSGapDecoration is enabled, gap decoration invalidation is handled
+    // by BoxPaintInvalidator.
     ClearNeedsLayoutWithFullPaintInvalidation();
   } else {
     ClearNeedsLayout();
@@ -1924,16 +1963,18 @@ bool LayoutBox::ApplyBoxClips(
     TransformState::TransformAccumulation accumulation,
     VisualRectFlags visual_rect_flags) const {
   NOT_DESTROYED();
-  // This won't work fully correctly for fixed-position elements, who should
-  // receive CSS clip but for whom the current object is not in the containing
-  // block chain.
-  PhysicalRect clip_rect = ClippingRect(PhysicalOffset());
-
+  if (visual_rect_flags & VisualRectFlags::kSkipAncestorAndViewportClips) {
+    return true;
+  }
   transform_state.Flatten();
   PhysicalRect rect = PhysicalRect::EnclosingRect(
       transform_state.LastPlanarQuad().BoundingBox());
 
   bool does_intersect;
+  // This won't work fully correctly for fixed-position elements, who should
+  // receive CSS clip but for whom the current object is not in the containing
+  // block chain.
+  PhysicalRect clip_rect = ClippingRect(PhysicalOffset());
   if (visual_rect_flags & kEdgeInclusive) {
     does_intersect = rect.InclusiveIntersect(clip_rect);
   } else {
@@ -1972,15 +2013,6 @@ void LayoutBox::SetOverrideContainingBlockContentLogicalWidth(
   EnsureRareData().has_override_containing_block_content_logical_width_ = true;
 }
 
-// TODO (lajava) Shouldn't we implement these functions based on physical
-// direction ?.
-void LayoutBox::ClearOverrideContainingBlockContentSize() {
-  NOT_DESTROYED();
-  if (!rare_data_)
-    return;
-  EnsureRareData().has_override_containing_block_content_logical_width_ = false;
-}
-
 bool LayoutBox::HitTestAllPhases(HitTestResult& result,
                                  const HitTestLocation& hit_test_location,
                                  const PhysicalOffset& accumulated_offset) {
@@ -2014,96 +2046,33 @@ bool LayoutBox::HitTestOverflowControl(
              NodeForHitTest(), hit_test_location) == kStopHitTesting;
 }
 
-bool LayoutBox::NodeAtPoint(HitTestResult& result,
-                            const HitTestLocation& hit_test_location,
-                            const PhysicalOffset& accumulated_offset,
-                            HitTestPhase phase) {
-  NOT_DESTROYED();
-  if (!MayIntersect(result, hit_test_location, accumulated_offset))
-    return false;
+namespace {
 
-  if (phase == HitTestPhase::kForeground && !HasSelfPaintingLayer() &&
-      HitTestOverflowControl(result, hit_test_location, accumulated_offset))
-    return true;
-
-  bool skip_children = (result.GetHitTestRequest().GetStopNode() == this) ||
-                       ChildPaintBlockedByDisplayLock();
-  if (!skip_children && ShouldClipOverflowAlongEitherAxis()) {
-    // PaintLayer::HitTestFragmentsWithPhase() checked the fragments'
-    // foreground rect for intersection if a layer is self painting,
-    // so only do the overflow clip check here for non-self-painting layers.
-    if (!HasSelfPaintingLayer() &&
-        !hit_test_location.Intersects(OverflowClipRect(
-            accumulated_offset, kExcludeOverlayScrollbarSizeForHitTesting))) {
-      skip_children = true;
-    }
-    if (!skip_children && StyleRef().HasBorderRadius()) {
-      PhysicalRect bounds_rect(accumulated_offset, StitchedSize());
-      skip_children = !hit_test_location.Intersects(
-          ContouredBorderGeometry::PixelSnappedContouredInnerBorder(
-              StyleRef(), bounds_rect));
-    }
+bool HitTestClippedOutByBorderShape(const LayoutBox& box,
+                                    const HitTestLocation& hit_test_location,
+                                    const PhysicalOffset& border_box_location) {
+  PhysicalRect border_rect = box.PhysicalBorderBoxRect();
+  border_rect.Move(border_box_location);
+  if (box.ShouldApplyOverflowClipMargin()) {
+    border_rect.Expand(box.BorderOutsetsForClipping());
   }
-
-  if (!skip_children &&
-      HitTestChildren(result, hit_test_location, accumulated_offset, phase)) {
-    return true;
-  }
-
-  if (StyleRef().HasBorderRadius() &&
-      HitTestClippedOutByBorder(hit_test_location, accumulated_offset))
-    return false;
-
-  // Now hit test ourselves.
-  if (IsInSelfHitTestingPhase(phase) &&
-      VisibleToHitTestRequest(result.GetHitTestRequest())) {
-    PhysicalRect bounds_rect;
-    if (result.GetHitTestRequest().IsHitTestVisualOverflow()) [[unlikely]] {
-      bounds_rect = VisualOverflowRectIncludingFilters();
-    } else {
-      bounds_rect = PhysicalBorderBoxRect();
-    }
-    bounds_rect.Move(accumulated_offset);
-    if (hit_test_location.Intersects(bounds_rect)) {
-      UpdateHitTestResult(result,
-                          hit_test_location.Point() - accumulated_offset);
-      if (result.AddNodeToListBasedTestResult(NodeForHitTest(),
-                                              hit_test_location,
-                                              bounds_rect) == kStopHitTesting)
-        return true;
-    }
-  }
-
-  return false;
+  Path hit_shape =
+      ComputeBorderShapeOuterPath(box.StyleRef(), border_rect, &box);
+  return !hit_test_location.Intersects(hit_shape);
 }
 
-bool LayoutBox::HitTestChildren(HitTestResult& result,
-                                const HitTestLocation& hit_test_location,
-                                const PhysicalOffset& accumulated_offset,
-                                HitTestPhase phase) {
-  NOT_DESTROYED();
-  for (LayoutObject* child = SlowLastChild(); child;
-       child = child->PreviousSibling()) {
-    if (child->HasLayer() &&
-        To<LayoutBoxModelObject>(child)->Layer()->IsSelfPaintingLayer())
-      continue;
-
-    PhysicalOffset child_accumulated_offset = accumulated_offset;
-    if (auto* box = DynamicTo<LayoutBox>(child))
-      child_accumulated_offset += box->PhysicalLocation();
-
-    if (child->NodeAtPoint(result, hit_test_location, child_accumulated_offset,
-                           phase))
-      return true;
-  }
-
-  return false;
-}
+}  // namespace
 
 bool LayoutBox::HitTestClippedOutByBorder(
     const HitTestLocation& hit_test_location,
     const PhysicalOffset& border_box_location) const {
   NOT_DESTROYED();
+
+  if (StyleRef().HasBorderShape()) {
+    return HitTestClippedOutByBorderShape(*this, hit_test_location,
+                                          border_box_location);
+  }
+
   PhysicalRect border_rect = PhysicalBorderBoxRect();
   border_rect.Move(border_box_location);
   return !hit_test_location.Intersects(
@@ -2260,12 +2229,10 @@ void LayoutBox::ImageChanged(WrappedImagePtr image,
       if (layer->GetImage() && image == layer->GetImage()->Data()) {
         SetShouldDoFullPaintInvalidationWithoutLayoutChange(
             PaintInvalidationReason::kImage);
-        if (layer->GetImage()->IsMaskSource() && IsSVGChild()) {
-          // Since an invalid <mask> reference does not yield a paint property
-          // on SVG content (see CSSMaskPainter), we need to update paint
-          // properties when such a reference changes.
-          SetNeedsPaintPropertyUpdate();
-        }
+        // Since an invalid <mask> reference does not yield a paint property
+        // (see CSSMaskPainter), we need to update paint properties when such a
+        // reference changes.
+        SetNeedsPaintPropertyUpdate();
         break;
       }
     }
@@ -2339,6 +2306,12 @@ void LayoutBox::LocationChanged() {
   // this object for paint invalidation.
   if (!NeedsLayout())
     SetShouldCheckForPaintInvalidation();
+
+  if (RuntimeEnabledFeatures::OffsetPathTransformUpdateFixEnabled()) {
+    if (HasLayer() && StyleRef().HasOffset()) {
+      Layer()->UpdateTransform();
+    }
+  }
 }
 
 void LayoutBox::SizeChanged() {
@@ -2574,7 +2547,7 @@ LayoutUnit LayoutBox::ContainingBlockLogicalWidthForContent() const {
   LayoutBlock* cb = ContainingBlock();
   if (IsOutOfFlowPositioned())
     return cb->ClientLogicalWidth();
-  return cb->AvailableLogicalWidth();
+  return cb->ContentLogicalWidth();
 }
 
 PhysicalOffset LayoutBox::OffsetFromContainerInternal(
@@ -3220,25 +3193,14 @@ PhysicalRect LayoutBox::LocalCaretRect(int caret_offset,
   // They never refer to children.
   // FIXME: Paint the carets inside empty blocks differently than the carets
   // before/after elements.
-  LayoutUnit caret_width = GetFrameView()->BarCaretWidth();
-  LogicalSize size(LogicalWidth(), LogicalHeight());
 
-  LayoutUnit caret_block_size = size.block_size;
-  // If height of box is smaller than font height, use the latter one,
-  // otherwise the caret might become invisible.
-  //
-  // Also, if the box is not an atomic inline-level element, always use the font
-  // height. This prevents the "big caret" bug described in:
-  // <rdar://problem/3777804> Deleting all content in a document can result in
-  // giant tall-as-window insertion point
-  //
-  // FIXME: ignoring :first-line, missing good reason to take care of
   const SimpleFontData* font_data = StyleRef().GetFont()->PrimaryFont();
-  LayoutUnit font_height =
-      LayoutUnit(font_data ? font_data->GetFontMetrics().Height() : 0);
-  if (font_height > size.block_size || (!IsAtomicInlineLevel() && !IsTable())) {
-    caret_block_size = font_height;
-  }
+  const LayoutUnit font_height =
+      font_data ? LayoutUnit(font_data->GetFontMetrics().Height())
+                : LayoutUnit();
+
+  // FIXME: ignoring :first-line, missing good reason to take care of
+  const LogicalSize caret_size = {GetFrameView()->BarCaretWidth(), font_height};
 
   // FIXME: Border/padding should be added for all elements but this workaround
   // is needed because we use offsets inside an "atomic" element to represent
@@ -3249,7 +3211,7 @@ PhysicalRect LayoutBox::LocalCaretRect(int caret_offset,
 
   WritingDirectionMode writing_direction = Style()->GetWritingDirection();
   LogicalOffset offset;
-  LayoutUnit content_inline_size = size.inline_size;
+  LayoutUnit content_inline_size = LogicalWidth();
   if (apply_border_padding) {
     BoxStrut border_padding = (BorderOutsets() + PaddingOutsets())
                                   .ConvertToLogical(writing_direction);
@@ -3258,12 +3220,11 @@ PhysicalRect LayoutBox::LocalCaretRect(int caret_offset,
     content_inline_size -= border_padding.InlineSum();
   }
   if (caret_offset) {
-    offset.inline_offset += content_inline_size - caret_width;
+    offset.inline_offset += content_inline_size - caret_size.inline_size;
   }
 
-  LogicalRect rect(offset, LogicalSize(caret_width, caret_block_size));
   return WritingModeConverter(writing_direction, StitchedSize())
-      .ToPhysical(rect);
+      .ToPhysical({offset, caret_size});
 }
 
 PositionWithAffinity LayoutBox::PositionForPointInFragments(
@@ -3303,31 +3264,15 @@ PositionWithAffinity LayoutBox::PositionForPointInFragments(
   return closest_fragment->PositionForPoint(target - closest_fragment_offset);
 }
 
-DISABLE_CFI_PERF
-bool LayoutBox::ShouldBeConsideredAsReplaced() const {
-  NOT_DESTROYED();
-  if (IsAtomicInlineLevel())
-    return true;
-  // We need to detect all types of objects that should be treated as replaced.
-  // Callers of this method will use the result for various things, such as
-  // determining how to size the object, or whether it needs to avoid adjacent
-  // floats, just like objects that establish a new formatting context.
-  // IsAtomicInlineLevel() will not catch all the cases. Objects may be
-  // block-level and still replaced, and we cannot deduce this from the
-  // LayoutObject type. Checkboxes and radio buttons are such examples. We need
-  // to check the Element type. This also applies to images, since we may have
-  // created a block-flow LayoutObject for the ALT text (which still counts as
-  // replaced).
-  auto* element = DynamicTo<Element>(GetNode());
-  if (!element)
-    return false;
-  if (element->IsFormControlElement()) {
-    // Form control elements are generally replaced objects. Fieldsets are not,
-    // though. A fieldset is (almost) a regular block container, and should be
-    // treated as such.
-    return !IsA<HTMLFieldSetElement>(element);
+bool LayoutBox::IsSemiReplaced() const {
+  // Exclude <fieldset> from this check, for layout purposes they aren't really
+  // form control elements.
+  if (const auto* element = DynamicTo<Element>(GetNode())) {
+    return IsA<HTMLImageElement>(element) ||
+           (element->IsFormControlElement() &&
+            !IsA<HTMLFieldSetElement>(element));
   }
-  return IsA<HTMLImageElement>(element);
+  return false;
 }
 
 // Children of LayoutCustom object's are only considered "items" when it has a
@@ -3345,20 +3290,20 @@ PhysicalBoxStrut LayoutBox::ComputeVisualEffectOverflowOutsets() {
 
   PhysicalBoxStrut outsets = style.BoxDecorationOutsets();
 
+  PhysicalRect border_rect(PhysicalOffset(), StitchedSize());
+  std::optional<BorderShapeReferenceRects> border_shape_rects;
+
   if (style.HasBorderShape()) {
-    PhysicalRect border_rect(PhysicalOffset(), StitchedSize());
-    std::optional<BorderShapeReferenceRects> border_shape_rects =
+    border_shape_rects =
         ComputeBorderShapeReferenceRects(border_rect, style, *this);
     const PhysicalRect outer_reference_rect =
         border_shape_rects ? border_shape_rects->outer : border_rect;
     const PhysicalRect inner_reference_rect =
         border_shape_rects ? border_shape_rects->inner : border_rect;
-    if (std::optional<PhysicalBoxStrut> border_shape_outsets =
-            BorderShapePainter::VisualOutsets(style, border_rect,
-                                              outer_reference_rect,
-                                              inner_reference_rect)) {
-      outsets.Unite(*border_shape_outsets);
-    }
+    // VisualOutsets() returns the complete border-shape overflow: both the
+    // border path's visual extent and the precise box-shadow extent.
+    outsets.Unite(BorderShapePainter::VisualOutsets(
+        style, border_rect, outer_reference_rect, inner_reference_rect));
   }
 
   if (style.HasOutline()) {
@@ -3370,9 +3315,41 @@ PhysicalBoxStrut LayoutBox::ComputeVisualEffectOverflowOutsets() {
     PhysicalSize size = StitchedSize();
     bool outline_affected = rect.size != size;
     SetOutlineMayBeAffectedByDescendants(outline_affected);
-    rect.Inflate(LayoutUnit(OutlinePainter::OutlineOutsetExtent(style, info)));
-    outsets.Unite(PhysicalBoxStrut(-rect.Y(), rect.Right() - size.width,
-                                   rect.Bottom() - size.height, -rect.X()));
+
+    // For border-shape, compute the outline bounds from the offset path.
+    if (style.HasBorderShape()) {
+      const PhysicalRect outer_reference_rect =
+          border_shape_rects ? border_shape_rects->outer : border_rect;
+      // When border-shape uses a single shape, the border is stroked centered
+      // on the path, so the outer edge is at border_width/2 from the path.
+      float border_stroke_offset = 0;
+      const StyleBorderShape* border_shape = style.BorderShape();
+      if (border_shape && !border_shape->HasSeparateInnerShape()) {
+        DerivedStroke derived_stroke = RelevantSideForBorderShape(style);
+        border_stroke_offset = derived_stroke.thickness / 2.0f;
+      }
+      const float outline_offset = border_stroke_offset +
+                                   static_cast<float>(info.offset) +
+                                   static_cast<float>(info.width);
+      Path outline_path = BorderShapePainter::OuterPathWithOffset(
+          style, outer_reference_rect, outline_offset);
+      gfx::RectF outline_bounds = outline_path.BoundingRect();
+      const float top_outset =
+          std::max(0.0f, border_rect.Y() - outline_bounds.y());
+      const float left_outset =
+          std::max(0.0f, border_rect.X() - outline_bounds.x());
+      const float right_outset =
+          std::max(0.0f, outline_bounds.right() - border_rect.Right());
+      const float bottom_outset =
+          std::max(0.0f, outline_bounds.bottom() - border_rect.Bottom());
+      outsets.Unite(PhysicalBoxStrut::Enclosing(gfx::OutsetsF::TLBR(
+          top_outset, left_outset, bottom_outset, right_outset)));
+    } else {
+      rect.Inflate(
+          LayoutUnit(OutlinePainter::OutlineOutsetExtent(style, info)));
+      outsets.Unite(PhysicalBoxStrut(-rect.Y(), rect.Right() - size.width,
+                                     rect.Bottom() - size.height, -rect.X()));
+    }
   }
 
   return outsets;
@@ -3812,7 +3789,7 @@ bool LayoutBox::IsMonolithic() const {
   // TODO(almaher): Don't consider a writing mode root monolitic if
   // IsFlexibleBox(). The breakability should be handled at the item
   // level. (Likely same for Table and Grid).
-  if (ShouldBeConsideredAsReplaced() || HasUnsplittableScrollingOverflow() ||
+  if (IsInline() || IsSemiReplaced() || HasUnsplittableScrollingOverflow() ||
       (Parent() && IsWritingModeRoot()) ||
       (IsFixedPositioned() && GetDocument().Printing() &&
        IsA<LayoutView>(Container())) ||
@@ -3822,17 +3799,6 @@ bool LayoutBox::IsMonolithic() const {
   }
 
   return false;
-}
-
-LayoutUnit LayoutBox::FirstLineHeight() const {
-  NOT_DESTROYED();
-  if (IsAtomicInlineLevel()) {
-    PhysicalSize size = StitchedSize();
-    return FirstLineStyle()->IsHorizontalWritingMode()
-               ? MarginHeight() + size.height
-               : MarginWidth() + size.width;
-  }
-  return LayoutUnit();
 }
 
 PhysicalBoxStrut LayoutBox::BorderOutsetsForClipping() const {
@@ -4085,6 +4051,23 @@ void LayoutBox::MutableForPainting::SavePreviousOverflowData() {
       GetLayoutBox().SelfVisualOverflowRect();
 }
 
+void LayoutBox::MutableForPainting::SavePreviousGapGeometries() {
+  auto* previous_gap_geometries =
+      MakeGarbageCollected<GCedHeapVector<Member<const GapGeometry>>>();
+  for (const PhysicalBoxFragment& fragment :
+       GetLayoutBox().PhysicalFragments()) {
+    previous_gap_geometries->push_back(fragment.GetGapGeometry());
+  }
+  GetLayoutBox().EnsureRareData().previous_gap_geometries_ =
+      previous_gap_geometries;
+}
+
+void LayoutBox::MutableForPainting::ClearPreviousGapGeometries() {
+  if (auto* rare_data = GetLayoutBox().rare_data_.Get()) {
+    rare_data->previous_gap_geometries_ = nullptr;
+  }
+}
+
 void LayoutBox::MutableForPainting::SetPreviousGeometryForLayoutShiftTracking(
     const PhysicalOffset& paint_offset,
     const PhysicalSize& size,
@@ -4124,8 +4107,7 @@ RasterEffectOutset LayoutBox::VisualRectOutsetForRasterEffects() const {
 
 TextDirection LayoutBox::ResolvedDirection() const {
   NOT_DESTROYED();
-  if (IsInline() && IsAtomicInlineLevel() &&
-      IsInLayoutNGInlineFormattingContext()) {
+  if (IsInLayoutNGInlineFormattingContext() && IsInline()) {
     InlineCursor cursor;
     cursor.MoveTo(*this);
     if (cursor) {

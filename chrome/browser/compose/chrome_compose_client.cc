@@ -28,10 +28,10 @@
 #include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/dialogs/browser_dialogs.h"
 #include "chrome/browser/ui/hats/hats_service_factory.h"
 #include "chrome/browser/ui/hats/survey_config.h"
 #include "chrome/browser/ui/user_education/show_promo_in_page.h"
@@ -122,8 +122,7 @@ void ChromeComposeClient::FieldChangeObserver::OnSuggestionsShown(
 void ChromeComposeClient::FieldChangeObserver::OnAfterTextFieldValueChanged(
     autofill::AutofillManager& manager,
     autofill::FormGlobalId form,
-    autofill::FieldGlobalId field,
-    const std::u16string& text_value) {
+    autofill::FieldGlobalId field) {
   ++text_field_value_change_event_count_;
   if (text_field_value_change_event_count_ >=
       compose::GetComposeConfig().nudge_field_change_event_max) {
@@ -185,7 +184,7 @@ ChromeComposeClient::ChromeComposeClient(content::WebContents* web_contents)
   }
 
   autofill_managers_observation_.Observe(
-      autofill::ContentAutofillDriverFactory::FromWebContents(web_contents),
+      autofill::ContentAutofillClient::FromWebContents(web_contents),
       autofill::ScopedAutofillManagersObservation::InitializationPolicy::
           kObservePreexistingManagers);
   nudge_tracker_.StartObserving(web_contents);

@@ -62,15 +62,15 @@ class AwProxyingRestrictedCookieManager
                     bool apply_devtools_overrides,
                     bool force_disable_third_party_cookies,
                     GetAllForUrlCallback callback) override;
-  void SetCanonicalCookie(const net::CanonicalCookie& cookie,
-                          const GURL& url,
-                          const net::SiteForCookies& site_for_cookies,
-                          const url::Origin& top_frame_origin,
-                          net::StorageAccessApiStatus storage_access_api_status,
-                          net::CookieInclusionStatus status,
-                          bool is_ad_tagged,
-                          bool apply_devtools_overrides,
-                          SetCanonicalCookieCallback callback) override;
+  void SetCanonicalCookie(
+      network::mojom::RestrictedCanonicalCookieParamsPtr cookie_params,
+      const GURL& url,
+      const net::SiteForCookies& site_for_cookies,
+      const url::Origin& top_frame_origin,
+      net::StorageAccessApiStatus storage_access_api_status,
+      bool is_ad_tagged,
+      bool apply_devtools_overrides,
+      SetCanonicalCookieCallback callback) override;
   void AddChangeListener(
       const GURL& url,
       const net::SiteForCookies& site_for_cookies,
@@ -137,6 +137,12 @@ class AwProxyingRestrictedCookieManager
   std::optional<const content::GlobalRenderFrameHostToken> global_frame_token_;
 
   raw_ref<AwCookieAccessPolicy> cookie_access_policy_;
+
+  // Latched cookie policy state (used when kWebViewLatchedCookiePolicy
+  // enabled). These values are captured at construction time and used
+  // throughout the RCM's lifetime to enable shared memory cookie versioning.
+  bool latched_accept_cookies_ = true;
+  bool latched_accept_third_party_ = false;
 
   base::WeakPtrFactory<AwProxyingRestrictedCookieManager> weak_factory_{this};
 };

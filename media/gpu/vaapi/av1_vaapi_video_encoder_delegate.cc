@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/40285824): Remove this and convert code to safer constructs.
-#pragma allow_unsafe_buffers
-#endif
-
 #include "media/gpu/vaapi/av1_vaapi_video_encoder_delegate.h"
 
 #include <array>
@@ -15,6 +10,7 @@
 #include <utility>
 
 #include "base/bits.h"
+#include "base/compiler_specific.h"
 #include "base/containers/span.h"
 #include "base/logging.h"
 #include "media/gpu/macros.h"
@@ -242,7 +238,7 @@ void DownscaleSegmentMap(const uint8_t* src_seg_map,
       freq_distribution[(row_offset + (src_x >> log_seg_size_ratio)) *
                             num_segments +
                         *src_seg_map]++;
-      src_seg_map++;
+      UNSAFE_TODO(src_seg_map++);
     }
   }
   auto dst_seg_map_it = dst_seg_map.begin();
@@ -323,7 +319,7 @@ AV1BitstreamBuilder::FrameHeader FillAV1BuilderFrameHeader(
   pic_hdr.loop_filter_delta_enabled = false;
   pic_hdr.primary_ref_frame = pic_param.primary_ref_frame;
   for (size_t i = 0; i < libgav1::kNumInterReferenceFrameTypes; ++i) {
-    pic_hdr.ref_frame_idx[i] = pic_param.ref_frame_idx[i];
+    pic_hdr.ref_frame_idx[i] = UNSAFE_TODO(pic_param.ref_frame_idx[i]);
   }
   pic_hdr.refresh_frame_flags = pic_param.refresh_frame_flags;
   // Set order hint for each reference frame.
@@ -337,7 +333,8 @@ AV1BitstreamBuilder::FrameHeader FillAV1BuilderFrameHeader(
   pic_hdr.cdef_damping_minus_3 = pic_param.cdef_damping_minus_3;
   pic_hdr.cdef_bits = pic_param.cdef_bits;
   for (size_t i = 0; i < ARRAY_SIZE(current_params.cdef_y_pri_strength); i++) {
-    pic_hdr.cdef_y_pri_strength[i] = current_params.cdef_y_pri_strength[i];
+    pic_hdr.cdef_y_pri_strength[i] =
+        UNSAFE_TODO(current_params.cdef_y_pri_strength[i]);
     pic_hdr.cdef_y_sec_strength[i] = current_params.cdef_y_sec_strength[i];
     pic_hdr.cdef_uv_pri_strength[i] = current_params.cdef_uv_pri_strength[i];
     pic_hdr.cdef_uv_sec_strength[i] = current_params.cdef_uv_sec_strength[i];
@@ -355,10 +352,11 @@ AV1BitstreamBuilder::FrameHeader FillAV1BuilderFrameHeader(
         pic_param.segments.seg_flags.bits.segmentation_temporal_update;
     pic_hdr.segmentation_update_data = true;
     for (uint32_t i = 0; i < pic_hdr.segment_number; i++) {
-      pic_hdr.feature_data[i][0] = pic_param.segments.feature_data[i][0];
+      pic_hdr.feature_data[i][0] =
+          UNSAFE_TODO(pic_param.segments.feature_data[i][0]);
       for (uint32_t j = 0; j < libgav1::kSegmentFeatureMax; j++) {
         pic_hdr.feature_enabled[i][j] =
-            !!(pic_param.segments.feature_mask[i] & (1 << j));
+            !!(UNSAFE_TODO(pic_param.segments.feature_mask[i]) & (1 << j));
       }
     }
   }
@@ -433,18 +431,40 @@ bool AV1VaapiVideoEncoderDelegate::Initialize(
       config.content_type ==
       VideoEncodeAccelerator::Config::ContentType::kDisplay;
 
+  // Treat 0 framerate as "use default". This matches the precedent set by
+  // VideoEncodeAccelerator::kDefaultFramerate and allows callers (e.g., WebRTC)
+  // to signal "encoder's choice" when the actual framerate is not yet known.
+  if (current_params_.framerate == 0) {
+    VLOGF(1) << "Framerate is 0, using default "
+             << VideoEncodeAccelerator::kDefaultFramerate << " fps";
+    current_params_.framerate = VideoEncodeAccelerator::kDefaultFramerate;
+  }
+
   level_idx_ = ComputeLevel(coded_size_, current_params_.framerate);
   if (level_idx_ < 0) {
-    LOG(ERROR) << "Could not compute level index";
-    return false;
+    // Fall back to Level 3.1 (index 5), which is a safe baseline for most
+    // WebRTC scenarios and common resolutions up to 1080p at 60fps.
+    // This prevents "level: not available" errors in the sequence header
+    // which can cause decoders to reject the bitstream (crbug.com/471780477).
+    VLOGF(1) << "Could not compute level index for " << coded_size_.ToString()
+             << " at " << current_params_.framerate
+             << "fps, falling back to Level 3.1 (index 5)";
+    level_idx_ = 5;
   }
 
   frame_num_ = current_params_.intra_period;
 
+  // Default to 8x8 (smallest supported) and let the driver request a larger
+  // minimum if needed.
+  seg_size_ = 8;
+
+  // If the driver query fails, keep the default.
   if (!vaapi_wrapper_->GetMinAV1SegmentSize(AV1PROFILE_PROFILE_MAIN,
                                             seg_size_)) {
-    LOG(ERROR) << "Could not get minimum segment size";
-    return false;
+    seg_size_ = 8;
+  }
+  if (seg_size_ < 8u) {
+    seg_size_ = 8u;
   }
 
   uint32_t seg_map_width =
@@ -466,6 +486,11 @@ AV1VaapiVideoEncoderDelegate::~AV1VaapiVideoEncoderDelegate() = default;
 bool AV1VaapiVideoEncoderDelegate::UpdateRates(
     const VideoBitrateAllocation& bitrate_allocation,
     uint32_t framerate) {
+  const uint32_t bitrate = bitrate_allocation.GetSumBps();
+  if (bitrate == 0 || framerate == 0) {
+    return false;
+  }
+
   current_params_.bitrate_allocation = bitrate_allocation;
   current_params_.framerate = framerate;
 
@@ -487,13 +512,14 @@ bool AV1VaapiVideoEncoderDelegate::UpdateRates(
   rc_config.frame_drop_thresh =
       base::strict_cast<int>(current_params_.drop_frame_thresh);
   rc_config.framerate = current_params_.framerate;
-  int bitrate_sum = 0;
+  uint64_t bitrate_sum = 0;
   for (int tid = 0; tid < num_temporal_layers_; ++tid) {
-    rc_config.ts_rate_decimator[tid] = 1u << (num_temporal_layers_ - tid - 1);
-    rc_config.max_quantizers[tid] = rc_config.max_quantizer;
-    rc_config.min_quantizers[tid] = rc_config.min_quantizer;
+    UNSAFE_TODO(rc_config.ts_rate_decimator[tid]) =
+        1u << (num_temporal_layers_ - tid - 1);
+    UNSAFE_TODO(rc_config.max_quantizers[tid]) = rc_config.max_quantizer;
+    UNSAFE_TODO(rc_config.min_quantizers[tid]) = rc_config.min_quantizer;
     bitrate_sum += bitrate_allocation.GetBitrateBps(/*spatial_index=*/0, tid);
-    rc_config.layer_target_bitrate[tid] = bitrate_sum / 1000;
+    UNSAFE_TODO(rc_config.layer_target_bitrate[tid]) = bitrate_sum / 1000;
   }
   rc_config.aq_mode = 3;
   rc_config.ss_number_layers = 1;
@@ -590,10 +616,10 @@ AV1VaapiVideoEncoderDelegate::PrepareEncodeJob(EncodeJob& encode_job) {
       CHECK(!picture_param.reference_frame_indices.empty());
       for (size_t i = 0; i < libgav1::kNumInterReferenceFrameTypes; ++i) {
         if (i < picture_param.reference_frame_indices.size()) {
-          pic->frame_header.reference_frame_index[i] =
+          UNSAFE_TODO(pic->frame_header.reference_frame_index[i]) =
               picture_param.reference_frame_indices[i];
         } else {
-          pic->frame_header.reference_frame_index[i] =
+          UNSAFE_TODO(pic->frame_header.reference_frame_index[i]) =
               picture_param.reference_frame_indices[0];
         }
       }
@@ -708,7 +734,7 @@ bool AV1VaapiVideoEncoderDelegate::SubmitSequenceHeader(
 // TODO(b:274756117): Consider tuning these parameters.
 bool AV1VaapiVideoEncoderDelegate::SubmitSequenceParam() {
   VAEncSequenceParameterBufferAV1 seq_param;
-  memset(&seq_param, 0, sizeof(VAEncSequenceParameterBufferAV1));
+  UNSAFE_TODO(memset(&seq_param, 0, sizeof(VAEncSequenceParameterBufferAV1)));
 
   // The only known hardware that supports AV1 encoding only uses profile 0.
   seq_param.seq_profile = sequence_header_.profile;
@@ -856,10 +882,11 @@ bool AV1VaapiVideoEncoderDelegate::FillPictureParam(
   pic_param.reconstructed_frame = reinterpret_cast<const VaapiAV1Picture*>(&pic)
                                       ->reconstruct_va_surface_id();
   for (int i = 0; i < libgav1::kNumReferenceFrameTypes; i++) {
-    pic_param.reference_frames[i] = VA_INVALID_ID;
+    UNSAFE_TODO(pic_param.reference_frames[i]) = VA_INVALID_ID;
   }
   for (size_t i = 0; i < libgav1::kNumInterReferenceFrameTypes; ++i) {
-    pic_param.ref_frame_idx[i] = pic.frame_header.reference_frame_index[i];
+    UNSAFE_TODO(pic_param.ref_frame_idx[i]) =
+        UNSAFE_TODO(pic.frame_header.reference_frame_index[i]);
   }
 
 #if VA_CHECK_VERSION(1, 16, 0)
@@ -879,7 +906,7 @@ bool AV1VaapiVideoEncoderDelegate::FillPictureParam(
   if (!is_keyframe) {
     for (size_t i = 0; i < libgav1::kNumReferenceFrameTypes; i++) {
       auto ref_pic = ref_frames_[i];
-      pic_param.reference_frames[i] =
+      UNSAFE_TODO(pic_param.reference_frames[i]) =
           ref_pic ? reinterpret_cast<VaapiAV1Picture*>(ref_pic.get())
                         ->reconstruct_va_surface_id()
                   : VA_INVALID_ID;
@@ -953,9 +980,11 @@ bool AV1VaapiVideoEncoderDelegate::FillPictureParam(
     pic_param.segments.seg_flags.bits.segmentation_temporal_update = 0;
     pic_param.segments.segment_number = seg_data.delta_q_size;
     for (uint32_t i = 0; i < seg_data.delta_q_size; i++) {
-      pic_param.segments.feature_data[i][0] = seg_data.delta_q[i];
-      pic_param.segments.feature_mask[i] =
-          (1u << libgav1::kSegmentFeatureQuantizer);
+      UNSAFE_TODO({
+        pic_param.segments.feature_data[i][0] = seg_data.delta_q[i];
+        pic_param.segments.feature_mask[i] =
+            (1u << libgav1::kSegmentFeatureQuantizer);
+      })
     }
     segment_map_param.segmentMapDataSize = segmentation_map_.size();
     DownscaleSegmentMap(seg_data.segmentation_map, kSegmentGranularity,
@@ -980,7 +1009,7 @@ bool AV1VaapiVideoEncoderDelegate::FillPictureParam(
   pic_param.interpolation_filter = 0;
 
   for (int i = 0; i < libgav1::kNumReferenceFrameTypes; i++) {
-    pic_param.ref_deltas[i] = 0;
+    UNSAFE_TODO(pic_param.ref_deltas[i]) = 0;
   }
 
   pic_param.mode_deltas[0] = 0;
@@ -1022,12 +1051,14 @@ bool AV1VaapiVideoEncoderDelegate::FillPictureParam(
   pic_param.cdef_damping_minus_3 = 5 - 3;
   pic_param.cdef_bits = 3;
   for (size_t i = 0; i < ARRAY_SIZE(current_params_.cdef_y_pri_strength); i++) {
-    pic_param.cdef_y_strengths[i] =
-        current_params_.cdef_y_pri_strength[i] * kCDEFStrengthDivisor +
-        current_params_.cdef_y_sec_strength[i];
-    pic_param.cdef_uv_strengths[i] =
-        current_params_.cdef_uv_pri_strength[i] * kCDEFStrengthDivisor +
-        current_params_.cdef_uv_sec_strength[i];
+    UNSAFE_TODO({
+      pic_param.cdef_y_strengths[i] =
+          current_params_.cdef_y_pri_strength[i] * kCDEFStrengthDivisor +
+          current_params_.cdef_y_sec_strength[i];
+      pic_param.cdef_uv_strengths[i] =
+          current_params_.cdef_uv_pri_strength[i] * kCDEFStrengthDivisor +
+          current_params_.cdef_uv_sec_strength[i];
+    })
   }
 
   pic_param.loop_restoration_flags.bits.yframe_restoration_type = 0;
@@ -1036,7 +1067,7 @@ bool AV1VaapiVideoEncoderDelegate::FillPictureParam(
   pic_param.loop_restoration_flags.bits.lr_unit_shift = 0;
   pic_param.loop_restoration_flags.bits.lr_uv_shift = 0;
 
-  memset(&pic_param.wm, 0, sizeof(pic_param.wm));
+  UNSAFE_TODO(memset(&pic_param.wm, 0, sizeof(pic_param.wm)));
 
   pic_param.tile_group_obu_hdr_info.bits.obu_extension_flag = 0;
   pic_param.tile_group_obu_hdr_info.bits.obu_has_size_field = 1;

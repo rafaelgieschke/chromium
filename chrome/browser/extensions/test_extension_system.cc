@@ -13,7 +13,6 @@
 #include "build/chromeos_buildflags.h"
 #include "chrome/browser/extensions/blocklist_factory.h"
 #include "chrome/browser/extensions/chrome_extension_registrar_delegate.h"
-#include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/cws_info_service.h"
 #include "chrome/browser/extensions/cws_info_service_factory.h"
 #include "chrome/browser/extensions/extension_error_controller.h"
@@ -283,7 +282,7 @@ void TestExtensionSystem::InstallUpdate(
 
 void TestExtensionSystem::PerformActionBasedOnOmahaAttributes(
     const std::string& extension_id,
-    const base::Value::Dict& attributes) {}
+    const base::DictValue& attributes) {}
 
 value_store::TestingValueStore* TestExtensionSystem::value_store() {
   // These tests use TestingValueStore in a way that ensures it only ever mints

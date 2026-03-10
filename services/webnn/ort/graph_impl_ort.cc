@@ -19,6 +19,7 @@
 #include "services/webnn/ort/platform_functions_ort.h"
 #include "services/webnn/ort/scoped_ort_types.h"
 #include "services/webnn/ort/tensor_impl_ort.h"
+#include "services/webnn/public/cpp/execution_providers_info.h"
 #include "services/webnn/public/mojom/webnn_context_provider.mojom.h"
 #include "services/webnn/public/mojom/webnn_error.mojom.h"
 #include "services/webnn/public/mojom/webnn_graph.mojom.h"
@@ -27,6 +28,29 @@
 #include "third_party/windows_app_sdk_headers/src/inc/abi/winml/winml/onnxruntime_c_api.h"
 
 namespace webnn::ort {
+
+namespace {
+
+std::optional<uint32_t> GetBatchedMatMulKDimensionLimit(
+    const OrtEpDevice* first_selected_device) {
+  const OrtApi* ort_api = PlatformFunctions::GetInstance()->ort_api();
+
+  const char* ep_name = ort_api->EpDevice_EpName(first_selected_device);
+  const auto iter = kKnownEPs.find(UNSAFE_BUFFERS(base::cstring_view(ep_name)));
+  if (iter == kKnownEPs.end()) {
+    return std::nullopt;
+  }
+
+  OrtHardwareDeviceType hardware_device_type = ort_api->HardwareDevice_Type(
+      ort_api->EpDevice_Device(first_selected_device));
+  if (hardware_device_type != OrtHardwareDeviceType_NPU) {
+    return std::nullopt;
+  }
+
+  return iter->second.workarounds.npu_batched_matmul_k_dimension_limit;
+}
+
+}  // namespace
 
 // Represents the collection of resources associated with a particular graph.
 // These resources may outlive their associated `GraphImplOrt` instance while
@@ -112,21 +136,22 @@ void GraphImplOrt::CreateAndBuild(
     ComputeResourceInfo compute_resource_info,
     base::flat_map<OperandId, std::unique_ptr<WebNNConstantOperand>>
         constant_operands,
-    base::flat_map<OperandId, WebNNTensorImpl*> constant_tensor_operands,
-    ContextImplOrt* context,
+    base::flat_map<OperandId, scoped_refptr<WebNNTensorImpl>>
+        constant_tensor_operands,
+    ContextImplOrt& context,
     WebNNContextImpl::CreateGraphImplCallback callback) {
   ScopedTrace scoped_trace("GraphImplOrt::CreateAndBuild");
 
-  base::ThreadPool::PostTaskAndReplyWithResult(
-      FROM_HERE,
-      {base::TaskPriority::BEST_EFFORT,
-       base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN, base::MayBlock()},
+  // Safe to use std::ref because the posted task and its reply will be canceled
+  // if the context is destroyed.
+  context.cancelable_task_tracker().PostTaskAndReplyWithResult(
+      context.env()->graph_compilation_task_runner().get(), FROM_HERE,
       base::BindOnce(&GraphImplOrt::CreateAndBuildOnBackgroundThread,
-                     std::move(graph_info), context->session_options(),
-                     context->env(), context->properties(),
+                     std::move(graph_info), context.session_options(),
+                     context.env(), context.properties(),
                      std::move(constant_operands), std::move(scoped_trace)),
       base::BindOnce(&GraphImplOrt::DidCreateAndBuild, std::move(receiver),
-                     context->AsWeakPtr(), std::move(compute_resource_info),
+                     std::ref(context), std::move(compute_resource_info),
                      std::move(callback)));
 }
 
@@ -143,10 +168,13 @@ GraphImplOrt::CreateAndBuildOnBackgroundThread(
   SCOPED_UMA_HISTOGRAM_TIMER("WebNN.ORT.TimingMs.Compilation");
 
   scoped_trace.AddStep("Create model info");
-  std::unique_ptr<ModelEditor::ModelInfo> model_info =
-      GraphBuilderOrt::CreateAndBuild(*graph_info,
-                                      std::move(context_properties),
-                                      std::move(constant_operands));
+  std::optional<uint32_t> batched_matmul_k_dimension_limit =
+      GetBatchedMatMulKDimensionLimit(session_options->first_selected_device());
+  ASSIGN_OR_RETURN(std::unique_ptr<ModelEditor::ModelInfo> model_info,
+                   GraphBuilderOrt::CreateAndBuild(
+                       *graph_info, std::move(context_properties),
+                       std::move(constant_operands),
+                       std::move(batched_matmul_k_dimension_limit)));
 
   scoped_trace.AddStep("Create session from model");
   ScopedOrtSession session;
@@ -170,15 +198,11 @@ GraphImplOrt::CreateAndBuildOnBackgroundThread(
 // static
 void GraphImplOrt::DidCreateAndBuild(
     mojo::PendingAssociatedReceiver<mojom::WebNNGraph> receiver,
-    base::WeakPtr<WebNNContextImpl> context,
+    WebNNContextImpl& context,
     ComputeResourceInfo compute_resource_info,
     WebNNContextImpl::CreateGraphImplCallback callback,
     base::expected<std::unique_ptr<GraphImplOrt::ComputeResources>,
                    mojom::ErrorPtr> result) {
-  if (!context) {
-    return;
-  }
-
   if (!result.has_value()) {
     std::move(callback).Run(base::unexpected(std::move(result.error())));
     return;
@@ -187,7 +211,7 @@ void GraphImplOrt::DidCreateAndBuild(
   // TODO(crbug.com/418031018): Get devices that will be used for dispatch.
   std::move(callback).Run(base::MakeRefCounted<GraphImplOrt>(
       std::move(receiver), std::move(compute_resource_info),
-      std::move(result.value()), std::move(context),
+      std::move(result.value()), context,
       /*devices=*/std::vector<mojom::Device>()));
 }
 
@@ -197,10 +221,10 @@ GraphImplOrt::GraphImplOrt(
     mojo::PendingAssociatedReceiver<mojom::WebNNGraph> receiver,
     ComputeResourceInfo compute_resource_info,
     std::unique_ptr<GraphImplOrt::ComputeResources> compute_resources,
-    base::WeakPtr<WebNNContextImpl> context,
+    WebNNContextImpl& context,
     std::vector<mojom::Device> devices)
     : WebNNGraphImpl(std::move(receiver),
-                     std::move(context),
+                     context,
                      std::move(compute_resource_info),
                      std::move(devices)),
       compute_resources_(std::move(compute_resources)) {}
@@ -216,9 +240,9 @@ void GraphImplOrt::DispatchImpl(
   ScopedOrtStatus status = compute_resources_->OrtRunSync(
       std::move(named_input_tensors), std::move(named_output_tensors));
   if (status.is_valid()) {
-    static_cast<ContextImplOrt*>(context_.get())
-        ->HandleContextLostOrCrash("Failed to run session.",
-                                   ort_api->GetErrorCode(status.get()));
+    static_cast<ContextImplOrt&>(context_.get())
+        .HandleContextLostOrCrash("Failed to run session.",
+                                  ort_api->GetErrorCode(status.get()));
   }
 }
 

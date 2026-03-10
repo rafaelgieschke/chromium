@@ -34,8 +34,9 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.lifetime.Destroyable;
 import org.chromium.base.shared_preferences.SharedPreferencesManager;
-import org.chromium.base.supplier.ObservableSupplierImpl;
+import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.OneshotSupplier;
+import org.chromium.base.supplier.SettableNonNullObservableSupplier;
 import org.chromium.base.task.AsyncTask;
 import org.chromium.base.test.util.AdvancedMockContext;
 import org.chromium.base.test.util.CallbackHelper;
@@ -179,7 +180,8 @@ public class TabPersistentStoreTest {
                                                     TestTabModelSelector.this,
                                                     getTabCreatorManager(),
                                                     TabWindowManagerSingleton.getInstance(),
-                                                    sCipherFactory);
+                                                    sCipherFactory,
+                                                    /* recordLegacyTabCountMetrics= */ true);
                                     tabPersistentStore.addObserver(mTabPersistentStoreObserver);
                                     return tabPersistentStore;
                                 }
@@ -430,7 +432,8 @@ public class TabPersistentStoreTest {
                             modelSelector,
                             creatorManager,
                             TabWindowManagerSingleton.getInstance(),
-                            sCipherFactory);
+                            sCipherFactory,
+                            /* recordLegacyTabCountMetrics= */ true);
                 });
     }
 
@@ -918,9 +921,8 @@ public class TabPersistentStoreTest {
                         () -> {
                             MockTab newTab =
                                     new MockTab(tabId, ProfileManager.getLastUsedRegularProfile());
-                            ObservableSupplierImpl<Boolean> observableSupplier =
-                                    new ObservableSupplierImpl<>();
-                            observableSupplier.set(true);
+                            SettableNonNullObservableSupplier<Boolean> observableSupplier =
+                                    ObservableSuppliers.createNonNull(true);
                             ShoppingPersistedTabData.from(newTab)
                                     .registerIsTabSaveEnabledSupplier(observableSupplier);
                             ShoppingPersistedTabData.from(newTab).save();
@@ -1220,12 +1222,12 @@ public class TabPersistentStoreTest {
         MockTabPersistentStoreObserver otherMockObserver = testSelector.mTabPersistentStoreObserver;
 
         // Assert state on tab details restored from metadata file.
-        assertTrue(
-                "First restored tab should be incognito.",
+        assertFalse(
+                "First restored tab should be regular.",
                 otherMockObserver.details.get(0).isIncognito);
         assertEquals(
                 "Incorrect URL for first restored tab.",
-                incognitoTab.url,
+                regularTab.url,
                 otherMockObserver.details.get(0).url);
 
         assertFalse(
@@ -1233,16 +1235,8 @@ public class TabPersistentStoreTest {
                 otherMockObserver.details.get(1).isIncognito);
         assertEquals(
                 "Incorrect URL for second restored tab.",
-                regularTab.url,
-                otherMockObserver.details.get(1).url);
-
-        assertFalse(
-                "Third restored tab should be regular.",
-                otherMockObserver.details.get(2).isIncognito);
-        assertEquals(
-                "Incorrect URL for third restored tab.",
                 regularTab2.url,
-                otherMockObserver.details.get(2).url);
+                otherMockObserver.details.get(1).url);
     }
 
     @Test
@@ -1426,12 +1420,12 @@ public class TabPersistentStoreTest {
         MockTabPersistentStoreObserver mockObserver = selector.mTabPersistentStoreObserver;
 
         // Load up the TabModel metadata.
-        int numExpectedTabs = info.numRegularTabs + info.numIncognitoTabs;
+        int numExpectedTabs = info.numRegularTabs + (restoreIncognito ? info.numIncognitoTabs : 0);
         ThreadUtils.runOnUiThreadBlocking(
                 () -> store.loadState(/* ignoreIncognitoFiles= */ !restoreIncognito));
         mockObserver.initializedCallback.waitForCallback(0, 1);
         assertEquals(numExpectedTabs, mockObserver.mTabCountAtStartup);
-        mockObserver.detailsReadCallback.waitForCallback(0, info.contents.length);
+        mockObserver.detailsReadCallback.waitForCallback(0, numExpectedTabs);
 
         assertEquals(numExpectedTabs, mockObserver.details.size());
 

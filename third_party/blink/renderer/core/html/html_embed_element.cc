@@ -96,7 +96,7 @@ void HTMLEmbedElement::ParseAttribute(
     const AttributeModificationParams& params) {
   if (params.name == html_names::kTypeAttr) {
     SetServiceType(params.new_value.LowerASCII());
-    wtf_size_t pos = service_type_.Find(";");
+    wtf_size_t pos = service_type_.find(';');
     if (pos != kNotFound)
       SetServiceType(service_type_.Left(pos));
     SetDisposeView();
@@ -123,13 +123,18 @@ void HTMLEmbedElement::ParseAttribute(
       if (!image_loader_)
         image_loader_ = MakeGarbageCollected<HTMLImageLoader>(this);
       image_loader_->UpdateFromElement(ImageLoader::kUpdateIgnorePreviousError);
-    } else if (GetLayoutObject()) {
+    } else if (GetLayoutObject() ||
+               RuntimeEnabledFeatures::
+                   HTMLEmbedElementRepresentsNothingToActiveEnabled()) {
       if (!FastHasAttribute(html_names::kTypeAttr)) {
         UseCounter::Count(GetDocument(),
                           WebFeature::kEmbedElementWithoutTypeSrcChanged);
       }
       SetNeedsPluginUpdate(true);
-      ReattachOnPluginChangeIfNeeded();
+      const bool require_layout =
+          !RuntimeEnabledFeatures::
+              HTMLEmbedElementRepresentsNothingToActiveEnabled();
+      ReattachOnPluginChangeIfNeeded(require_layout);
     }
   } else {
     HTMLPlugInElement::ParseAttribute(params);
@@ -232,9 +237,8 @@ bool HTMLEmbedElement::IsExposed() const {
   return true;
 }
 
-const V8UnionTrustedScriptURLOrUSVString* HTMLEmbedElement::src() {
-  return MakeGarbageCollected<V8UnionTrustedScriptURLOrUSVString>(
-      GetURLAttribute(html_names::kSrcAttr));
+String HTMLEmbedElement::src() {
+  return GetURLAttribute(html_names::kSrcAttr);
 }
 
 void HTMLEmbedElement::setSrc(const V8UnionTrustedScriptURLOrUSVString* value,

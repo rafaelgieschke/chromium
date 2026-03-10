@@ -19,8 +19,12 @@ import android.app.Activity;
 import android.app.PictureInPictureUiState;
 import android.app.assist.AssistContent;
 import android.net.Uri;
+import android.os.Build;
 import android.util.Pair;
 import android.view.ViewGroup;
+import android.window.OnBackInvokedDispatcher;
+
+import androidx.annotation.Nullable;
 
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -40,7 +44,7 @@ import org.robolectric.annotation.Config;
 import org.chromium.base.UserDataHost;
 import org.chromium.base.supplier.ObservableSuppliers;
 import org.chromium.base.supplier.OneshotSupplier;
-import org.chromium.base.supplier.SettableObservableSupplier;
+import org.chromium.base.supplier.SettableMonotonicObservableSupplier;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
@@ -94,8 +98,8 @@ public class ChromeActivityUnitTest {
     @Mock DomDistillerUrlUtilsJni mDomDistillerUrlUtilsJni;
     @Mock private TabStateThemeResourceProvider mThemeResourceProvider;
 
-    private final SettableObservableSupplier<ReadAloudController> mReadAloudControllerSupplier =
-            ObservableSuppliers.createMonotonic();
+    private final SettableMonotonicObservableSupplier<ReadAloudController>
+            mReadAloudControllerSupplier = ObservableSuppliers.createMonotonic();
 
     class TestChromeActivity extends ChromeActivity {
         public TestChromeActivity() {
@@ -144,8 +148,11 @@ public class ChromeActivityUnitTest {
         }
 
         @Override
-        protected FullscreenVideoPictureInPictureController
+        protected @Nullable FullscreenVideoPictureInPictureController
                 ensureFullscreenVideoPictureInPictureController() {
+            if (!ChromeFeatureList.sFullscreenVideoPictureInPicture.isEnabled()) {
+                return null;
+            }
             return mFullscreenVideoPictureInPictureController;
         }
 
@@ -167,7 +174,7 @@ public class ChromeActivityUnitTest {
         String errorString = "Some error.";
         ViewGroup viewGroup = new BottomContainer(mActivity, null);
         SnackbarManager snackbarManager =
-                Mockito.spy(new SnackbarManager(mActivity, viewGroup, null));
+                Mockito.spy(new SnackbarManager(mActivity, viewGroup, null, null, null));
         ChromeActivity.createWindowErrorSnackbar(errorString, snackbarManager);
         Snackbar snackbar = snackbarManager.getCurrentSnackbarForTesting();
         Mockito.verify(snackbarManager).showSnackbar(ArgumentMatchers.any());
@@ -205,6 +212,7 @@ public class ChromeActivityUnitTest {
 
     @Test
     @Config(sdk = 31)
+    @EnableFeatures(ChromeFeatureList.FULLSCREEN_VIDEO_PICTURE_IN_PICTURE)
     public void testPictureInPictureStashing() {
         // Verify that ChromeActivity reports `isStashed` correctly to the controller.
         TestChromeActivity chromeActivity = Mockito.spy(new TestChromeActivity());
@@ -218,6 +226,19 @@ public class ChromeActivityUnitTest {
         when(mPictureInPictureUiState.isStashed()).thenReturn(true);
         chromeActivity.onPictureInPictureUiStateChanged(mPictureInPictureUiState);
         Mockito.verify(mFullscreenVideoPictureInPictureController).onStashReported(true);
+    }
+
+    @Test
+    @Config(sdk = 31)
+    @DisableFeatures(ChromeFeatureList.FULLSCREEN_VIDEO_PICTURE_IN_PICTURE)
+    public void testPictureInPictureStashing_Disabled() {
+        // Verify that ChromeActivity does not report `isStashed` when the feature is disabled.
+        TestChromeActivity chromeActivity = Mockito.spy(new TestChromeActivity());
+
+        when(mPictureInPictureUiState.isStashed()).thenReturn(true);
+        chromeActivity.onPictureInPictureUiStateChanged(mPictureInPictureUiState);
+        Mockito.verify(mFullscreenVideoPictureInPictureController, Mockito.never())
+                .onStashReported(Mockito.anyBoolean());
     }
 
     @Test
@@ -300,7 +321,12 @@ public class ChromeActivityUnitTest {
     @Test
     @EnableFeatures(ChromeFeatureList.ANDROID_THEME_RESOURCE_PROVIDER)
     public void testThemeResourceProvider_enabled() {
-        TestChromeActivity chromeActivity = new TestChromeActivity();
+        TestChromeActivity chromeActivity = Mockito.spy(new TestChromeActivity());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+            doReturn(Mockito.mock(OnBackInvokedDispatcher.class))
+                    .when(chromeActivity)
+                    .getOnBackInvokedDispatcher();
+        }
         chromeActivity.onPreCreate();
         assertNotNull(
                 "ThemeResourceProvider should be created.",
@@ -310,7 +336,12 @@ public class ChromeActivityUnitTest {
     @Test
     @DisableFeatures(ChromeFeatureList.ANDROID_THEME_RESOURCE_PROVIDER)
     public void testThemeResourceProvider_disabled() {
-        TestChromeActivity chromeActivity = new TestChromeActivity();
+        TestChromeActivity chromeActivity = Mockito.spy(new TestChromeActivity());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+            doReturn(Mockito.mock(OnBackInvokedDispatcher.class))
+                    .when(chromeActivity)
+                    .getOnBackInvokedDispatcher();
+        }
         chromeActivity.onPreCreate();
         assertNull(
                 "ThemeResourceProvider should not be created.",
@@ -321,6 +352,11 @@ public class ChromeActivityUnitTest {
     @EnableFeatures(ChromeFeatureList.ANDROID_THEME_RESOURCE_PROVIDER)
     public void testThemeResourceProvider_wrongActivityType() {
         TestChromeActivity chromeActivity = Mockito.spy(new TestChromeActivity());
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+            doReturn(Mockito.mock(OnBackInvokedDispatcher.class))
+                    .when(chromeActivity)
+                    .getOnBackInvokedDispatcher();
+        }
         doReturn(ActivityType.CUSTOM_TAB).when(chromeActivity).getActivityType();
         chromeActivity.onPreCreate();
         assertNull(

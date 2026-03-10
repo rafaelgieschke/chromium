@@ -12,6 +12,7 @@
 #include "base/command_line.h"
 #include "base/containers/map_util.h"
 #include "base/containers/to_value_list.h"
+#include "base/containers/to_vector.h"
 #include "base/files/file_util.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/no_destructor.h"
@@ -24,6 +25,7 @@
 #include "chrome/browser/web_applications/isolated_web_apps/key_distribution/features.h"
 #include "chrome/browser/web_applications/isolated_web_apps/key_distribution/iwa_key_distribution_histograms.h"
 #include "chrome/browser/web_applications/isolated_web_apps/key_distribution/proto/key_distribution.pb.h"
+#include "chrome/browser/web_applications/isolated_web_apps/runtime_data/iwa_entitlements.h"
 #include "components/webapps/isolated_web_apps/public/iwa_runtime_data_provider.h"
 
 namespace web_app {
@@ -147,8 +149,7 @@ IwaKeyDistributionInfoProvider::OnRuntimeDataChanged(
 
 bool IwaKeyDistributionInfoProvider::IsBundleBlocklisted(
     std::string_view web_bundle_id) const {
-  return component_ &&
-         base::Contains(component_->data.blocklist, web_bundle_id);
+  return component_ && component_->data.blocklist.contains(web_bundle_id);
 }
 
 bool IwaKeyDistributionInfoProvider::IsManagedInstallPermitted(
@@ -159,8 +160,7 @@ bool IwaKeyDistributionInfoProvider::IsManagedInstallPermitted(
   }
 
   bool is_permitted =
-      component_ &&
-      base::Contains(component_->data.managed_allowlist, web_bundle_id);
+      component_ && component_->data.managed_allowlist.contains(web_bundle_id);
 
   base::UmaHistogramEnumeration(
       kIwaKeyDistributionManagedInstallCheckInfoSourceHistogramName,
@@ -179,8 +179,7 @@ bool IwaKeyDistributionInfoProvider::IsManagedUpdatePermitted(
   }
 
   bool is_permitted =
-      component_ &&
-      base::Contains(component_->data.managed_allowlist, web_bundle_id);
+      component_ && component_->data.managed_allowlist.contains(web_bundle_id);
 
   base::UmaHistogramEnumeration(
       kIwaKeyDistributionManagedUpdateCheckInfoSourceHistogramName,
@@ -301,9 +300,7 @@ IwaKeyDistributionInfoProvider::ParseKeyDistributionData(
     for (const auto& [web_bundle_id, kr_info] :
          key_distribution.key_rotation_data().key_rotations()) {
       if (!kr_info.has_expected_key()) {
-        key_rotations.emplace(web_bundle_id,
-                              IwaKeyDistributionInfoProvider::KeyRotationInfo(
-                                  /*public_key=*/std::nullopt));
+        // The null key is skipped for backwards compatibility.
         continue;
       }
       std::optional<std::vector<uint8_t>> decoded_public_key =
@@ -311,9 +308,19 @@ IwaKeyDistributionInfoProvider::ParseKeyDistributionData(
       if (!decoded_public_key) {
         return base::unexpected(IwaComponentUpdateError::kMalformedBase64Key);
       }
-      key_rotations.emplace(web_bundle_id,
-                            IwaKeyDistributionInfoProvider::KeyRotationInfo(
-                                std::move(decoded_public_key)));
+
+      std::optional<std::vector<uint8_t>> decoded_previous_key;
+      if (kr_info.has_previous_key()) {
+        decoded_previous_key = base::Base64Decode(kr_info.previous_key());
+        if (!decoded_previous_key) {
+          return base::unexpected(IwaComponentUpdateError::kMalformedBase64Key);
+        }
+      }
+
+      key_rotations.emplace(
+          web_bundle_id,
+          IwaKeyDistributionInfoProvider::KeyRotationInfo(
+              std::move(*decoded_public_key), std::move(decoded_previous_key)));
     }
   }
 
@@ -346,10 +353,29 @@ IwaKeyDistributionInfoProvider::ParseKeyDistributionData(
         /*comp=*/{},
         /*proj=*/[](const auto& entry) {
           const auto& [web_bundle_id, data] = entry;
+          std::vector<web_app::IwaEntitlementsSet> entitlements;
+          for (const auto& entitlement_set_proto : data.entitlements()) {
+            web_app::IwaEntitlementsSet set;
+            if (entitlement_set_proto.has_version_range()) {
+              set.version_range.set_begin(
+                  entitlement_set_proto.version_range().begin());
+              set.version_range.set_end(
+                  entitlement_set_proto.version_range().end());
+            }
+            set.entitlements = base::ToVector(
+                entitlement_set_proto.entitlement(),
+                [](const auto& entitlement_proto) {
+                  return IwaAccessControl::UserInstallAllowlistItemData::
+                      Entitlement(entitlement_proto);
+                });
+            entitlements.push_back(std::move(set));
+          }
+
           return std::make_pair(
               web_bundle_id,
               ChromeIwaRuntimeDataProvider::UserInstallAllowlistItemData(
-                  data.has_enterprise_name() ? data.enterprise_name() : ""));
+                  data.has_enterprise_name() ? data.enterprise_name() : "",
+                  std::move(entitlements)));
         });
   }
 
@@ -361,7 +387,7 @@ IwaKeyDistributionInfoProvider::ParseKeyDistributionData(
 void IwaKeyDistributionInfoProvider::RotateKeyForDevMode(
     base::PassKey<IwaInternalsHandler>,
     const std::string& web_bundle_id,
-    const std::optional<std::vector<uint8_t>>& rotated_key) {
+    const std::vector<uint8_t>& rotated_key) {
   GetDevModeKeyRotationData().insert_or_assign(
       web_bundle_id, IwaRuntimeDataProvider::KeyRotationInfo(rotated_key));
   DispatchComponentUpdateSuccess();
@@ -408,7 +434,7 @@ IwaKeyDistributionInfoProvider::OnComponentUpdatedForTesting(
 }
 
 base::Value IwaKeyDistributionInfoProvider::AsDebugValue() const {
-  base::Value::Dict debug_data;
+  base::DictValue debug_data;
 
   if (!GetDevModeKeyRotationData().empty()) {
     auto* dev_mode_key_rotations =
@@ -455,7 +481,7 @@ base::Value IwaKeyDistributionInfoProvider::AsDebugValue() const {
 }
 
 void IwaKeyDistributionInfoProvider::WriteDebugMetadata(
-    base::Value::Dict& log) const {
+    base::DictValue& log) const {
   if (!component_) {
     // Will be displayed as <null>.
     log.Set("component", base::Value());

@@ -19,7 +19,6 @@
 #include "chrome/browser/ui/views/frame/toolbar_button_provider.h"
 #include "chrome/browser/ui/views/profiles/avatar_toolbar_button.h"
 #include "chrome/browser/ui/views/profiles/dice_web_signin_interception_bubble_view.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/profile_destruction_waiter.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -80,6 +79,7 @@ struct TestParam {
   SkColor4f primary_profile_color = SkColors::kBlue;
   NameFormat name_format = NameFormat::Regular;
   bool use_right_to_left_language = false;
+  bool use_primary_and_tonal_buttons_for_promos = false;
 };
 
 // To be passed as 4th argument to `INSTANTIATE_TEST_SUITE_P()`, allows the test
@@ -108,6 +108,15 @@ const TestParam kTestParams[] = {
             WebSigninInterceptor::SigninInterceptionType::kMultiUser,
         .use_dark_theme = true,
         .intercepted_profile_color = SkColors::kMagenta,
+    },
+
+    // Ditto, with primary and tonal buttons for promos.
+    {
+        .test_suffix = "ConsumerSimpleExplicitBrowserSigninPrimaryAndTonalButto"
+                       "nsForPromos",
+        .interception_type =
+            WebSigninInterceptor::SigninInterceptionType::kMultiUser,
+        .use_primary_and_tonal_buttons_for_promos = true,
     },
 
     // Regular account signing in to a profile having a regular account on a
@@ -187,6 +196,17 @@ const TestParam kTestParams[] = {
             WebSigninInterceptor::SigninInterceptionType::kProfileSwitch,
     },
 
+    // Profile switch bubble: the account used for signing in is already
+    // associated with another profile, with primary and tonal buttons for
+    // promos.
+    {
+        .test_suffix = "ProfileSwitchExplicitBrowserSigninPrimaryAndTonalButto"
+                       "nsForPromos",
+        .interception_type =
+            WebSigninInterceptor::SigninInterceptionType::kProfileSwitch,
+        .use_primary_and_tonal_buttons_for_promos = true,
+    },
+
     // Supervised user sign-in intercept bubble, no accounts in chrome.
     {
         .test_suffix = "ChromeSignInSupervisedUserIntercepted",
@@ -255,7 +275,11 @@ class DiceWebSigninInterceptionBubblePixelTest
     : public DialogBrowserTest,
       public testing::WithParamInterface<TestParam> {
  public:
-  DiceWebSigninInterceptionBubblePixelTest() = default;
+  DiceWebSigninInterceptionBubblePixelTest() {
+    scoped_feature_list_.InitWithFeatureState(
+        switches::kUsePrimaryAndTonalButtonsForPromos,
+        GetParam().use_primary_and_tonal_buttons_for_promos);
+  }
 
   // DialogBrowserTest:
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -390,6 +414,7 @@ class DiceWebSigninInterceptionBubblePixelTest
 
   std::unique_ptr<ScopedWebSigninInterceptionBubbleHandle> bubble_handle_;
   std::unique_ptr<base::ScopedEnvironmentVariableOverride> scoped_env_override_;
+  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_P(DiceWebSigninInterceptionBubblePixelTest,

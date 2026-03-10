@@ -54,7 +54,6 @@
 #include "chrome/browser/global_features.h"
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/ui/ash/system/system_tray_client_impl.h"
-#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/ash/components/dbus/pciguard/pciguard_client.h"
 #include "chromeos/ash/components/dbus/update_engine/update_engine.pb.h"
@@ -89,7 +88,6 @@
 #include "ui/base/ime/ash/extension_ime_util.h"
 #include "ui/base/ime/ash/ime_keyboard.h"
 #include "ui/base/ime/ash/input_method_manager.h"
-#include "ui/events/ash/mojom/extended_fkeys_modifier.mojom-shared.h"
 #include "ui/events/ash/mojom/extended_fkeys_modifier.mojom.h"
 #include "ui/events/ash/mojom/modifier_key.mojom.h"
 #include "ui/events/ash/pref_names.h"
@@ -115,7 +113,7 @@ const char* const kCopyToKnownUserPrefs[] = {
     ::prefs::kLanguageRemapExternalMetaKeyTo,
 
     prefs::kLoginDisplayPasswordButtonEnabled,
-    ::prefs::kUse24HourClock,
+    ash::prefs::kUse24HourClock,
     prefs::kDarkModeEnabled};
 
 }  // namespace
@@ -146,13 +144,14 @@ void Preferences::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kOwnerTapToClickEnabled, true);
   // TODO(jamescook): Move ownership and registration into ash.
   registry->RegisterStringPref(::prefs::kLogoutStartedLast, std::string());
-  registry->RegisterStringPref(::prefs::kSigninScreenTimezone, std::string());
+  registry->RegisterStringPref(ash::prefs::kSigninScreenTimezone,
+                               std::string());
   registry->RegisterIntegerPref(
-      ::prefs::kResolveDeviceTimezoneByGeolocationMethod,
+      ash::prefs::kResolveDeviceTimezoneByGeolocationMethod,
       static_cast<int>(
           system::TimeZoneResolverManager::TimeZoneResolveMethod::IP_ONLY));
   registry->RegisterIntegerPref(
-      ::prefs::kSystemTimezoneAutomaticDetectionPolicy,
+      ash::prefs::kSystemTimezoneAutomaticDetectionPolicy,
       enterprise_management::SystemTimezoneProto::USERS_DECIDE);
   registry->RegisterStringPref(::prefs::kMinimumAllowedChromeVersion, "");
   registry->RegisterBooleanPref(prefs::kDeviceSystemWideTracingEnabled, true);
@@ -165,13 +164,13 @@ void Preferences::RegisterPrefs(PrefRegistrySimple* registry) {
                                 false);
   registry->RegisterBooleanPref(prefs::kDeviceSwitchFunctionKeysBehaviorEnabled,
                                 false);
-  registry->RegisterBooleanPref(::prefs::kLocalUserFilesAllowed, true);
-  registry->RegisterStringPref(::prefs::kLocalUserFilesMigrationDestination,
-                               "read_only");
+  registry->RegisterBooleanPref(ash::prefs::kLocalUserFilesAllowed, true);
+  registry->RegisterStringPref(
+      ash::prefs::kLocalUserFilesMigrationDestination, "read_only");
   registry->RegisterListPref(prefs::kDnsOverHttpsExcludedDomains,
-                             base::Value::List());
+                             base::ListValue());
   registry->RegisterListPref(prefs::kDnsOverHttpsIncludedDomains,
-                             base::Value::List());
+                             base::ListValue());
 
   RegisterLocalStatePrefs(registry);
 }
@@ -266,19 +265,20 @@ void Preferences::RegisterProfilePrefs(
       prefs::kTouchpadHapticClickSensitivity, 3,
       user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PRIORITY_PREF);
   registry->RegisterBooleanPref(
-      ::prefs::kUse24HourClock, base::GetHourClockType() == base::k24HourClock,
+      ash::prefs::kUse24HourClock,
+      base::GetHourClockType() == base::k24HourClock,
       user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
   // We don't sync ::prefs::kLanguageCurrentInputMethod and PreviousInputMethod
   // because they're just used to track the logout state of the device.
-  registry->RegisterStringPref(::prefs::kLanguageCurrentInputMethod, "");
-  registry->RegisterStringPref(::prefs::kLanguagePreviousInputMethod, "");
-  registry->RegisterListPref(::prefs::kLanguageAllowedInputMethods);
+  registry->RegisterStringPref(ash::prefs::kLanguageCurrentInputMethod, "");
+  registry->RegisterStringPref(ash::prefs::kLanguagePreviousInputMethod, "");
+  registry->RegisterListPref(ash::prefs::kLanguageAllowedInputMethods);
   registry->RegisterBooleanPref(
-      ::prefs::kLanguageAllowedInputMethodsForceEnabled, false);
+      ash::prefs::kLanguageAllowedInputMethodsForceEnabled, false);
   registry->RegisterListPref(::prefs::kAllowedLanguages);
-  registry->RegisterStringPref(::prefs::kLanguagePreloadEngines,
+  registry->RegisterStringPref(ash::prefs::kLanguagePreloadEngines,
                                hardware_keyboard_id);
-  registry->RegisterStringPref(::prefs::kLanguageEnabledImes, "");
+  registry->RegisterStringPref(ash::prefs::kLanguageEnabledImes, "");
   registry->RegisterDictionaryPref(prefs::kAssistiveInputFeatureSettings);
   registry->RegisterBooleanPref(prefs::kAssistPersonalInfoEnabled, true);
   registry->RegisterBooleanPref(prefs::kAssistPredictiveWritingEnabled, true);
@@ -308,7 +308,7 @@ void Preferences::RegisterProfilePrefs(
   registry->RegisterDictionaryPref(prefs::kEmojiPickerHistory);
   registry->RegisterDictionaryPref(prefs::kEmojiPickerPreferences);
   registry->RegisterDictionaryPref(
-      ::prefs::kLanguageInputMethodSpecificSettings);
+      ash::prefs::kLanguageInputMethodSpecificSettings);
   registry->RegisterBooleanPref(prefs::kLastUsedImeShortcutReminderDismissed,
                                 false);
   registry->RegisterBooleanPref(prefs::kNextImeShortcutReminderDismissed,
@@ -408,10 +408,10 @@ void Preferences::RegisterProfilePrefs(
   }
   // |current_timezone_id| will be empty if CrosSettings doesn't know the
   // timezone yet.
-  registry->RegisterStringPref(::prefs::kUserTimezone, current_timezone_id);
+  registry->RegisterStringPref(ash::prefs::kUserTimezone, current_timezone_id);
 
   registry->RegisterBooleanPref(
-      ::prefs::kResolveTimezoneByGeolocationMigratedToMethod, false,
+      ash::prefs::kResolveTimezoneByGeolocationMigratedToMethod, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_OS_PREF);
 
   bool allow_time_zone_resolve_by_default = true;
@@ -427,7 +427,7 @@ void Preferences::RegisterProfilePrefs(
   }
 
   registry->RegisterIntegerPref(
-      ::prefs::kResolveTimezoneByGeolocationMethod,
+      ash::prefs::kResolveTimezoneByGeolocationMethod,
       static_cast<int>(
           allow_time_zone_resolve_by_default
               ? system::TimeZoneResolverManager::TimeZoneResolveMethod::IP_ONLY
@@ -438,7 +438,7 @@ void Preferences::RegisterProfilePrefs(
   registry->RegisterBooleanPref(
       chromeos::prefs::kCaptivePortalAuthenticationIgnoresProxy, true);
 
-  registry->RegisterBooleanPref(::prefs::kLanguageImeMenuActivated, false);
+  registry->RegisterBooleanPref(ash::prefs::kLanguageImeMenuActivated, false);
 
   registry->RegisterInt64Pref(::prefs::kHatsLastInteractionTimestamp, 0);
 
@@ -671,7 +671,7 @@ void Preferences::RegisterProfilePrefs(
   registry->RegisterDictionaryPref(prefs::kAshAppIconSortableColorGroupCache);
   registry->RegisterDictionaryPref(prefs::kAshAppIconSortableColorHueCache);
 
-  registry->RegisterStringPref(::prefs::kFilesAppDefaultLocation,
+  registry->RegisterStringPref(ash::prefs::kFilesAppDefaultLocation,
                                std::string());
 
   registry->RegisterIntegerPref(
@@ -727,20 +727,21 @@ void Preferences::InitUserPrefs(sync_preferences::PrefServiceSyncable* prefs) {
       prefs::kTouchpadHapticClickSensitivity, prefs, callback);
   download_default_directory_.Init(::prefs::kDownloadDefaultDirectory, prefs,
                                    callback);
-  preload_engines_.Init(::prefs::kLanguagePreloadEngines, prefs, callback);
-  enabled_imes_.Init(::prefs::kLanguageEnabledImes, prefs, callback);
-  current_input_method_.Init(::prefs::kLanguageCurrentInputMethod, prefs,
+  preload_engines_.Init(ash::prefs::kLanguagePreloadEngines, prefs, callback);
+  enabled_imes_.Init(ash::prefs::kLanguageEnabledImes, prefs, callback);
+  current_input_method_.Init(ash::prefs::kLanguageCurrentInputMethod, prefs,
                              callback);
-  previous_input_method_.Init(::prefs::kLanguagePreviousInputMethod, prefs,
+  previous_input_method_.Init(ash::prefs::kLanguagePreviousInputMethod, prefs,
                               callback);
-  allowed_input_methods_.Init(::prefs::kLanguageAllowedInputMethods, prefs,
+  allowed_input_methods_.Init(ash::prefs::kLanguageAllowedInputMethods, prefs,
                               callback);
   allowed_input_methods_force_enabled_.Init(
-      ::prefs::kLanguageAllowedInputMethodsForceEnabled, prefs, callback);
+      ash::prefs::kLanguageAllowedInputMethodsForceEnabled, prefs, callback);
   allowed_languages_.Init(::prefs::kAllowedLanguages, prefs, callback);
   preferred_languages_.Init(language::prefs::kPreferredLanguages, prefs,
                             callback);
-  ime_menu_activated_.Init(::prefs::kLanguageImeMenuActivated, prefs, callback);
+  ime_menu_activated_.Init(ash::prefs::kLanguageImeMenuActivated, prefs,
+                           callback);
   // Notifies the system tray to remove the IME items.
   if (ime_menu_activated_.GetValue()) {
     input_method::InputMethodManager::Get()->ImeMenuActivationChanged(true);
@@ -763,8 +764,8 @@ void Preferences::InitUserPrefs(sync_preferences::PrefServiceSyncable* prefs) {
   pref_change_registrar_.Add(ash::prefs::kUserGeolocationAccessLevel, callback);
   pref_change_registrar_.Add(ash::prefs::kUserPreviousGeolocationAccessLevel,
                              callback);
-  pref_change_registrar_.Add(::prefs::kUserTimezone, callback);
-  pref_change_registrar_.Add(::prefs::kResolveTimezoneByGeolocationMethod,
+  pref_change_registrar_.Add(ash::prefs::kUserTimezone, callback);
+  pref_change_registrar_.Add(ash::prefs::kResolveTimezoneByGeolocationMethod,
                              callback);
   pref_change_registrar_.Add(::prefs::kParentAccessCodeConfig, callback);
   for (auto* copy_pref : kCopyToKnownUserPrefs) {
@@ -826,7 +827,7 @@ void Preferences::Init(Profile* profile, const user_manager::User* user) {
   // after ApplyPreferences().
   // As InputMethodManager only holds the active state for the active user,
   // SetState() is only called if the preferences belongs to the active user.
-  // See https://crbug.com/841112.
+  // See https://crbug.com/40575497.
   if (user->is_active()) {
     input_method_manager_->SetState(ime_state_);
   }
@@ -1182,8 +1183,8 @@ void Preferences::ApplyPreferences(ApplyReason reason,
   }
 
   if (reason != REASON_PREF_CHANGED ||
-      pref_name == ::prefs::kLanguageAllowedInputMethods ||
-      pref_name == ::prefs::kLanguageAllowedInputMethodsForceEnabled) {
+      pref_name == ash::prefs::kLanguageAllowedInputMethods ||
+      pref_name == ash::prefs::kLanguageAllowedInputMethodsForceEnabled) {
     const std::vector<std::string> allowed_input_methods =
         allowed_input_methods_.GetValue();
     const bool allowed_input_methods_force_enabled =
@@ -1225,7 +1226,7 @@ void Preferences::ApplyPreferences(ApplyReason reason,
     locale_util::RemoveDisallowedLanguagesFromPreferred(prefs_);
   }
 
-  if (pref_name == ::prefs::kLanguagePreloadEngines &&
+  if (pref_name == ash::prefs::kLanguagePreloadEngines &&
       reason == REASON_PREF_CHANGED) {
     SetLanguageConfigStringListAsCSV(language_prefs::kGeneralSectionName,
                                      language_prefs::kPreloadEnginesConfigName,
@@ -1233,7 +1234,7 @@ void Preferences::ApplyPreferences(ApplyReason reason,
   }
 
   if ((reason == REASON_INITIALIZATION) ||
-      (pref_name == ::prefs::kLanguageEnabledImes &&
+      (pref_name == ash::prefs::kLanguageEnabledImes &&
        reason == REASON_PREF_CHANGED)) {
     std::string value(enabled_imes_.GetValue());
 
@@ -1245,7 +1246,7 @@ void Preferences::ApplyPreferences(ApplyReason reason,
     ime_state_->SetEnabledExtensionImes(split_values);
   }
 
-  if (pref_name == ::prefs::kLanguageImeMenuActivated &&
+  if (pref_name == ash::prefs::kLanguageImeMenuActivated &&
       (reason == REASON_PREF_CHANGED || reason == REASON_ACTIVE_USER_CHANGED)) {
     const bool activated = ime_menu_activated_.GetValue();
     input_method::InputMethodManager::Get()->ImeMenuActivationChanged(
@@ -1290,24 +1291,24 @@ void Preferences::ApplyPreferences(ApplyReason reason,
     }
   }
 
-  if (pref_name == ::prefs::kUserTimezone &&
+  if (pref_name == ash::prefs::kUserTimezone &&
       reason != REASON_ACTIVE_USER_CHANGED) {
     system::UpdateSystemTimezone(ProfileHelper::Get()->GetProfileByUser(user_));
   }
 
   if (reason == REASON_INITIALIZATION ||
-      (pref_name == ::prefs::kResolveTimezoneByGeolocationMethod &&
+      (pref_name == ash::prefs::kResolveTimezoneByGeolocationMethod &&
        reason != REASON_ACTIVE_USER_CHANGED)) {
-    if (prefs_->GetInteger(::prefs::kResolveTimezoneByGeolocationMethod) !=
+    if (prefs_->GetInteger(ash::prefs::kResolveTimezoneByGeolocationMethod) !=
         static_cast<int>(
             system::TimeZoneResolverManager::TimeZoneResolveMethod::DISABLED)) {
-      prefs_->SetBoolean(::prefs::kResolveTimezoneByGeolocationMigratedToMethod,
-                         true);
+      prefs_->SetBoolean(
+          ash::prefs::kResolveTimezoneByGeolocationMigratedToMethod, true);
     }
     if (user_is_owner) {
       // Policy check is false here, because there is no owner for enterprise.
       g_browser_process->local_state()->SetInteger(
-          ::prefs::kResolveDeviceTimezoneByGeolocationMethod,
+          ash::prefs::kResolveDeviceTimezoneByGeolocationMethod,
           static_cast<int>(system::TimeZoneResolverManager::
                                GetEffectiveUserTimeZoneResolveMethod(
                                    prefs_, false /* check_policy */)));
@@ -1333,7 +1334,7 @@ void Preferences::ApplyPreferences(ApplyReason reason,
       reason != REASON_PREF_CHANGED) {
     if (prefs_->IsManagedPreference(::prefs::kParentAccessCodeConfig) &&
         user_->IsChild()) {
-      const base::Value::Dict& value =
+      const base::DictValue& value =
           prefs_->GetDict(::prefs::kParentAccessCodeConfig);
       parent_access::ParentAccessService::Get().UpdateConfigForUser(
           user_->GetAccountId(), value.Clone());

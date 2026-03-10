@@ -29,6 +29,7 @@ class HTMLImageElement;
 class HTMLVideoElement;
 class ImageBitmap;
 class ImageData;
+class ProxyDawnInstanceForANGLE;
 class ScriptState;
 class V8PredefinedColorSpace;
 class V8UnionHTMLCanvasElementOrOffscreenCanvas;
@@ -65,11 +66,10 @@ class MODULES_EXPORT WebGLRenderingContextWebGPUBase
   WebGLRenderingContextWebGPUBase& operator=(
       const WebGLRenderingContextWebGPUBase&) = delete;
 
-  HTMLCanvasElement* canvas() const;
+  // Returns true on success, false and an error_msg on failure.
+  bool Initialize(ExecutionContext*, String* error_msg);
 
-  // Extra Web-exposed initAsync while until Dawn operations can be made
-  // blocking in the renderer process.
-  ScriptPromise<IDLUndefined> initAsync(ScriptState* script_state);
+  HTMLCanvasElement* canvas() const;
 
   // **************************************************************************
   // Start of WebGLRenderingContextBase's IDL methods
@@ -1348,7 +1348,7 @@ class MODULES_EXPORT WebGLRenderingContextWebGPUBase
   SkAlphaType GetAlphaType() const override;
   viz::SharedImageFormat GetSharedImageFormat() const override;
   gfx::ColorSpace GetColorSpace() const override;
-  int AllocatedBufferCountPerPixel() const override;
+  base::ByteSize AllocatedBufferSize() const override;
   bool isContextLost() const override;
   scoped_refptr<StaticBitmapImage> GetImage() override;
   void SetHdrMetadata(const gfx::HDRMetadata& hdr_metadata) override;
@@ -1391,17 +1391,6 @@ class MODULES_EXPORT WebGLRenderingContextWebGPUBase
                       const GLchar* message);
 
  private:
-  void InitRequestAdapterCallback(ScriptState* script_state,
-                                  ScriptPromiseResolver<IDLUndefined>* resolver,
-                                  wgpu::RequestAdapterStatus status,
-                                  wgpu::Adapter adapter,
-                                  wgpu::StringView error_message);
-  void InitRequestDeviceCallback(ScriptState* script_state,
-                                 ScriptPromiseResolver<IDLUndefined>* resolver,
-                                 wgpu::RequestDeviceStatus status,
-                                 wgpu::Device device,
-                                 wgpu::StringView error_message);
-
   // Must be called when an operation happens that should cause the drawing
   // buffer to be present to the compositor. See WebGL spec Section 2.2 The
   // Drawing Buffer.
@@ -1483,7 +1472,8 @@ class MODULES_EXPORT WebGLRenderingContextWebGPUBase
   WebGLFramebuffer* GetBoundFramebuffer(GLenum target) const;
 
   scoped_refptr<DawnControlClientHolder> dawn_control_client_;
-  wgpu::Adapter adapter_;
+  std::unique_ptr<ProxyDawnInstanceForANGLE> proxy_instance_;
+  wgpu::Instance instance_;
   wgpu::Device device_;
   std::unique_ptr<gpu::gles2::GLES2Interface> gles2_for_objects_;
 
@@ -1534,6 +1524,13 @@ class MODULES_EXPORT WebGLRenderingContextWebGPUBase
       bound_textures_;
 
   Member<WebGLBuffer> array_buffer_binding_;
+  Member<WebGLBuffer> copy_read_buffer_binding_;
+  Member<WebGLBuffer> copy_write_buffer_binding_;
+  Member<WebGLBuffer> pixel_pack_buffer_binding_;
+  Member<WebGLBuffer> pixel_unpack_buffer_binding_;
+  Member<WebGLBuffer> transform_feedback_buffer_binding_;
+  Member<WebGLBuffer> uniform_buffer_binding_;
+
   // TODO(413078308): This reference should live in the VAO instead.
   Member<WebGLBuffer> element_array_buffer_binding_;
 

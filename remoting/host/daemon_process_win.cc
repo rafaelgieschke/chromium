@@ -35,13 +35,13 @@
 #include "mojo/public/cpp/system/message_pipe.h"
 #include "remoting/base/auto_thread.h"
 #include "remoting/base/auto_thread_task_runner.h"
+#include "remoting/base/branding.h"
 #include "remoting/base/crash/crash_reporting_breakpad.h"
 #include "remoting/base/logging.h"
 #include "remoting/base/scoped_sc_handle_win.h"
 #include "remoting/host/base/host_exit_codes.h"
 #include "remoting/host/base/screen_resolution.h"
 #include "remoting/host/base/switches.h"
-#include "remoting/host/branding.h"
 #include "remoting/host/chromoting_host_services_server.h"
 #include "remoting/host/crash/minidump_handler.h"
 #include "remoting/host/desktop_session_win.h"
@@ -58,7 +58,7 @@
 #include "remoting/host/win/launch_process_with_token.h"
 #include "remoting/host/win/security_descriptor.h"
 #include "remoting/host/win/unprivileged_process_delegate.h"
-#include "remoting/host/win/worker_process_launcher.h"
+#include "remoting/host/worker_process_launcher.h"
 
 using base::win::ScopedHandle;
 
@@ -134,8 +134,7 @@ class DaemonProcessWin : public DaemonProcess {
   // DaemonProcess implementation.
   std::unique_ptr<DesktopSession> DoCreateDesktopSession(
       int terminal_id,
-      const ScreenResolution& resolution,
-      bool virtual_terminal) override;
+      const mojom::DesktopSessionOptions& options) override;
   void DoCrashNetworkProcess(const base::Location& location) override;
   void LaunchNetworkProcess() override;
   void SendHostConfigToNetworkProcess(
@@ -259,16 +258,15 @@ bool DaemonProcessWin::OnDesktopSessionAgentAttached(
 
 std::unique_ptr<DesktopSession> DaemonProcessWin::DoCreateDesktopSession(
     int terminal_id,
-    const ScreenResolution& resolution,
-    bool virtual_terminal) {
+    const mojom::DesktopSessionOptions& options) {
   DCHECK(caller_task_runner()->BelongsToCurrentThread());
 
-  if (virtual_terminal) {
+  if (options.is_curtained) {
     return DesktopSessionWin::CreateForVirtualTerminal(
-        caller_task_runner(), io_task_runner(), this, terminal_id, resolution);
+        caller_task_runner(), io_task_runner(), this, terminal_id, options);
   } else {
     return DesktopSessionWin::CreateForConsole(
-        caller_task_runner(), io_task_runner(), this, terminal_id, resolution);
+        caller_task_runner(), io_task_runner(), this, terminal_id, options);
   }
 }
 
@@ -290,7 +288,7 @@ void DaemonProcessWin::LaunchNetworkProcess() {
   }
 
   std::unique_ptr<base::CommandLine> target(new base::CommandLine(host_binary));
-  target->AppendSwitchASCII(kProcessTypeSwitchName, kProcessTypeHost);
+  target->AppendSwitchASCII(kProcessTypeSwitchName, kProcessTypeNetwork);
   target->CopySwitchesFrom(*base::CommandLine::ForCurrentProcess(),
                            kCopiedSwitchNames);
 
@@ -309,8 +307,7 @@ void DaemonProcessWin::SendHostConfigToNetworkProcess(
   LOG_IF(ERROR, !remoting_host_control_.is_connected())
       << "IPC channel not connected. HostConfig message will be dropped.";
 
-  std::optional<base::Value::Dict> config(
-      HostConfigFromJson(serialized_config));
+  std::optional<base::DictValue> config(HostConfigFromJson(serialized_config));
   if (!config.has_value()) {
     LOG(ERROR) << "Invalid host config, shutting down.";
     OnPermanentError(kInvalidHostConfigurationExitCode);

@@ -15,6 +15,7 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
+#include "components/accessibility_annotator/core/storage/accessibility_annotator_backend.h"
 #include "components/autofill/core/browser/payments/autofill_wallet_data_type_controller.h"
 #include "components/autofill/core/browser/webdata/account_settings/account_setting_service.h"
 #include "components/autofill/core/browser/webdata/addresses/autofill_profile_sync_bridge.h"
@@ -36,8 +37,8 @@
 #include "components/collaboration/public/data_type_controller/shared_tab_group_account_data_type_controller.h"
 #include "components/collaboration/public/data_type_controller/shared_tab_group_data_type_controller.h"
 #include "components/commerce/core/commerce_feature_list.h"
-#include "components/commerce/core/product_specifications/product_specifications_service.h"
 #include "components/consent_auditor/consent_auditor.h"
+#include "components/contextual_tasks/public/contextual_tasks_service.h"
 #include "components/data_sharing/public/data_sharing_service.h"
 #include "components/data_sharing/public/features.h"
 #include "components/data_sharing/public/personal_collaboration_data/personal_collaboration_data_service.h"
@@ -63,6 +64,8 @@
 #include "components/sharing_message/sharing_message_bridge.h"
 #include "components/sharing_message/sharing_message_data_type_controller.h"
 #include "components/signin/public/base/signin_switches.h"
+#include "components/skills/features.h"
+#include "components/skills/public/skills_service.h"
 #include "components/sync/base/data_type.h"
 #include "components/sync/base/features.h"
 #include "components/sync/base/report_unrecoverable_error.h"
@@ -86,8 +89,8 @@
 #endif  // !BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
-#include "components/supervised_user/core/browser/supervised_user_settings_data_type_controller.h"
-#include "components/supervised_user/core/browser/supervised_user_settings_service.h"
+#include "components/supervised_user/core/browser/family_link_settings_data_type_controller.h"
+#include "components/supervised_user/core/browser/family_link_settings_service.h"
 #endif  // BUILDFLAG(ENABLE_SUPERVISED_USER)
 
 namespace browser_sync {
@@ -212,6 +215,12 @@ CommonControllerBuilder::CommonControllerBuilder() = default;
 
 CommonControllerBuilder::~CommonControllerBuilder() = default;
 
+void CommonControllerBuilder::SetAccessibilityAnnotatorBackend(
+    accessibility_annotator::AccessibilityAnnotatorBackend*
+        accessibility_annotator_backend) {
+  accessibility_annotator_backend_.Set(accessibility_annotator_backend);
+}
+
 void CommonControllerBuilder::SetAccountSettingService(
     autofill::AccountSettingService* account_setting_service) {
   account_setting_service_.Set(account_setting_service);
@@ -258,6 +267,11 @@ void CommonControllerBuilder::SetCollaborationService(
   collaboration_service_.Set(collaboration_service);
 }
 
+void CommonControllerBuilder::SetContextualTasksService(
+    contextual_tasks::ContextualTasksService* contextual_tasks_service) {
+  contextual_tasks_service_.Set(contextual_tasks_service);
+}
+
 void CommonControllerBuilder::SetPersonalCollaborationDataService(
     data_sharing::personal_collaboration_data::PersonalCollaborationDataService*
         personal_collaboration_data_service) {
@@ -297,6 +311,11 @@ void CommonControllerBuilder::SetIdentityManager(
 void CommonControllerBuilder::SetDataTypeStoreService(
     syncer::DataTypeStoreService* data_type_store_service) {
   data_type_store_service_.Set(data_type_store_service);
+}
+
+void CommonControllerBuilder::SetSkillsService(
+    skills::SkillsService* skills_service) {
+  skills_service_.Set(skills_service);
 }
 
 #if !BUILDFLAG(IS_ANDROID)
@@ -342,11 +361,6 @@ void CommonControllerBuilder::SetPrefServiceSyncable(
   pref_service_syncable_.Set(pref_service_syncable);
 }
 
-void CommonControllerBuilder::SetProductSpecificationsService(
-    commerce::ProductSpecificationsService* product_specifications_service) {
-  product_specifications_service_.Set(product_specifications_service);
-}
-
 void CommonControllerBuilder::SetDualReadingListModel(
     reading_list::DualReadingListModel* dual_reading_list_model) {
   dual_reading_list_model_.Set(dual_reading_list_model);
@@ -368,10 +382,9 @@ void CommonControllerBuilder::SetSharingMessageBridge(
 }
 
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
-void CommonControllerBuilder::SetSupervisedUserSettingsService(
-    supervised_user::SupervisedUserSettingsService*
-        supervised_user_settings_service) {
-  supervised_user_settings_service_.Set(supervised_user_settings_service);
+void CommonControllerBuilder::SetFamilyLinkSettingsService(
+    supervised_user::FamilyLinkSettingsService* family_link_settings_service) {
+  family_link_settings_service_.Set(family_link_settings_service);
 }
 #endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
 
@@ -541,8 +554,7 @@ CommonControllerBuilder::Build(syncer::DataTypeSet disabled_types,
 
   if (!disabled_types.Has(syncer::HISTORY)) {
     controllers.push_back(std::make_unique<history::HistoryDataTypeController>(
-        sync_service, identity_manager_.value(), history_service_.value(),
-        pref_service_.value()));
+        sync_service, history_service_.value(), pref_service_.value()));
   }
 
   if (!disabled_types.Has(syncer::HISTORY_DELETE_DIRECTIVES)) {
@@ -807,9 +819,7 @@ CommonControllerBuilder::Build(syncer::DataTypeSet disabled_types,
   if (!disabled_types.Has(syncer::AUTOFILL_VALUABLE) &&
       base::FeatureList::IsEnabled(syncer::kSyncAutofillLoyaltyCard)) {
     scoped_refptr<autofill::AutofillWebDataService> autofill_web_data_service =
-        base::FeatureList::IsEnabled(syncer::kSyncMoveValuablesToProfileDb)
-            ? profile_autofill_web_data_service_.value()
-            : account_autofill_web_data_service_.value();
+        profile_autofill_web_data_service_.value();
     if (autofill_web_data_service) {
       controllers.push_back(
           std::make_unique<autofill::AutofillValuableDataTypeController>(
@@ -828,7 +838,8 @@ CommonControllerBuilder::Build(syncer::DataTypeSet disabled_types,
   }
 
   if (!disabled_types.Has(syncer::AUTOFILL_VALUABLE_METADATA) &&
-      base::FeatureList::IsEnabled(syncer::kSyncAutofillValuableMetadata)) {
+      base::FeatureList::IsEnabled(syncer::kSyncAutofillValuableMetadata) &&
+      profile_autofill_web_data_service_.value()) {
     // Both `AUTOFILL_VALUABLE` and `AUTOFILL_VALUABLE_METADATA` use the same
     // controller as they share the same behaviour.
     controllers.push_back(
@@ -908,19 +919,60 @@ CommonControllerBuilder::Build(syncer::DataTypeSet disabled_types,
   }
 
   if (!disabled_types.Has(syncer::AI_THREAD) &&
-      base::FeatureList::IsEnabled(syncer::kSyncAIThread)) {
-    // TODO(crbug.com/445841720): In CL #4, register the type, i.e. instantiate
-    // the DataTypeController. There is more than one way to go about it,
-    // but one option is:
-    // - Create a trivial implementation of DataTypeSyncBridge which lives in
-    //   your feature's directory. It should have synchronous access to your
-    //   data model (e.g. DualReadingListModel) and be (indirectly) owned by a
-    //   CoolKeyedService (often the model itself).
-    // - Expose CoolKeyedService::GetControllerDelegate() which calls
-    //   bridge->change_processor()->GetControllerDelegate().
-    // - Inject CoolKeyedService in this class and call GetControllerDelegate()
-    //   on it to create the DataTypeController.
-    // In CLs #5, #6, ..., implement the bridge and keep adding unit tests.
+      base::FeatureList::IsEnabled(syncer::kSyncAIThread) &&
+      contextual_tasks_service_.value()) {
+    syncer::DataTypeControllerDelegate* delegate =
+        contextual_tasks_service_.value()
+            ->GetAiThreadControllerDelegate()
+            .get();
+    if (delegate) {
+      controllers.push_back(std::make_unique<DataTypeController>(
+          /*type= */ syncer::AI_THREAD,
+          /*delegate_for_full_sync_mode= */
+          std::make_unique<syncer::ForwardingDataTypeControllerDelegate>(
+              delegate),
+          /*delegate_for_transport_mode= */
+          std::make_unique<syncer::ForwardingDataTypeControllerDelegate>(
+              delegate)));
+    }
+  }
+
+  if (!disabled_types.Has(syncer::GEMINI_THREAD) &&
+      base::FeatureList::IsEnabled(syncer::kSyncGeminiThread) &&
+      contextual_tasks_service_.value()) {
+    syncer::DataTypeControllerDelegate* delegate =
+        contextual_tasks_service_.value()
+            ->GetGeminiThreadControllerDelegate()
+            .get();
+    if (delegate) {
+      controllers.push_back(std::make_unique<DataTypeController>(
+          /*type= */ syncer::GEMINI_THREAD,
+          /*delegate_for_full_sync_mode= */
+          std::make_unique<syncer::ForwardingDataTypeControllerDelegate>(
+              delegate),
+          /*delegate_for_transport_mode= */
+          std::make_unique<syncer::ForwardingDataTypeControllerDelegate>(
+              delegate)));
+    }
+  }
+
+  if (!disabled_types.Has(syncer::ACCESSIBILITY_ANNOTATION) &&
+      base::FeatureList::IsEnabled(syncer::kSyncAccessibilityAnnotation) &&
+      accessibility_annotator_backend_.value()) {
+    syncer::DataTypeControllerDelegate* delegate =
+        accessibility_annotator_backend_.value()
+            ->GetAccessibilityAnnotationControllerDelegate()
+            .get();
+    if (delegate) {
+      controllers.push_back(std::make_unique<DataTypeController>(
+          /*type= */ syncer::ACCESSIBILITY_ANNOTATION,
+          /*delegate_for_full_sync_mode= */
+          std::make_unique<syncer::ForwardingDataTypeControllerDelegate>(
+              delegate),
+          /*delegate_for_transport_mode= */
+          std::make_unique<syncer::ForwardingDataTypeControllerDelegate>(
+              delegate)));
+    }
   }
 
   if (!disabled_types.Has(syncer::CONTEXTUAL_TASK) &&
@@ -939,6 +991,36 @@ CommonControllerBuilder::Build(syncer::DataTypeSet disabled_types,
     // In CLs #5, #6, ..., implement the bridge and keep adding unit tests.
   }
 
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+  if (!disabled_types.Has(syncer::SKILL) &&
+      base::FeatureList::IsEnabled(features::kSkillsEnabled)) {
+    // TODO(rushans): In CL #4, register the type, i.e. instantiate
+    // the DataTypeController. There is more than one way to go about it,
+    // but one option is:
+    // - Create a trivial implementation of DataTypeSyncBridge which lives in
+    //   your feature's directory. It should have synchronous access to your
+    //   data model (e.g. DualReadingListModel) and be (indirectly) owned by a
+    //   CoolKeyedService (often the model itself).
+    // - Expose CoolKeyedService::GetControllerDelegate() which calls
+    //   bridge->change_processor()->GetControllerDelegate().
+    // - Inject CoolKeyedService in this class and call GetControllerDelegate()
+    //   on it to create the DataTypeController.
+    // In CLs #5, #6, ..., implement the bridge and keep adding unit tests.
+    syncer::DataTypeControllerDelegate* delegate =
+        skills_service_.value()->GetControllerDelegate().get();
+    if (delegate) {
+      controllers.push_back(std::make_unique<syncer::DataTypeController>(
+          syncer::SKILL,
+          /*delegate_for_full_sync_mode=*/
+          std::make_unique<syncer::ForwardingDataTypeControllerDelegate>(
+              delegate),
+          /*delegate_for_transport_mode=*/
+          std::make_unique<syncer::ForwardingDataTypeControllerDelegate>(
+              delegate)));
+    }
+  }
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+
 #if !BUILDFLAG(IS_ANDROID)
   if (!disabled_types.Has(syncer::WEBAUTHN_CREDENTIAL)) {
     syncer::DataTypeControllerDelegate* delegate =
@@ -956,11 +1038,11 @@ CommonControllerBuilder::Build(syncer::DataTypeSet disabled_types,
 #endif
 
 #if BUILDFLAG(ENABLE_SUPERVISED_USERS)
-  if (supervised_user_settings_service_.value()) {
+  if (family_link_settings_service_.value()) {
     controllers.push_back(
-        std::make_unique<SupervisedUserSettingsDataTypeController>(
+        std::make_unique<FamilyLinkSettingsDataTypeController>(
             dump_stack, data_type_store_service_.value()->GetStoreFactory(),
-            supervised_user_settings_service_.value()->AsWeakPtr(),
+            family_link_settings_service_.value()->AsWeakPtr(),
             pref_service_.value()));
   }
 #endif  // BUILDFLAG(ENABLE_SUPERVISED_USERS)
@@ -985,7 +1067,9 @@ CommonControllerBuilder::Build(syncer::DataTypeSet disabled_types,
   }
 
   return controllers;
-}
+  // TODO(crbug.com/487347673): Cleanup: Split CommonControllerBuilder::Build()
+  // into smaller functions.
+}  // NOLINT(readability/fn_size)
 
 std::unique_ptr<DataTypeController>
 CommonControllerBuilder::CreateWalletDataTypeController(

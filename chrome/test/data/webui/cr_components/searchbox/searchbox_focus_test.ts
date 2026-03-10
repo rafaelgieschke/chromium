@@ -6,13 +6,13 @@ import 'chrome://new-tab-page/new_tab_page.js';
 
 import type {SearchboxElement} from 'chrome://new-tab-page/new_tab_page.js';
 import {BrowserProxyImpl, MetricsReporterImpl, SearchboxBrowserProxy} from 'chrome://new-tab-page/new_tab_page.js';
+import {createAutocompleteResultForTesting, createSearchMatchForTesting} from 'chrome://resources/cr_components/searchbox/searchbox_browser_proxy.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {PageMetricsCallbackRouter} from 'chrome://resources/js/metrics_reporter.mojom-webui.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
 import {TestMock} from 'chrome://webui-test/test_mock.js';
 import {microtasksFinished} from 'chrome://webui-test/test_util.js';
 
-import {createAutocompleteResult, createSearchMatch} from './searchbox_test_utils.js';
 import {TestSearchboxBrowserProxy} from './test_searchbox_browser_proxy.js';
 
 async function createAndAppendRealbox(
@@ -60,7 +60,8 @@ suite('SearchboxFocusTest', () => {
     // Force a synchronous render.
     await testProxy.callbackRouterRemote.$.flushForTesting();
     await microtasksFinished();
-    return window.getComputedStyle(realbox.$.matches).display !== 'none';
+    return window.getComputedStyle(realbox.getSuggestionsElement()).display !==
+        'none';
   }
 
   test('tabbing with inline autocompletion', async () => {
@@ -68,29 +69,30 @@ suite('SearchboxFocusTest', () => {
     realbox.$.input.focus();
     assertEquals(realbox.$.input, realbox.shadowRoot.activeElement);
 
-    realbox.$.input.value = 'goo';
-    realbox.$.input.dispatchEvent(new InputEvent('input'));
+    realbox.$.input.inputElement.value = 'goo';
+    realbox.$.input.inputElement.dispatchEvent(new InputEvent('input'));
 
     let args = await testProxy.handler.whenCalled('queryAutocomplete');
-    assertEquals(args.input, realbox.$.input.value);
+    assertEquals(args.input, realbox.$.input.inputElement.value);
     testProxy.handler.reset();
 
-    const matches = [createSearchMatch({
+    const matches = [createSearchMatchForTesting({
       allowedToBeDefaultMatch: true,
       inlineAutocompletion: 'gle',
     })];
 
     testProxy.callbackRouterRemote.autocompleteResultChanged(
-        createAutocompleteResult({
-          input: realbox.$.input.value.trimStart(),
+        createAutocompleteResultForTesting({
+          input: realbox.$.input.inputElement.value.trimStart(),
           matches: matches,
         }));
     assertTrue(await areMatchesShowing());
-    assertEquals('google', realbox.$.input.value);
+    assertEquals('google', realbox.$.input.inputElement.value);
 
-    let start = realbox.$.input.selectionStart!;
-    let end = realbox.$.input.selectionEnd!;
-    assertEquals('gle', realbox.$.input.value.substring(start, end));
+    let start = realbox.$.input.inputElement.selectionStart!;
+    let end = realbox.$.input.inputElement.selectionEnd!;
+    assertEquals(
+        'gle', realbox.$.input.inputElement.value.substring(start, end));
 
     testProxy.handler.reset();
 
@@ -110,30 +112,31 @@ suite('SearchboxFocusTest', () => {
     args = await testProxy.handler.whenCalled('queryAutocomplete');
     assertEquals('google', args.input);
 
-    assertEquals('google', realbox.$.input.value);
-    start = realbox.$.input.selectionStart!;
-    end = realbox.$.input.selectionEnd!;
+    assertEquals('google', realbox.$.input.inputElement.value);
+    start = realbox.$.input.inputElement.selectionStart!;
+    end = realbox.$.input.inputElement.selectionEnd!;
     assertEquals(start, end);
-    assertEquals(realbox.$.input.value.length, start);
+    assertEquals(realbox.$.input.inputElement.value.length, start);
 
     // Shift+Tab correctly moves the focus to the previous icon
     // without triggering the autocompletion.
-    realbox.$.input.value = 'goo';
-    realbox.$.input.dispatchEvent(new InputEvent('input'));
+    realbox.$.input.inputElement.value = 'goo';
+    realbox.$.input.inputElement.dispatchEvent(new InputEvent('input'));
     await testProxy.handler.whenCalled('queryAutocomplete');
     testProxy.handler.reset();
 
     testProxy.callbackRouterRemote.autocompleteResultChanged(
-        createAutocompleteResult({
-          input: realbox.$.input.value.trimStart(),
+        createAutocompleteResultForTesting({
+          input: realbox.$.input.inputElement.value.trimStart(),
           matches: matches,
         }));
     assertTrue(await areMatchesShowing());
-    assertEquals('google', realbox.$.input.value);
+    assertEquals('google', realbox.$.input.inputElement.value);
 
-    start = realbox.$.input.selectionStart!;
-    end = realbox.$.input.selectionEnd!;
-    assertEquals('gle', realbox.$.input.value.substring(start, end));
+    start = realbox.$.input.inputElement.selectionStart!;
+    end = realbox.$.input.inputElement.selectionEnd!;
+    assertEquals(
+        'gle', realbox.$.input.inputElement.value.substring(start, end));
 
     testProxy.handler.reset();
 
@@ -146,12 +149,12 @@ suite('SearchboxFocusTest', () => {
     });
     realbox.$.inputWrapper.dispatchEvent(shiftTabEvent);
 
-    assertEquals('goo', realbox.$.input.value);
+    assertEquals('goo', realbox.$.input.inputElement.value);
     assertFalse(shiftTabEvent.defaultPrevented);
     assertEquals(0, testProxy.handler.getCallCount('queryAutocomplete'));
 
-    start = realbox.$.input.selectionStart!;
-    end = realbox.$.input.selectionEnd!;
+    start = realbox.$.input.inputElement.selectionStart!;
+    end = realbox.$.input.inputElement.selectionEnd!;
     assertEquals(start, end);
     assertEquals('goo'.length, start);
   });

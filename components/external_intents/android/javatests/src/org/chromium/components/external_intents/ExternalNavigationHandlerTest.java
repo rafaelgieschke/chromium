@@ -49,11 +49,9 @@ import org.chromium.base.test.util.Batch;
 import org.chromium.base.test.util.Features;
 import org.chromium.base.test.util.MaxAndroidSdkLevel;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
-import org.chromium.components.external_intents.ExternalNavigationHandler.IncognitoDialogDelegate;
+import org.chromium.components.external_intents.ExternalNavigationHandler.IncognitoDialogDelegateWithFallback;
 import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResult;
 import org.chromium.components.external_intents.ExternalNavigationHandler.OverrideUrlLoadingResultType;
-import org.chromium.components.external_intents.ExternalNavigationHandler.QueryIntentActivitiesSupplier;
-import org.chromium.components.external_intents.ExternalNavigationHandler.ResolveActivitySupplier;
 import org.chromium.components.external_intents.ExternalNavigationParams.AsyncActionTakenParams;
 import org.chromium.components.external_intents.ExternalNavigationParams.AsyncActionTakenParams.AsyncActionTakenType;
 import org.chromium.content_public.browser.WebContents;
@@ -179,11 +177,15 @@ public class ExternalNavigationHandlerTest {
 
     private static final String SELF_SCHEME = "selfscheme";
     private static final String DIGITAL_CREDENTIALS_URL = "openid4vp-v1-unsigned://authorize";
+    private static final String HAIP_VP_URL = "haip-vp://authorize";
+    private static final String HAIP_VCI_URL = "haip-vci://authorize";
+    private static final String MDOC_URL = "mdoc://authorize";
+    private static final String OPENID4VCI_URL = "openid-credential-offer://authorize";
     private static final String DIGITAL_CREDENTIALS_PACKAGE_NAME = "pkg.dcc";
 
     @Rule public MockitoRule mMockitoRule = MockitoJUnit.rule().strictness(Strictness.STRICT_STUBS);
 
-    @Mock private IncognitoDialogDelegate mIncognitoDialogDelegateMock;
+    @Mock private IncognitoDialogDelegateWithFallback mIncognitoDialogDelegateMock;
     @Mock private WindowAndroid mWindowAndroidMock;
 
     private Context mContext;
@@ -1217,10 +1219,10 @@ public class ExternalNavigationHandlerTest {
                                 filter,
                                 new Instrumentation.ActivityResult(Activity.RESULT_OK, null),
                                 true);
-        Intent dummyIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
-        dummyIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent testIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
+        testIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Activity activity =
-                InstrumentationRegistry.getInstrumentation().startActivitySync(dummyIntent);
+                InstrumentationRegistry.getInstrumentation().startActivitySync(testIntent);
         mDelegate.setContext(activity);
         mDelegate.setCanLoadUrlInTab(true);
         try {
@@ -1285,10 +1287,10 @@ public class ExternalNavigationHandlerTest {
 
     private void doTestFallbackUrl_ChromeCanHandle_Incognito(final boolean clearRedirectHandler) {
         mDelegate.add(new IntentActivity("https", "package"));
-        Intent dummyIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
-        dummyIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent testIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
+        testIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Activity activity =
-                InstrumentationRegistry.getInstrumentation().startActivitySync(dummyIntent);
+                InstrumentationRegistry.getInstrumentation().startActivitySync(testIntent);
         mDelegate.setContext(activity);
         mDelegate.setCanLoadUrlInTab(true);
         try {
@@ -1373,10 +1375,10 @@ public class ExternalNavigationHandlerTest {
                                 filter,
                                 new Instrumentation.ActivityResult(Activity.RESULT_OK, null),
                                 true);
-        Intent dummyIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
-        dummyIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent testIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
+        testIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Activity activity =
-                InstrumentationRegistry.getInstrumentation().startActivitySync(dummyIntent);
+                InstrumentationRegistry.getInstrumentation().startActivitySync(testIntent);
         mDelegate.setContext(activity);
         mDelegate.setCanLoadUrlInTab(true);
         mDelegate.setShouldPresentLeavingIncognitoDialog(true);
@@ -1454,10 +1456,10 @@ public class ExternalNavigationHandlerTest {
     @MediumTest
     public void testFallbackUrl_ChromeCanHandle_Incognito_DelegateHandleDialogPresentation() {
         mDelegate.add(new IntentActivity("https", "package"));
-        Intent dummyIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
-        dummyIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent testIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
+        testIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Activity activity =
-                InstrumentationRegistry.getInstrumentation().startActivitySync(dummyIntent);
+                InstrumentationRegistry.getInstrumentation().startActivitySync(testIntent);
         mDelegate.setContext(activity);
         mDelegate.setCanLoadUrlInTab(true);
         mDelegate.setShouldPresentLeavingIncognitoDialog(true);
@@ -1552,10 +1554,10 @@ public class ExternalNavigationHandlerTest {
     public void runIncognitoAlertDialogDismissedTest(
             long navId, Runnable testCallback, boolean shouldDismiss) {
         mDelegate.add(new IntentActivity("imdb:", INTENT_APP_PACKAGE_NAME));
-        Intent dummyIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
-        dummyIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent testIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
+        testIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Activity activity =
-                InstrumentationRegistry.getInstrumentation().startActivitySync(dummyIntent);
+                InstrumentationRegistry.getInstrumentation().startActivitySync(testIntent);
         mDelegate.setContext(activity);
         mDelegate.setCanLoadUrlInTab(true);
         try {
@@ -1576,7 +1578,8 @@ public class ExternalNavigationHandlerTest {
                         Assert.assertNull(mUrlHandler.mStartActivityIntent);
                         Assert.assertNull(mUrlHandler.mNewUrlAfterClobbering);
                     });
-            IncognitoDialogDelegate delegateSpy = mUrlHandler.spyIncognitoDialogDelegate();
+            IncognitoDialogDelegateWithFallback delegateSpy =
+                    mUrlHandler.spyIncognitoDialogDelegate();
             Mockito.doReturn(true).when(delegateSpy).isShowing();
             ThreadUtils.runOnUiThreadBlocking(
                     () -> {
@@ -1645,10 +1648,10 @@ public class ExternalNavigationHandlerTest {
                                 filter,
                                 new Instrumentation.ActivityResult(Activity.RESULT_OK, null),
                                 true);
-        Intent dummyIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
-        dummyIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent testIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
+        testIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Activity activity =
-                InstrumentationRegistry.getInstrumentation().startActivitySync(dummyIntent);
+                InstrumentationRegistry.getInstrumentation().startActivitySync(testIntent);
         mDelegate.setContext(activity);
         mDelegate.setCanLoadUrlInTab(true);
 
@@ -1683,6 +1686,44 @@ public class ExternalNavigationHandlerTest {
         }
     }
 
+    private void checkDigitalCredentialsWarningDialogShow(String scheme, String url) {
+        mDelegate.add(new IntentActivity(scheme, DIGITAL_CREDENTIALS_PACKAGE_NAME));
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> {
+                    checkUrl(url, redirectHandlerForLinkClick())
+                            .withHasUserGesture(true)
+                            .expecting(
+                                    OverrideUrlLoadingResultType.OVERRIDE_WITH_ASYNC_ACTION,
+                                    IGNORE);
+                    mUrlHandler.mDigitalCredentialsWarningDialogDelegate.onClick(
+                            null, ModalDialogProperties.ButtonType.NEGATIVE);
+                });
+    }
+
+    @Test
+    @MediumTest
+    public void testDigitalCredentialsWarningDialog_HaipVp() {
+        checkDigitalCredentialsWarningDialogShow("haip-vp", HAIP_VP_URL);
+    }
+
+    @Test
+    @MediumTest
+    public void testDigitalCredentialsWarningDialog_HaipVci() {
+        checkDigitalCredentialsWarningDialogShow("haip-vci", HAIP_VCI_URL);
+    }
+
+    @Test
+    @MediumTest
+    public void testDigitalCredentialsWarningDialog_Mdoc() {
+        checkDigitalCredentialsWarningDialogShow("mdoc", MDOC_URL);
+    }
+
+    @Test
+    @MediumTest
+    public void testDigitalCredentialsWarningDialog_OpenId4Vci() {
+        checkDigitalCredentialsWarningDialogShow("openid-credential-offer", OPENID4VCI_URL);
+    }
+
     @Test
     @MediumTest
     public void testDigitalCredentialsWarningDialog_NegativeClick() {
@@ -1696,10 +1737,10 @@ public class ExternalNavigationHandlerTest {
                                 filter,
                                 new Instrumentation.ActivityResult(Activity.RESULT_OK, null),
                                 true);
-        Intent dummyIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
-        dummyIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent testIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
+        testIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Activity activity =
-                InstrumentationRegistry.getInstrumentation().startActivitySync(dummyIntent);
+                InstrumentationRegistry.getInstrumentation().startActivitySync(testIntent);
         mDelegate.setContext(activity);
         mDelegate.setCanLoadUrlInTab(true);
 
@@ -1745,10 +1786,10 @@ public class ExternalNavigationHandlerTest {
                                 filter,
                                 new Instrumentation.ActivityResult(Activity.RESULT_OK, null),
                                 true);
-        Intent dummyIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
-        dummyIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent testIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
+        testIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Activity activity =
-                InstrumentationRegistry.getInstrumentation().startActivitySync(dummyIntent);
+                InstrumentationRegistry.getInstrumentation().startActivitySync(testIntent);
         mDelegate.setContext(activity);
         mDelegate.setCanLoadUrlInTab(true);
 
@@ -1785,10 +1826,10 @@ public class ExternalNavigationHandlerTest {
             long navId, Runnable testCallback, boolean shouldDismiss) {
         mDelegate.add(
                 new IntentActivity("openid4vp-v1-unsigned", DIGITAL_CREDENTIALS_PACKAGE_NAME));
-        Intent dummyIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
-        dummyIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        Intent testIntent = new Intent(mRealApplicationContext, BlankUiTestActivity.class);
+        testIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         Activity activity =
-                InstrumentationRegistry.getInstrumentation().startActivitySync(dummyIntent);
+                InstrumentationRegistry.getInstrumentation().startActivitySync(testIntent);
         mDelegate.setContext(activity);
         mDelegate.setCanLoadUrlInTab(true);
         try {
@@ -2057,7 +2098,7 @@ public class ExternalNavigationHandlerTest {
                 .expecting(OverrideUrlLoadingResultType.OVERRIDE_WITH_NAVIGATE_TAB, IGNORE);
 
         mDelegate.setCanResolveActivityForExternalSchemes(true);
-        // As a result of intent resolution fallback, we have clobberred the current tab and the
+        // As a result of intent resolution fallback, we have clobbered the current tab and the
         // sending site has learned that an app is not installed. In order to prevent chaining this
         // and learning about more not-installed apps, even URLs that would otherwise successfully
         // launch an app will use the fallback URL.
@@ -2471,7 +2512,7 @@ public class ExternalNavigationHandlerTest {
 
     @Test
     @SmallTest
-    @MinAndroidSdkLevel(33) // TODO(twellington): Replace with version code when available.
+    @MinAndroidSdkLevel(Build.VERSION_CODES.TIRAMISU)
     public void testFileAccessHtml_AndroidT() {
         String fileUrl = "file:///sdcard/Downloads/test.html";
 
@@ -3456,9 +3497,10 @@ public class ExternalNavigationHandlerTest {
             return OverrideUrlLoadingResult.forAsyncAction();
         }
 
-        public IncognitoDialogDelegate spyIncognitoDialogDelegate() {
-            mIncognitoDialogDelegate = Mockito.spy(mIncognitoDialogDelegate);
-            return mIncognitoDialogDelegate;
+        public IncognitoDialogDelegateWithFallback spyIncognitoDialogDelegate() {
+            mIncognitoDialogDelegate =
+                    Mockito.spy((IncognitoDialogDelegateWithFallback) mIncognitoDialogDelegate);
+            return (IncognitoDialogDelegateWithFallback) mIncognitoDialogDelegate;
         }
 
         public ExternalNavigationHandler.DigitalCredentialsWarningDialogDelegate
@@ -3684,6 +3726,14 @@ public class ExternalNavigationHandlerTest {
             return false;
         }
 
+        @Override
+        public void setExternalNavigationHelper(ExternalNavigationHelper helper) {}
+
+        @Override
+        public boolean allowExternalNavigationForHttpProtocols(GURL url) {
+            return false;
+        }
+
         public void reset() {
             startIncognitoIntentCalled = false;
         }
@@ -3793,7 +3843,7 @@ public class ExternalNavigationHandlerTest {
         private Intent mSafeBrowsingIntent;
     }
 
-    private void checkIntentSanity(Intent intent, String name) {
+    private void checkIntentValidity(Intent intent, String name) {
         Assert.assertTrue(
                 "The invoked " + name + " doesn't have the BROWSABLE category set\n",
                 intent.hasCategory(Intent.CATEGORY_BROWSABLE));
@@ -3959,9 +4009,9 @@ public class ExternalNavigationHandlerTest {
             Assert.assertEquals(expectStartFile, mUrlHandler.mRequestFilePermissionsCalled);
 
             if (startActivityCalled && expectSaneIntent) {
-                checkIntentSanity(startActivityIntent, "Intent");
+                checkIntentValidity(startActivityIntent, "Intent");
                 if (startActivityIntent.getSelector() != null) {
-                    checkIntentSanity(startActivityIntent.getSelector(), "Intent's selector");
+                    checkIntentValidity(startActivityIntent.getSelector(), "Intent's selector");
                 }
             }
         }

@@ -15,7 +15,6 @@
 #include "ash/system/diagnostics/diagnostics_log_controller.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/webui/shimless_rma/backend/fake_shimless_rma_delegate.h"
-#include "ash/webui/shimless_rma/mojom/shimless_rma.mojom-shared.h"
 #include "ash/webui/shimless_rma/mojom/shimless_rma.mojom.h"
 #include "base/files/file_path.h"
 #include "base/functional/callback.h"
@@ -162,7 +161,9 @@ class ShimlessRmaServiceTest : public NoSessionAshTestBase {
     base::RunLoop().RunUntilIdle();
     // ShimlessRmaService has to be shutdown before RmadClient or there will be
     // a null ptr dereference in the service destructor.
+    version_updater_ = nullptr;
     shimless_rma_provider_.reset();
+    rmad_client_ = nullptr;
     RmadClient::Shutdown();
     NetworkHandler::Shutdown();
     cros_network_config_test_helper_.reset();
@@ -323,9 +324,8 @@ class ShimlessRmaServiceTest : public NoSessionAshTestBase {
   }
 
   std::unique_ptr<ShimlessRmaService> shimless_rma_provider_;
-  raw_ptr<RmadClient, DanglingUntriaged> rmad_client_ =
-      nullptr;  // Unowned convenience pointer.
-  raw_ptr<VersionUpdater, DanglingUntriaged> version_updater_ = nullptr;
+  raw_ptr<RmadClient> rmad_client_ = nullptr;  // Unowned convenience pointer.
+  raw_ptr<VersionUpdater> version_updater_ = nullptr;
 
  private:
   std::unique_ptr<user_manager::ScopedUserManager> scoped_user_manager_;

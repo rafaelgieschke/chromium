@@ -150,11 +150,14 @@ void BrowserProcessPlatformPart::InitializeUserManager() {
           ash::DeviceSettingsService::Get(),
           browser_policy_connector_ash()->GetMinimumVersionPolicyHandler());
   user_image_manager_registry_ =
-      std::make_unique<ash::UserImageManagerRegistry>(user_manager_.get());
+      std::make_unique<ash::UserImageManagerRegistry>(
+          g_browser_process->local_state(),
+          g_browser_process->shared_url_loader_factory(), user_manager_.get());
   multi_user_sign_in_policy_controller_ =
       std::make_unique<user_manager::MultiUserSignInPolicyController>(
           local_state, user_manager_.get());
   session_manager_->OnUserManagerCreated(user_manager_.get());
+  chrome_session_manager_->OnUserManagerCreated(user_manager_.get());
   // LoginState and DeviceCloudPolicyManager outlives UserManager, so on
   // their initialization, there's no way to start observing UserManager.
   // This is the earliest timing to do so.
@@ -208,7 +211,8 @@ void BrowserProcessPlatformPart::InitializeDeviceDisablingManager() {
       std::make_unique<ash::system::DeviceDisablingManagerDefaultDelegate>();
   device_disabling_manager_ =
       std::make_unique<ash::system::DeviceDisablingManager>(
-          g_browser_process->local_state(),
+          g_browser_process->local_state(), browser_policy_connector_ash(),
+          device_restriction_schedule_controller_.get(),
           device_disabling_manager_delegate_.get(), ash::CrosSettings::Get(),
           user_manager::UserManager::Get());
   device_disabling_manager_->Init();
@@ -222,13 +226,22 @@ void BrowserProcessPlatformPart::ShutdownDeviceDisablingManager() {
 void BrowserProcessPlatformPart::InitializeSessionManager() {
   CHECK(ash::BootTimesRecorder::GetIfCreated());
   CHECK(!session_manager_);
-  session_manager_ = std::make_unique<ash::ChromeSessionManager>(
+  CHECK(!chrome_session_manager_);
+  session_manager_ = std::make_unique<session_manager::SessionManager>(
       std::make_unique<ash::SessionManagerDelegateImpl>());
+  chrome_session_manager_ = std::make_unique<ash::ChromeSessionManager>(
+      g_browser_process->local_state(), browser_policy_connector_ash(),
+      session_manager_.get());
+  // Registers BootTimesRecorder as an observer *after* ChromeSessionManager
+  // creation to include ChromeSessionManager operations in UserLoggedIn
+  // metrics. ChromeSessionManager registers itself as an observer, too,
+  // in its constructor. The order of observers guarantees the measurement.
   session_manager_->AddObserver(ash::BootTimesRecorder::Get());
 }
 
 void BrowserProcessPlatformPart::ShutdownSessionManager() {
   session_manager_->RemoveObserver(ash::BootTimesRecorder::Get());
+  chrome_session_manager_.reset();
   session_manager_.reset();
 }
 
@@ -297,7 +310,8 @@ void BrowserProcessPlatformPart::InitializePrimaryProfileServices(
 
   DCHECK(!in_session_password_change_manager_);
   in_session_password_change_manager_ =
-      ash::InSessionPasswordChangeManager::CreateIfEnabled(primary_profile);
+      ash::InSessionPasswordChangeManager::CreateIfEnabled(
+          g_browser_process->local_state(), primary_profile);
 
   primary_profile_shutdown_subscription_ =
       PrimaryProfileServicesShutdownNotifierFactory::GetInstance()

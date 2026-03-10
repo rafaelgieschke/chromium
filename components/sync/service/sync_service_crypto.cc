@@ -14,8 +14,6 @@
 #include "base/strings/to_string.h"
 #include "base/task/sequenced_task_runner.h"
 #include "components/os_crypt/async/common/encryptor.h"
-#include "components/os_crypt/sync/os_crypt.h"
-#include "components/sync/base/features.h"
 #include "components/sync/base/passphrase_enums.h"
 #include "components/sync/engine/nigori/nigori.h"
 #include "components/sync/engine/sync_string_conversions.h"
@@ -136,6 +134,7 @@ void SyncServiceCrypto::SetEncryptor(
     std::unique_ptr<os_crypt_async::Encryptor> encryptor) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   encryptor_ = std::move(encryptor);
+  CHECK(encryptor_);
 }
 
 void SyncServiceCrypto::Reset() {
@@ -831,14 +830,9 @@ std::unique_ptr<Nigori> SyncServiceCrypto::ReadNigoriFromBootstrapToken(
   }
 
   std::string decrypted_key;
-  bool decryption_result;
-  if (base::FeatureList::IsEnabled(kSyncUseOsCryptAsync)) {
-    // If the feature is enabled, the encryptor must be available.
-    CHECK(encryptor_);
-    decryption_result = encryptor_->DecryptString(decoded_key, &decrypted_key);
-  } else {
-    decryption_result = OSCrypt::DecryptString(decoded_key, &decrypted_key);
-  }
+  CHECK(encryptor_);
+  bool decryption_result =
+      encryptor_->DecryptString(decoded_key, &decrypted_key);
   base::UmaHistogramBoolean("Sync.BootstrapTokenDecryptionResult",
                             decryption_result);
   if (!decryption_result) {
@@ -866,15 +860,9 @@ std::string SyncServiceCrypto::SerializeNigoriAsBootstrapToken(
   }
 
   std::string encrypted_key;
-  bool encryption_result;
-  if (base::FeatureList::IsEnabled(kSyncUseOsCryptAsync)) {
-    // If the feature is enabled, the encryptor must be available.
-    CHECK(encryptor_);
-    encryption_result =
-        encryptor_->EncryptString(serialized_key, &encrypted_key);
-  } else {
-    encryption_result = OSCrypt::EncryptString(serialized_key, &encrypted_key);
-  }
+  CHECK(encryptor_);
+  bool encryption_result =
+      encryptor_->EncryptString(serialized_key, &encrypted_key);
   base::UmaHistogramBoolean("Sync.BootstrapTokenEncryptionResult",
                             encryption_result);
   if (!encryption_result) {

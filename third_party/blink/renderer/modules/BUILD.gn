@@ -106,7 +106,6 @@ component("modules") {
     "//third_party/blink/renderer/modules/image_downloader",
     "//third_party/blink/renderer/modules/indexeddb",
     "//third_party/blink/renderer/modules/installation",
-    "//third_party/blink/renderer/modules/installedapp",
     "//third_party/blink/renderer/modules/keyboard",
     "//third_party/blink/renderer/modules/launch",
     "//third_party/blink/renderer/modules/locked_mode",
@@ -183,6 +182,12 @@ component("modules") {
   }
   if (!is_ios && !target_os_is_android) {
     sub_modules += [ "//third_party/blink/renderer/modules/awc" ]
+  }
+
+  # Installed App (getInstalledRelatedApps) is excluded on iOS because the
+  # webapp infrastructure required for this API is not yet implemented.
+  if (!is_ios) {
+    sub_modules += [ "//third_party/blink/renderer/modules/installedapp" ]
   }
 
   if (enable_compute_pressure) {
@@ -406,6 +411,7 @@ source_set("unit_tests") {
     "accessibility/testing/accessibility_test.cc",
     "accessibility/testing/accessibility_test.h",
     "ai/ai_utils_test.cc",
+    "ai/language_model_tool_types_test.cc",
     "ai/model_execution_responder_test.cc",
     "ai/proofreader_test.cc",
     "animationworklet/animation_worklet_global_scope_test.cc",
@@ -460,7 +466,6 @@ source_set("unit_tests") {
     "filesystem/file_writer_test.cc",
     "handwriting/handwriting_type_converters_unittest.cc",
     "imagecapture/image_capture_test.cc",
-    "installedapp/installed_app_controller_test.cc",
     "manifest/image_resource_type_converters_test.cc",
     "manifest/manifest_manager_unittest.cc",
     "manifest/manifest_parser_unittest.cc",
@@ -528,6 +533,7 @@ source_set("unit_tests") {
     "mediastream/transferred_media_stream_track_test.cc",
     "mediastream/user_media_client_test.cc",
     "mediastream/video_track_adapter_unittest.cc",
+    "mediastream/web_media_player_ms_compositor_test.cc",
     "mediastream/web_media_player_ms_test.cc",
     "mediastream/webaudio_media_stream_audio_sink_test.cc",
     "nfc/nfc_proxy_test.cc",
@@ -544,6 +550,7 @@ source_set("unit_tests") {
     "payments/payment_request_for_invalid_origin_or_ssl_test.cc",
     "payments/payment_request_optional_total_test.cc",
     "payments/payment_request_secure_payment_confirmation_availability_test.cc",
+    "payments/payment_request_secure_payment_confirmation_capabilities_test.cc",
     "payments/payment_request_test.cc",
     "payments/payment_request_update_event_test.cc",
     "payments/payment_response_test.cc",
@@ -602,8 +609,10 @@ source_set("unit_tests") {
     "service_worker/service_worker_installed_scripts_manager_test.cc",
     "service_worker/service_worker_router_type_converter_test.cc",
     "service_worker/thread_safe_script_container_test.cc",
+    "service_worker/wait_until_observer_test.cc",
     "service_worker/web_embedded_worker_impl_test.cc",
     "service_worker/web_service_worker_fetch_context_impl_test.cc",
+    "shared_storage/shared_storage_worklet_test.cc",
     "shared_storage/shared_storage_worklet_unittest.cc",
     "speech/speech_recognition_controller_unittest.cc",
     "video_rvfc/video_frame_callback_requester_impl_test.cc",
@@ -626,6 +635,7 @@ source_set("unit_tests") {
     "webaudio/script_processor_node_test.cc",
     "webaudio/stereo_panner_node_test.cc",
     "webaudio/testing/mock_web_audio_device.h",
+    "webrtc/rtc_test.cc",
     "webrtc/webrtc_audio_device_impl_test.cc",
     "webshare/navigator_share_test.cc",
     "websockets/dom_websocket_test.cc",
@@ -667,6 +677,11 @@ source_set("unit_tests") {
       # preventing meaningful testing.
       "mediastream/capture_controller_test.cc",
     ]
+  }
+
+  # Installed App is excluded on iOS (see sub_modules above).
+  if (!is_ios) {
+    sources += [ "installedapp/installed_app_controller_test.cc" ]
   }
 
   configs += [
@@ -720,6 +735,7 @@ source_set("unit_tests") {
     "//third_party/blink/renderer/modules/mediastream:test_support",
     "//third_party/blink/renderer/modules/ml:unit_tests",
     "//third_party/blink/renderer/modules/peerconnection:test_support",
+    "//third_party/blink/renderer/modules/permissions:unit_tests",
     "//third_party/blink/renderer/modules/storage:unit_tests",
     "//third_party/blink/renderer/modules/storage_access:unit_tests",
     "//third_party/blink/renderer/modules/webcodecs:unit_tests",

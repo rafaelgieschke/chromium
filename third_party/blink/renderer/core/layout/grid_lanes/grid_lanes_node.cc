@@ -6,15 +6,15 @@
 
 #include "third_party/blink/renderer/core/layout/grid/grid_item.h"
 #include "third_party/blink/renderer/core/layout/grid/grid_line_resolver.h"
+#include "third_party/blink/renderer/core/style/grid_position.h"
 
 namespace blink {
 
 namespace {
 
-void AdjustGridLanesItemSpan(
-    GridItemData& grid_lanes_item,
-    const GridLineResolver& line_resolver,
-    const GridTrackSizingDirection grid_axis_direction) {
+void AdjustGridItemSpan(GridItemData& grid_lanes_item,
+                        const GridLineResolver& line_resolver,
+                        const GridTrackSizingDirection grid_axis_direction) {
   // Resolve the positions of the items based on style. We can only resolve
   // the number of spans for each item based on the grid axis.
   GridSpan item_span = line_resolver.ResolveGridPositionsFromStyle(
@@ -49,9 +49,16 @@ GridLanesItemGroups GridLanesNode::CollectItemGroups(
       continue;
     }
 
+    // Determine baseline-sharing group for this item.
+    std::optional<BaselineGroup> baseline_group = std::nullopt;
+    if (grid_lanes_item->IsBaselineAligned(grid_axis_direction)) {
+      baseline_group = grid_lanes_item->BaselineGroup(grid_axis_direction);
+    }
+
     const auto item_properties = GridLanesItemGroupProperties(
         /*item_span=*/line_resolver.ResolveGridPositionsFromStyle(
-            child.Style(), grid_axis_direction));
+            child.Style(), grid_axis_direction),
+        baseline_group);
 
     const auto& item_span = item_properties.Span();
     // Keep a running sum of unplaced item spans to determine where to
@@ -97,9 +104,13 @@ GridLanesItemGroups GridLanesNode::CollectItemGroups(
   return item_groups;
 }
 
-GridItems GridLanesNode::ConstructGridLanesItems(
+// TODO(almaher): Do something with `opt_has_nested_subgrid` and make sure that
+// subgridded items are incorporated here.
+GridItems GridLanesNode::ConstructGridItems(
     const GridLineResolver& line_resolver,
-    HeapVector<Member<LayoutBox>>* opt_oof_children) const {
+    bool* must_invalidate_placement_cache,
+    HeapVector<Member<LayoutBox>>* opt_oof_children,
+    bool* opt_has_nested_subgrid) const {
   const ComputedStyle& style = Style();
   const GridTrackSizingDirection grid_axis_direction =
       style.GridLanesTrackSizingDirection();
@@ -125,8 +136,7 @@ GridItems GridLanesNode::ConstructGridLanesItems(
       should_sort_grid_lanes_items_by_order_property |=
           child.Style().Order() != initial_order;
 
-      AdjustGridLanesItemSpan(*grid_lanes_item, line_resolver,
-                              grid_axis_direction);
+      AdjustGridItemSpan(*grid_lanes_item, line_resolver, grid_axis_direction);
       grid_lanes_items.Append(grid_lanes_item);
     }
 
@@ -138,15 +148,50 @@ GridItems GridLanesNode::ConstructGridLanesItems(
   return grid_lanes_items;
 }
 
-void GridLanesNode::AdjustGridLanesItemSpans(
+void GridLanesNode::AppendSubgriddedItems(GridItems* grid_items) const {
+  CHECK(grid_items);
+
+  // TODO(almaher): Actually implement this. Maybe we can reuse the same
+  // method between both grid/grid-lanes nodes?
+}
+
+void GridLanesNode::AdjustGridItemSpans(
     GridItems& grid_lanes_items,
     const GridLineResolver& line_resolver) const {
   const GridTrackSizingDirection grid_axis_direction =
       Style().GridLanesTrackSizingDirection();
   for (GridItemData& grid_lanes_item : grid_lanes_items) {
-    AdjustGridLanesItemSpan(grid_lanes_item, line_resolver,
-                            grid_axis_direction);
+    AdjustGridItemSpan(grid_lanes_item, line_resolver, grid_axis_direction);
   }
+}
+
+// TODO(almaher): We may be able to optimize this by caching the largest span
+// size when children are added to `LayoutGridLanes`, but this would require
+// extra invalidation logic, which, given that we only need this in certain
+// scoped cases at the moment, would end up being more expensive in the total.
+wtf_size_t GridLanesNode::ComputeLargestChildSpanSize() const {
+  const ComputedStyle& style = Style();
+  const auto grid_axis_direction = style.GridLanesTrackSizingDirection();
+  wtf_size_t largest_span = 0;
+
+  // The largest span size may be inaccurate if it depends on line names or
+  // numbers, as the final span size requires knowing the full number of auto
+  // repeats. We use 1 auto repeat as a heuristic here to get a "reasonable"
+  // estimate.
+  const GridLineResolver temp_line_resolver(style, 1u);
+  for (auto child = FirstChild(); child; child = child.NextSibling()) {
+    if (child.IsOutOfFlowPositioned()) {
+      continue;
+    }
+
+    const ComputedStyle& child_style = child.Style();
+    GridSpan item_span = temp_line_resolver.ResolveGridPositionsFromStyle(
+        child_style, grid_axis_direction);
+
+    largest_span = std::max(largest_span, item_span.SpanSize());
+  }
+
+  return largest_span;
 }
 
 }  // namespace blink

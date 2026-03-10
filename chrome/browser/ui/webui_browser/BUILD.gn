@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//components/surface_embed/buildflags/buildflags.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 
 assert(!is_android)
@@ -18,7 +19,7 @@ source_set("webui_browser") {
     "webui_browser_side_panel_ui.h",
     "webui_browser_ui.h",
     "webui_browser_window.h",
-    "webui_location_bar.h",
+    "webui_stub_location_bar.h",
   ]
   public_deps = [
     ":browser_mojo_bindings",
@@ -26,6 +27,8 @@ source_set("webui_browser") {
     "//base",
     "//chrome/browser/ui/exclusive_access",
     "//chrome/browser/ui/location_bar",
+    "//chrome/browser/ui/side_panel",
+    "//chrome/browser/ui/side_panel:side_panel_views_dependent",
     "//chrome/browser/ui/views/interaction",
     "//chrome/browser/ui/views/side_panel",
     "//chrome/browser/ui/webui/cr_components/searchbox",
@@ -60,7 +63,7 @@ source_set("impl") {
     "webui_browser_web_contents_delegate.cc",
     "webui_browser_web_contents_delegate.h",
     "webui_browser_window.cc",
-    "webui_location_bar.cc",
+    "webui_stub_location_bar.cc",
   ]
 
   if (is_mac) {
@@ -73,6 +76,7 @@ source_set("impl") {
     "//base",
     "//chrome/browser:browser_public_dependencies",
     "//chrome/browser/app_mode",
+    "//chrome/browser/bookmarks",
     "//chrome/browser/contextual_search",
     "//chrome/browser/devtools",
     "//chrome/browser/extensions",
@@ -84,6 +88,8 @@ source_set("impl") {
     "//chrome/browser/ui/extensions",
     "//chrome/browser/ui/find_bar",
     "//chrome/browser/ui/location_bar",
+    "//chrome/browser/ui/side_panel",
+    "//chrome/browser/ui/side_panel:side_panel_views_dependent",
     "//chrome/browser/ui/tabs/tab_strip_api",
     "//chrome/browser/ui/toolbar",
     "//chrome/browser/ui/views/page_info",
@@ -97,6 +103,7 @@ source_set("impl") {
     "//components/input",
     "//components/omnibox/browser:vector_icons",
     "//components/sharing_message",
+    "//components/surface_embed/buildflags",
     "//content/public/browser",
     "//ui/base",
     "//ui/content_accelerators",
@@ -114,6 +121,13 @@ source_set("impl") {
       "//chrome/browser/apps/app_shim",
       "//components/remote_cocoa/app_shim",
       "//ui/base/accelerators/global_accelerator_listener",
+    ]
+  }
+
+  if (enable_surface_embed) {
+    deps += [
+      "//components/surface_embed/common",
+      "//services/network/public/mojom",
     ]
   }
 
@@ -150,6 +164,18 @@ source_set("browser_tests") {
     "//chrome/browser/ui",
     "//chrome/common:chrome_features",
     "//chrome/test:test_support",
+    "//components/bookmarks/browser",
+    "//components/surface_embed/buildflags",
     "//content/test:test_support",
   ]
+
+  if (enable_surface_embed) {
+    deps += [
+      "//components/surface_embed/common",
+      "//components/viz/common",
+      "//content/public/browser",
+      "//skia",
+      "//ui/gfx/geometry",
+    ]
+  }
 }

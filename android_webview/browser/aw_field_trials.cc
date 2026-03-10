@@ -18,6 +18,7 @@
 #include "components/payments/content/android/payment_feature_map.h"
 #include "components/permissions/features.h"
 #include "components/safe_browsing/core/common/features.h"
+#include "components/stylus_handwriting/android/stylus_handwriting_feature_map.h"
 #include "components/variations/feature_overrides.h"
 #include "components/viz/common/features.h"
 #include "content/public/common/content_features.h"
@@ -82,7 +83,7 @@ void AwFieldTrials::RegisterFeatureOverrides(base::FeatureList* feature_list) {
   aw_feature_overrides.DisableFeature(ui::kAndroidHDR);
 
   // Disable launch_handler on WebView.
-  aw_feature_overrides.DisableFeature(::features::kAndroidWebAppLaunchHandler);
+  aw_feature_overrides.DisableFeature(blink::features::kWebAppLaunchQueue);
 
   // Disable Reducing User Agent minor version on WebView.
   aw_feature_overrides.DisableFeature(
@@ -138,6 +139,11 @@ void AwFieldTrials::RegisterFeatureOverrides(base::FeatureList* feature_list) {
   // expose the PaymentRequest.securePaymentConfirmationAvailability API.
   aw_feature_overrides.DisableFeature(
       blink::features::kSecurePaymentConfirmationAvailabilityAPI);
+
+  // WebView does not support Secure Payment Confirmation, and thus should not
+  // expose the PaymentRequest.securePaymentConfirmationCapabilities API.
+  aw_feature_overrides.DisableFeature(
+      blink::features::kSecurePaymentConfirmationCapabilities);
 
   // WebView does not support handling payment links.
   aw_feature_overrides.DisableFeature(blink::features::kPaymentLinkDetection);
@@ -232,7 +238,6 @@ void AwFieldTrials::RegisterFeatureOverrides(base::FeatureList* feature_list) {
 
   // Disabling the permission element as it needs embedder support in order to
   // function and the webview permission manager cannot support it.
-  aw_feature_overrides.DisableFeature(blink::features::kPermissionElement);
   aw_feature_overrides.DisableFeature(blink::features::kGeolocationElement);
   aw_feature_overrides.DisableFeature(blink::features::kUserMediaElement);
   aw_feature_overrides.DisableFeature(blink::features::kInstallElement);
@@ -285,11 +290,6 @@ void AwFieldTrials::RegisterFeatureOverrides(base::FeatureList* feature_list) {
   aw_feature_overrides.DisableFeature(
       features::kAAudioPerStreamDeviceSelection);
 
-  // WebView exposes text autosizing to apps via setLayoutAlgorithm(), so
-  // we keep text autosizing support in WebView for now. Further WebView
-  // work will take place in https://crbug.com/391990606.
-  aw_feature_overrides.DisableFeature(blink::features::kForceOffTextAutosizing);
-
   // Local Network Access restrictions should not be enforced in WebView.
   // The LNA permission is auto-granted in WebView, but the permission
   // policy currently blocks iframes from using it. crbug.com/442879527
@@ -314,4 +314,24 @@ void AwFieldTrials::RegisterFeatureOverrides(base::FeatureList* feature_list) {
   // Deemed that performance benefit is not worth the stability cost.
   // See crbug.com/1309151.
   aw_feature_overrides.DisableFeature(::features::kGpuShaderDiskCache);
+
+  // Don't pass the data about browser window position on screen to WebView.
+  aw_feature_overrides.DisableFeature(ui::kAndroidUseCorrectWindowBounds);
+
+  // Launched for WebView. Experimentation needed for Chrome on Android.
+  aw_feature_overrides.EnableFeature(
+      stylus_handwriting::android::kProbeStylusWritingInBackground);
+
+  // As WebSettings.setAllowContentAccess() allows this to be controlled by
+  // the WebView's host, we keep the old behavior for content:// URLs.
+  aw_feature_overrides.DisableFeature(blink::features::kContentSchemeIsLocal);
+
+  // Disable No-Vary-Search in disk cache on WebView.
+  // See https://crbug.com/382394774.
+  aw_feature_overrides.DisableFeature(net::features::kHttpCacheNoVarySearch);
+
+  // TODO(crbug.com/489450060): Disable DirectReceiver on Viz for WebView until
+  // its Viz thread is updated to handle IO.
+  aw_feature_overrides.DisableFeature(
+      ::features::kVizDirectCompositorThreadIpcFrameSinkManager);
 }

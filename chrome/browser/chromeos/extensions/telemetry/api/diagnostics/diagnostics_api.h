@@ -9,8 +9,7 @@
 #include <optional>
 
 #include "chrome/browser/chromeos/extensions/telemetry/api/common/base_telemetry_extension_api_guard_function.h"
-#include "chrome/browser/chromeos/extensions/telemetry/api/diagnostics/remote_diagnostics_service_strategy.h"
-#include "chromeos/crosapi/mojom/diagnostics_service.mojom.h"
+#include "chromeos/ash/services/cros_healthd/public/mojom/cros_healthd.mojom.h"
 #include "chromeos/crosapi/mojom/telemetry_extension_exception.mojom.h"
 #include "extensions/browser/extension_function.h"
 #include "extensions/browser/extension_function_histogram_value.h"
@@ -37,11 +36,14 @@ class DiagnosticsApiFunctionBase : public DiagnosticsApiFunctionV1AndV2Base {
  protected:
   ~DiagnosticsApiFunctionBase() override;
 
-  mojo::Remote<crosapi::mojom::DiagnosticsService>& GetRemoteService();
+  const mojo::Remote<ash::cros_healthd::mojom::CrosHealthdDiagnosticsService>&
+  GetService();
 
  private:
-  std::unique_ptr<RemoteDiagnosticsServiceStrategy>
-      remote_diagnostics_service_strategy_;
+  void OnMojoDisconnect();
+
+  mojo::Remote<ash::cros_healthd::mojom::CrosHealthdDiagnosticsService>
+      service_;
 };
 
 class DiagnosticsApiFunctionBaseV2 : public DiagnosticsApiFunctionV1AndV2Base {
@@ -64,8 +66,9 @@ class OsDiagnosticsGetAvailableRoutinesFunction
   // BaseTelemetryExtensionApiGuardFunction:
   void RunIfAllowed() override;
 
-  void OnResult(
-      const std::vector<crosapi::mojom::DiagnosticsRoutineEnum>& routines);
+  void OnResponse(
+      const std::vector<ash::cros_healthd::mojom::DiagnosticRoutineEnum>&
+          routines);
 };
 
 class OsDiagnosticsGetRoutineUpdateFunction
@@ -78,20 +81,20 @@ class OsDiagnosticsGetRoutineUpdateFunction
   // BaseTelemetryExtensionApiGuardFunction:
   void RunIfAllowed() override;
 
-  void OnResult(crosapi::mojom::DiagnosticsRoutineUpdatePtr ptr);
+  void OnResponse(ash::cros_healthd::mojom::RoutineUpdatePtr ptr);
 };
 
 class DiagnosticsApiRunRoutineFunctionBase : public DiagnosticsApiFunctionBase {
  public:
-  void OnResult(crosapi::mojom::DiagnosticsRunRoutineResponsePtr ptr);
+  void OnResponse(ash::cros_healthd::mojom::RunRoutineResponsePtr ptr);
 
  protected:
   ~DiagnosticsApiRunRoutineFunctionBase() override = default;
 
   // Returns a callback that resolves the corresponding JavaScript call with
   // the response passed to the callback.
-  base::OnceCallback<void(crosapi::mojom::DiagnosticsRunRoutineResponsePtr)>
-  GetOnResult();
+  base::OnceCallback<void(ash::cros_healthd::mojom::RunRoutineResponsePtr)>
+  GetOnResponse();
 };
 
 class OsDiagnosticsRunAcPowerRoutineFunction

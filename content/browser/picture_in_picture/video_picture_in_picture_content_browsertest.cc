@@ -8,6 +8,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/run_until.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "content/browser/picture_in_picture/picture_in_picture_service_impl.h"
@@ -91,6 +92,11 @@ class TestVideoOverlayWindow : public VideoOverlayWindow {
               OnSetFaviconImages,
               (const std::vector<media_session::MediaImage>& images));
   void SetSurfaceId(const viz::SurfaceId& surface_id) override {}
+  void SetPlaybackControlsVisibility(bool is_visible) override {
+    playback_controls_visible_ = is_visible;
+  }
+
+  bool playback_controls_visible() const { return playback_controls_visible_; }
 
   const std::optional<PlaybackState>& playback_state() const {
     return playback_state_;
@@ -130,6 +136,7 @@ class TestVideoOverlayWindow : public VideoOverlayWindow {
 
   std::optional<bool> play_pause_button_visible_;
   std::optional<bool> next_track_button_visible_;
+  bool playback_controls_visible_ = true;
 
   std::vector<media_session::MediaImage> favicon_images_;
   std::u16string source_title_;
@@ -697,7 +704,7 @@ IN_PROC_BROWSER_TEST_F(VideoPictureInPictureContentBrowserTest,
   // The overlay window should have received the favicon image.
   ASSERT_EQ(overlay_window()->favicon_images().size(), 1u);
   const std::string icon_src = overlay_window()->favicon_images()[0].src.spec();
-  EXPECT_TRUE(base::Contains(icon_src, "test.ico"))
+  EXPECT_TRUE(icon_src.contains("test.ico"))
       << "The icon source: \"" << icon_src << "\" should contain \"test.ico\"";
 
   // The overlay window should be able to retrieve the favicon image.
@@ -717,7 +724,7 @@ IN_PROC_BROWSER_TEST_F(VideoPictureInPictureContentBrowserTest,
       .WillOnce([](const std::vector<media_session::MediaImage>& images) {
         ASSERT_EQ(images.size(), 1u);
         const std::string icon_src = images[0].src.spec();
-        EXPECT_TRUE(base::Contains(icon_src, "new.ico"))
+        EXPECT_TRUE(icon_src.contains("new.ico"))
             << "The icon source: \"" << icon_src
             << "\" should contain \"new.ico\"";
       });
@@ -779,6 +786,23 @@ IN_PROC_BROWSER_TEST_F(VideoPictureInPictureContentBrowserTest,
   EXPECT_EQ(
       overlay_window()->source_title().substr(0, expected_title_prefix.size()),
       expected_title_prefix);
+}
+
+IN_PROC_BROWSER_TEST_F(VideoPictureInPictureContentBrowserTest,
+                       PlaybackControlsHideWhenPlayerIsDisconnected) {
+  ASSERT_TRUE(NavigateToURL(
+      shell(), GetTestUrl("media/picture_in_picture", "one-video.html")));
+  ASSERT_EQ(true, EvalJs(shell(), "play();"));
+  ASSERT_EQ(true, EvalJs(shell(), "enterPictureInPicture();"));
+
+  // Initially, playback controls should be visible.
+  EXPECT_TRUE(overlay_window()->playback_controls_visible());
+
+  // Trigger player disconnect.
+  ASSERT_TRUE(ExecJs(shell(), "video.src = ''; video.load();"));
+
+  EXPECT_TRUE(base::test::RunUntil(
+      [&]() { return !overlay_window()->playback_controls_visible(); }));
 }
 
 }  // namespace content

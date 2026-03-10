@@ -15,6 +15,7 @@
 #include "third_party/blink/renderer/modules/xr/xr_layer_shared_image_manager.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/xr_frame_transport_delegate.h"
+#include "third_party/blink/renderer/platform/graphics/gpu/xr_webgl_drawing_buffer.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/disallow_new_wrapper.h"
@@ -26,7 +27,6 @@
 namespace blink {
 
 class LocalDOMWindow;
-class StaticBitmapImage;
 class XRFrameTransport;
 class XRProjectionLayer;
 class XRSession;
@@ -34,6 +34,11 @@ class XRSystem;
 class XRWebGLLayer;
 class XrLayerClient;
 class XRFrameTransportDelegate;
+
+struct XRLayerUpdate {
+  device::LayerId layer_id;
+  std::unique_ptr<SharedImageHolder> current_frame_image;
+};
 
 // This class manages requesting and dispatching frame updates, which includes
 // pose information for a given XRDevice.
@@ -129,6 +134,8 @@ class XRFrameProvider final : public GarbageCollected<XRFrameProvider> {
   // Sends the frame data to the requesting sessions for calculating
   // diagnostics.
   void SendFrameData();
+  void OnTransferComplete(bool succeeded,
+                          const Vector<device::LayerId>& layer_ids);
   void OnRenderComplete();
 
   void OnProviderConnectionError(XRSession* session);
@@ -206,8 +213,7 @@ class XRFrameProvider final : public GarbageCollected<XRFrameProvider> {
 
   // Temporarily store the images and ids for the current frame during layer
   // submitting. Will be empty after OnFrameEnd.
-  Vector<device::LayerId> layer_ids_;
-  Vector<scoped_refptr<StaticBitmapImage>> current_frame_images_;
+  Vector<XRLayerUpdate> layers_;
 };
 
 }  // namespace blink

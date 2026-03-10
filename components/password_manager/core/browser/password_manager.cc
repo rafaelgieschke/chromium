@@ -11,7 +11,6 @@
 #include <memory>
 #include <utility>
 
-#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
 #include "base/feature_list.h"
 #include "base/memory/raw_ptr.h"
@@ -664,6 +663,16 @@ void PasswordManager::RegisterLocalPrefs(PrefRegistrySimple* registry) {
 #endif  // BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS)
   registry->RegisterListPref(prefs::kLocalPasswordHashDataList,
                              PrefRegistry::NO_REGISTRATION_FLAGS);
+}
+
+bool PasswordManager::ShouldAllowSavingPasswordsWithInFlowRecovery() {
+#if BUILDFLAG(IS_ANDROID)
+  // TODO(crbug.com/483652520): Also check if the client is in the correct error state.
+  return base::FeatureList::IsEnabled(
+      password_manager::features::kInFlowTrustedVaultKeyRetrievalAndroid);
+#else
+  return false;
+#endif
 }
 
 PasswordManager::PasswordManager(PasswordManagerClient* client)
@@ -1320,8 +1329,8 @@ void PasswordManager::UpdateStateOnUserInput(
 
   OnUserModifiedNonPasswordField(
       driver, field_id, field_value,
-      base::Contains(field.autocomplete_attribute(),
-                     password_manager::constants::kAutocompleteUsername),
+      field.autocomplete_attribute().contains(
+          password_manager::constants::kAutocompleteUsername),
       is_likely_otp);
 }
 // LINT.ThenChange()
@@ -1616,9 +1625,10 @@ void PasswordManager::OnLoginSuccessful() {
 
   bool able_to_save_passwords =
       password_manager_util::IsAbleToSavePasswords(client_);
+
   UMA_HISTOGRAM_BOOLEAN("PasswordManager.AbleToSavePasswordsOnSuccessfulLogin",
                         able_to_save_passwords);
-  if (!submitted_manager->IsPasswordUpdate() && !able_to_save_passwords) {
+  if (!submitted_manager->IsPasswordUpdate() && !(able_to_save_passwords || ShouldAllowSavingPasswordsWithInFlowRecovery())) {
     return;
   }
 

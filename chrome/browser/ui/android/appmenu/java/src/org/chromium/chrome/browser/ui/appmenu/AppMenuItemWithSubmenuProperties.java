@@ -10,6 +10,7 @@ import static org.chromium.chrome.browser.ui.appmenu.AppMenuItemProperties.HIGHL
 import static org.chromium.chrome.browser.ui.appmenu.AppMenuItemProperties.HOVER_LISTENER;
 import static org.chromium.chrome.browser.ui.appmenu.AppMenuItemProperties.ICON;
 import static org.chromium.chrome.browser.ui.appmenu.AppMenuItemProperties.ICON_COLOR_RES;
+import static org.chromium.chrome.browser.ui.appmenu.AppMenuItemProperties.ICON_NO_TINT;
 import static org.chromium.chrome.browser.ui.appmenu.AppMenuItemProperties.ICON_SHOW_BADGE;
 import static org.chromium.chrome.browser.ui.appmenu.AppMenuItemProperties.KEY_LISTENER;
 import static org.chromium.chrome.browser.ui.appmenu.AppMenuItemProperties.MANAGED;
@@ -24,6 +25,7 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.ui.modelutil.MVCListAdapter.ListItem;
 import org.chromium.ui.modelutil.PropertyKey;
+import org.chromium.ui.modelutil.PropertyModel.WritableBooleanPropertyKey;
 import org.chromium.ui.modelutil.PropertyModel.WritableObjectPropertyKey;
 
 import java.util.List;
@@ -40,6 +42,8 @@ public class AppMenuItemWithSubmenuProperties {
     public static final WritableObjectPropertyKey<View.@Nullable OnClickListener> CLICK_LISTENER =
             new WritableObjectPropertyKey<>();
 
+    public static final WritableBooleanPropertyKey IS_EXPANDED = new WritableBooleanPropertyKey();
+
     public static final PropertyKey[] ALL_KEYS =
             new PropertyKey[] {
                 MENU_ITEM_ID,
@@ -50,6 +54,7 @@ public class AppMenuItemWithSubmenuProperties {
                 ICON,
                 ICON_COLOR_RES,
                 ICON_SHOW_BADGE,
+                ICON_NO_TINT,
                 POSITION,
                 HOVER_LISTENER,
                 KEY_LISTENER,
@@ -57,5 +62,6 @@ public class AppMenuItemWithSubmenuProperties {
                 MENU_ICON_AT_START,
                 CLICK_LISTENER,
                 SUBMENU_ITEMS,
+                IS_EXPANDED,
             };
 }

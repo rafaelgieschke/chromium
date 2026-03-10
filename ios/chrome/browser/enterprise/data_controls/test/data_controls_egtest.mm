@@ -12,7 +12,6 @@
 #import "ios/chrome/test/earl_grey/chrome_earl_grey_ui.h"
 #import "ios/chrome/test/earl_grey/chrome_matchers.h"
 #import "ios/chrome/test/earl_grey/chrome_test_case.h"
-#import "ios/components/enterprise/data_controls/features.h"
 #import "ios/testing/earl_grey/earl_grey_test.h"
 #import "ios/web/public/test/element_selector.h"
 #import "net/test/embedded_test_server/default_handlers.h"
@@ -82,11 +81,8 @@ void TapOnContextMenuButton(id<GREYMatcher> context_menu_item_button) {
   if ([self isRunningTest:@selector(testCopyBlockedOnReaderMode)] ||
       [self isRunningTest:@selector(testCopyLinkWarnProceedOnReaderMode)] ||
       [self isRunningTest:@selector(testCopyLinkWarnCancelOnReaderMode)]) {
-    config.features_enabled.push_back(kEnableReaderMode);
     config.features_enabled.push_back(kEnableReaderModeInUS);
   }
-  config.features_enabled.push_back(
-      data_controls::kEnableClipboardDataControlsIOS);
 
   return config;
 }

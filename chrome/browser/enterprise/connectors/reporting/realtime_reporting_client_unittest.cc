@@ -8,6 +8,7 @@
 #include <string>
 #include <utility>
 
+#include "base/test/bind.h"
 #include "base/test/gmock_move_support.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
@@ -226,17 +227,22 @@ TEST_P(RealtimeReportingClientUmaTest, TestDeprecatedUmaEventUploadSucceeds) {
   }
 #endif
 
+  // Disable proto-based reporting, since this test case uses deprecated
+  // reporting methods.
+  scoped_feature_list_.InitAndDisableFeature(
+      policy::kUploadRealtimeReportingEventsUsingProto);
+
   is_profile_reporting()
       ? reporting_client_->SetProfileCloudPolicyClientForTesting(client_.get())
       : reporting_client_->SetBrowserCloudPolicyClientForTesting(client_.get());
 
   ReportingSettings settings;
   settings.per_profile = is_profile_reporting();
-  base::Value::Dict event;
+  base::DictValue event;
 
   base::RunLoop run_loop;
   EXPECT_CALL(*client_.get(), UploadSecurityEventReport(_, _, _))
-      .WillOnce([&](bool include_device_info, base::Value::Dict&& report,
+      .WillOnce([&](bool include_device_info, base::DictValue&& report,
                     policy::CloudPolicyClient::ResultCallback callback) {
         upload_callback_ = std::move(callback);
         run_loop.Quit();
@@ -263,7 +269,6 @@ TEST_P(RealtimeReportingClientUmaTest, TestUmaEventUploadSucceeds) {
   }
 #endif
 
-  base::test::ScopedFeatureList scoped_feature_list_;
   scoped_feature_list_.InitAndEnableFeature(
       policy::kUploadRealtimeReportingEventsUsingProto);
 
@@ -315,17 +320,22 @@ TEST_P(RealtimeReportingClientUmaTest, TestDeprecatedUmaEventUploadFails) {
   }
 #endif
 
+  // Disable proto-based reporting, since this test case uses deprecated
+  // reporting methods.
+  scoped_feature_list_.InitAndDisableFeature(
+      policy::kUploadRealtimeReportingEventsUsingProto);
+
   is_profile_reporting()
       ? reporting_client_->SetProfileCloudPolicyClientForTesting(client_.get())
       : reporting_client_->SetBrowserCloudPolicyClientForTesting(client_.get());
 
   ReportingSettings settings;
   settings.per_profile = is_profile_reporting();
-  base::Value::Dict event;
+  base::DictValue event;
 
   base::RunLoop run_loop;
   EXPECT_CALL(*client_.get(), UploadSecurityEventReport(_, _, _))
-      .WillOnce([&](bool include_device_info, base::Value::Dict&& report,
+      .WillOnce([&](bool include_device_info, base::DictValue&& report,
                     policy::CloudPolicyClient::ResultCallback callback) {
         upload_callback_ = std::move(callback);
         run_loop.Quit();
@@ -352,7 +362,6 @@ TEST_P(RealtimeReportingClientUmaTest, TestUmaEventUploadFails) {
   }
 #endif
 
-  base::test::ScopedFeatureList scoped_feature_list_;
   scoped_feature_list_.InitAndEnableFeature(
       policy::kUploadRealtimeReportingEventsUsingProto);
 
@@ -407,6 +416,9 @@ TEST_F(RealtimeReportingClientTestBase,
                               kAllReportingEnabledEvents.end());
   all_reporting_events.insert(kAllReportingOptInEvents.begin(),
                               kAllReportingOptInEvents.end());
+  // Saas usage event is independent from reporting connector, so it is
+  // neither enabled nor opt-in event.
+  all_reporting_events.insert(kKeySaasUsageEvent);
 
   EXPECT_EQ(all_reporting_events.size(), kEventNameToUmaEnumMap.size());
   for (std::string eventName : all_reporting_events) {
@@ -423,7 +435,7 @@ TEST_F(RealtimeReportingClientTestBase,
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
 
 TEST_F(RealtimeReportingClientTestBase, TestCrowdstrikeSignalsPopulated) {
-  base::Value::Dict event;
+  base::DictValue event;
   device_signals::CrowdStrikeSignals signals;
   signals.agent_id = "agent-123";
   signals.customer_id = "customer-123";
@@ -432,9 +444,9 @@ TEST_F(RealtimeReportingClientTestBase, TestCrowdstrikeSignalsPopulated) {
   device_signals::SignalsAggregationResponse response;
   response.agent_signals_response = agent_signals;
   AddCrowdstrikeSignalsToEvent(event, response);
-  const base::Value::List& agentList = event.Find("securityAgents")->GetList();
+  const base::ListValue& agentList = event.Find("securityAgents")->GetList();
   ASSERT_EQ(agentList.size(), 1u);
-  const base::Value::Dict& signalValues =
+  const base::DictValue& signalValues =
       agentList[0].GetDict().Find("crowdstrike")->GetDict();
   EXPECT_EQ(signalValues.Find("agent_id")->GetString(), "agent-123");
   EXPECT_EQ(signalValues.Find("customer_id")->GetString(), "customer-123");
@@ -442,7 +454,7 @@ TEST_F(RealtimeReportingClientTestBase, TestCrowdstrikeSignalsPopulated) {
 
 TEST_F(RealtimeReportingClientTestBase,
        TestCrowdstrikeSignalsNotPopulatedForEmptyResponse) {
-  base::Value::Dict event;
+  base::DictValue event;
   device_signals::SignalsAggregationResponse response;
   response.agent_signals_response = std::nullopt;
   AddCrowdstrikeSignalsToEvent(event, response);
@@ -731,5 +743,89 @@ INSTANTIATE_TEST_SUITE_P(
           return "UnknownEvent";
       }
     });
+
+class RealtimeReportingClientSaasTest
+    : public RealtimeReportingClientTestBase,
+      public testing::WithParamInterface<
+          std::tuple<bool, policy::DeviceManagementStatus>> {
+ public:
+  bool is_profile_reporting() const { return std::get<0>(GetParam()); }
+
+  policy::DeviceManagementStatus dm_status() const {
+    return std::get<1>(GetParam());
+  }
+
+  bool should_succeed() const {
+    return dm_status() == policy::DM_STATUS_SUCCESS;
+  }
+
+  void SetUp() override {
+    RealtimeReportingClientTestBase::SetUp();
+    reporting_client_ =
+        enterprise_connectors::RealtimeReportingClientFactory::GetForProfile(
+            profile_);
+  }
+
+ protected:
+  base::HistogramTester histogram_;
+  raw_ptr<RealtimeReportingClient> reporting_client_ = nullptr;
+};
+
+TEST_P(RealtimeReportingClientSaasTest, ReportSaasUsageEvent) {
+#if BUILDFLAG(IS_CHROMEOS)
+  if (is_profile_reporting()) {
+    return;
+  }
+#endif
+
+  is_profile_reporting()
+      ? reporting_client_->SetProfileCloudPolicyClientForTesting(client_.get())
+      : reporting_client_->SetBrowserCloudPolicyClientForTesting(client_.get());
+
+  ::chrome::cros::reporting::proto::Event event;
+  event.mutable_saas_usage_report_event();
+
+  base::RunLoop run_loop;
+  bool success_result = false;
+
+  EXPECT_CALL(*client_.get(), UploadSecurityEvent(_, _, _))
+      .WillOnce(
+          [&](bool include_device_info,
+              ::chrome::cros::reporting::proto::UploadEventsRequest&& request,
+              policy::CloudPolicyClient::ResultCallback callback) {
+            EXPECT_EQ(request.events_size(), 1);
+            EXPECT_TRUE(request.events(0).has_saas_usage_report_event());
+            std::move(callback).Run(
+                policy::CloudPolicyClient::Result(dm_status()));
+          });
+
+  reporting_client_->ReportSaasUsageEvent(
+      event, is_profile_reporting(), "fake-token",
+      base::BindLambdaForTesting([&](bool success) {
+        success_result = success;
+        run_loop.Quit();
+      }));
+
+  run_loop.Run();
+  EXPECT_EQ(success_result, should_succeed());
+  if (should_succeed()) {
+    histogram_.ExpectUniqueSample(
+        "Enterprise.ReportingEventUploadSuccess",
+        EnterpriseReportingEventType::kSaasUsageReportEvent, 1);
+    histogram_.ExpectTotalCount("Enterprise.ReportingEventUploadFailure", 0);
+  } else {
+    histogram_.ExpectUniqueSample(
+        "Enterprise.ReportingEventUploadFailure",
+        EnterpriseReportingEventType::kSaasUsageReportEvent, 1);
+    histogram_.ExpectTotalCount("Enterprise.ReportingEventUploadSuccess", 0);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    All,
+    RealtimeReportingClientSaasTest,
+    testing::Combine(testing::Bool(),  // is_profile_reporting
+                     testing::Values(policy::DM_STATUS_SUCCESS,
+                                     policy::DM_STATUS_REQUEST_FAILED)));
 
 }  // namespace enterprise_connectors

@@ -37,7 +37,7 @@ class SingleThreadTaskRunner;
 namespace content {
 class BrowserContext;
 class WebContents;
-}
+}  // namespace content
 
 namespace guest_view {
 class GuestViewManagerDelegate;
@@ -52,7 +52,6 @@ namespace extensions {
 class AutomationInternalApiDelegate;
 class AppViewGuestDelegate;
 class ContentRulesRegistry;
-class DevicePermissionsPrompt;
 class DisplayInfoProvider;
 class ExtensionOptionsGuest;
 class ExtensionOptionsGuestDelegate;
@@ -70,6 +69,7 @@ class NativeMessagePortDispatcher;
 class NonNativeFileSystemDelegate;
 class RulesCacheDelegate;
 class SupervisedUserExtensionsDelegate;
+class UsbDevicePermissionsPrompt;
 class ValueStoreCache;
 class VirtualKeyboardDelegate;
 struct WebRequestInfo;
@@ -109,8 +109,8 @@ class ExtensionsAPIClient {
 
   // Attaches any extra web contents helpers (like ExtensionWebContentsObserver)
   // to `web_contents`.
-  virtual void AttachWebContentsHelpers(content::WebContents* web_contents)
-      const;
+  virtual void AttachWebContentsHelpers(
+      content::WebContents* web_contents) const;
 
   // Returns true if the header should be hidden to extensions.
   virtual bool ShouldHideResponseHeader(const GURL& url,
@@ -158,9 +158,11 @@ class ExtensionsAPIClient {
   virtual std::unique_ptr<guest_view::GuestViewManagerDelegate>
   CreateGuestViewManagerDelegate() const;
 
+#if BUILDFLAG(ENABLE_EXTENSIONS)
   // Creates a delegate for MimeHandlerViewGuest.
   virtual std::unique_ptr<MimeHandlerViewGuestDelegate>
   CreateMimeHandlerViewGuestDelegate(MimeHandlerViewGuest* guest) const;
+#endif
 
   // Creates a delegate for some of WebViewGuest's behavior.
   virtual std::unique_ptr<WebViewGuestDelegate> CreateWebViewGuestDelegate(
@@ -185,9 +187,9 @@ class ExtensionsAPIClient {
       content::BrowserContext* browser_context,
       RulesCacheDelegate* cache_delegate) const;
 
-  // Creates a DevicePermissionsPrompt appropriate for the embedder.
-  virtual std::unique_ptr<DevicePermissionsPrompt>
-  CreateDevicePermissionsPrompt(content::WebContents* web_contents) const;
+  // Creates a UsbDevicePermissionsPrompt appropriate for the embedder.
+  virtual std::unique_ptr<UsbDevicePermissionsPrompt>
+  CreateUsbDevicePermissionsPrompt(content::WebContents* web_contents) const;
 
 #if BUILDFLAG(IS_CHROMEOS)
   // Returns true if device policy allows detaching a given USB device.

@@ -12,6 +12,8 @@
 #include "chrome/browser/actor/ui/actor_ui_metrics.h"
 #include "chrome/browser/actor/ui/actor_ui_tab_controller.h"
 #include "chrome/browser/actor/ui/actor_ui_window_controller.h"
+#include "chrome/browser/glic/public/glic_keyed_service.h"
+#include "chrome/browser/glic/public/glic_keyed_service_factory.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/views/interaction/browser_elements_views.h"
@@ -21,7 +23,7 @@
 #include "components/vector_icons/vector_icons.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkRRect.h"
-#include "third_party/skia/include/effects/SkGradientShader.h"
+#include "third_party/skia/include/effects/SkGradient.h"
 #include "third_party/skia/include/effects/SkImageFilters.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/cursor/mojom/cursor_type.mojom-shared.h"
@@ -44,10 +46,6 @@
 #include "ui/views/view_class_properties.h"
 #include "ui/views/widget/widget_delegate.h"
 
-#if BUILDFLAG(ENABLE_GLIC)
-#include "chrome/browser/glic/public/glic_keyed_service.h"
-#include "chrome/browser/glic/public/glic_keyed_service_factory.h"
-#endif
 
 namespace {
 
@@ -315,6 +313,8 @@ void HandoffButtonController::CreateAndShowButton(
   button_view_ = button_view.get();
   button_view_->SetAccessibleDescription(a11y_text);
   button_view_->SetEnabledTextColors(::ui::kColorLabelForeground);
+  button_view_->SetTextColor(views::Button::STATE_DISABLED,
+                             ::ui::kColorLabelForeground);
   button_view_->SetImageModel(views::Button::STATE_NORMAL, icon);
   button_view_->SetProperty(views::kElementIdentifierKey,
                             kHandoffButtonElementId);
@@ -419,7 +419,6 @@ void HandoffButtonController::OnButtonPressed() {
   if (auto* tab_controller = GetTabController()) {
     if (ownership_ == kActor) {
       tab_controller->SetActorTaskPaused();
-#if BUILDFLAG(ENABLE_GLIC)
       BrowserWindowInterface* bwi = tab_interface_->GetBrowserWindowInterface();
       auto* glic_service =
           glic::GlicKeyedServiceFactory::GetGlicKeyedService(bwi->GetProfile());
@@ -427,7 +426,6 @@ void HandoffButtonController::OnButtonPressed() {
         glic_service->ToggleUI(bwi, /*prevent_close=*/true,
                                glic::mojom::InvocationSource::kHandoffButton);
       }
-#endif
     } else {
       tab_controller->SetActorTaskResume();
     }

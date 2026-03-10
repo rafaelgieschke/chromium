@@ -731,13 +731,13 @@ TEST_F(ElementTest, ParseFocusgroupAttrDefaultValuesWhenEmptyValue) {
       fg_empty->GetFocusgroupData(),
       FocusgroupData(FocusgroupBehavior::kNoBehavior, FocusgroupFlags::kNone));
 
-  // Toolbar behavior with default axes
+  // Toolbar behavior with default inline axis.
   auto* fg_toolbar = document.getElementById(AtomicString("fg_toolbar"));
   ASSERT_TRUE(fg_toolbar);
 
-  EXPECT_EQ(fg_toolbar->GetFocusgroupData(),
-            FocusgroupData(FocusgroupBehavior::kToolbar,
-                           FocusgroupFlags::kInline | FocusgroupFlags::kBlock));
+  EXPECT_EQ(
+      fg_toolbar->GetFocusgroupData(),
+      FocusgroupData(FocusgroupBehavior::kToolbar, FocusgroupFlags::kInline));
 }
 
 TEST_F(ElementTest, ParseFocusgroupAttrSupportedAxesAreValid) {
@@ -761,13 +761,14 @@ TEST_F(ElementTest, ParseFocusgroupAttrSupportedAxesAreValid) {
       fg1->GetFocusgroupData(),
       FocusgroupData(FocusgroupBehavior::kToolbar, FocusgroupFlags::kInline));
 
-  // 2. Only block should be supported.
+  // 2. Only block should be supported; tablist default wrap applies in block.
   auto* fg2 = document.getElementById(AtomicString("fg2"));
   EXPECT_TRUE(fg2);
 
   EXPECT_EQ(
       fg2->GetFocusgroupData(),
-      FocusgroupData(FocusgroupBehavior::kTablist, FocusgroupFlags::kBlock));
+      FocusgroupData(FocusgroupBehavior::kTablist,
+                     FocusgroupFlags::kBlock | FocusgroupFlags::kWrapBlock));
 
   // 3. No axis specified so both should be supported
   auto* fg3 = document.getElementById(AtomicString("fg3"));
@@ -777,21 +778,24 @@ TEST_F(ElementTest, ParseFocusgroupAttrSupportedAxesAreValid) {
             FocusgroupData(FocusgroupBehavior::kListbox,
                            FocusgroupFlags::kInline | FocusgroupFlags::kBlock));
 
-  // 4. Only support inline because it's specified.
+  // 4. Only support inline because it's specified; menu default wrap in inline.
   auto* fg3_a = document.getElementById(AtomicString("fg3_a"));
   ASSERT_TRUE(fg3_a);
 
   EXPECT_EQ(
       fg3_a->GetFocusgroupData(),
-      FocusgroupData(FocusgroupBehavior::kMenu, FocusgroupFlags::kInline));
+      FocusgroupData(FocusgroupBehavior::kMenu,
+                     FocusgroupFlags::kInline | FocusgroupFlags::kWrapInline));
 
-  // 5. Only support block because it's specified.
+  // 5. Only support block because it's specified; menubar default wrap in
+  // block.
   auto* fg3_b = document.getElementById(AtomicString("fg3_b"));
   ASSERT_TRUE(fg3_b);
 
   EXPECT_EQ(
       fg3_b->GetFocusgroupData(),
-      FocusgroupData(FocusgroupBehavior::kMenubar, FocusgroupFlags::kBlock));
+      FocusgroupData(FocusgroupBehavior::kMenubar,
+                     FocusgroupFlags::kBlock | FocusgroupFlags::kWrapBlock));
 
   // 6. Child specifying only behavior should still support both axes.
   auto* fg3_b_1 = document.getElementById(AtomicString("fg3_b_1"));
@@ -847,10 +851,10 @@ TEST_F(ElementTest, ParseFocusgroupAttrWrapIgnoredInDescendantsWithoutOwnWrap) {
   ASSERT_TRUE(fg11);
   ASSERT_TRUE(fg12);
 
-  // Parent supports both axes but no wrap - children should not inherit wrap
-  EXPECT_EQ(fg1->GetFocusgroupData(),
-            FocusgroupData(FocusgroupBehavior::kToolbar,
-                           FocusgroupFlags::kInline | FocusgroupFlags::kBlock));
+  // Parent supports inline (toolbar default) with no wrap.
+  EXPECT_EQ(
+      fg1->GetFocusgroupData(),
+      FocusgroupData(FocusgroupBehavior::kToolbar, FocusgroupFlags::kInline));
 
   EXPECT_EQ(
       fg2->GetFocusgroupData(),
@@ -862,11 +866,11 @@ TEST_F(ElementTest, ParseFocusgroupAttrWrapIgnoredInDescendantsWithoutOwnWrap) {
       FocusgroupData(FocusgroupBehavior::kToolbar,
                      FocusgroupFlags::kBlock | FocusgroupFlags::kWrapBlock));
 
-  EXPECT_EQ(fg4->GetFocusgroupData(),
-            FocusgroupData(FocusgroupBehavior::kToolbar,
-                           FocusgroupFlags::kInline | FocusgroupFlags::kBlock |
-                               FocusgroupFlags::kWrapInline |
-                               FocusgroupFlags::kWrapBlock));
+  // Toolbar wrap with no explicit axis: toolbar default inline + wrap-inline.
+  EXPECT_EQ(
+      fg4->GetFocusgroupData(),
+      FocusgroupData(FocusgroupBehavior::kToolbar,
+                     FocusgroupFlags::kInline | FocusgroupFlags::kWrapInline));
 
   // Parent supports only inline axis - children inherit this restriction
   EXPECT_EQ(
@@ -883,11 +887,11 @@ TEST_F(ElementTest, ParseFocusgroupAttrWrapIgnoredInDescendantsWithoutOwnWrap) {
       FocusgroupData(FocusgroupBehavior::kToolbar,
                      FocusgroupFlags::kBlock | FocusgroupFlags::kWrapBlock));
 
-  EXPECT_EQ(fg8->GetFocusgroupData(),
-            FocusgroupData(FocusgroupBehavior::kToolbar,
-                           FocusgroupFlags::kInline | FocusgroupFlags::kBlock |
-                               FocusgroupFlags::kWrapInline |
-                               FocusgroupFlags::kWrapBlock));
+  // Toolbar wrap with no explicit axis: toolbar default inline + wrap-inline.
+  EXPECT_EQ(
+      fg8->GetFocusgroupData(),
+      FocusgroupData(FocusgroupBehavior::kToolbar,
+                     FocusgroupFlags::kInline | FocusgroupFlags::kWrapInline));
 
   // Parent supports only block axis - children inherit this restriction
   EXPECT_EQ(
@@ -904,11 +908,11 @@ TEST_F(ElementTest, ParseFocusgroupAttrWrapIgnoredInDescendantsWithoutOwnWrap) {
       FocusgroupData(FocusgroupBehavior::kToolbar,
                      FocusgroupFlags::kBlock | FocusgroupFlags::kWrapBlock));
 
-  EXPECT_EQ(fg12->GetFocusgroupData(),
-            FocusgroupData(FocusgroupBehavior::kToolbar,
-                           FocusgroupFlags::kInline | FocusgroupFlags::kBlock |
-                               FocusgroupFlags::kWrapInline |
-                               FocusgroupFlags::kWrapBlock));
+  // Toolbar wrap with no explicit axis: toolbar default inline + wrap-inline.
+  EXPECT_EQ(
+      fg12->GetFocusgroupData(),
+      FocusgroupData(FocusgroupBehavior::kToolbar,
+                     FocusgroupFlags::kInline | FocusgroupFlags::kWrapInline));
 }
 
 TEST_F(ElementTest, ParseFocusgroupAttrGrid) {
@@ -1052,8 +1056,8 @@ TEST_F(ElementTest, ParseFocusgroupAttrOptOutNone) {
 TEST_F(ElementTest, ParseFocusgroupAttrNoMemoryToken) {
   Document& document = GetDocument();
   SetBodyContent(R"HTML(
-    <div id=a focusgroup="toolbar no-memory"></div>
-    <div id=b focusgroup="listbox inline no-memory"></div>
+    <div id=a focusgroup="toolbar nomemory"></div>
+    <div id=b focusgroup="listbox inline nomemory"></div>
   )HTML");
 
   auto* a = document.getElementById(AtomicString("a"));
@@ -1061,14 +1065,14 @@ TEST_F(ElementTest, ParseFocusgroupAttrNoMemoryToken) {
   ASSERT_TRUE(a);
   ASSERT_TRUE(b);
 
-  // Default axes (inline+block) plus no-memory.
-  EXPECT_EQ(a->GetFocusgroupData(),
-            FocusgroupData(FocusgroupBehavior::kToolbar,
-                           FocusgroupFlags::kInline | FocusgroupFlags::kBlock |
-                               FocusgroupFlags::kNoMemory));
+  // Toolbar default axis (inline) plus nomemory.
+  EXPECT_EQ(
+      a->GetFocusgroupData(),
+      FocusgroupData(FocusgroupBehavior::kToolbar,
+                     FocusgroupFlags::kInline | FocusgroupFlags::kNoMemory));
   EXPECT_TRUE(focusgroup::IsActualFocusgroup(a->GetFocusgroupData()));
 
-  // Explicit inline axis only + no-memory.
+  // Explicit inline axis only + nomemory.
   EXPECT_EQ(
       b->GetFocusgroupData(),
       FocusgroupData(FocusgroupBehavior::kListbox,
@@ -1221,7 +1225,7 @@ TEST_F(ElementTest, FocusgroupFlagsToString) {
       static_cast<FocusgroupFlags>(FocusgroupFlags::kBlock |
                                    FocusgroupFlags::kNoMemory)};
   EXPECT_EQ(
-      "toolbar:(block|no-memory)",
+      "toolbar:(block|nomemory)",
       focusgroup::FocusgroupDataToStringForTesting(toolbar_no_memory_data));
 }
 
@@ -1475,197 +1479,6 @@ TEST_F(ElementTest, ThePickerIconPseudoElement) {
   EXPECT_EQ(nullptr, target_option->GetPseudoElement(kPseudoIdPickerIcon));
 }
 
-TEST_F(ElementTest, OverscrollPseudoElementLayoutStructure) {
-  ScopedCSSOverscrollGesturesForTest enabled(true);
-  GetDocument().body()->SetInnerHTMLWithoutTrustedTypes(R"HTML(
-    <style>
-      div, #scroller::before {
-        /* Prevent wrapping by anonymous blocks. */
-        display: block;
-      }
-      #scroller {
-        overscroll-area: --foo, --bar;
-      }
-      #scroller::before {
-        content: "::before pseudo";
-      }
-    </style>
-    <div id="previous-sibling"></div>
-    <div id="scroller">
-      <div id="child"></div>
-    </div>
-    <div id="next-sibling"></div>
-  )HTML");
-
-  UpdateAllLifecyclePhasesForTest();
-
-  Element* scroller = GetElementById("scroller");
-  const OverscrollAreaParentPseudoElementsVector* overscroll_elements =
-      scroller->GetOverscrollAreaParentPseudoElements();
-  PseudoElement* overscroll_parent_foo = overscroll_elements->at(0);
-  PseudoElement* overscroll_parent_bar = overscroll_elements->at(1);
-
-  ASSERT_TRUE(overscroll_parent_foo);
-  ASSERT_TRUE(overscroll_parent_bar);
-  EXPECT_FALSE(scroller->GetPseudoElement(kPseudoIdOverscrollAreaParent,
-                                          AtomicString("--baz")));
-
-  // Order of children and pseudos within content:
-  EXPECT_EQ(scroller->GetPseudoElement(kPseudoIdBefore)
-                ->GetLayoutObject()
-                ->PreviousSibling(),
-            overscroll_parent_bar->GetLayoutObject());
-  EXPECT_EQ(GetElementById("child")->GetLayoutObject()->PreviousSibling(),
-            scroller->GetPseudoElement(kPseudoIdBefore)->GetLayoutObject());
-
-  // Overscroll area parents:
-  EXPECT_EQ(overscroll_parent_bar->GetLayoutObject()->Parent(),
-            scroller->GetLayoutObject());
-  EXPECT_EQ(overscroll_parent_foo->GetLayoutObject()->Parent(),
-            scroller->GetLayoutObject());
-
-  // Scroller siblings:
-  EXPECT_EQ(scroller->GetLayoutObject()->PreviousSibling(),
-            GetElementById("previous-sibling")->GetLayoutObject());
-  EXPECT_EQ(scroller->GetLayoutObject()->NextSibling(),
-            GetElementById("next-sibling")->GetLayoutObject());
-}
-
-TEST_F(ElementTest, OverscrollPropertyTrees) {
-  ScopedCSSOverscrollGesturesForTest enabled(true);
-  GetDocument().body()->SetInnerHTMLWithoutTrustedTypes(R"HTML(
-    <style>
-      #container {
-        overscroll-area: --foo, --bar;
-        overflow: auto;
-      }
-    </style>
-    <div id="container"></div>
-  )HTML");
-
-  UpdateAllLifecyclePhasesForTest();
-  Element* container = GetElementById("container");
-  const OverscrollAreaParentPseudoElementsVector* overscroll_elements =
-      container->GetOverscrollAreaParentPseudoElements();
-  PseudoElement* foo = overscroll_elements->at(0);
-  PseudoElement* bar = overscroll_elements->at(1);
-
-  // ::-internal-overscroll-area-parent skips the scrollers scroll translation.
-  for (auto* pseudo_element : {foo, bar}) {
-    EXPECT_EQ(pseudo_element->GetLayoutObject()
-                  ->FirstFragment()
-                  .PaintProperties()
-                  ->PaintOffsetTranslation()
-                  ->Parent(),
-              container->GetLayoutObject()
-                  ->FirstFragment()
-                  .PaintProperties()
-                  ->PaintOffsetTranslation());
-  }
-
-  // Scroll chains from the element, to the overscroll-area-parents, to the
-  // root.
-  HeapVector<Member<const ScrollPaintPropertyNode>> scroll_chain(
-      {container->GetLayoutObject()
-           ->FirstFragment()
-           .PaintProperties()
-           ->Scroll(),
-       bar->GetLayoutObject()->FirstFragment().PaintProperties()->Scroll(),
-       foo->GetLayoutObject()->FirstFragment().PaintProperties()->Scroll(),
-       GetDocument().View()->GetPage()->GetVisualViewport().GetScrollNode()});
-  for (size_t i = 1; i < scroll_chain.size(); ++i) {
-    const ScrollPaintPropertyNode* child = scroll_chain[i - 1];
-    const ScrollPaintPropertyNode* parent = scroll_chain[i];
-    EXPECT_EQ(child->Parent(), parent);
-  }
-}
-
-TEST_F(ElementTest, OverscrollPseudoElementStyles) {
-  ScopedCSSOverscrollGesturesForTest enabled(true);
-  GetDocument().body()->SetInnerHTMLWithoutTrustedTypes(R"HTML(
-    <style>
-      #scroller, #non-scroller {
-        overscroll-area: --foo;
-      }
-      #scroller {
-        overflow: auto;
-      }
-      /* Only UA stylesheets should be able to style these pseudo-elements.
-       * The following styles SHOULD NOT apply. */
-      #scroller::-internal-overscroll-area-parent(*),
-      #non-scroller::-internal-overscroll-area-parent(*) {
-        backface-visibility: hidden;
-      }
-    </style>
-    <div id="scroller"></div>
-  )HTML");
-
-  UpdateAllLifecyclePhasesForTest();
-
-  Element* scroller = GetElementById("scroller");
-  PseudoElement* overscroll_parent_foo =
-      scroller->GetOverscrollAreaParentPseudoElements()->at(0);
-
-  ASSERT_TRUE(overscroll_parent_foo);
-
-  // Computed style of the overscroll area parent pseudo-elements
-  EXPECT_EQ(EOverflow::kAuto,
-            overscroll_parent_foo->GetComputedStyle()->OverflowX());
-  EXPECT_EQ(EOverflow::kAuto,
-            overscroll_parent_foo->GetComputedStyle()->OverflowY());
-  EXPECT_EQ(EScrollbarWidth::kNone,
-            overscroll_parent_foo->GetComputedStyle()->ScrollbarWidth());
-
-  // Computed style of the overscroll area parent pseudo-elements
-  EXPECT_EQ(EOverflow::kAuto,
-            overscroll_parent_foo->GetComputedStyle()->OverflowX());
-  EXPECT_EQ(EOverflow::kAuto,
-            overscroll_parent_foo->GetComputedStyle()->OverflowY());
-  EXPECT_EQ(EScrollbarWidth::kNone,
-            overscroll_parent_foo->GetComputedStyle()->ScrollbarWidth());
-
-  // Only UA selectors can match these pseudo-elements,
-  // backface-visibility should be unchanged.
-  EXPECT_EQ(EBackfaceVisibility::kVisible,
-            overscroll_parent_foo->GetComputedStyle()->BackfaceVisibility());
-}
-
-// TODO(crbug.com/463729080): Enable this when the layout objects are properly
-// created.
-TEST_F(ElementTest, DISABLED_OverscrollContainerWithElement) {
-  ScopedCSSOverscrollGesturesForTest enabled(true);
-  GetDocument().body()->SetInnerHTMLWithoutTrustedTypes(R"HTML(
-    <div id="container" overscrollcontainer>
-      <div id="menu"></div>
-      <div id="content"></div>
-    </div>
-    <button id=button command="toggle-overscroll" commandfor="menu"></button>
-  )HTML");
-
-  UpdateAllLifecyclePhasesForTest();
-
-  Element* container = GetElementById("container");
-  ASSERT_TRUE(container);
-  PseudoElement* overscroll_area_parent =
-      container->GetPseudoElement(kPseudoIdOverscrollAreaParent);
-  Element* menu = GetElementById("menu");
-  Element* content = GetElementById("content");
-  ASSERT_TRUE(overscroll_area_parent);
-  ASSERT_TRUE(menu);
-  ASSERT_TRUE(content);
-
-  // We expect the following layout tree:
-  // container
-  //   overscroll-area-parent
-  //     menu
-  //   content
-  EXPECT_EQ(menu->GetLayoutObject()->Parent(),
-            overscroll_area_parent->GetLayoutObject());
-  EXPECT_EQ(overscroll_area_parent->GetLayoutObject(),
-            container->GetLayoutObject());
-  EXPECT_EQ(content->GetLayoutObject()->Parent(), container->GetLayoutObject());
-}
-
 TEST_F(ElementTest, GenerateScrollMarkerGroup) {
   GetDocument().body()->SetInnerHTMLWithoutTrustedTypes(R"HTML(
     <style id="test-style">
@@ -1778,15 +1591,18 @@ TEST_F(ElementTest, ParseFocusgroupAttrBehaviorFirstRequirement) {
   // Valid behavior tokens should work
   auto* valid_toolbar = document.getElementById(AtomicString("valid_toolbar"));
   ASSERT_TRUE(valid_toolbar);
-  EXPECT_EQ(valid_toolbar->GetFocusgroupData(),
-            FocusgroupData(FocusgroupBehavior::kToolbar,
-                           FocusgroupFlags::kInline | FocusgroupFlags::kBlock));
+  // Toolbar defaults to inline-only axis.
+  EXPECT_EQ(
+      valid_toolbar->GetFocusgroupData(),
+      FocusgroupData(FocusgroupBehavior::kToolbar, FocusgroupFlags::kInline));
 
   auto* valid_tablist = document.getElementById(AtomicString("valid_tablist"));
   ASSERT_TRUE(valid_tablist);
+  // Tablist explicit inline + default wrap applies in inline axis.
   EXPECT_EQ(
       valid_tablist->GetFocusgroupData(),
-      FocusgroupData(FocusgroupBehavior::kTablist, FocusgroupFlags::kInline));
+      FocusgroupData(FocusgroupBehavior::kTablist,
+                     FocusgroupFlags::kInline | FocusgroupFlags::kWrapInline));
 
   auto* valid_radiogroup =
       document.getElementById(AtomicString("valid_radiogroup"));
@@ -1805,15 +1621,19 @@ TEST_F(ElementTest, ParseFocusgroupAttrBehaviorFirstRequirement) {
 
   auto* valid_menu = document.getElementById(AtomicString("valid_menu"));
   ASSERT_TRUE(valid_menu);
-  EXPECT_EQ(valid_menu->GetFocusgroupData(),
-            FocusgroupData(FocusgroupBehavior::kMenu,
-                           FocusgroupFlags::kInline | FocusgroupFlags::kBlock));
+  // Menu defaults to block axis + wrap-block.
+  EXPECT_EQ(
+      valid_menu->GetFocusgroupData(),
+      FocusgroupData(FocusgroupBehavior::kMenu,
+                     FocusgroupFlags::kBlock | FocusgroupFlags::kWrapBlock));
 
   auto* valid_menubar = document.getElementById(AtomicString("valid_menubar"));
   ASSERT_TRUE(valid_menubar);
-  EXPECT_EQ(valid_menubar->GetFocusgroupData(),
-            FocusgroupData(FocusgroupBehavior::kMenubar,
-                           FocusgroupFlags::kInline | FocusgroupFlags::kBlock));
+  // Menubar defaults to inline axis + wrap-inline.
+  EXPECT_EQ(
+      valid_menubar->GetFocusgroupData(),
+      FocusgroupData(FocusgroupBehavior::kMenubar,
+                     FocusgroupFlags::kInline | FocusgroupFlags::kWrapInline));
 
   auto* valid_none = document.getElementById(AtomicString("valid_none"));
   ASSERT_TRUE(valid_none);

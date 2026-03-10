@@ -4,12 +4,12 @@
 
 #include "components/optimization_guide/core/model_execution/on_device_model_service_controller.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 
-#include "base/containers/contains.h"
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
@@ -114,15 +114,6 @@ OnDeviceModelEligibilityReason GetBaseModelError(
   }
 }
 
-void LogEligibilityReason(mojom::OnDeviceFeature feature,
-                          OnDeviceModelEligibilityReason reason) {
-  base::UmaHistogramEnumeration(
-      base::StrCat(
-          {"OptimizationGuide.ModelExecution.OnDeviceModelEligibilityReason.",
-           GetVariantName(feature)}),
-      reason);
-}
-
 void RecordOnDeviceLoadModelResult(
     on_device_model::mojom::LoadModelResult result) {
   base::UmaHistogramEnumeration(
@@ -132,21 +123,17 @@ void RecordOnDeviceLoadModelResult(
 }  // namespace
 
 OnDeviceModelServiceController::OnDeviceModelServiceController(
-    std::unique_ptr<OnDeviceModelAccessController> access_controller,
-    base::SafeRef<PerformanceClassifier> performance_classifier,
-    base::WeakPtr<OnDeviceModelComponentStateManager>
-        on_device_component_state_manager,
+    on_device_model::ServiceClient& service_client,
     UsageTracker& usage_tracker,
-    base::SafeRef<on_device_model::ServiceClient> service_client)
-    : access_controller_(std::move(access_controller)),
+    ModelBrokerImpl& model_broker_impl,
+    std::unique_ptr<OnDeviceModelAccessController> access_controller,
+    base::WeakPtr<OnDeviceModelComponentStateManager>
+        on_device_component_state_manager)
+    : service_client_(service_client),
       usage_tracker_(usage_tracker),
-      service_client_(std::move(service_client)),
-      safety_client_(service_client_->GetWeakPtr()),
-      model_broker_impl_(
-          *usage_tracker_,
-          base::BindRepeating(
-              &PerformanceClassifier::EnsurePerformanceClassAvailable,
-              performance_classifier)) {
+      model_broker_impl_(model_broker_impl),
+      access_controller_(std::move(access_controller)),
+      safety_client_(service_client.GetWeakPtr()) {
   base_model_controller_.emplace(weak_ptr_factory_.GetSafeRef(), nullptr);
   service_client_->set_on_disconnect_fn(base::BindRepeating(
       &OnDeviceModelServiceController::OnServiceDisconnected,
@@ -158,47 +145,6 @@ OnDeviceModelServiceController::OnDeviceModelServiceController(
 }
 
 OnDeviceModelServiceController::~OnDeviceModelServiceController() = default;
-
-OnDeviceModelEligibilityReason OnDeviceModelServiceController::CanCreateSession(
-    mojom::OnDeviceFeature feature) {
-  TRACE_EVENT("optimization_guide",
-              "OnDeviceModelServiceController::CanCreateSession", "feature",
-              base::ToString(feature));
-  // Ensure an initial solution is computed to avoid giving kUnknown error.
-  UpdateSolutionProvider(feature);
-
-  return model_broker_impl_.GetSolutionProvider(feature).solution().error_or(
-      OnDeviceModelEligibilityReason::kSuccess);
-}
-
-std::unique_ptr<OnDeviceSession> OnDeviceModelServiceController::CreateSession(
-    mojom::OnDeviceFeature feature,
-    base::WeakPtr<OptimizationGuideLogger> logger,
-    const SessionConfigParams& config_params) {
-  TRACE_EVENT("optimization_guide",
-              "OnDeviceModelServiceController::CreateSession", "feature",
-              base::ToString(feature));
-  // Ensure an initial solution is computed to avoid giving kUnknown error.
-  UpdateSolutionProvider(feature);
-  auto& maybe_solution =
-      model_broker_impl_.GetSolutionProvider(feature).solution();
-  auto reason =
-      maybe_solution.error_or(OnDeviceModelEligibilityReason::kSuccess);
-  LogEligibilityReason(feature, reason);
-
-  usage_tracker_->OnDeviceEligibleFeatureUsed(feature);
-
-  // Return if we cannot do anything more for right now.
-  if (reason != OnDeviceModelEligibilityReason::kSuccess) {
-    VLOG(1) << "Failed to create Session:" << reason;
-    return nullptr;
-  }
-
-  return model_broker_impl_.GetSolutionProvider(feature)
-      .local_subscriber()
-      .client()
-      ->CreateSession(config_params, logger);
-}
 
 void OnDeviceModelServiceController::SetLanguageDetectionModel(
     base::optional_ref<const ModelInfo> model_info) {
@@ -288,19 +234,6 @@ OnDeviceModelServiceController::GetPerformanceHint() {
   return base_model_controller_->model_metadata()->performance_hint();
 }
 
-void OnDeviceModelServiceController::AddOnDeviceModelAvailabilityChangeObserver(
-    mojom::OnDeviceFeature feature,
-    OnDeviceModelAvailabilityObserver* observer) {
-  model_broker_impl_.GetSolutionProvider(feature).AddObserver(observer);
-}
-
-void OnDeviceModelServiceController::
-    RemoveOnDeviceModelAvailabilityChangeObserver(
-        mojom::OnDeviceFeature feature,
-        OnDeviceModelAvailabilityObserver* observer) {
-  model_broker_impl_.GetSolutionProvider(feature).RemoveObserver(observer);
-}
-
 on_device_model::Capabilities
 OnDeviceModelServiceController::GetCapabilities() {
   if (!base_model_controller_->model_metadata()) {
@@ -321,7 +254,11 @@ OnDeviceModelServiceController::GetSolution(mojom::OnDeviceFeature feature) {
   // Checks usage for feature before checking (eligible) model status, so that
   // kPendingUsage is returned if the feature is not requested but the model was
   // available for a different feature.
-  if (!usage_tracker_->WasOnDeviceEligibleFeatureRecentlyUsed(feature)) {
+  bool is_background_download_enabled_for_feature =
+      features::IsOnDeviceModelBackgroundDownloadEnabledForFeature(feature);
+
+  if (!usage_tracker_->WasOnDeviceEligibleFeatureRecentlyUsed(feature) &&
+      !is_background_download_enabled_for_feature) {
     return base::unexpected(
         OnDeviceModelEligibilityReason::kNoOnDeviceFeatureUsed);
   }
@@ -371,7 +308,7 @@ void OnDeviceModelServiceController::UpdateSolutionProvider(
     mojom::OnDeviceFeature feature) {
   // Note: This always constructs the Solution, even if the provider was not
   // constructed yet, to update supported_adaptation_ranks_ on the base model.
-  model_broker_impl_.GetSolutionProvider(feature).Update(GetSolution(feature));
+  model_broker_impl_->GetSolutionProvider(feature).Update(GetSolution(feature));
 }
 
 OnDeviceModelServiceController::BaseModelController::BaseModelController(
@@ -416,7 +353,7 @@ void OnDeviceModelServiceController::BaseModelController::RequireAdaptationRank(
     // Older configs may not specify rank, and should be covered by defaults.
     return;
   }
-  if (base::Contains(supported_adaptation_ranks_, required_rank)) {
+  if (std::ranges::contains(supported_adaptation_ranks_, required_rank)) {
     return;
   }
   // Add the rank and reset all remotes to force a reload.
@@ -639,6 +576,11 @@ OnDeviceModelServiceController::Solution::MakeConfig() const {
   config->text_safety_config =
       mojo_base::ProtoWrapper(safety_checker_->safety_cfg().proto());
   return config;
+}
+
+const OnDeviceModelFeatureAdapter*
+OnDeviceModelServiceController::Solution::GetAdapter() const {
+  return adapter_.get();
 }
 
 void OnDeviceModelServiceController::Solution::CreateSession(

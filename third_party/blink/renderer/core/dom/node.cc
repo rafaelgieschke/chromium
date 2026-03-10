@@ -46,7 +46,6 @@
 #include "third_party/blink/renderer/core/dom/child_node_list.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
-#include "third_party/blink/renderer/core/dom/document_part_root.h"
 #include "third_party/blink/renderer/core/dom/document_type.h"
 #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -63,11 +62,10 @@
 #include "third_party/blink/renderer/core/dom/focus_params.h"
 #include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
 #include "third_party/blink/renderer/core/dom/mutation_observer_registration.h"
+#include "third_party/blink/renderer/core/dom/node-inl.h"
 #include "third_party/blink/renderer/core/dom/node_cloning_data.h"
 #include "third_party/blink/renderer/core/dom/node_lists_node_data.h"
-#include "third_party/blink/renderer/core/dom/node_rare_data.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
-#include "third_party/blink/renderer/core/dom/part.h"
 #include "third_party/blink/renderer/core/dom/processing_instruction.h"
 #include "third_party/blink/renderer/core/dom/range.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
@@ -81,6 +79,7 @@
 #include "third_party/blink/renderer/core/dom/user_action_element_set.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
+#include "third_party/blink/renderer/core/editing/serializers/serialization.h"
 #include "third_party/blink/renderer/core/event_target_names.h"
 #include "third_party/blink/renderer/core/events/event_util.h"
 #include "third_party/blink/renderer/core/events/gesture_event.h"
@@ -113,6 +112,7 @@
 #include "third_party/blink/renderer/core/html/html_object_element.h"
 #include "third_party/blink/renderer/core/html/html_script_element.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
+#include "third_party/blink/renderer/core/html/parser/fragment_parser_options.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/input/input_device_capabilities.h"
@@ -133,6 +133,8 @@
 #include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_script.h"
+#include "third_party/blink/renderer/core/trustedtypes/trusted_types_names.h"
+#include "third_party/blink/renderer/core/trustedtypes/trusted_types_util.h"
 #include "third_party/blink/renderer/core/view_transition/view_transition_pseudo_element_base.h"
 #include "third_party/blink/renderer/core/view_transition/view_transition_supplement.h"
 #include "third_party/blink/renderer/core/view_transition/view_transition_utils.h"
@@ -155,6 +157,10 @@
 #include "third_party/blink/renderer/platform/wtf/text/character_visitor.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+
+#if DUMP_NODE_STATISTICS
+#include "third_party/blink/renderer/core/dom/named_node_map.h"
+#endif
 
 namespace blink {
 
@@ -185,7 +191,7 @@ static_assert(sizeof(Node) <= sizeof(NotSmallerThanNode),
               "members of node should be reordered for better packing");
 
 #if DUMP_NODE_STATISTICS
-using WeakNodeSet = HeapHashSet<WeakMember<Node>>;
+using WeakNodeSet = GCedHeapHashSet<WeakMember<Node>>;
 static WeakNodeSet& LiveNodeSet() {
   DEFINE_STATIC_LOCAL(Persistent<WeakNodeSet>, set,
                       (MakeGarbageCollected<WeakNodeSet>()));
@@ -314,7 +320,7 @@ void Node::DumpStatistics() {
             << elements_with_attribute_storage << " x " << sizeof(ElementData)
             << "Bytes\n"
             << "  Number of Elements with RareData: " << elements_with_rare_data
-            << " x " << sizeof(ElementRareData) << "Bytes\n"
+            << " x " << sizeof(ElementRareDataVector) << "Bytes\n"
             << "  Number of Elements with NamedNodeMap: "
             << elements_with_named_node_map << " x " << sizeof(NamedNodeMap)
             << "Bytes";
@@ -352,12 +358,8 @@ Node* Node::FromDomNodeId(DOMNodeId dom_node_id) {
   return DOMNodeIds::NodeForId(dom_node_id);
 }
 
-NodeRareData& Node::CreateRareData() {
-  if (IsElementNode()) {
-    data_ = MakeGarbageCollected<ElementRareDataVector>();
-  } else {
-    data_ = MakeGarbageCollected<NodeRareData>();
-  }
+ElementRareDataVector& Node::CreateRareData() {
+  data_ = ElementRareDataVector::Create();
   return *data_;
 }
 
@@ -384,9 +386,10 @@ void Node::setNodeValue(const String&, ExceptionState&) {
 
 NodeList* Node::childNodes() {
   auto* this_node = DynamicTo<ContainerNode>(this);
+  auto& node_lists = UnpackAndRefresh(EnsureRareData().EnsureNodeLists());
   if (this_node)
-    return EnsureRareData().EnsureNodeLists().EnsureChildNodeList(*this_node);
-  return EnsureRareData().EnsureNodeLists().EnsureEmptyChildNodeList(*this);
+    return node_lists.EnsureChildNodeList(*this_node);
+  return node_lists.EnsureEmptyChildNodeList(*this);
 }
 
 // TODO(crbug.com/447642032): Implement previous / next sibling for overscroll
@@ -1089,7 +1092,7 @@ VectorOf<Node> Node::ConvertNodeUnionsIntoNodes(
         NodeVector fragment_nodes;
         GetChildNodes(*fragment, fragment_nodes);
         fragment->RemoveChildren();
-        nodes.AppendVector(fragment_nodes);
+        nodes.append_range(fragment_nodes);
       } else {
         nodes.push_back(node);
       }
@@ -1225,6 +1228,110 @@ void Node::after(
     return;
   }
   parent->InsertBefore(node_vector, viable_next_sibling, exception_state);
+}
+
+namespace {
+bool CanInsertHTMLToParent(Node* child) {
+  const ContainerNode* parent = child->parentNode();
+  return parent && (parent->IsElementNode() || parent->IsShadowRoot());
+}
+}  // namespace
+
+void Node::replaceWithHTML(const String& html,
+                           V8UnionSetHTMLOptionsOrTrustedParserOptions* options,
+                           ExceptionState& exception_state) {
+  if (CanInsertHTMLToParent(this)) {
+    parentNode()->ReplaceChildWithHTML(
+        this, html,
+        blink::GetFragmentParserConfig(
+            Sanitizer::Mode::kSafe, trusted_types_names::kNode,
+            trusted_types_names::kReplaceWithHTML, parentNode()),
+        FragmentParserOptions::From(options), exception_state);
+  }
+}
+
+void Node::replaceWithHTMLUnsafe(
+    const V8UnionStringOrTrustedHTML* html,
+    V8UnionSetHTMLUnsafeOptionsOrTrustedParserOptions* options,
+    ExceptionState& exception_state) {
+  if (!CanInsertHTMLToParent(this)) {
+    return;
+  }
+  const FragmentParserConfig config = blink::GetFragmentParserConfig(
+      Sanitizer::Mode::kUnsafe, trusted_types_names::kNode,
+      trusted_types_names::kReplaceWithHTMLUnsafe, parentNode());
+
+  parentNode()->ReplaceChildWithHTML(
+      this,
+      TrustedTypesCheckForHTML(html, GetExecutionContext(),
+                               config.interface_name, config.property_name,
+                               exception_state),
+      config, FragmentParserOptions::From(options), exception_state);
+}
+
+void Node::beforeHTML(const String& html,
+                      V8UnionSetHTMLOptionsOrTrustedParserOptions* options,
+                      ExceptionState& exception_state) {
+  if (CanInsertHTMLToParent(this)) {
+    parentNode()->InsertHTMLBefore(
+        this, html,
+        blink::GetFragmentParserConfig(
+            Sanitizer::Mode::kSafe, trusted_types_names::kNode,
+            trusted_types_names::kBeforeHTML, parentNode()),
+
+        FragmentParserOptions::From(options), exception_state);
+  }
+}
+
+void Node::beforeHTMLUnsafe(
+    const V8UnionStringOrTrustedHTML* html,
+    V8UnionSetHTMLUnsafeOptionsOrTrustedParserOptions* options,
+    ExceptionState& exception_state) {
+  if (!CanInsertHTMLToParent(this)) {
+    return;
+  }
+  const FragmentParserConfig config = blink::GetFragmentParserConfig(
+      Sanitizer::Mode::kUnsafe, trusted_types_names::kNode,
+      trusted_types_names::kBeforeHTMLUnsafe, parentNode());
+
+  parentNode()->InsertHTMLBefore(
+      this,
+      TrustedTypesCheckForHTML(html, GetExecutionContext(),
+                               config.interface_name, config.property_name,
+                               exception_state),
+      config, FragmentParserOptions::From(options), exception_state);
+}
+
+void Node::afterHTML(const String& html,
+                     V8UnionSetHTMLOptionsOrTrustedParserOptions* options,
+                     ExceptionState& exception_state) {
+  if (CanInsertHTMLToParent(this)) {
+    parentNode()->InsertHTMLBefore(
+        nextSibling(), html,
+        blink::GetFragmentParserConfig(
+            Sanitizer::Mode::kSafe, trusted_types_names::kNode,
+            trusted_types_names::kAfterHTML, parentNode()),
+        FragmentParserOptions::From(options), exception_state);
+  }
+}
+
+void Node::afterHTMLUnsafe(
+    const V8UnionStringOrTrustedHTML* html,
+    V8UnionSetHTMLUnsafeOptionsOrTrustedParserOptions* options,
+    ExceptionState& exception_state) {
+  if (!CanInsertHTMLToParent(this)) {
+    return;
+  }
+  const FragmentParserConfig config = blink::GetFragmentParserConfig(
+      Sanitizer::Mode::kUnsafe, trusted_types_names::kNode,
+      trusted_types_names::kAfterHTMLUnsafe, parentNode());
+
+  parentNode()->InsertHTMLBefore(
+      nextSibling(),
+      TrustedTypesCheckForHTML(html, GetExecutionContext(),
+                               config.interface_name, config.property_name,
+                               exception_state),
+      config, FragmentParserOptions::From(options), exception_state);
 }
 
 void Node::replaceWith(
@@ -1470,39 +1577,68 @@ bool Node::ShouldSkipMarkingStyleDirty() const {
   return true;
 }
 
+namespace {
+
+bool IsNodeInFlatTree(const Node& node, const Element* style_parent) {
+  const ComputedStyle* current_style = nullptr;
+  if (const Element* element = DynamicTo<Element>(node)) {
+    current_style = element->GetComputedStyle();
+    if (current_style && !style_parent && !element->IsDocumentElement()) {
+      // An element which does not have a GetStyleRecalcParent(), and is not
+      // the documentElement, does not take part in the flat tree with the
+      // current slot assignments. They still may have a non-null ComputedStyle
+      // if they have been inserted in their current position with moveBefore().
+      //
+      // The ComputedStyle will be cleared if the next slot assignment decides
+      // it is not part of the flat tree.
+      //
+      // Return early here to make sure we do not attempt to use elements
+      // outside the flat to update the recalc root below since they won't be
+      // reached during the style recalc pass when outside the flat tree.
+      return false;
+    }
+  }
+  if (!current_style && style_parent) {
+    current_style = style_parent->GetComputedStyle();
+  }
+  if (current_style && current_style->IsEnsuredOutsideFlatTree()) {
+    return false;
+  }
+  return true;
+}
+
+}  // namespace
+
 void Node::MarkAncestorsWithChildNeedsStyleRecalc() {
   Element* style_parent = GetStyleRecalcParent();
   bool parent_dirty = style_parent && style_parent->IsDirtyForStyleRecalc();
   Element* ancestor = style_parent;
   for (; ancestor && !ancestor->ChildNeedsStyleRecalc();
        ancestor = ancestor->GetStyleRecalcParent()) {
-    if (!ancestor->isConnected())
+    if (!ancestor->isConnected()) {
       return;
+    }
     ancestor->SetChildNeedsStyleRecalc();
-    if (ancestor->IsDirtyForStyleRecalc())
+    if (ancestor->IsDirtyForStyleRecalc()) {
       break;
-
+    }
     // If we reach a locked ancestor, we should abort since the ancestor marking
     // will be done when the lock is committed.
-    if (ancestor->ChildStyleRecalcBlockedByDisplayLock())
+    if (ancestor->ChildStyleRecalcBlockedByDisplayLock()) {
       break;
+    }
   }
-  if (!isConnected())
+  if (!isConnected()) {
     return;
+  }
   // If the parent node is already dirty, we can keep the same recalc root. The
   // early return here is a performance optimization.
-  if (parent_dirty)
+  if (parent_dirty) {
     return;
+  }
   // If we are outside the flat tree we should not update the recalc root
   // because we should not traverse those nodes from StyleEngine::RecalcStyle().
-  const ComputedStyle* current_style = nullptr;
-  if (Element* element = DynamicTo<Element>(this)) {
-    current_style = element->GetComputedStyle();
-  }
-  if (!current_style && style_parent) {
-    current_style = style_parent->GetComputedStyle();
-  }
-  if (current_style && current_style->IsEnsuredOutsideFlatTree()) {
+  if (!IsNodeInFlatTree(*this, style_parent)) {
     return;
   }
   // If we're in a locked subtree, then we should not update the style recalc
@@ -1513,8 +1649,9 @@ void Node::MarkAncestorsWithChildNeedsStyleRecalc() {
       0) {
     for (Element* ancestor_copy = ancestor; ancestor_copy;
          ancestor_copy = ancestor_copy->GetStyleRecalcParent()) {
-      if (ancestor_copy->ChildStyleRecalcBlockedByDisplayLock())
+      if (ancestor_copy->ChildStyleRecalcBlockedByDisplayLock()) {
         return;
+      }
     }
   }
 
@@ -1687,7 +1824,7 @@ void Node::ClearNodeLists() {
 }
 
 FlatTreeNodeData& Node::EnsureFlatTreeNodeData() {
-  return EnsureRareData().EnsureFlatTreeNodeData();
+  return UnpackAndRefresh(EnsureRareData().EnsureFlatTreeNodeData());
 }
 
 FlatTreeNodeData* Node::GetFlatTreeNodeData() const {
@@ -2321,11 +2458,8 @@ String Node::textContent(bool convert_brs_to_newlines,
   return content.ReleaseString();
 }
 
-V8UnionStringOrTrustedScript* Node::textContentForBinding() const {
-  const String& value = textContent();
-  if (value.IsNull())
-    return nullptr;
-  return MakeGarbageCollected<V8UnionStringOrTrustedScript>(value);
+String Node::textContentForBinding() const {
+  return textContent();
 }
 
 void Node::setTextContentForBinding(const V8UnionStringOrTrustedScript* value,
@@ -2537,7 +2671,7 @@ Node::InsertionNotificationRequest Node::InsertedInto(
   DCHECK(!ChildNeedsStyleInvalidation());
   DCHECK(!NeedsStyleInvalidation());
   DCHECK(insertion_point.isConnected() || insertion_point.IsInShadowTree() ||
-         IsContainerNode() || GetDOMParts());
+         IsContainerNode());
   if (insertion_point.isConnected()) {
     SetFlag(kIsConnectedFlag);
 #if DCHECK_IS_ON()
@@ -2556,7 +2690,7 @@ Node::InsertionNotificationRequest Node::InsertedInto(
 void Node::MovedFrom(ContainerNode& old_parent) {}
 
 void Node::RemovedFrom(ContainerNode& insertion_point) {
-  DCHECK(IsContainerNode() || IsInTreeScope() || GetDOMParts());
+  DCHECK(IsContainerNode() || IsInTreeScope());
   if (insertion_point.isConnected()) {
     // Don't clear the layout/style flags on `moveBefore`, so that the layout is
     // recomputed and reattached on the next style recalc.
@@ -3003,6 +3137,10 @@ void Node::AddedEventListener(const AtomicString& event_type,
   EventTarget::AddedEventListener(event_type, registered_listener);
   GetDocument().AddListenerTypeIfNeeded(event_type, *this);
   GetDocument().DidAddEventListeners(/*count*/ 1);
+  if (registered_listener.Capture() &&
+      RuntimeEnabledFeatures::SkipEventCaptureEnabled()) {
+    GetDocument().SetHasCaptureListener();
+  }
   if (auto* frame = GetDocument().GetFrame()) {
     frame->GetEventHandlerRegistry().DidAddEventHandler(
         *this, event_type, registered_listener.Options());
@@ -3087,6 +3225,12 @@ void Node::MoveEventListenersToNewDocument(Document& old_document,
                                       &old_frame->LocalFrameRoot());
   if (moving_into_different_connected_local_root) {
     new_frame->GetEventHandlerRegistry().DidMoveIntoLocalRoot(*this);
+  }
+
+  // This might be faster than going through all of the event
+  // listeners to see if any of them have capture set.
+  if (old_document.HasCaptureListener()) {
+    new_document.SetHasCaptureListener();
   }
 }
 
@@ -3181,8 +3325,9 @@ void Node::RegisterMutationObserver(
     MutationObserverOptions options,
     const HashSet<AtomicString>& attribute_filter) {
   MutationObserverRegistration* registration = nullptr;
-  for (const auto& item :
-       EnsureRareData().EnsureMutationObserverData().Registry()) {
+  auto& mutation_observer_data =
+      UnpackAndRefresh(EnsureRareData().EnsureMutationObserverData());
+  for (const auto& item : mutation_observer_data.Registry()) {
     if (&item->Observer() == &observer) {
       registration = item.Get();
       registration->ResetObservation(options, attribute_filter);
@@ -3192,7 +3337,7 @@ void Node::RegisterMutationObserver(
   if (!registration) {
     registration = MakeGarbageCollected<MutationObserverRegistration>(
         observer, this, options, attribute_filter);
-    EnsureRareData().EnsureMutationObserverData().AddRegistration(registration);
+    mutation_observer_data.AddRegistration(registration);
   }
 
   GetDocument().AddMutationObserverTypes(registration->MutationTypes());
@@ -3210,14 +3355,14 @@ void Node::UnregisterMutationObserver(
   // understandable by humans.  The explicit dispose() is needed to have the
   // registration object unregister itself promptly.
   registration->Dispose();
-  EnsureRareData().EnsureMutationObserverData().RemoveRegistration(
-      registration);
+  UnpackAndRefresh(EnsureRareData().EnsureMutationObserverData())
+      .RemoveRegistration(registration);
 }
 
 void Node::RegisterTransientMutationObserver(
     MutationObserverRegistration* registration) {
-  EnsureRareData().EnsureMutationObserverData().AddTransientRegistration(
-      registration);
+  UnpackAndRefresh(EnsureRareData().EnsureMutationObserverData())
+      .AddTransientRegistration(registration);
 }
 
 void Node::UnregisterTransientMutationObserver(
@@ -3228,8 +3373,8 @@ void Node::UnregisterTransientMutationObserver(
   if (!transient_registry)
     return;
 
-  EnsureRareData().EnsureMutationObserverData().RemoveTransientRegistration(
-      registration);
+  UnpackAndRefresh(EnsureRareData().EnsureMutationObserverData())
+      .RemoveTransientRegistration(registration);
 }
 
 void Node::NotifyMutationObserversNodeWillDetach() {
@@ -3275,7 +3420,13 @@ DispatchEventResult Node::DispatchDOMActivateEvent(int detail,
   DCHECK(!EventDispatchForbiddenScope::IsEventDispatchForbidden());
 #endif
   UIEvent& event = *UIEvent::Create();
-  event.initUIEvent(event_type_names::kDOMActivate, true, true,
+  // DOMActivate inherits bubbles from the underlying event to prevent
+  // activation behavior of parent elements from running when it doesn't bubble.
+  const bool bubbles =
+      RuntimeEnabledFeatures::DOMActivateBubblesInheritanceEnabled()
+          ? underlying_event.bubbles()
+          : true;
+  event.initUIEvent(event_type_names::kDOMActivate, bubbles, true,
                     GetDocument().domWindow(), detail);
   event.SetUnderlyingEvent(&underlying_event);
   event.SetComposed(underlying_event.composed());
@@ -3684,7 +3835,16 @@ void Node::FlatTreeParentChanged() {
       // already dirty.
       MarkAncestorsWithChildNeedsStyleRecalc();
     } else {
-      SetNeedsStyleRecalc(kLocalStyleChange,
+      // We retain the ComputedStyles for elements moved with moveBefore(), but
+      // need to invalidate all styles in the subtree since any element in the
+      // subtree may have styles changed via e.g. selector matching changes or
+      // @container query changes. Also, DynamicRestyleFlags potentially need
+      // updating, which happens during style recalc.
+      StyleChangeType change_type =
+          GetDocument().StatePreservingAtomicMoveInProgress()
+              ? kSubtreeStyleChange
+              : kLocalStyleChange;
+      SetNeedsStyleRecalc(change_type,
                           StyleChangeReasonForTracing::Create(
                               style_change_reason::kFlatTreeChange));
     }
@@ -3708,10 +3868,10 @@ void Node::RemovedFromFlatTree() {
 }
 
 void Node::RegisterScrollTimeline(ScrollTimeline* timeline) {
-  EnsureRareData().RegisterScrollTimeline(timeline);
+  data_ = EnsureRareData().RegisterScrollTimeline(timeline);
 }
 void Node::UnregisterScrollTimeline(ScrollTimeline* timeline) {
-  EnsureRareData().UnregisterScrollTimeline(timeline);
+  data_ = EnsureRareData().UnregisterScrollTimeline(timeline);
 }
 
 void Node::SetManuallyAssignedSlot(HTMLSlotElement* slot) {

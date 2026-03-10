@@ -8,6 +8,7 @@
 
 #include "third_party/blink/renderer/core/animation/css_interpolation_environment.h"
 #include "third_party/blink/renderer/core/animation/interpolable_filter.h"
+#include "third_party/blink/renderer/core/animation/interpolable_length.h"
 #include "third_party/blink/renderer/core/animation/interpolable_transform_list.h"
 #include "third_party/blink/renderer/core/animation/string_keyframe.h"
 #include "third_party/blink/renderer/core/animation/underlying_value_owner.h"
@@ -180,7 +181,6 @@ InvalidatableInterpolation::EnsureValidConversion(
       MaybeConvertPairwise(environment, underlying_value_owner);
   if (pairwise_conversion) {
     cached_value_ = pairwise_conversion->InitialValue();
-    bool needs_end_interpolation = false;
 
     if (current_iteration_composite_ ==
         EffectModel::kIterationCompositeAccumulate) {
@@ -188,16 +188,12 @@ InvalidatableInterpolation::EnsureValidConversion(
       if (final_keyframe_ && final_keyframe_ != end_keyframe_) {
         cached_end_value_ = ConvertSingleKeyframe(*final_keyframe_, environment,
                                                   underlying_value_owner);
-      }
-      if (!cached_end_value_) {
-        cached_end_value_ = pairwise_conversion->InitialValue();
-        needs_end_interpolation = true;
+      } else {
+        cached_end_value_ = ConvertSingleKeyframe(*end_keyframe_, environment,
+                                                  underlying_value_owner);
       }
     }
     cached_pair_conversion_ = std::move(pairwise_conversion);
-    if (needs_end_interpolation) {
-      cached_pair_conversion_->InterpolateValue(1.0, cached_end_value_);
-    }
   } else {
     cached_pair_conversion_ = MakeGarbageCollected<FlipPrimitiveInterpolation>(
         ConvertSingleKeyframe(*start_keyframe_, environment,
@@ -279,21 +275,42 @@ void InvalidatableInterpolation::ApplyIterationAccumulation() const {
   if (current_iteration_ <= 0 ||
       current_iteration_composite_ !=
           EffectModel::kIterationCompositeAccumulate ||
-      !cached_end_value_) {
+      !cached_end_value_ || !cached_value_) {
     return;
   }
 
   DCHECK(RuntimeEnabledFeatures::CSSAnimationIterationCompositeEnabled());
 
-  // TODO(crbug.com/41133485): Implement transform accumulation.
-  if (cached_value_->GetInterpolableValue().IsTransformList()) {
-    return;
-  }
-
   InterpolableValue* result_value =
       cached_value_->MutableValue().interpolable_value.Get();
   const InterpolableValue* end_value =
       cached_end_value_->Value().interpolable_value.Get();
+
+  // Transform accumulation is not linear so transform lists cannot simply use
+  // Scale() and ScaleAndAdd(). Instead, we accumulate the final keyframe
+  // value (from cached_end_value_) onto both interval endpoints using
+  // AccumulateN, then re-interpolate between the accumulated endpoints.
+  if (result_value->IsTransformList() && end_value->IsTransformList()) {
+    const InterpolableValue* interval_start =
+        cached_pair_conversion_->StartValue();
+    const InterpolableValue* interval_end = cached_pair_conversion_->EndValue();
+
+    if (interval_start && interval_start->IsTransformList() && interval_end &&
+        interval_end->IsTransformList()) {
+      auto* accumulated_start =
+          To<InterpolableTransformList>(interval_start->Clone());
+      auto* accumulated_end =
+          To<InterpolableTransformList>(interval_end->Clone());
+      const auto& accumulation_delta =
+          To<InterpolableTransformList>(*end_value);
+
+      accumulated_start->AccumulateN(accumulation_delta, current_iteration_);
+      accumulated_end->AccumulateN(accumulation_delta, current_iteration_);
+      accumulated_start->Interpolate(*accumulated_end, current_fraction_,
+                                     *result_value);
+    }
+    return;
+  }
 
   // For filter lists, skip accumulation if their types don't match. Same logic
   // as CSSFilterListInterpolationType::PerformAccumulativeComposition.
@@ -309,6 +326,13 @@ void InvalidatableInterpolation::ApplyIterationAccumulation() const {
           result_filter->GetType() != end_filter->GetType()) {
         return;
       }
+    }
+  }
+
+  // Iteration accumulation skips incompatible (IACVT) length values.
+  if (result_value->IsLength() && end_value->IsLength()) {
+    if (!InterpolableLength::CanMergeValues(result_value, end_value)) {
+      return;
     }
   }
 

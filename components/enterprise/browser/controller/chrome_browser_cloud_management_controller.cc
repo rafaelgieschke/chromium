@@ -25,11 +25,15 @@
 #include "components/enterprise/browser/reporting/real_time_report_controller.h"
 #include "components/enterprise/browser/reporting/report_scheduler.h"
 #include "components/enterprise/browser/reporting/reporting_delegate_factory.h"
+#include "components/enterprise/browser/reporting/reporting_features.h"
+#include "components/enterprise/browser/reporting/saas_usage/saas_usage_report_scheduler.h"
+#include "components/enterprise/browser/reporting/saas_usage/saas_usage_reporting_delegate_factory.h"
 #include "components/enterprise/client_certificates/core/certificate_provisioning_service.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/cloud/client_data_delegate.h"
 #include "components/policy/core/common/cloud/cloud_external_data_manager.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/policy/core/common/cloud/cloud_policy_util.h"
 #include "components/policy/core/common/cloud/dm_token.h"
 #include "components/policy/core/common/cloud/machine_level_user_cloud_policy_manager.h"
 #include "components/policy/core/common/cloud/machine_level_user_cloud_policy_store.h"
@@ -144,14 +148,18 @@ ChromeBrowserCloudManagementController::CreatePolicyManager(
   std::unique_ptr<MachineLevelUserCloudPolicyStore> extension_install_store =
       nullptr;
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  extension_install_store =
-      MachineLevelUserCloudPolicyStore::CreateForExtensionInstall(
-          dm_token, client_id, policy_dir,
-          base::ThreadPool::CreateSequencedTaskRunner(
-              {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
-               // Block shutdown to make sure the policy cache update is
-               // always finished.
-               base::TaskShutdownBehavior::BLOCK_SHUTDOWN}));
+  // This is not supported before M146. A feature flag check is not possible
+  // here because finch is not yet initialized.
+  if (IsExtensionInstallPolicySupportedOnThisVersion()) {
+    extension_install_store =
+        MachineLevelUserCloudPolicyStore::CreateForExtensionInstall(
+            dm_token, client_id, policy_dir,
+            base::ThreadPool::CreateSequencedTaskRunner(
+                {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
+                 // Block shutdown to make sure the policy cache update is
+                 // always finished.
+                 base::TaskShutdownBehavior::BLOCK_SHUTDOWN}));
+  }
 #endif  // !BUILDFLAG(ENABLE_EXTENSIONS)
 
   return std::make_unique<MachineLevelUserCloudPolicyManager>(
@@ -203,12 +211,12 @@ void ChromeBrowserCloudManagementController::Init(
     std::move(create_cloud_policy_manager_callback_).Run();
   }
 
-  // Post the task of CreateReportScheduler to run on best effort after launch
+  // Post the task of InitializeReporting to run on best effort after launch
   // is completed.
   delegate_->GetBestEffortTaskRunner()->PostTask(
       FROM_HERE,
       base::BindOnce(
-          &ChromeBrowserCloudManagementController::CreateReportScheduler,
+          &ChromeBrowserCloudManagementController::InitializeReporting,
           weak_factory_.GetWeakPtr()));
 
   MachineLevelUserCloudPolicyManager* policy_manager =
@@ -392,8 +400,8 @@ void ChromeBrowserCloudManagementController::OnServiceAccountSet(
 void ChromeBrowserCloudManagementController::ShutDown() {
   NotifyShutdown();
   delegate_->ShutDown();
-  if (report_scheduler_)
-    report_scheduler_.reset();
+  report_scheduler_.reset();
+  saas_usage_report_scheduler_.reset();
 }
 
 enterprise_connectors::DeviceTrustKeyManager*
@@ -512,7 +520,7 @@ void ChromeBrowserCloudManagementController::
   NotifyPolicyRegisterFinished(true);
 }
 
-void ChromeBrowserCloudManagementController::CreateReportScheduler() {
+void ChromeBrowserCloudManagementController::InitializeReporting() {
   cloud_policy_client_ = std::make_unique<policy::CloudPolicyClient>(
       delegate_->GetDeviceManagementService(),
       delegate_->GetSharedURLLoaderFactory(),
@@ -532,6 +540,15 @@ void ChromeBrowserCloudManagementController::CreateReportScheduler() {
 
   report_scheduler_ = std::make_unique<enterprise_reporting::ReportScheduler>(
       std::move(params));
+
+  if (base::FeatureList::IsEnabled(enterprise_reporting::kSaasUsageReporting)) {
+    if (auto saas_usage_reporting_delegate_factory =
+            delegate_->GetSaasUsageReportingDelegateFactory()) {
+      saas_usage_report_scheduler_ =
+          enterprise_reporting::SaasUsageReportScheduler::Create(
+              saas_usage_reporting_delegate_factory.get());
+    }
+  }
 
   NotifyCloudReportingLaunched();
 }

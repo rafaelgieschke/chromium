@@ -2,12 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import '//resources/cr_elements/cr_icon_button/cr_icon_button.js';
+import '//resources/cr_elements/cr_button/cr_button.js';
 import '//resources/cr_elements/icons.html.js';
 import '//resources/cr_elements/cr_tooltip/cr_tooltip.js';
 
 import type {CrTooltipElement} from '//resources/cr_elements/cr_tooltip/cr_tooltip.js';
-import {loadTimeData} from '//resources/js/load_time_data.js';
 import {CrLitElement} from '//resources/lit/v3_0/lit.rollup.js';
 import type {PropertyValues} from '//resources/lit/v3_0/lit.rollup.js';
 
@@ -38,12 +37,6 @@ export class ContextualTasksOnboardingTooltipElement extends CrLitElement {
   // The element that the tooltip is anchored to.
   accessor target: Element|null = null;
   accessor shouldShow: boolean = false;
-  protected onboardingTitle_: string =
-      loadTimeData.getString('onboardingTitle');
-  protected onboardingBody_: string = loadTimeData.getString('onboardingBody');
-  protected onboardingLink_: string = loadTimeData.getString('onboardingLink');
-  protected onboardingLinkUrl_: string =
-      loadTimeData.getString('onboardingLinkUrl');
 
   private get tooltip_(): CrTooltipElement {
     return this.shadowRoot.querySelector('cr-tooltip')!;
@@ -60,6 +53,7 @@ export class ContextualTasksOnboardingTooltipElement extends CrLitElement {
   show() {
     if (this.tooltip_) {
       this.tooltip_.show();
+      this.updatePosition();
     }
   }
 
@@ -96,14 +90,11 @@ export class ContextualTasksOnboardingTooltipElement extends CrLitElement {
     }
   }
 
-  protected onTooltipClose_(e: Event) {
+  protected onTooltipCloseClick_(e: Event) {
     e.stopPropagation();
     BrowserProxyImpl.getInstance().handler.onboardingTooltipDismissed();
     this.hide();
-    this.dispatchEvent(new CustomEvent('onboarding-tooltip-dismissed', {
-      bubbles: true,
-      composed: true,
-    }));
+    this.fire('onboarding-tooltip-dismissed');
   }
 
   protected onHelpLinkClick_(e: Event) {

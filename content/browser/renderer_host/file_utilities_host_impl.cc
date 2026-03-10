@@ -15,13 +15,13 @@
 
 namespace content {
 
-FileUtilitiesHostImpl::FileUtilitiesHostImpl(int process_id)
+FileUtilitiesHostImpl::FileUtilitiesHostImpl(ChildProcessId process_id)
     : process_id_(process_id) {}
 
 FileUtilitiesHostImpl::~FileUtilitiesHostImpl() = default;
 
 void FileUtilitiesHostImpl::Create(
-    int process_id,
+    ChildProcessId process_id,
     mojo::PendingReceiver<blink::mojom::FileUtilitiesHost> receiver) {
   mojo::MakeSelfOwnedReceiver(
       std::make_unique<FileUtilitiesHostImpl>(process_id), std::move(receiver));

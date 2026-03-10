@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/ui/views/commerce/discounts_icon_view.h"
-
 #include "base/time/default_clock.h"
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/commerce/mock_commerce_ui_tab_helper.h"
@@ -104,7 +102,7 @@ class DiscountsIconViewBrowserTest : public UiBrowserTest {
   void WaitForUserDismissal() override {
     // Consider closing the browser to be dismissal. This is useful when using
     // the test-launcher-interactive option.
-    ui_test_utils::WaitForBrowserToClose();
+    ui_test_utils::BrowserDestroyedObserver().Wait();
   }
 
  protected:
@@ -131,7 +129,7 @@ class DiscountsIconViewBrowserTest : public UiBrowserTest {
   }
 
   LocationBarView* GetLocationBarView() {
-    return GetBrowserView()->toolbar()->location_bar();
+    return GetBrowserView()->toolbar()->location_bar_view();
   }
 
   std::vector<commerce::DiscountInfo> discount_infos_;

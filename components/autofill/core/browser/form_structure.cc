@@ -20,7 +20,6 @@
 #include "base/check_deref.h"
 #include "base/command_line.h"
 #include "base/containers/adapters.h"
-#include "base/containers/contains.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/map_util.h"
 #include "base/containers/to_vector.h"
@@ -43,6 +42,7 @@
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_ai_form_rationalization.h"
 #include "components/autofill/core/browser/autofill_field.h"
+#include "components/autofill/core/browser/autofill_format_string.h"
 #include "components/autofill/core/browser/autofill_server_prediction.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/crowdsourcing/server_prediction_overrides.h"
@@ -220,7 +220,7 @@ void FormStructure::RationalizeAndAssignSections(
   // The sections are mapped to consecutive natural numbers starting at 1.
   std::map<Section, size_t> section_id_map;
   for (const auto& field : fields_) {
-    if (!base::Contains(section_id_map, field->section())) {
+    if (!section_id_map.contains(field->section())) {
       size_t next_section_id = section_id_map.size() + 1;
       section_id_map[field->section()] = next_section_id;
     }
@@ -432,15 +432,18 @@ void FormStructure::UpdateFormData(const FormData& form_data) {
           // from it and add it to the list.
           return std::make_unique<AutofillField>(field_data);
         }
-        const bool old_is_autofilled = autofill_field->is_autofilled();
+        const bool old_is_autofilled_according_to_renderer =
+            autofill_field->is_autofilled_deprecated(/*pass_key=*/{});
 
         // The field existed in the cache previously, update the cached members
         // of `FormFieldData` in `autofill_field` provided by `field_data`.
         autofill_field->UpdateFieldData(field_data, /*pass_key=*/{});
 
-        // TODO(crbug.com/393114125): Remove the special handling of
-        // `FormFieldData::is_autofilled_` below after fixing its semantics.
-        autofill_field->set_is_autofilled(old_is_autofilled);
+        if (!base::FeatureList::IsEnabled(features::kAutofillFixIsAutofilled)) {
+          autofill_field->set_is_autofilled_deprecated(
+              old_is_autofilled_according_to_renderer,
+              base::PassKey<FormStructure>());
+        }
         return autofill_field;
       });
 
@@ -538,13 +541,25 @@ void FormStructure::RetrieveFromCache(const FormStructure& cached_form,
     }
     if (reason == RetrieveFromCacheReason::kFormCacheUpdateWithoutParsing ||
         reason == RetrieveFromCacheReason::kFormCacheUpdateAfterParsing) {
-      field->set_is_autofilled(cached_field->is_autofilled());
+      if (!base::FeatureList::IsEnabled(features::kAutofillFixIsAutofilled)) {
+        field->set_is_autofilled_deprecated(
+            cached_field->is_autofilled_deprecated(/*pass_key=*/{}),
+            base::PassKey<FormStructure>());
+      }
     }
     field->set_autofill_source_profile_guid(
         cached_field->autofill_source_profile_guid());
     field->set_autofilled_type(cached_field->autofilled_type());
     field->set_filling_product(cached_field->filling_product());
-    field->set_previously_autofilled(cached_field->previously_autofilled());
+    if (!base::FeatureList::IsEnabled(features::kAutofillFixIsAutofilled)) {
+      field->set_is_user_edited_deprecated(
+          cached_field->is_user_edited_deprecated());
+      field->set_previously_autofilled_deprecated(
+          cached_field->previously_autofilled_deprecated());
+    }
+    field->set_field_modifiers(
+        cached_field->field_modifiers(base::PassKey<FormStructure>()),
+        base::PassKey<FormStructure>());
     field->set_did_trigger_suggestions(cached_field->did_trigger_suggestions());
     field->set_was_focused(cached_field->was_focused());
     if (base::optional_ref<const AutofillFormatString> format_string =
@@ -611,6 +626,12 @@ void FormStructure::RetrieveFromCache(const FormStructure& cached_form,
   // Whether the AutofillAI model may be run is set at the same time as the
   // server predictions - it also needs to be retrieved from the cache.
   may_run_autofill_ai_model_ = cached_form.may_run_autofill_ai_model_;
+
+  // The last successfully queried version is set at the same time as the
+  // server predictions - it also needs to be retrieved from the cache to avoid
+  // applying outdated server predictions.
+  last_successfully_queried_version_ =
+      cached_form.last_successfully_queried_version_;
 }
 
 void FormStructure::SetFieldTypesFromAutocompleteAttribute() {
@@ -699,10 +720,12 @@ FormData FormStructure::ToFormData() const {
   return data;
 }
 
-DenseSet<FormType> FormStructure::GetFormTypes() const {
+DenseSet<FormType> FormStructure::GetFormTypes(
+    AutocompleteUnrecognizedBehavior ac_unrecognized_behavior) const {
   DenseSet<FormType> form_types;
   for (const auto& field : fields_) {
-    if (field->ShouldSuppressSuggestionsAndFillingByDefault()) {
+    if (field->ShouldSuppressSuggestionsAndFillingByDefault(
+            ac_unrecognized_behavior)) {
       // Types are predicted for fields with unrecognized autocomplete
       // attribute, but suggestions are suppressed. So we don't want such fields
       // to affect the key and quality metrics. We therefore exclude them from
@@ -961,7 +984,7 @@ LogBuffer& operator<<(LogBuffer& buffer, const FormStructure& form) {
 
     buffer << Tr{} << "Is empty:" << ToYesOrNo(field->value().empty());
     buffer << Tr{} << "Is focusable:"
-           << (field->IsFocusable() ? "Yes (focusable)" : "No (unfocusable)");
+           << (field->is_focusable() ? "Yes (focusable)" : "No (unfocusable)");
     buffer << Tr{} << "Is visible:"
            << (field->is_visible() ? "Yes (visible)" : "No (invisible)");
     buffer << Tr{} << "Ranks: "

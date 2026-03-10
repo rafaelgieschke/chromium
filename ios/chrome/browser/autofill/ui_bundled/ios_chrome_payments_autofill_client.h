@@ -12,11 +12,11 @@
 #import "base/functional/callback.h"
 #import "base/memory/raw_ref.h"
 #import "base/memory/weak_ptr.h"
-#import "components/autofill/core/browser/autofill_progress_dialog_type.h"
 #import "components/autofill/core/browser/payments/autofill_save_card_delegate.h"
 #import "components/autofill/core/browser/payments/autofill_save_card_ui_info.h"
 #import "components/autofill/core/browser/payments/multiple_request_payments_network_interface.h"
 #import "components/autofill/core/browser/payments/payments_autofill_client.h"
+#import "components/autofill/core/browser/ui/payments/autofill_progress_ui_type.h"
 #import "components/autofill/core/browser/ui/payments/card_expiration_date_fix_flow_controller_impl.h"
 #import "components/autofill/core/browser/ui/payments/card_name_fix_flow_controller_impl.h"
 #import "components/infobars/core/infobar_manager.h"
@@ -46,6 +46,7 @@ class CreditCardRiskBasedAuthenticator;
 class OtpUnmaskDelegate;
 enum class OtpUnmaskResult;
 class PaymentsDataManager;
+class SaveAndFillManager;
 class SaveCardBottomSheetModel;
 struct VirtualCardEnrollmentFields;
 class VirtualCardEnrollmentManager;
@@ -116,7 +117,7 @@ class IOSChromePaymentsAutofillClient : public PaymentsAutofillClient {
                                 SaveIbanPromptCallback callback) override;
   void IbanUploadCompleted(bool iban_saved, bool hit_max_strikes) override;
   void ShowAutofillProgressDialog(
-      AutofillProgressDialogType autofill_progress_dialog_type,
+      AutofillProgressUiType autofill_progress_dialog_type,
       base::OnceClosure cancel_callback) override;
   void CloseAutofillProgressDialog(
       bool show_confirmation_before_closing,
@@ -178,7 +179,10 @@ class IOSChromePaymentsAutofillClient : public PaymentsAutofillClient {
   bool ShowTouchToFillIban(
       base::WeakPtr<TouchToFillDelegate> delegate,
       base::span<const autofill::Iban> ibans_to_suggest) override;
-  bool ShowTouchToFillLoyaltyCard(
+  bool ShowTouchToFillAffiliatedLoyaltyCard(
+      base::WeakPtr<TouchToFillDelegate> delegate,
+      std::vector<autofill::LoyaltyCard> loyalty_cards_to_suggest) override;
+  bool ShowTouchToFillForAllLoyaltyCards(
       base::WeakPtr<TouchToFillDelegate> delegate,
       std::vector<autofill::LoyaltyCard> loyalty_cards_to_suggest) override;
   bool OnPurchaseAmountExtracted(
@@ -253,6 +257,8 @@ class IOSChromePaymentsAutofillClient : public PaymentsAutofillClient {
 
   std::unique_ptr<VirtualCardEnrollmentManager>
       virtual_card_enrollment_manager_;
+
+  std::unique_ptr<SaveAndFillManager> save_and_fill_manager_;
 
   base::WeakPtr<VirtualCardEnrollUiModel> virtual_card_enroll_ui_model_;
 

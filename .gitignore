@@ -36,8 +36,10 @@
 !Android.mk
 .*.sw?
 .DS_Store
+/.agent
 .android
 .ccls-cache
+.checkstyle
 .cipd
 .classpath
 .code-coverage
@@ -47,16 +49,12 @@
 .emulator_sdk
 .gdb_history
 .gdbinit
-!/.gemini/
-/.gemini/*
-!/.gemini/commands/
-!/.gemini/OWNERS
 .landmines
 .metadata
 .project
 .projectile
 .pydevproject
-.checkstyle
+.siso_failed_targets
 *.class
 compile_commands.json
 cscope.*
@@ -73,6 +71,7 @@ v8.log
 vs-chromium-project.txt
 # Store android emulator artifacts, used by //tools/android/avd/avd.py
 /.android_emulator/
+/.android_emulator_cipd_cache/
 /.clangd/
 /.clangd-index/
 # Settings directories for eclipse

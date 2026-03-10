@@ -457,10 +457,6 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   base::TimeTicks send_start_time_;
   base::TimeTicks send_end_time_;
 
-  // When the connection and request headers are reset, and the request is
-  // resent.
-  base::TimeTicks reset_connection_and_request_for_resend_start_time_;
-
   // The next state in the state machine.
   State next_state_ = STATE_NONE;
 
@@ -511,6 +507,13 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   // behaved server may time those out and thus the number
   // of times we can retry a request on reused sockets is limited.
   size_t retry_attempts_ = 0;
+
+  // Number of retries made for connection errors on reused sockets like
+  // ERR_CONNECTION_RESET, ERR_CONNECTION_CLOSED, ERR_CONNECTION_ABORTED,
+  // ERR_SOCKET_NOT_CONNECTED and ERR_EMPTY_RESPONSE.
+  // If this count reaches kMaxRetryAttemptsOnConnectionErrors, we crash via
+  // NOTREACHED() as it indicates a potential infinite retry loop.
+  size_t retry_attempts_on_connection_errors_ = 0;
 
   // Number of times the transaction was restarted via a RestartWith* call.
   size_t num_restarts_ = 0;

@@ -61,11 +61,11 @@ import org.mockito.junit.MockitoRule;
 import org.robolectric.Robolectric;
 import org.robolectric.android.controller.ActivityController;
 import org.robolectric.annotation.Config;
-import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.Callback;
 import org.chromium.base.MathUtils;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.base.test.RobolectricUtil;
 import org.chromium.base.test.util.Features.DisableFeatures;
 import org.chromium.base.test.util.Features.EnableFeatures;
 import org.chromium.chrome.browser.flags.ChromeFeatureList;
@@ -173,7 +173,7 @@ public class UrlBarUnitTest {
     @After
     public void tearDown() {
         mController.close();
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUiIncludingDelayed();
     }
 
     /** Force reset text layout. */
@@ -699,38 +699,12 @@ public class UrlBarUnitTest {
         for (int keyCode : keysToCheck) {
             var event = new KeyEvent(KeyEvent.ACTION_DOWN, keyCode);
 
-            // Pre-IME Key Down, consumed: do not pass to IME.
-            doReturn(true).when(listener).onKey(any(), anyInt(), any());
-            assertTrue(mUrlBar.onKeyPreIme(keyCode, event));
-            verify(listener).onKey(mUrlBar, keyCode, event);
-            verify(mUrlBar, never()).super_onKeyPreIme(anyInt(), any());
-
-            clearInvocations(listener, mUrlBar);
-
-            // Pre-IME Key Down, not consumed: pass to IME.
-            doReturn(false).when(listener).onKey(any(), anyInt(), any());
-            doReturn(false).when(mUrlBar).super_onKeyPreIme(anyInt(), any());
-            assertFalse(mUrlBar.onKeyPreIme(keyCode, event));
-            verify(listener).onKey(mUrlBar, keyCode, event);
-            verify(mUrlBar).super_onKeyPreIme(keyCode, event);
-
-            clearInvocations(listener, mUrlBar);
-
-            // Pre-IME Key Down, not consumed: return IME result.
-            doReturn(true).when(mUrlBar).super_onKeyPreIme(anyInt(), any());
-            assertTrue(mUrlBar.onKeyPreIme(keyCode, event));
-            verify(mUrlBar).super_onKeyPreIme(keyCode, event);
-
-            clearInvocations(listener, mUrlBar);
-
-            // Post-IME Key Down: never passed to the listener.
             doReturn(false).when(mUrlBar).super_onKeyDown(anyInt(), any());
             assertFalse(mUrlBar.onKeyDown(keyCode, event));
             verifyNoMoreInteractions(listener);
 
             clearInvocations(listener, mUrlBar);
 
-            // Post-IME Key Down: return IME result.
             doReturn(true).when(mUrlBar).super_onKeyDown(anyInt(), any());
             assertTrue(mUrlBar.onKeyDown(keyCode, event));
             verifyNoMoreInteractions(listener);
@@ -749,14 +723,6 @@ public class UrlBarUnitTest {
         for (int keyCode : keysToCheck) {
             var event = new KeyEvent(KeyEvent.ACTION_DOWN, keyCode);
 
-            // Pre-IME Key Down: passed only to IME.
-            doReturn(false).when(mUrlBar).super_onKeyPreIme(anyInt(), any());
-            assertFalse(mUrlBar.onKeyPreIme(keyCode, event));
-            verify(listener, never()).onKey(any(), anyInt(), any());
-            verify(mUrlBar).super_onKeyPreIme(keyCode, event);
-
-            clearInvocations(listener, mUrlBar);
-
             // Post-IME Key Down: consumed keys not passed to View.
             doReturn(true).when(listener).onKey(any(), anyInt(), any());
             assertTrue(mUrlBar.onKeyDown(keyCode, event));
@@ -768,7 +734,6 @@ public class UrlBarUnitTest {
 
             // Post-IME Key Down: not consumed keys passed to View.
             doReturn(false).when(listener).onKey(any(), anyInt(), any());
-            doReturn(true).when(mUrlBar).super_onKeyPreIme(anyInt(), any());
             assertTrue(mUrlBar.onKeyDown(keyCode, event));
             verify(listener).onKey(mUrlBar, keyCode, event);
             verify(mUrlBar).super_onKeyDown(keyCode, event);
@@ -786,7 +751,8 @@ public class UrlBarUnitTest {
                         KeyEvent.KEYCODE_DPAD_UP,
                         KeyEvent.KEYCODE_DPAD_DOWN,
                         KeyEvent.KEYCODE_DPAD_LEFT,
-                        KeyEvent.KEYCODE_DPAD_RIGHT);
+                        KeyEvent.KEYCODE_DPAD_RIGHT,
+                        KeyEvent.KEYCODE_DEL);
 
         var listener = mock(View.OnKeyListener.class);
         mUrlBar.setKeyDownListener(listener);
@@ -794,15 +760,6 @@ public class UrlBarUnitTest {
         for (int keyCode : keysToCheck) {
             var event = new KeyEvent(KeyEvent.ACTION_DOWN, keyCode);
 
-            // Pre-IME Key Down: passed only to IME.
-            doReturn(false).when(mUrlBar).super_onKeyPreIme(anyInt(), any());
-            assertFalse(mUrlBar.onKeyPreIme(keyCode, event));
-            verify(listener, never()).onKey(any(), anyInt(), any());
-            verify(mUrlBar).super_onKeyPreIme(keyCode, event);
-
-            clearInvocations(listener, mUrlBar);
-
-            // Post-IME Key Down: consumed keys not passed to View.
             doReturn(true).when(listener).onKey(any(), anyInt(), any());
             assertTrue(mUrlBar.onKeyDown(keyCode, event));
             verify(listener).onKey(mUrlBar, keyCode, event);
@@ -832,7 +789,8 @@ public class UrlBarUnitTest {
                         KeyEvent.KEYCODE_ENTER,
                         KeyEvent.KEYCODE_NUMPAD_ENTER,
                         KeyEvent.KEYCODE_DPAD_UP,
-                        KeyEvent.KEYCODE_DPAD_DOWN);
+                        KeyEvent.KEYCODE_DPAD_DOWN,
+                        KeyEvent.KEYCODE_DEL);
 
         var listener = mock(View.OnKeyListener.class);
         mUrlBar.setKeyDownListener(listener);
@@ -840,23 +798,6 @@ public class UrlBarUnitTest {
         for (int keyCode : keysToCheck) {
             var event = new KeyEvent(KeyEvent.ACTION_UP, keyCode);
 
-            // Pre-IME, not consumed by IME.
-            doReturn(false).when(mUrlBar).super_onKeyPreIme(anyInt(), any());
-            assertFalse(mUrlBar.onKeyPreIme(keyCode, event));
-            verify(mUrlBar).super_onKeyPreIme(keyCode, event);
-            verifyNoMoreInteractions(listener);
-
-            clearInvocations(mUrlBar);
-
-            // Pre-IME, consumed by IME.
-            doReturn(true).when(mUrlBar).super_onKeyPreIme(anyInt(), any());
-            assertTrue(mUrlBar.onKeyPreIme(keyCode, event));
-            verify(mUrlBar).super_onKeyPreIme(keyCode, event);
-            verifyNoMoreInteractions(listener);
-
-            clearInvocations(mUrlBar);
-
-            // Post-IME.
             assertFalse(mUrlBar.onKeyUp(keyCode, event));
             verifyNoMoreInteractions(listener);
 
@@ -920,10 +861,11 @@ public class UrlBarUnitTest {
      *
      * @param fontActualHeight the desired actual difference between top and the bottom pixel ever
      *     drawn by the font
-     * @param urlBarHeight the usable area of the UrlBar that will accommodate the text
      */
-    private float computeExpectedFontHeight(float fontActualHeight, int urlBarHeight) {
+    private float computeExpectedFontHeight(float fontActualHeight) {
         float lineHeightScaleFactor = LINE_HEIGHT_ELEGANT_FACTOR;
+        int urlBarHeight =
+                mActivity.getResources().getDimensionPixelSize(R.dimen.location_bar_height);
         return FONT_HEIGHT_NOMINAL * (urlBarHeight / (fontActualHeight * lineHeightScaleFactor));
     }
 
@@ -936,7 +878,7 @@ public class UrlBarUnitTest {
         mUrlBar.enforceMaxTextHeight();
 
         assertEquals(
-                computeExpectedFontHeight(FONT_HEIGHT_ACTUAL_TALL, URL_BAR_HEIGHT),
+                computeExpectedFontHeight(FONT_HEIGHT_ACTUAL_TALL),
                 mUrlBar.getTextSize(),
                 MathUtils.EPSILON);
     }
@@ -950,7 +892,7 @@ public class UrlBarUnitTest {
         mUrlBar.enforceMaxTextHeight();
 
         assertEquals(
-                computeExpectedFontHeight(FONT_HEIGHT_ACTUAL_TALL, URL_BAR_HEIGHT - 20),
+                computeExpectedFontHeight(FONT_HEIGHT_ACTUAL_TALL),
                 mUrlBar.getTextSize(),
                 MathUtils.EPSILON);
     }
@@ -964,7 +906,7 @@ public class UrlBarUnitTest {
         mUrlBar.enforceMaxTextHeight();
 
         assertEquals(
-                computeExpectedFontHeight(FONT_HEIGHT_ACTUAL_SHORT, URL_BAR_HEIGHT),
+                computeExpectedFontHeight(FONT_HEIGHT_ACTUAL_SHORT),
                 mUrlBar.getTextSize(),
                 MathUtils.EPSILON);
     }
@@ -978,34 +920,9 @@ public class UrlBarUnitTest {
         mUrlBar.enforceMaxTextHeight();
 
         assertEquals(
-                computeExpectedFontHeight(FONT_HEIGHT_ACTUAL_SHORT, URL_BAR_HEIGHT - 20),
+                computeExpectedFontHeight(FONT_HEIGHT_ACTUAL_SHORT),
                 mUrlBar.getTextSize(),
                 MathUtils.EPSILON);
-    }
-
-    @Test
-    public void layout_adjustFontSizeWithFixedHeight() {
-        mUrlBar.setLayoutParams(new LayoutParams(123, 123));
-        mUrlBar.layout(0, 0, 123, 123);
-        verify(mUrlBar).post(mUrlBar.mEnforceMaxTextHeight);
-    }
-
-    @Test
-    public void layout_adjustFontSizeLayoutRequested() {
-        mUrlBar.setLayoutParams(new LayoutParams(123, 123));
-        mUrlBar.layout(0, 0, 123, 123);
-        verify(mUrlBar).post(mUrlBar.mEnforceMaxTextHeight);
-
-        mUrlBar.forceLayout();
-        mUrlBar.enforceMaxTextHeight();
-        verify(mUrlBar, times(2)).post(mUrlBar.mEnforceMaxTextHeight);
-    }
-
-    @Test
-    public void layout_fixedFontSizeWithWrappingHeight() {
-        mUrlBar.setLayoutParams(new LayoutParams(123, LayoutParams.WRAP_CONTENT));
-        mUrlBar.layout(0, 0, 123, 123);
-        verify(mUrlBar, never()).post(mUrlBar.mEnforceMaxTextHeight);
     }
 
     @Test
@@ -1106,32 +1023,32 @@ public class UrlBarUnitTest {
         // No single-line report (implied initial state).
         doReturn(1).when(mLayout).getLineCount();
         mUrlBar.onTextChanged("text", 0, 0, 4);
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(callback, never()).onResult(anyBoolean());
         clearInvocations(callback);
 
         // Report multi-line.
         doReturn(2).when(mLayout).getLineCount();
         mUrlBar.onTextChanged("longer text", 0, 0, 11);
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(callback).onResult(true);
         clearInvocations(callback);
 
         // No repeated callbacks.
         mUrlBar.onTextChanged("longer text 2", 0, 0, 13);
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(callback, never()).onResult(anyBoolean());
 
         // Report single-line again.
         doReturn(1).when(mLayout).getLineCount();
         mUrlBar.onTextChanged("text", 0, 0, 4);
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(callback).onResult(false);
         clearInvocations(callback);
 
         // No repeated callbacks.
         mUrlBar.onTextChanged("text 2", 0, 0, 6);
-        ShadowLooper.runUiThreadTasksIncludingDelayedTasks();
+        RobolectricUtil.runAllBackgroundAndUi();
         verify(callback, never()).onResult(anyBoolean());
     }
 
@@ -1145,5 +1062,14 @@ public class UrlBarUnitTest {
     @DisableFeatures(OmniboxFeatureList.URL_BAR_WITHOUT_LIGATURES)
     public void testUrlBarWithoutLigaturesDisabled() {
         assertNull(mUrlBar.getFontFeatureSettings());
+    }
+
+    @Test
+    public void setSelection_trimToTextContents() {
+        mUrlBar.setText("a"); // 1 character.
+        mUrlBar.setSelection(10, 10); // no crash.
+        mUrlBar.setSelection(0, 10); // no crash.
+        mUrlBar.setSelection(10, 0); // no crash.
+        mUrlBar.setSelection(1, 1); // no crash.
     }
 }

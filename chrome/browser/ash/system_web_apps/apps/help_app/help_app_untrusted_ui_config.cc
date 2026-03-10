@@ -34,7 +34,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/common/webui_url_constants.h"
 #include "chromeos/ash/components/browser_context_helper/browser_context_types.h"
 #include "chromeos/ash/components/channel/channel_info.h"
 #include "chromeos/ash/components/system/statistics_provider.h"
@@ -46,6 +45,7 @@
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_controller.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "content/public/common/url_constants.h"
 #include "ui/chromeos/devicetype_utils.h"
 #include "ui/display/screen.h"
 #include "ui/events/ash/keyboard_capability.h"
@@ -120,9 +120,7 @@ void PopulateLoadTimeData(content::WebUI* web_ui,
                         "device-help-content-id"));
 
   // Add any features that have been enabled.
-  source->AddBoolean(
-      "HelpAppLauncherSearch",
-      base::FeatureList::IsEnabled(features::kHelpAppLauncherSearch));
+  source->AddBoolean("HelpAppLauncherSearch", true);
   source->AddBoolean("HelpAppSearchServiceIntegration", true);
   source->AddBoolean("isCloudGamingDevice",
                      chromeos::features::IsCloudGamingDeviceEnabled());

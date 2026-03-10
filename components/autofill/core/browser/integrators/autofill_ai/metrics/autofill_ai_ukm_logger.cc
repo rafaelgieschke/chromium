@@ -11,6 +11,7 @@
 
 #include "base/check_deref.h"
 #include "base/notreached.h"
+#include "components/autofill/core/browser/autofill_browser_util.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/data_model/autofill_ai/entity_instance.h"
 #include "components/autofill/core/browser/field_types.h"
@@ -44,6 +45,8 @@ optimization_guide::proto::AutofillAiEntityType GetEntityType(
       return ProtoType::AUTOFILL_AI_ENTITY_TYPE_KNOWN_TRAVELER_NUMBER;
     case EntityTypeName::kNationalIdCard:
       return ProtoType::AUTOFILL_AI_ENTITY_TYPE_NATIONAL_ID_CARD;
+    case EntityTypeName::kOrder:
+      return ProtoType::AUTOFILL_AI_ENTITY_TYPE_ORDER;
     case EntityTypeName::kPassport:
       return ProtoType::AUTOFILL_AI_ENTITY_TYPE_PASSPORT;
     case EntityTypeName::kRedressNumber:
@@ -124,18 +127,18 @@ optimization_guide::proto::AutofillAiFieldEventType GetFieldEventType(
 }
 
 optimization_guide::proto::AutofillAiPromptUserDecision GetUserDecision(
-    AutofillClient::AutofillAiBubbleClosedReason close_reason) {
-  switch (close_reason) {
-    case AutofillClient::AutofillAiBubbleClosedReason::kAccepted:
+    AutofillClient::AutofillAiBubbleResult result) {
+  switch (result) {
+    case AutofillClient::AutofillAiBubbleResult::kAccepted:
       return optimization_guide::proto::
           AUTOFILL_AI_PROMPT_USER_DECISION_ACCEPTED;
-    case AutofillClient::AutofillAiBubbleClosedReason::kCancelled:
-    case AutofillClient::AutofillAiBubbleClosedReason::kClosed:
+    case AutofillClient::AutofillAiBubbleResult::kCancelled:
+    case AutofillClient::AutofillAiBubbleResult::kClosed:
       return optimization_guide::proto::
           AUTOFILL_AI_PROMPT_USER_DECISION_DECLINED;
-    case AutofillClient::AutofillAiBubbleClosedReason::kNotInteracted:
-    case AutofillClient::AutofillAiBubbleClosedReason::kLostFocus:
-    case AutofillClient::AutofillAiBubbleClosedReason::kUnknown:
+    case AutofillClient::AutofillAiBubbleResult::kNotInteracted:
+    case AutofillClient::AutofillAiBubbleResult::kLostFocus:
+    case AutofillClient::AutofillAiBubbleResult::kUnknown:
       return optimization_guide::proto::
           AUTOFILL_AI_PROMPT_USER_DECISION_IGNORED;
   }
@@ -161,6 +164,8 @@ optimization_guide::proto::AutofillAiEntityStorageType GetStorageType(
       return optimization_guide::proto::AUTOFILL_AI_ENTITY_STORAGE_TYPE_LOCAL;
     case EntityInstance::RecordType::kServerWallet:
       return optimization_guide::proto::AUTOFILL_AI_ENTITY_STORAGE_TYPE_WALLET;
+    case EntityInstance::RecordType::kAccessibilityAnnotator:
+      return optimization_guide::proto::AUTOFILL_AI_ENTITY_STORAGE_TYPE_UNKNOWN;
   }
 }
 
@@ -197,6 +202,7 @@ void AutofillAiUkmLogger::LogKeyMetrics(ukm::SourceId ukm_source_id,
           case FillingProduct::kCompose:
           case FillingProduct::kDataList:
           case FillingProduct::kPasskey:
+          case FillingProduct::kAtMemory:
           case FillingProduct::kNone:
             return false;
         }
@@ -204,7 +210,7 @@ void AutofillAiUkmLogger::LogKeyMetrics(ukm::SourceId ukm_source_id,
   const int autofill_ai_filled_field_count = std::ranges::count(
       form, FillingProduct::kAutofillAi, &AutofillField::filling_product);
 
-  const bool perfect_filling = IsFormPerfectlyFilled(form.ToFormData());
+  const bool perfect_filling = IsFormStructurePerfectlyFilled(form);
 
   if (optimization_guide::ModelQualityLogsUploaderService* uploader_ =
           client_->GetMqlsUploadService();
@@ -272,7 +278,7 @@ void AutofillAiUkmLogger::LogImportPromptResult(
     AutofillClient::AutofillAiImportPromptType prompt_type,
     EntityType entity_type,
     EntityInstance::RecordType record_type,
-    AutofillClient::AutofillAiBubbleClosedReason close_reason,
+    AutofillClient::AutofillAiBubbleResult result,
     ukm::SourceId ukm_source_id) {
   uint64_t form_session_id =
       autofill_metrics::FormGlobalIdToHash64Bit(form.global_id());
@@ -304,7 +310,7 @@ void AutofillAiUkmLogger::LogImportPromptResult(
     mqls_user_prompt_event->set_storage_type(GetStorageType(record_type));
     mqls_user_prompt_event->set_prompt_type(GetPromptType(prompt_type));
     mqls_user_prompt_event->set_entity_type(GetEntityType(entity_type));
-    mqls_user_prompt_event->set_result(GetUserDecision(close_reason));
+    mqls_user_prompt_event->set_result(GetUserDecision(result));
   }
 
   if (!CanLogUkm(ukm_source_id)) {
@@ -316,7 +322,7 @@ void AutofillAiUkmLogger::LogImportPromptResult(
       .SetEntityType(std::to_underlying(entity_type.name()))
       .SetStorageType(GetStorageType(record_type))
       .SetPromptType(GetPromptType(prompt_type))
-      .SetResult(GetUserDecision(close_reason))
+      .SetResult(GetUserDecision(result))
       .Record(client_->GetUkmRecorder());
 }
 

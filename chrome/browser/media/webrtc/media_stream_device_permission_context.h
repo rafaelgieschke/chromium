@@ -9,7 +9,12 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/permissions/content_setting_permission_context_base.h"
-#include "components/permissions/permission_decision.h"
+
+#if BUILDFLAG(IS_ANDROID)
+namespace permissions {
+struct PermissionPromptDecision;
+}  // namespace permissions
+#endif
 
 // Common class which handles the mic and camera permissions.
 class MediaStreamDevicePermissionContext
@@ -31,16 +36,15 @@ class MediaStreamDevicePermissionContext
       const permissions::PermissionRequestData& request_data,
       permissions::BrowserPermissionCallback callback,
       bool persist,
-      PermissionDecision decision,
-      bool is_final_decision) override;
+      const permissions::PermissionPromptDecision& decision) override;
 #endif
   void ResetPermission(const GURL& requesting_origin,
                        const GURL& embedding_origin) override;
 
   // ContentSettingPermissionContextBase:
   // TODO(xhwang): GURL.DeprecatedGetOriginAsURL() shouldn't be used as the
-  // origin. Need to refactor to use url::Origin. crbug.com/527149 is filed for
-  // this.
+  // origin. Need to refactor to use url::Origin. crbug.com/40082781 is filed
+  // for this.
   ContentSetting GetContentSettingStatusInternal(
       content::RenderFrameHost* render_frame_host,
       const GURL& requesting_origin,
@@ -56,6 +60,7 @@ class MediaStreamDevicePermissionContext
       const permissions::PermissionRequestID& id,
       const GURL& requesting_origin,
       const GURL& embedding_origin,
+      const permissions::PermissionPromptDecision& website_permission_decision,
       permissions::BrowserPermissionCallback callback,
       bool permission_granted);
 #endif

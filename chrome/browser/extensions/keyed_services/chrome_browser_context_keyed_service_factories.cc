@@ -19,9 +19,8 @@
 #include "chrome/browser/extensions/extension_allowlist_factory.h"
 #include "chrome/browser/extensions/extension_error_controller_factory.h"
 #include "chrome/browser/extensions/extension_garbage_collector_factory.h"
-#include "chrome/browser/extensions/extension_gcm_app_handler.h"
 #include "chrome/browser/extensions/extension_management.h"
-#include "chrome/browser/extensions/extension_web_ui_override_registrar.h"
+#include "chrome/browser/extensions/extension_url_overrides_registrar.h"
 #include "chrome/browser/extensions/external_install_manager_factory.h"
 #include "chrome/browser/extensions/external_provider_manager_factory.h"
 #include "chrome/browser/extensions/forced_extensions/install_stage_tracker_factory.h"
@@ -32,12 +31,10 @@
 #include "chrome/browser/extensions/shared_module_service_factory.h"
 #include "chrome/browser/extensions/sync/account_extension_tracker.h"
 #include "chrome/browser/extensions/sync/extension_sync_service_factory.h"
-#include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/extensions/updater/extension_updater_factory.h"
 #include "extensions/browser/permissions/permissions_updater.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-#include "chrome/browser/extensions/extension_web_ui_override_registrar.h"
 #include "chrome/browser/extensions/plugin_manager.h"
 #include "chrome/browser/extensions/warning_badge_service_factory.h"
 #include "content/public/common/buildflags.h"
@@ -69,10 +66,9 @@ void EnsureChromeBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::ExtensionAllowlistFactory::GetInstance();
   extensions::ExtensionErrorControllerFactory::GetInstance();
   extensions::ExtensionGarbageCollectorFactory::GetInstance();
-  extensions::ExtensionGCMAppHandler::GetFactoryInstance();
   extensions::ExtensionManagementFactory::GetInstance();
   extensions::ExtensionUpdaterFactory::GetInstance();
-  extensions::ExtensionWebUIOverrideRegistrar::GetFactoryInstance();
+  extensions::ExtensionUrlOverridesRegistrar::GetFactoryInstance();
   extensions::ExternalInstallManagerFactory::GetInstance();
   extensions::ExternalProviderManagerFactory::GetInstance();
   extensions::InstallStageTrackerFactory::GetInstance();
@@ -82,7 +78,6 @@ void EnsureChromeBrowserContextKeyedServiceFactoriesBuilt() {
   extensions::MenuManagerFactory::GetInstance();
   extensions::PermissionsUpdater::EnsureAssociatedFactoryBuilt();
   extensions::SharedModuleServiceFactory::GetInstance();
-  extensions::UnpackedInstaller::EnsureShutdownNotifierFactoryBuilt();
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #if BUILDFLAG(ENABLE_PLUGINS)

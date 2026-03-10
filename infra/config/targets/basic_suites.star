@@ -132,6 +132,9 @@ targets.legacy_basic_suite(
                 timeout_sec = 14400,
                 cros_test_names_from_file = ["chromeos/tast_control_disabled_tests.txt"],
             ),
+            args = [
+                "-retries=0",
+            ],
             experiment_percentage = 100,
         ),
     },
@@ -1308,6 +1311,21 @@ targets.legacy_basic_suite(
     name = "ondevice_model_benchmark_tests_cpu_no_submodel_suite",
     tests = {
         "ondevice_model_benchmark_tests_cpu_no_submodel": targets.legacy_test_config(),
+    },
+)
+
+# TODO(b:484388901): Enable GPU backedn testing when the issue is fixed.
+# targets.legacy_basic_suite(
+#     name = "litert_e2e_tests_gpu_suite",
+#     tests = {
+#         "litert_e2e_tests_gpu": targets.legacy_test_config(),
+#     },
+# )
+
+targets.legacy_basic_suite(
+    name = "litert_e2e_tests_cpu_suite",
+    tests = {
+        "litert_e2e_tests_cpu": targets.legacy_test_config(),
     },
 )
 

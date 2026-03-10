@@ -9,7 +9,6 @@
 #import "base/metrics/user_metrics.h"
 #import "base/metrics/user_metrics_action.h"
 #import "base/strings/sys_string_conversions.h"
-#import "ios/chrome/browser/incognito_reauth/ui_bundled/features.h"
 #import "ios/chrome/browser/keyboard/ui_bundled/UIKeyCommand+Chrome.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
@@ -79,9 +78,6 @@ CGFloat CompactButtonHorizontalPadding() {
   if (self) {
     [self setupViews];
     [self updateLayout];
-    NSArray<UITrait>* traits = TraitCollectionSetForTraits(
-        @[ UITraitVerticalSizeClass.class, UITraitHorizontalSizeClass.class ]);
-    [self registerForTraitChanges:traits withAction:@selector(updateLayout)];
   }
   return self;
 }
@@ -102,6 +98,10 @@ CGFloat CompactButtonHorizontalPadding() {
           .active = YES;
     }
   }
+
+  NSArray<UITrait>* traits = TraitCollectionSetForTraits(
+      @[ UITraitVerticalSizeClass.class, UITraitHorizontalSizeClass.class ]);
+  [self registerForTraitChanges:traits withAction:@selector(updateLayout)];
   [super didMoveToSuperview];
 }
 
@@ -203,6 +203,11 @@ CGFloat CompactButtonHorizontalPadding() {
                                  animated:animated];
 }
 
+- (void)updateNewTabButtonBackgroundColor:(UIColor*)backgroundColor {
+  _smallNewTabButton.buttonColor = backgroundColor;
+  _largeNewTabButton.buttonColor = backgroundColor;
+}
+
 #pragma mark Close Tabs
 
 - (void)setCloseTabsButtonEnabled:(BOOL)enabled {
@@ -256,7 +261,7 @@ CGFloat CompactButtonHorizontalPadding() {
     buttonConfiguration.image = image;
     button = [UIButton buttonWithConfiguration:buttonConfiguration
                                  primaryAction:nil];
-    button.tintColor = TabGridGlassButtonTintColor();
+    button.tintColor = UIColor.clearColor;
   } else {
     button = [UIButton systemButtonWithPrimaryAction:nil];
     button.tintColor = UIColor.whiteColor;
@@ -536,6 +541,10 @@ CGFloat CompactButtonHorizontalPadding() {
   }
 
   if (useCompactLayout) {
+    if (IsChromeNextIaEnabled()) {
+      // If ChromeNext is enabled, there is no toolbar in normal mode compact.
+      return;
+    }
     if (self.page == TabGridPageTabGroups) {
       _doneButton.hidden = NO;
 

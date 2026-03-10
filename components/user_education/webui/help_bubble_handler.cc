@@ -10,7 +10,6 @@
 
 #include "base/callback_list.h"
 #include "base/check.h"
-#include "base/containers/contains.h"
 #include "base/functional/callback.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/raw_ptr.h"
@@ -34,7 +33,6 @@
 #include "third_party/abseil-cpp/absl/strings/ascii.h"
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/base/interaction/element_tracker.h"
-#include "ui/webui/resources/cr_components/help_bubble/help_bubble.mojom-shared.h"
 #include "ui/webui/resources/cr_components/help_bubble/help_bubble.mojom.h"
 
 namespace user_education {
@@ -304,6 +302,12 @@ void HelpBubbleHandlerBase::OnWebContentsVisibilityChanged(
   }
 }
 
+void HelpBubbleHandlerBase::SetManager(
+    mojo::PendingRemote<tracked_element::mojom::TrackedElementManager>
+        observer) {
+  // We don't use the pipe to the manager for anything.
+}
+
 void HelpBubbleHandlerBase::TrackedElementVisibilityChanged(
     const std::string& identifier_name,
     bool visible,
@@ -398,6 +402,10 @@ void HelpBubbleHandlerBase::TrackedElementCustomEvent(
 
   data->element->CustomEvent(event_type);
 }
+
+void HelpBubbleHandlerBase::TrackedElementCanHighlightChanged(
+    const std::string& native_identifier,
+    bool can_highlight) {}
 
 void HelpBubbleHandlerBase::HelpBubbleButtonPressed(
     const std::string& identifier_name,
@@ -497,7 +505,7 @@ void HelpBubbleHandlerBase::BindTrackedElementHandler(
 
 bool HelpBubbleHandlerBase::ToggleHelpBubbleFocusForAccessibility(
     ui::ElementIdentifier anchor_id) {
-  if (base::Contains(element_data_, anchor_id)) {
+  if (element_data_.contains(anchor_id)) {
     GetClient()->ToggleFocusForAccessibility(anchor_id.GetName());
     return true;
   }

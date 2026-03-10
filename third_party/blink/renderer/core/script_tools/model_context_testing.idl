@@ -8,12 +8,17 @@ dictionary RegisteredTool {
   DOMString inputSchema;
 };
 
-callback ToolsChangedCallback = void ();
+dictionary ExecuteToolOptions {
+  AbortSignal signal;
+};
 
 [
     RuntimeEnabled=WebMCPTesting
-] interface ModelContextTesting {
+] interface ModelContextTesting : EventTarget {
   sequence<RegisteredTool> listTools();
-  [CallWith=ScriptState] Promise<DOMString> executeTool(DOMString tool_name, DOMString input_arguments);
-  undefined registerToolsChangedCallback(ToolsChangedCallback callback);
+  // Returns null when a navigation is triggered.
+  [CallWith=ScriptState] Promise<DOMString?> executeTool(DOMString tool_name, DOMString input_arguments, optional ExecuteToolOptions options = {});
+  [CallWith=ScriptState] Promise<DOMString> getCrossDocumentScriptToolResult();
+
+  attribute EventHandler ontoolchange;
 };

@@ -8,8 +8,8 @@
 #include "base/test/scoped_feature_list.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_entry_id.h"
-#include "chrome/browser/ui/views/side_panel/side_panel_ui.h"
+#include "chrome/browser/ui/side_panel/side_panel_entry_id.h"
+#include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/web_ui_mocha_browser_test.h"
 #include "content/public/common/url_constants.h"
@@ -23,8 +23,7 @@ class ReadAnythingMochaBrowserTest : public WebUIMochaBrowserTest {
     set_test_loader_host(chrome::kChromeUIUntrustedReadAnythingSidePanelHost);
     set_test_loader_scheme(content::kChromeUIUntrustedScheme);
     scoped_feature_list_.InitWithFeatures(
-        {features::kReadAnythingReadAloud,
-         features::kReadAnythingImagesViaAlgorithm},
+        {features::kReadAnythingImagesViaAlgorithm},
         {features::kReadAnythingReadAloudPhraseHighlighting,
          features::kReadAnythingDocsIntegration});
   }
@@ -54,7 +53,6 @@ class ReadAnythingMochaParameterizedTest
  protected:
   ReadAnythingMochaParameterizedTest() {
     std::vector<base::test::FeatureRef> enabled_features = {
-        features::kReadAnythingReadAloud,
         features::kReadAnythingImagesViaAlgorithm};
     if (IsTsSegmentationEnabled()) {
       enabled_features.push_back(
@@ -202,8 +200,8 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingMochaParameterizedTest, FontMenu) {
   RunSidePanelTest("side_panel/read_anything/font_menu_test.js", "mocha.run()");
 }
 
-IN_PROC_BROWSER_TEST_P(ReadAnythingMochaParameterizedTest, FontSelect) {
-  RunSidePanelTest("side_panel/read_anything/font_select_test.js",
+IN_PROC_BROWSER_TEST_P(ReadAnythingMochaParameterizedTest, SimpleActionMenu) {
+  RunSidePanelTest("side_panel/read_anything/simple_action_menu_test.js",
                    "mocha.run()");
 }
 
@@ -261,11 +259,6 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingMochaParameterizedTest, RateMenu) {
   RunSidePanelTest("side_panel/read_anything/rate_menu_test.js", "mocha.run()");
 }
 
-IN_PROC_BROWSER_TEST_P(ReadAnythingMochaParameterizedTest, SettingsMenu) {
-  RunSidePanelTest("side_panel/read_anything/settings_menu_test.js",
-                   "mocha.run()");
-}
-
 IN_PROC_BROWSER_TEST_P(ReadAnythingMochaParameterizedTest, ToolbarOverflow) {
   RunSidePanelTest("side_panel/read_anything/toolbar_overflow_test.js",
                    "mocha.run()");
@@ -289,6 +282,11 @@ IN_PROC_BROWSER_TEST_P(ReadAnythingMochaParameterizedTest,
                    "mocha.run()");
 }
 
+IN_PROC_BROWSER_TEST_P(ReadAnythingMochaParameterizedTest, DomQueries) {
+  RunSidePanelTest("side_panel/read_anything/dom_queries_test.js",
+                   "mocha.run()");
+}
+
 INSTANTIATE_TEST_SUITE_P(
     ReadAnythingMochaParameterized,
     ReadAnythingMochaParameterizedTest,
@@ -303,9 +301,7 @@ class ReadAnythingReadAloudTsSegmentationMochaTest
  protected:
   ReadAnythingReadAloudTsSegmentationMochaTest() {
     scoped_feature_list_.InitWithFeatures(
-        {features::kReadAnythingReadAloud,
-         features::kReadAnythingReadAloudTSTextSegmentation},
-        {});
+        {features::kReadAnythingReadAloudTSTextSegmentation}, {});
   }
 
  private:
@@ -328,4 +324,59 @@ IN_PROC_BROWSER_TEST_F(ReadAnythingReadAloudTsSegmentationMochaTest,
                        ReadAloudModel) {
   RunSidePanelTest("side_panel/read_anything/read_aloud_model_test.js",
                    "mocha.run()");
+}
+
+class ImmersiveReadAnythingMochaTest : public ReadAnythingMochaBrowserTest {
+ protected:
+  ImmersiveReadAnythingMochaTest() {
+    scoped_feature_list_.InitWithFeatures({features::kImmersiveReadAnything},
+                                          {});
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(ImmersiveReadAnythingMochaTest, PresentationMenu) {
+  RunSidePanelTest("side_panel/read_anything/presentation_menu_test.js",
+                   "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(ImmersiveReadAnythingMochaTest, SettingsMenu) {
+  RunSidePanelTest("side_panel/read_anything/settings_menu_test.js",
+                   "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(ImmersiveReadAnythingMochaTest, ToolbarSettingsMenu) {
+  RunSidePanelTest("side_panel/read_anything/toolbar_settings_menu_test.js",
+                   "mocha.run()");
+}
+
+class ImmersiveReadAnythingWithReadabilityMochaTest
+    : public ReadAnythingMochaBrowserTest {
+ protected:
+  ImmersiveReadAnythingWithReadabilityMochaTest() {
+    scoped_feature_list_.InitWithFeatures(
+        {features::kImmersiveReadAnything,
+         features::kReadAnythingWithReadability,
+         features::kReadAnythingWithReadabilityAllowLinks},
+        {});
+  }
+
+ private:
+  base::test::ScopedFeatureList scoped_feature_list_;
+};
+
+IN_PROC_BROWSER_TEST_F(ImmersiveReadAnythingWithReadabilityMochaTest,
+                       ReadabilityImageClassifier) {
+  RunSidePanelTest(
+      "side_panel/read_anything/readability_image_classifier_test.js",
+      "mocha.run()");
+}
+
+IN_PROC_BROWSER_TEST_F(ImmersiveReadAnythingWithReadabilityMochaTest,
+                       ReadabilityAnchorsIntegration) {
+  RunSidePanelTest(
+      "side_panel/read_anything/readability_anchors_integration_test.js",
+      "mocha.run()");
 }

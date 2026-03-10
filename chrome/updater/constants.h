@@ -6,6 +6,7 @@
 #define CHROME_UPDATER_CONSTANTS_H_
 
 #include <optional>
+#include <utility>
 
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -28,10 +29,6 @@ inline constexpr char kUninstallCompanionAppSwitch[] = "uninstall";
 
 // A suffix appended to the updater executable name before any file extension.
 extern const char kExecutableSuffix[];
-
-// The value of `request.updater` sent to the update server.
-// TODO(crbug.com/467929954): change this value to `PRODUCT_FULLNAME_STRING`.
-inline constexpr char kProdId[] = "updater";
 
 // "0.0.0.0". Historically, a null version has been used to indicate a
 // new install.
@@ -252,6 +249,13 @@ inline constexpr char kCmdLineExpectDeElevated[] = "expect-de-elevated";
 // is now trying to install the app per-user.
 inline constexpr char kCmdLinePrefersUser[] = "prefers-user";
 
+// The "installsource" switch allows an `installsource` that is reported in
+// pings to be user defined on the offline installer command line.
+inline constexpr char kInstallSourceSwitch[] = "installsource";
+
+// An experimental flag to use a WebView-based UI.
+inline constexpr char kWebViewUISwitch[] = "webviewui";
+
 // File system paths.
 //
 // The directory name where CRX apps get installed. This is provided for demo
@@ -336,13 +340,8 @@ inline constexpr double kProbabilityOfIncreasedDelay = 0.1;
 // reported in such a way that their range does not conflict with the range of
 // generic errors defined by the metainstaller, the `update_client` module, or
 // Windows.
-#if BUILDFLAG(IS_WIN)
 inline constexpr int kCustomInstallErrorBase =
-    static_cast<int>(update_client::InstallError::CUSTOM_ERROR_BASE) + 74000;
-#else
-inline constexpr int kCustomInstallErrorBase =
-    static_cast<int>(update_client::InstallError::CUSTOM_ERROR_BASE);
-#endif
+    std::to_underlying(update_client::InstallError::CUSTOM_ERROR_BASE) + 74000;
 
 // Running the application installer failed.
 inline constexpr int kErrorApplicationInstallerFailed =
@@ -669,6 +668,7 @@ inline constexpr char kInstallSourceTaggedMetainstaller[] = "taggedmi";
 inline constexpr char kInstallSourceOffline[] = "offline";
 inline constexpr char kInstallSourcePolicy[] = "policy";
 inline constexpr char kInstallSourceOnDemand[] = "ondemand";
+inline constexpr char kInstallSourceEnterpriseMsi[] = "enterprisemsi";
 
 inline constexpr int kRegistrationSuccess = 0;
 inline constexpr int kRegistrationError = 1;

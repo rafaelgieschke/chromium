@@ -10,10 +10,12 @@
 #import "ios/chrome/browser/menu/ui_bundled/action_factory.h"
 #import "ios/chrome/browser/saved_tab_groups/ui/face_pile_providing.h"
 #import "ios/chrome/browser/share_kit/model/sharing_state.h"
+#import "ios/chrome/browser/shared/public/features/features.h"
+#import "ios/chrome/browser/shared/ui/util/color_palette/tab_group_color_palette.h"
 #import "ios/chrome/browser/toolbar/legacy/ui_bundled/public/toolbar_constants.h"
-#import "ios/chrome/browser/toolbar/legacy/ui_bundled/public/toolbar_height_delegate.h"
 #import "ios/chrome/browser/toolbar/tab_group/ui/tab_group_indicator_constants.h"
 #import "ios/chrome/browser/toolbar/tab_group/ui/tab_group_indicator_mutator.h"
+#import "ios/chrome/browser/toolbar/ui/toolbar_height_delegate.h"
 #import "ios/chrome/common/ui/colors/semantic_color_names.h"
 #import "ios/chrome/common/ui/util/constraints_ui_util.h"
 #import "ios/chrome/grit/ios_strings.h"
@@ -39,6 +41,7 @@ NSString* const kDestructiveActionsMenuIdentifier =
   // Stores the tab group informations.
   NSString* _groupTitle;
   UIColor* _groupColor;
+  TabGroupColorPalette* _tabGroupColorPalette;
 
   // Tracks if the view is available.
   BOOL _available;
@@ -99,6 +102,19 @@ NSString* const kDestructiveActionsMenuIdentifier =
 
   [self setGroupTitle:groupTitle];
   [self setGroupColor:groupColor];
+  [self updateVisibility];
+}
+
+- (void)setTabGroupTitle:(NSString*)groupTitle
+    tabGroupColorPalette:(TabGroupColorPalette*)tabGroupColorPalette {
+  if (groupTitle == _groupTitle &&
+      tabGroupColorPalette == _tabGroupColorPalette) {
+    [self updateVisibility];
+    return;
+  }
+
+  [self setGroupTitle:groupTitle];
+  [self setTabGroupColor:tabGroupColorPalette];
   [self updateVisibility];
 }
 
@@ -353,7 +369,12 @@ NSString* const kDestructiveActionsMenuIdentifier =
 
 - (void)setGroupColor:(UIColor*)color {
   _groupColor = color;
-  _coloredDotView.backgroundColor = color;
+    _coloredDotView.backgroundColor = color;
+}
+
+- (void)setTabGroupColor:(TabGroupColorPalette*)tabGroupColorPalette {
+  _tabGroupColorPalette = tabGroupColorPalette;
+  _coloredDotView.backgroundColor = tabGroupColorPalette.commonColor;
 }
 
 @end

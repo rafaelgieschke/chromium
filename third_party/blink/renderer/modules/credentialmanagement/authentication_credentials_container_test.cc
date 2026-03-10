@@ -16,16 +16,20 @@
 #include "third_party/blink/public/mojom/credentialmanagement/credential_manager.mojom-blink.h"
 #include "third_party/blink/public/mojom/webauthn/authenticator.mojom-blink.h"
 #include "third_party/blink/public/platform/browser_interface_broker_proxy.h"
+#include "third_party/blink/public/platform/web_runtime_features.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_tester.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_exception.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_arraybuffer_arraybufferview.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_credential_creation_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_credential_request_options.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_credential_ui_mode_requirement.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_federated_credential_request_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_identity_credential_request_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_identity_provider_request_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_public_key_credential_creation_options.h"
+#include "third_party/blink/renderer/bindings/modules/v8/v8_public_key_credential_descriptor.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_public_key_credential_parameters.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_public_key_credential_request_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_public_key_credential_rp_entity.h"
@@ -34,6 +38,7 @@
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/testing/gc_object_liveness_observer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/modules/credentialmanagement/credential.h"
@@ -75,8 +80,9 @@ class MockCredentialManager : public mojom::blink::CredentialManager {
   bool IsDisconnected() const { return disconnected_; }
 
   void WaitForCallToGet() {
-    if (get_callback_)
+    if (get_callback_) {
       return;
+    }
 
     loop_.Run();
   }
@@ -143,7 +149,14 @@ class MockAuthenticatorInterface : public mojom::blink::Authenticator {
     std::move(get_callback_).Run(std::move(credential_response));
   }
 
-  void Reset() { loop_ = std::make_unique<base::RunLoop>(); }
+  void Reset() {
+    loop_ = std::make_unique<base::RunLoop>();
+    last_mediation_ = std::nullopt;
+  }
+
+  std::optional<mojom::blink::Mediation> last_mediation() const {
+    return last_mediation_;
+  }
 
  protected:
   void MakeCredential(
@@ -151,6 +164,7 @@ class MockAuthenticatorInterface : public mojom::blink::Authenticator {
       MakeCredentialCallback callback) override {}
   void GetCredential(blink::mojom::blink::GetCredentialOptionsPtr options,
                      GetCredentialCallback callback) override {
+    last_mediation_ = options->mediation;
     get_callback_ = std::move(callback);
     loop_->Quit();
   }
@@ -169,6 +183,7 @@ class MockAuthenticatorInterface : public mojom::blink::Authenticator {
 
   GetCredentialCallback get_callback_;
   std::unique_ptr<base::RunLoop> loop_;
+  std::optional<mojom::blink::Mediation> last_mediation_;
 };
 
 class MockFederatedAuthRequest : public mojom::blink::FederatedAuthRequest {
@@ -223,6 +238,9 @@ class MockFederatedAuthRequest : public mojom::blink::FederatedAuthRequest {
                        RequestUserInfoCallback callback) override {}
   void CancelTokenRequest() override {}
   void ResolveTokenRequest(const String& account_id,
+                           mojom::blink::FedCmRedirectMethod method,
+                           const std::optional<::blink::KURL>& redirect_to,
+                           const String& request_body,
                            base::Value token,
                            ResolveTokenRequestCallback callback) override {}
   void SetIdpSigninStatus(
@@ -311,6 +329,39 @@ class CredentialManagerTestingContext {
 };
 
 }  // namespace
+
+TEST(AuthenticationCredentialsContainerTest, FedCmDisabledRejectsPromise) {
+  test::TaskEnvironment task_environment;
+  ScopedFedCmForTest fedcm_disabled(false);
+
+  MockFederatedAuthRequest mock_federated_auth_request;
+  CredentialManagerTestingContext context(
+      /*mock_credential_manager=*/nullptr, /*mock_authenticator=*/nullptr,
+      /*mock_federated_auth_request=*/&mock_federated_auth_request);
+
+  CredentialRequestOptions* options = CredentialRequestOptions::Create();
+  IdentityCredentialRequestOptions* identity =
+      IdentityCredentialRequestOptions::Create();
+  auto* idp = IdentityProviderRequestOptions::Create();
+  idp->setConfigURL("https://idp.example/config.json");
+  idp->setClientId("clientId");
+  identity->setProviders({idp});
+  options->setIdentity(identity);
+
+  auto promise = AuthenticationCredentialsContainer::credentials(
+                     *context.DomWindow().navigator())
+                     ->get(context.GetScriptState(), options,
+                           IGNORE_EXCEPTION_FOR_TESTING);
+
+  ScriptPromiseTester tester(context.GetScriptState(), promise);
+  tester.WaitUntilSettled();
+  EXPECT_TRUE(tester.IsRejected());
+  auto* exception = V8DOMException::ToWrappable(
+      context.GetScriptState()->GetIsolate(), tester.Value().V8Value());
+  ASSERT_TRUE(exception);
+  EXPECT_EQ(exception->name(), "NotSupportedError");
+  EXPECT_EQ(exception->message(), "FedCM is not supported.");
+}
 
 class MockPublicKeyCredential : public Credential {
  public:
@@ -572,6 +623,206 @@ TEST_F(AuthenticationCredentialsContainerActiveModeMultiIdpTest,
   task_environment.RunUntilIdle();
 
   EXPECT_EQ(v8::Promise::kRejected, promise.V8Promise()->State());
+}
+
+TEST(AuthenticationCredentialsContainerTest,
+     WebAuthenticationUiModeImmediateRequiresUserActivation) {
+  test::TaskEnvironment task_environment;
+  ScopedWebAuthenticationImmediateGetForTest webauthn_immediate_get(true);
+
+  MockAuthenticatorInterface mock_authenticator;
+  CredentialManagerTestingContext context(/*mock_credential_manager=*/nullptr,
+                                          &mock_authenticator);
+
+  auto* request_options = CredentialRequestOptions::Create();
+  request_options->setUiMode(V8CredentialUiModeRequirement::Enum::kImmediate);
+  auto* public_key_request_options =
+      PublicKeyCredentialRequestOptions::Create();
+  public_key_request_options->setRpId("https://www.example.com");
+  const Vector<uint8_t> challenge = {1, 2, 3, 4};
+  public_key_request_options->setChallenge(
+      MakeGarbageCollected<V8UnionArrayBufferOrArrayBufferView>(
+          DOMArrayBuffer::Create(challenge)));
+  request_options->setPublicKey(public_key_request_options);
+
+  // No user activation, so it should be rejected.
+  auto promise = AuthenticationCredentialsContainer::credentials(
+                     *context.DomWindow().navigator())
+                     ->get(context.GetScriptState(), request_options,
+                           IGNORE_EXCEPTION_FOR_TESTING);
+
+  ScriptPromiseTester tester(context.GetScriptState(), promise);
+  tester.WaitUntilSettled();
+  EXPECT_TRUE(tester.IsRejected());
+  auto* exception = V8DOMException::ToWrappable(
+      context.GetScriptState()->GetIsolate(), tester.Value().V8Value());
+  ASSERT_TRUE(exception);
+  EXPECT_EQ(exception->name(), "NotAllowedError");
+  EXPECT_EQ(exception->message(),
+            "A user activation is required to request immediate credentials.");
+}
+
+TEST(AuthenticationCredentialsContainerTest,
+     WebAuthenticationUiModeImmediateWithUserActivation) {
+  test::TaskEnvironment task_environment;
+  ScopedWebAuthenticationImmediateGetForTest webauthn_immediate_get(true);
+
+  MockAuthenticatorInterface mock_authenticator;
+  CredentialManagerTestingContext context(/*mock_credential_manager=*/nullptr,
+                                          &mock_authenticator);
+
+  auto* request_options = CredentialRequestOptions::Create();
+  request_options->setUiMode(V8CredentialUiModeRequirement::Enum::kImmediate);
+  auto* public_key_request_options =
+      PublicKeyCredentialRequestOptions::Create();
+  public_key_request_options->setRpId("https://www.example.com");
+  const Vector<uint8_t> challenge = {1, 2, 3, 4};
+  public_key_request_options->setChallenge(
+      MakeGarbageCollected<V8UnionArrayBufferOrArrayBufferView>(
+          DOMArrayBuffer::Create(challenge)));
+  request_options->setPublicKey(public_key_request_options);
+
+  LocalFrame::NotifyUserActivation(
+      context.DomWindow().GetFrame(),
+      mojom::blink::UserActivationNotificationType::kTest);
+
+  auto promise = AuthenticationCredentialsContainer::credentials(
+                     *context.DomWindow().navigator())
+                     ->get(context.GetScriptState(), request_options,
+                           IGNORE_EXCEPTION_FOR_TESTING);
+  mock_authenticator.WaitForCallToGet();
+  mock_authenticator.InvokeGetCallback();
+
+  ScriptPromiseTester tester(context.GetScriptState(), promise);
+  tester.WaitUntilSettled();
+  EXPECT_TRUE(tester.IsRejected());
+  auto* exception = V8DOMException::ToWrappable(
+      context.GetScriptState()->GetIsolate(), tester.Value().V8Value());
+  ASSERT_TRUE(exception);
+  // Rejection from MockAuthenticatorInterface::InvokeGetCallback
+  EXPECT_EQ(exception->name(), "NotAllowedError");
+}
+
+TEST(AuthenticationCredentialsContainerTest,
+     WebAuthenticationUiModeImmediateIncompatibleWithConditionalMediation) {
+  test::TaskEnvironment task_environment;
+  ScopedWebAuthenticationImmediateGetForTest webauthn_immediate_get(true);
+
+  MockAuthenticatorInterface mock_authenticator;
+  CredentialManagerTestingContext context(/*mock_credential_manager=*/nullptr,
+                                          &mock_authenticator);
+
+  auto* request_options = CredentialRequestOptions::Create();
+  request_options->setUiMode(V8CredentialUiModeRequirement::Enum::kImmediate);
+  request_options->setMediation(
+      V8CredentialMediationRequirement::Enum::kConditional);
+  auto* public_key_request_options =
+      PublicKeyCredentialRequestOptions::Create();
+  public_key_request_options->setRpId("https://www.example.com");
+  const Vector<uint8_t> challenge = {1, 2, 3, 4};
+  public_key_request_options->setChallenge(
+      MakeGarbageCollected<V8UnionArrayBufferOrArrayBufferView>(
+          DOMArrayBuffer::Create(challenge)));
+  request_options->setPublicKey(public_key_request_options);
+
+  auto promise = AuthenticationCredentialsContainer::credentials(
+                     *context.DomWindow().navigator())
+                     ->get(context.GetScriptState(), request_options,
+                           IGNORE_EXCEPTION_FOR_TESTING);
+
+  ScriptPromiseTester tester(context.GetScriptState(), promise);
+  tester.WaitUntilSettled();
+  EXPECT_TRUE(tester.IsRejected());
+  auto* exception = V8DOMException::ToWrappable(
+      context.GetScriptState()->GetIsolate(), tester.Value().V8Value());
+  ASSERT_TRUE(exception);
+  EXPECT_EQ(exception->name(), "NotSupportedError");
+  EXPECT_EQ(exception->message(),
+            "Immediate uiMode is not compatible with conditional mediation");
+}
+
+TEST(AuthenticationCredentialsContainerTest,
+     WebAuthenticationUiModeImmediateIncompatibleWithAllowCredentials) {
+  test::TaskEnvironment task_environment;
+  ScopedWebAuthenticationImmediateGetForTest webauthn_immediate_get(true);
+
+  MockAuthenticatorInterface mock_authenticator;
+  CredentialManagerTestingContext context(/*mock_credential_manager=*/nullptr,
+                                          &mock_authenticator);
+
+  auto* request_options = CredentialRequestOptions::Create();
+  request_options->setUiMode(V8CredentialUiModeRequirement::Enum::kImmediate);
+  auto* public_key_request_options =
+      PublicKeyCredentialRequestOptions::Create();
+  public_key_request_options->setRpId("https://www.example.com");
+  const Vector<uint8_t> challenge = {1, 2, 3, 4};
+  public_key_request_options->setChallenge(
+      MakeGarbageCollected<V8UnionArrayBufferOrArrayBufferView>(
+          DOMArrayBuffer::Create(challenge)));
+
+  auto* credential = PublicKeyCredentialDescriptor::Create();
+  credential->setId(MakeGarbageCollected<V8UnionArrayBufferOrArrayBufferView>(
+      DOMArrayBuffer::Create(challenge)));
+  credential->setType("public-key");
+  public_key_request_options->setAllowCredentials({credential});
+
+  request_options->setPublicKey(public_key_request_options);
+
+  auto promise = AuthenticationCredentialsContainer::credentials(
+                     *context.DomWindow().navigator())
+                     ->get(context.GetScriptState(), request_options,
+                           IGNORE_EXCEPTION_FOR_TESTING);
+
+  ScriptPromiseTester tester(context.GetScriptState(), promise);
+  tester.WaitUntilSettled();
+  EXPECT_TRUE(tester.IsRejected());
+  auto* exception = V8DOMException::ToWrappable(
+      context.GetScriptState()->GetIsolate(), tester.Value().V8Value());
+  ASSERT_TRUE(exception);
+  EXPECT_EQ(exception->name(), "NotAllowedError");
+  EXPECT_EQ(exception->message(),
+            "An allowCredentials is not allowed with immediate mediation.");
+}
+
+TEST(AuthenticationCredentialsContainerTest,
+     WebAuthenticationImmediateGetDisabledIgnoresUiMode) {
+  test::TaskEnvironment task_environment;
+  ScopedWebAuthenticationImmediateGetForTest webauthn_immediate_get(false);
+
+  MockAuthenticatorInterface mock_authenticator;
+  CredentialManagerTestingContext context(/*mock_credential_manager=*/nullptr,
+                                          &mock_authenticator);
+
+  auto* request_options = CredentialRequestOptions::Create();
+  request_options->setUiMode(V8CredentialUiModeRequirement::Enum::kImmediate);
+  auto* public_key_request_options =
+      PublicKeyCredentialRequestOptions::Create();
+  public_key_request_options->setRpId("https://www.example.com");
+  const Vector<uint8_t> challenge = {1, 2, 3, 4};
+  public_key_request_options->setChallenge(
+      MakeGarbageCollected<V8UnionArrayBufferOrArrayBufferView>(
+          DOMArrayBuffer::Create(challenge)));
+  request_options->setPublicKey(public_key_request_options);
+
+  // Since the feature is disabled, uiMode should be ignored and the request
+  // should proceed as a normal (modal) request.
+  auto promise = AuthenticationCredentialsContainer::credentials(
+                     *context.DomWindow().navigator())
+                     ->get(context.GetScriptState(), request_options,
+                           IGNORE_EXCEPTION_FOR_TESTING);
+
+  mock_authenticator.WaitForCallToGet();
+  EXPECT_EQ(mock_authenticator.last_mediation(),
+            mojom::blink::Mediation::MODAL);
+  mock_authenticator.InvokeGetCallback();
+
+  ScriptPromiseTester tester(context.GetScriptState(), promise);
+  tester.WaitUntilSettled();
+  EXPECT_TRUE(tester.IsRejected());
+  auto* exception = V8DOMException::ToWrappable(
+      context.GetScriptState()->GetIsolate(), tester.Value().V8Value());
+  ASSERT_TRUE(exception);
+  EXPECT_EQ(exception->name(), "NotAllowedError");
 }
 
 }  // namespace blink

@@ -419,6 +419,10 @@ class PasswordManager : public PasswordManagerInterface {
   // predictions.
   void ResetFormsAndPredictionsCache();
 
+  // Returns true if the password saving should be allowed for the in-flow
+  // Trusted Vault key recovery.
+  bool ShouldAllowSavingPasswordsWithInFlowRecovery();
+
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
   // Triggers a user survey to rate Password Manager, if the user actively
   // engaged with Password Manager (filled a form manually).
@@ -475,7 +479,7 @@ class PasswordManager : public PasswordManagerInterface {
   std::unique_ptr<PasswordFormManager> owned_submitted_form_manager_;
 
   // The embedder-level client. Must outlive this class.
-  const raw_ptr<PasswordManagerClient, DanglingUntriaged> client_;
+  const raw_ptr<PasswordManagerClient> client_;
 
   const base::CallbackListSubscription account_store_cb_list_subscription_;
 

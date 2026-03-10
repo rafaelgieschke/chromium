@@ -2,11 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifdef UNSAFE_BUFFERS_BUILD
-// TODO(crbug.com/390223051): Remove C-library calls to fix the errors.
-#pragma allow_unsafe_libc_calls
-#endif
-
 #include "media/capture/video/linux/video_capture_device_factory_v4l2.h"
 
 #include <errno.h>
@@ -17,7 +12,7 @@
 #include <algorithm>
 #include <utility>
 
-#include "base/containers/contains.h"
+#include "base/compiler_specific.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/notimplemented.h"
@@ -27,6 +22,8 @@
 #include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "media/capture/video/linux/scoped_v4l2_device_fd.h"
+#include "media/capture/video/linux/v4l2_capture_device.h"
+#include "media/capture/video/linux/v4l2_capture_device_impl.h"
 #include "media/capture/video/linux/video_capture_device_linux.h"
 
 #if BUILDFLAG(IS_OPENBSD)
@@ -61,7 +58,7 @@ bool ReadIdFile(const std::string& path, std::string* id) {
   if (!file) {
     return false;
   }
-  const bool success = fread(id_buf, kVidPidSize, 1, file) == 1;
+  const bool success = UNSAFE_TODO(fread(id_buf, kVidPidSize, 1, file)) == 1;
   fclose(file);
   if (!success) {
     return false;
@@ -74,7 +71,7 @@ std::string ExtractFileNameFromDeviceId(const std::string& device_id) {
   // |unique_id| is of the form "/dev/video2".  |file_name| is "video2".
   const char kDevDir[] = "/dev/";
   DCHECK(base::StartsWith(device_id, kDevDir, base::CompareCase::SENSITIVE));
-  return device_id.substr(strlen(kDevDir), device_id.length());
+  return device_id.substr(UNSAFE_TODO(strlen(kDevDir)), device_id.length());
 }
 
 class DevVideoFilePathsDeviceProvider
@@ -258,7 +255,7 @@ bool VideoCaptureDeviceFactoryV4L2::HasUsableFormats(int fd,
   v4l2_fmtdesc fmtdesc = {};
   fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   for (; DoIoctl(fd, VIDIOC_ENUM_FMT, &fmtdesc) == 0; ++fmtdesc.index) {
-    if (base::Contains(usable_fourccs, fmtdesc.pixelformat)) {
+    if (std::ranges::contains(usable_fourccs, fmtdesc.pixelformat)) {
       return true;
     }
   }

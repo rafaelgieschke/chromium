@@ -45,6 +45,7 @@
 #include "chrome/browser/ash/login/wizard_controller.h"
 #include "chrome/browser/ash/policy/arc/fake_android_management_client.h"
 #include "chrome/browser/ash/settings/scoped_cros_settings_test_helper.h"
+#include "chrome/browser/global_features.h"
 #include "chrome/browser/notifications/notification_display_service_tester.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -682,7 +683,7 @@ TEST_F(ArcSessionManagerTest,
   {
     // Emulate the situation that ARC is activated during user session start up
     // in recent three sessions, which exceeds the threshold.
-    base::Value::List history;
+    base::ListValue history;
     for (size_t i = 0; i < kHistoryThreshold; ++i) {
       history.Append(base::Value(true));
     }
@@ -1211,6 +1212,8 @@ TEST_F(ArcSessionManagerTest, RemoveDataDir_Restart) {
 TEST_F(ArcSessionManagerTest, ArcVmDataMigrationInProgress_RequestEnable) {
   int restart_count = 0;
   // Replace chrome::AttemptRestart() for testing.
+  // TODO(crbug.com/479113713): now we can inject the behavior at
+  // session_manager::SessionManager via its delegate.
   arc_session_manager()->SetAttemptRestartCallbackForTesting(
       base::BindLambdaForTesting([&restart_count]() { ++restart_count; }));
 
@@ -2070,21 +2073,11 @@ TEST_F(ArcSessionManagerPublicSessionTest, AuthFailure) {
   arc_session_manager()->RequestEnable();
   EXPECT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
 
-  // Replace chrome::AttemptUserExit() for testing.
-  // At the end of test, leave the dangling pointer |terminated|,
-  // assuming the callback is never invoked in OnProvisioningFinished()
-  // and not invoked then, including TearDown().
-  bool terminated = false;
-  arc_session_manager()->SetAttemptUserExitCallbackForTesting(
-      base::BindRepeating([](bool* terminated) { *terminated = true; },
-                          &terminated));
-
   arc::mojom::ArcSignInResultPtr result = arc::mojom::ArcSignInResult::NewError(
       arc::mojom::ArcSignInError::NewGeneralError(
           arc::mojom::GeneralSignInError::CHROME_SERVER_COMMUNICATION_ERROR));
   arc_session_manager()->OnProvisioningFinished(
       ArcProvisioningResult(std::move(result)));
-  EXPECT_FALSE(terminated);
   EXPECT_EQ(ArcSessionManager::State::ACTIVE, arc_session_manager()->state());
 }
 
@@ -2110,6 +2103,10 @@ class ArcSessionOobeOptInNegotiatorTest
     std::unique_ptr<ash::ConsolidatedConsentScreen>
         fake_consolidated_consent_screen =
             std::make_unique<ash::ConsolidatedConsentScreen>(
+                TestingBrowserProcess::GetGlobal()
+                    ->GetFeatures()
+                    ->application_locale_storage(),
+                TestingBrowserProcess::GetGlobal()->metrics_service(),
                 std::make_unique<ash::ConsolidatedConsentScreenHandler>()
                     ->AsWeakPtr(),
                 base::DoNothing());

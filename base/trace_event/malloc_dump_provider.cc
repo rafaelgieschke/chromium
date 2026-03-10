@@ -11,6 +11,7 @@
 #include "base/allocator/buildflags.h"
 #include "base/compiler_specific.h"
 #include "base/debug/profiler.h"
+#include "base/feature_list.h"
 #include "base/format_macros.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/numerics/safe_conversions.h"
@@ -50,6 +51,15 @@
 namespace base::trace_event {
 
 namespace {
+
+#if PA_BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
+// Whether to populate "discardable bytes" in "light" stats reported via
+// `MallocDumpProvider::OnMemoryDump`. This involves traversing the free list
+// which is expensive.
+BASE_FEATURE(kMallocDumpProviderPopulateDiscardableBytes,
+             base::FEATURE_ENABLED_BY_DEFAULT);
+#endif  // PA_BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
+
 #if BUILDFLAG(IS_WIN)
 // A structure containing some information about a given heap.
 struct WinHeapInfo {
@@ -124,15 +134,21 @@ void ReportPartitionAllocStats(ProcessMemoryDump* pmd,
                                size_t* cumulative_brp_quarantined_count) {
   MemoryDumpPartitionStatsDumper partition_stats_dumper("malloc", pmd,
                                                         level_of_detail);
-  bool is_light_dump = level_of_detail == MemoryDumpLevelOfDetail::kBackground;
+  const bool is_light_dump =
+      level_of_detail == MemoryDumpLevelOfDetail::kBackground;
+  const bool populate_discardable_bytes =
+      !is_light_dump ||
+      base::FeatureList::IsEnabled(kMallocDumpProviderPopulateDiscardableBytes);
 
   auto* allocator = allocator_shim::internal::PartitionAllocMalloc::Allocator();
-  allocator->DumpStats("allocator", is_light_dump, &partition_stats_dumper);
+  allocator->DumpStats("allocator", is_light_dump, populate_discardable_bytes,
+                       &partition_stats_dumper);
 
   auto* original_allocator =
       allocator_shim::internal::PartitionAllocMalloc::OriginalAllocator();
   if (original_allocator) {
     original_allocator->DumpStats("original", is_light_dump,
+                                  populate_discardable_bytes,
                                   &partition_stats_dumper);
   }
 
@@ -257,7 +273,7 @@ void ReportPartitionAllocThreadCacheStats(
           "%s/buckets_alloc/%07d", name.c_str(), static_cast<int>(bucket_size));
       auto* buckets_alloc_dump = pmd->CreateAllocatorDump(dump_name);
       buckets_alloc_dump->AddScalar("count", MemoryAllocatorDump::kUnitsObjects,
-                                    UNSAFE_TODO(stats.allocs_per_bucket_[i]));
+                                    stats.allocs_per_bucket_[i]);
     }
   }
 #endif  // PA_CONFIG(THREAD_CACHE_ALLOC_STATS)

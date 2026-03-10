@@ -8,7 +8,6 @@
 #include <functional>
 
 #include "base/check_deref.h"
-#include "base/containers/contains.h"
 #include "base/containers/to_vector.h"
 #include "base/debug/crash_logging.h"
 #include "base/metrics/histogram_functions.h"
@@ -20,6 +19,7 @@
 #include "components/autofill/core/common/password_form_fill_data.h"
 #include "components/autofill/core/common/signatures.h"
 #include "components/autofill/core/common/unique_ids.h"
+#include "third_party/abseil-cpp/absl/container/flat_hash_map.h"
 
 namespace autofill {
 
@@ -140,8 +140,8 @@ void AutofillDriverRouter::FormsSeen(
   for (FormGlobalId renderer_form_id : renderer_form_ids) {
     const FormData& browser_form =
         form_forest_.GetBrowserForm(renderer_form_id);
-    if (!base::Contains(browser_forms, browser_form.global_id(),
-                        &FormData::global_id)) {
+    if (!std::ranges::contains(browser_forms, browser_form.global_id(),
+                               &FormData::global_id)) {
       browser_forms.push_back(browser_form);
     }
   }
@@ -150,8 +150,8 @@ void AutofillDriverRouter::FormsSeen(
 
   for (const FormGlobalId form_id : forms_with_removed_fields) {
     const FormData& browser_form = form_forest_.GetBrowserForm(form_id);
-    if (!base::Contains(browser_forms, browser_form.global_id(),
-                        &FormData::global_id)) {
+    if (!std::ranges::contains(browser_forms, browser_form.global_id(),
+                               &FormData::global_id)) {
       browser_forms.push_back(browser_form);
     }
   }
@@ -193,8 +193,8 @@ void AutofillDriverRouter::CaretMovedInFormField(
   form_forest_.UpdateTreeOfRendererForm(std::move(form), source);
 
   const FormData& browser_form = form_forest_.GetBrowserForm(form_id);
-  if (!base::Contains(browser_form.fields(), field_id,
-                      &FormFieldData::global_id)) {
+  if (!std::ranges::contains(browser_form.fields(), field_id,
+                             &FormFieldData::global_id)) {
     // To avoid very large flattened forms, UpdateTreeOfRendererForm() may have
     // cut the tree into two and, as a result, may have lost some fields. We
     // drop such events.
@@ -218,8 +218,8 @@ void AutofillDriverRouter::TextFieldValueChanged(
   TriggerFormExtractionExcept(source);
 
   const FormData& browser_form = form_forest_.GetBrowserForm(form_id);
-  if (!base::Contains(browser_form.fields(), field_id,
-                      &FormFieldData::global_id)) {
+  if (!std::ranges::contains(browser_form.fields(), field_id,
+                             &FormFieldData::global_id)) {
     // To avoid very large flattened forms, UpdateTreeOfRendererForm() may have
     // cut the tree into two and, as a result, may have lost some fields. We
     // drop such events.
@@ -241,8 +241,8 @@ void AutofillDriverRouter::TextFieldDidScroll(
   TriggerFormExtractionExcept(source);
 
   const FormData& browser_form = form_forest_.GetBrowserForm(form_id);
-  if (!base::Contains(browser_form.fields(), field_id,
-                      &FormFieldData::global_id)) {
+  if (!std::ranges::contains(browser_form.fields(), field_id,
+                             &FormFieldData::global_id)) {
     // To avoid very large flattened forms, UpdateTreeOfRendererForm() may have
     // cut the tree into two and, as a result, may have lost some fields. We
     // drop such events.
@@ -264,8 +264,8 @@ void AutofillDriverRouter::SelectControlSelectionChanged(
   TriggerFormExtractionExcept(source);
 
   const FormData& browser_form = form_forest_.GetBrowserForm(form_id);
-  if (!base::Contains(browser_form.fields(), field_id,
-                      &FormFieldData::global_id)) {
+  if (!std::ranges::contains(browser_form.fields(), field_id,
+                             &FormFieldData::global_id)) {
     // To avoid very large flattened forms, UpdateTreeOfRendererForm() may have
     // cut the tree into two and, as a result, may have lost some fields. We
     // drop such events.
@@ -294,8 +294,8 @@ void AutofillDriverRouter::AskForValuesToFill(
   TriggerFormExtractionExcept(source);
 
   const FormData& browser_form = form_forest_.GetBrowserForm(form_id);
-  if (!base::Contains(browser_form.fields(), field_id,
-                      &FormFieldData::global_id)) {
+  if (!std::ranges::contains(browser_form.fields(), field_id,
+                             &FormFieldData::global_id)) {
     // To avoid very large flattened forms, UpdateTreeOfRendererForm() may have
     // cut the tree into two and, as a result, may have lost some fields. We
     // drop such events.
@@ -379,8 +379,8 @@ void AutofillDriverRouter::FocusOnFormField(
   TriggerFormExtractionExcept(source);
 
   const FormData& browser_form = form_forest_.GetBrowserForm(form_id);
-  if (!base::Contains(browser_form.fields(), field_id,
-                      &FormFieldData::global_id)) {
+  if (!std::ranges::contains(browser_form.fields(), field_id,
+                             &FormFieldData::global_id)) {
     // To avoid very large flattened forms, UpdateTreeOfRendererForm() may have
     // cut the tree into two and, as a result, may have lost some fields. We
     // drop such events.
@@ -444,8 +444,8 @@ void AutofillDriverRouter::JavaScriptChangedAutofilledValue(
   TriggerFormExtractionExcept(source);
 
   const FormData& browser_form = form_forest_.GetBrowserForm(form_id);
-  if (!base::Contains(browser_form.fields(), field_id,
-                      &FormFieldData::global_id)) {
+  if (!std::ranges::contains(browser_form.fields(), field_id,
+                             &FormFieldData::global_id)) {
     // To avoid very large flattened forms, UpdateTreeOfRendererForm() may have
     // cut the tree into two and, as a result, may have lost some fields. We
     // drop such events.
@@ -476,7 +476,7 @@ base::flat_set<FieldGlobalId> AutofillDriverRouter::ApplyFormAction(
     bool supports_refill,
     const url::Origin& main_origin,
     const url::Origin& triggered_origin,
-    const base::flat_map<FieldGlobalId, FieldType>& field_type_map) {
+    const absl::flat_hash_map<FieldGlobalId, FieldType>& field_type_map) {
   // Since Undo only affects fields that were already filled, and only sets
   // values of fields to something that already existed in it prior to the
   // filling, it is okay to bypass the filling security checks and hence passing
@@ -490,7 +490,7 @@ base::flat_set<FieldGlobalId> AutofillDriverRouter::ApplyFormAction(
   // Collect the fields per frame and emit a single fill operation per frame,
   // even if multiple renderer forms belong to the same iframe due to
   // flattening.
-  base::flat_map<AutofillDriver*, std::vector<FormFieldData::FillData>>
+  absl::flat_hash_map<AutofillDriver*, std::vector<FormFieldData::FillData>>
       fields_of_driver;
   for (FormData& renderer_form : renderer_forms.renderer_forms) {
     if (auto* target = DriverOfFrame(renderer_form.host_frame())) {
@@ -601,6 +601,14 @@ void AutofillDriverRouter::SendTypePredictionsToRenderer(
     if (auto* target = DriverOfFrame(frame)) {
       callback(*target, renderer_fdp);
     }
+  }
+}
+
+void AutofillDriverRouter::ScrollFieldIntoView(
+    RoutedCallback<FieldRendererId> callback,
+    FieldGlobalId field_id) {
+  if (auto* target = DriverOfFrame(field_id.frame_token)) {
+    callback(*target, field_id.renderer_id);
   }
 }
 

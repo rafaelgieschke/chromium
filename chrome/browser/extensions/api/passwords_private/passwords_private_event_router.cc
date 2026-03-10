@@ -37,9 +37,10 @@ void PasswordsPrivateEventRouter::OnSavedPasswordsListChanged(
 }
 
 void PasswordsPrivateEventRouter::SendSavedPasswordListToListeners() {
-  if (!cached_saved_password_parameters_.has_value())
+  if (!cached_saved_password_parameters_.has_value()) {
     // If there is nothing to send, return early.
     return;
+  }
 
   auto extension_event = std::make_unique<Event>(
       events::PASSWORDS_PRIVATE_ON_SAVED_PASSWORDS_LIST_CHANGED,
@@ -57,9 +58,10 @@ void PasswordsPrivateEventRouter::OnPasswordExceptionsListChanged(
 }
 
 void PasswordsPrivateEventRouter::SendPasswordExceptionListToListeners() {
-  if (!cached_password_exception_parameters_.has_value())
+  if (!cached_password_exception_parameters_.has_value()) {
     // If there is nothing to send, return early.
     return;
+  }
 
   auto extension_event = std::make_unique<Event>(
       events::PASSWORDS_PRIVATE_ON_PASSWORD_EXCEPTIONS_LIST_CHANGED,
@@ -77,7 +79,7 @@ void PasswordsPrivateEventRouter::OnPasswordsExportProgress(
   params.file_path = file_path;
   params.folder_name = folder_name;
 
-  base::Value::List event_value;
+  base::ListValue event_value;
   event_value.Append(params.ToValue());
 
   auto extension_event = std::make_unique<Event>(
@@ -87,13 +89,13 @@ void PasswordsPrivateEventRouter::OnPasswordsExportProgress(
   event_router_->BroadcastEvent(std::move(extension_event));
 }
 
-void PasswordsPrivateEventRouter::OnAccountStorageEnabledStateChanged(
-    bool enabled) {
+void PasswordsPrivateEventRouter::OnAccountStorageActiveStateChanged(
+    bool active) {
   auto extension_event = std::make_unique<Event>(
       events::PASSWORDS_PRIVATE_ON_ACCOUNT_STORAGE_ENABLED_STATE_CHANGED,
-      api::passwords_private::OnAccountStorageEnabledStateChanged::kEventName,
-      api::passwords_private::OnAccountStorageEnabledStateChanged::Create(
-          enabled));
+      api::passwords_private::OnAccountStorageActiveStateChanged::kEventName,
+      api::passwords_private::OnAccountStorageActiveStateChanged::Create(
+          active));
   event_router_->BroadcastEvent(std::move(extension_event));
 }
 

@@ -10,7 +10,9 @@
 #import "ios/chrome/browser/intelligence/page_action_menu/ui/page_action_menu_consumer.h"
 #import "ios/chrome/browser/intelligence/page_action_menu/ui/page_action_menu_mutator.h"
 
+class AuthenticationService;
 class BwgService;
+class BwgTabHelper;
 class PrefService;
 class ReaderModeTabHelper;
 class TemplateURLService;
@@ -28,9 +30,11 @@ class WebState;
 
 // Designated initializer for the mediator.
 - (instancetype)initWithWebState:(web::WebState*)webState
+           authenticationService:(AuthenticationService*)authenticationService
               profilePrefService:(PrefService*)profilePrefs
               templateURLService:(TemplateURLService*)templateURLService
-                      BWGService:(BwgService*)BWGService
+                   geminiService:(BwgService*)geminiService
+                 geminiTabHelper:(BwgTabHelper*)geminiTabHelper
              readerModeTabHelper:(ReaderModeTabHelper*)readerModeTabHelper
           hostContentSettingsMap:(HostContentSettingsMap*)hostContentSettingsMap
     NS_DESIGNATED_INITIALIZER;

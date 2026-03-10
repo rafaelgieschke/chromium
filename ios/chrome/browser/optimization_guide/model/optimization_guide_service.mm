@@ -38,7 +38,7 @@
 #import "ios/chrome/browser/optimization_guide/model/ios_model_quality_logs_uploader_service.h"
 #import "ios/chrome/browser/optimization_guide/model/optimization_guide_service_factory.h"
 #import "ios/chrome/browser/optimization_guide/model/tab_url_provider_impl.h"
-#import "ios/chrome/browser/policy/model/management_service_ios_factory.h"
+#import "ios/chrome/browser/policy/model/browser_management_service_factory.h"
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
 #import "ios/chrome/browser/shared/model/paths/paths.h"
 #import "ios/web/public/navigation/navigation_context.h"
@@ -104,9 +104,10 @@ OptimizationGuideService::OptimizationGuideService(
     model_execution_features_controller_ =
         std::make_unique<optimization_guide::ModelExecutionFeaturesController>(
             pref_service, identity_manager,
-            GetApplicationContext()->GetLocalState(),
-            policy::ManagementServiceIOSFactory::GetForPlatform(),
-            dogfood_status, version_info::IsOfficialBuild());
+            policy::BrowserManagementServiceFactory::GetForPlatform(),
+            dogfood_status, version_info::IsOfficialBuild(),
+            optimization_guide::ModelExecutionFeaturesController::
+                HistorySearchNotSupported());
 
     if (optimization_guide::features::IsModelQualityLoggingEnabled()) {
       model_quality_logs_uploader_service_ =

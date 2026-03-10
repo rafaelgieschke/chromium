@@ -48,6 +48,7 @@ public class OmniboxSuggestionsContainer extends FrameLayout {
 
     private int mListViewMaxHeight;
     private int mLastBroadcastedListViewMaxHeight;
+    private boolean mShouldRoundTopCorners = true;
     private final Callback<OmniboxAlignment> mOmniboxAlignmentObserver =
             this::onOmniboxAlignmentChanged;
 
@@ -81,10 +82,7 @@ public class OmniboxSuggestionsContainer extends FrameLayout {
                             isTablet ? MeasureSpec.AT_MOST : MeasureSpec.EXACTLY);
             super.onMeasure(widthMeasureSpec, heightMeasureSpec);
             if (isTablet) {
-                setRoundBottomCorners(
-                        getMeasuredHeight() < availableViewportHeight
-                                || !KeyboardVisibilityDelegate.getInstance()
-                                        .isKeyboardShowing(this));
+                setRoundingCorners(mShouldRoundTopCorners, shouldRoundBottomCorners());
             }
         }
     }
@@ -113,6 +111,36 @@ public class OmniboxSuggestionsContainer extends FrameLayout {
         // activators, including keyboard <Enter> key.
         super.onTouchEvent(event);
         return true;
+    }
+
+    /**
+     * Set whether the dropdown should be clipped to its outline.
+     *
+     * @param clip whether to clip the outline
+     */
+    public void setShouldClipToOutline(boolean clip) {
+        if (clip) {
+            var radius =
+                    getResources()
+                            .getDimensionPixelSize(
+                                    R.dimen.omnibox_suggestion_dropdown_round_corner_radius);
+            var outlineProvider = new RoundedCornerOutlineProvider(radius);
+            setOutlineProvider(outlineProvider);
+            setClipToOutline(true);
+        } else {
+            setOutlineProvider(null);
+            setClipToOutline(false);
+        }
+    }
+
+    public void setShouldRoundTopCorners(boolean shouldRoundTopCorners) {
+        mShouldRoundTopCorners = shouldRoundTopCorners;
+        setRoundingCorners(mShouldRoundTopCorners, shouldRoundBottomCorners());
+    }
+
+    private boolean shouldRoundBottomCorners() {
+        return getMeasuredHeight() < mOmniboxAlignment.height
+                || !KeyboardVisibilityDelegate.getInstance().isKeyboardShowing(this);
     }
 
     private void maybeUpdateLayoutParams(int topMargin) {
@@ -154,10 +182,11 @@ public class OmniboxSuggestionsContainer extends FrameLayout {
         setTranslationX(mOmniboxAlignment.left);
     }
 
-    private void setRoundBottomCorners(boolean roundBottomCorners) {
+    private void setRoundingCorners(boolean roundTopCorners, boolean roundBottomCorners) {
         ViewOutlineProvider outlineProvider = getOutlineProvider();
         if (outlineProvider instanceof RoundedCornerOutlineProvider roundedCornerOutlineProvider) {
-            roundedCornerOutlineProvider.setRoundingEdges(true, true, true, roundBottomCorners);
+            roundedCornerOutlineProvider.setRoundingEdges(
+                    true, roundTopCorners, true, roundBottomCorners);
         }
     }
 
@@ -212,7 +241,7 @@ public class OmniboxSuggestionsContainer extends FrameLayout {
         mOmniboxAlignment = omniboxAlignment;
         mDropdown.setPaddingRelative(
                 mDropdown.getPaddingStart(),
-                mDropdown.getPaddingTop(),
+                mDropdown.getBaseTopPadding() + mOmniboxAlignment.paddingTop,
                 mDropdown.getPaddingEnd(),
                 mDropdown.getBaseBottomPadding() + mOmniboxAlignment.paddingBottom);
 

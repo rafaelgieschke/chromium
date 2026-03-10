@@ -112,13 +112,6 @@ export class SettingsSectionElement extends SettingsSectionElementBase {
       },
       // </if>
 
-      isPasskeyUpgradeSettingsToggleVisible_: {
-        type: Boolean,
-        value() {
-          return loadTimeData.getBoolean('passkeyUpgradeSettingsToggleVisible');
-        },
-      },
-
       isAutomatedPasswordChangeVisible_: {
         type: Boolean,
         value() {
@@ -221,7 +214,6 @@ export class SettingsSectionElement extends SettingsSectionElementBase {
   declare private hasPasskeys_: boolean;
   declare private passwordManagerDisabled_: boolean;
   declare private hasPasswordsToExport_: boolean;
-  declare private isPasskeyUpgradeSettingsToggleVisible_: boolean;
   declare private isAutomatedPasswordChangeVisible_: boolean;
   declare private canAddShortcut_: boolean;
   declare private trustedVaultBannerState_: TrustedVaultBannerState;
@@ -532,11 +524,11 @@ export class SettingsSectionElement extends SettingsSectionElementBase {
     return this.localPasswordCount_ > 0;
   }
 
-  private getAriaLabelMovePasswordsButton_(): string {
+  private getAriaDescriptionMovePasswordsButton_(movePasswordsLabel: string):
+      string {
     return [
-      this.movePasswordsLabel_,
+      movePasswordsLabel,
       this.i18n('movePasswordsInSettingsSubLabel'),
-      this.i18n('moveSinglePasswordButton'),
     ].join('. ');
   }
 
@@ -588,7 +580,7 @@ export class SettingsSectionElement extends SettingsSectionElementBase {
     this.$.toast.show();
   }
 
-  private getAriaLabelForCloudAuthenticatorButton_(): string {
+  private getAriaDescriptionForCloudAuthenticatorButton_(): string {
     return [
       this.i18n('disconnectCloudAuthenticatorTitle'),
       this.i18n('disconnectCloudAuthenticatorDescription'),
