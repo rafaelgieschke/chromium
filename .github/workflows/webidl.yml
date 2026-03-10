@@ -8,7 +8,7 @@ jobs:
           sparse-checkout: third_party/blink/renderer
       # https://developer.mozilla.org/en-US/docs/MDN/Writing_guidelines/Howto/Write_an_api_reference/Information_contained_in_a_WebIDL_file#where_to_find_webidl_files
       - run: find -name '*.idl' -printf '// %P\n' -exec cat -- {} \; > chromium.webidl
-      - uses: rafaelgieschke/upload-artifact@HEAD
+      - uses: actions/upload-artifact@HEAD
         with:
-          name: chromium.webidl
           path: "*.webidl"
+          archive: false          
