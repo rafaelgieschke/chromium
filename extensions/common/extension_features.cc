@@ -134,7 +134,7 @@ BASE_FEATURE(kLaunchWindowsNativeHostsDirectly,
 BASE_FEATURE(kSafeBrowsingCrxAllowlistAutoDisable,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kStructuredCloningForMessaging, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kStructuredCloningForMessaging, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kTelemetryExtensionPendingApprovalApi,
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -197,9 +197,6 @@ BASE_FEATURE(kAvoidCloneArgsOnExtensionFunctionDispatch,
 BASE_FEATURE(kExtensionContentVerificationUsesExtensionRoot,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kContentVerifyJobUseJobVersionForHashing,
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 BASE_FEATURE(kEnableShouldShowPromotion, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kSearchEngineExplicitChoiceDialog,
@@ -216,5 +213,7 @@ BASE_FEATURE(kSearchEngineUnconditionalDialog,
 
 BASE_FEATURE(kWebRequestPersistFilteredEventsViaEventRouter,
              base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kOptimizeWebRequestProxy, base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace extensions_features

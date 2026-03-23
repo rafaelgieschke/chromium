@@ -19,6 +19,7 @@
 #include "chrome/browser/glic/common/glic_tab_observer.h"
 #include "chrome/browser/glic/glic_pref_names.h"
 #include "chrome/browser/glic/host/glic.mojom.h"
+#include "chrome/browser/glic/host/glic_web_contents_warming_pool.h"
 #include "chrome/browser/glic/host/host.h"
 #include "chrome/browser/glic/host/webui_contents_container.h"
 #include "chrome/browser/glic/public/features.h"
@@ -43,7 +44,6 @@
 namespace glic {
 
 namespace {
-constexpr base::TimeDelta kSidePanelMaxRecency = base::Minutes(20);
 constexpr base::TimeDelta kFloatyMaxRecency = base::Hours(3);
 
 BASE_FEATURE(kGlicMaxRecency, base::FEATURE_ENABLED_BY_DEFAULT);
@@ -316,8 +316,8 @@ void GlicInstanceCoordinatorImpl::InvokeInternal(
   GlicInstanceImpl* instance = nullptr;
 
   instance = std::visit(
-      absl::Overload{[&](const ConversationId& conversation_id) {
-                       if (conversation_id.empty()) {
+      absl::Overload{[&](const ConversationId& conv_id) {
+                       if (conv_id.conversation_id.empty()) {
                          if (options.on_error) {
                            std::move(options.on_error)
                                .Run(GlicInvokeError::kInvalidConversationId);
@@ -327,7 +327,7 @@ void GlicInstanceCoordinatorImpl::InvokeInternal(
                          return (GlicInstanceImpl*)nullptr;
                        }
                        return GetOrCreateInstanceImplForConversationId(
-                           conversation_id);
+                           conv_id.conversation_id, conv_id.turn_id);
                      },
                      [&](NewConversation) { return CreateGlicInstance(); },
                      [&](DefaultConversation) {
@@ -346,9 +346,6 @@ void GlicInstanceCoordinatorImpl::InvokeInternal(
     // TODO(crbug.com/483387751): Show default toast here once implemented.
     return;
   }
-
-  instance->Show(ShowOptions::ForSidePanel(
-      *tab, GlicPinTrigger::kInstanceCreation, options.invocation_source));
 
   invoke_handlers_[instance] = std::make_unique<GlicInvokeHandler>(
       *instance, tab, std::move(options), auto_submit_passkey,
@@ -538,14 +535,25 @@ GlicInstanceImpl* GlicInstanceCoordinatorImpl::GetInstanceImplForConversationId(
 
 GlicInstanceImpl*
 GlicInstanceCoordinatorImpl::GetOrCreateInstanceImplForConversationId(
-    const std::string& conversation_id) {
+    const std::string& conversation_id,
+    const std::optional<std::string>& turn_id) {
   GlicInstanceImpl* instance =
       GetInstanceImplForConversationId(conversation_id);
   if (!instance) {
     instance = CreateGlicInstance();
     auto info = mojom::ConversationInfo::New();
     info->conversation_id = conversation_id;
+    if (turn_id.has_value()) {
+      info->turn_id = turn_id.value();
+    }
     instance->RegisterConversation(std::move(info), base::DoNothing());
+  } else if (turn_id.has_value()) {
+    // Instance exists, update turn_id if provided.
+    auto info = instance->GetConversationInfo();
+    if (info && info->turn_id != turn_id.value()) {
+      info->turn_id = turn_id.value();
+      instance->RegisterConversation(std::move(info), base::DoNothing());
+    }
   }
   return instance;
 }
@@ -560,7 +568,8 @@ GlicInstanceCoordinatorImpl::GetOrCreateGlicInstanceImplForTab(
   if (base::FeatureList::IsEnabled(
           features::kGlicDefaultToLastActiveConversation) &&
       last_active_instance_ &&
-      last_active_instance_->GetTimeSinceLastActive() < kSidePanelMaxRecency) {
+      last_active_instance_->GetTimeSinceLastActive() <
+          features::kGlicDefaultToLastActiveConversationMaxRecency.Get()) {
     return last_active_instance_;
   }
 
@@ -746,14 +755,6 @@ void GlicInstanceCoordinatorImpl::ToggleSidePanel(
   // newly created instance, so we provide the instance creation trigger.
   ShowOptions options = ShowOptions::ForSidePanel(
       *tab, GlicPinTrigger::kInstanceCreation, source);
-
-  // If the user has not consented, don't pin the tab.
-  if (GlicEnabling::ShouldBypassFreUi(profile_, source)) {
-    if (auto* side_panel_options =
-            std::get_if<SidePanelShowOptions>(&options.embedder_options)) {
-      side_panel_options->pin_on_bind = false;
-    }
-  }
 
   instance->Toggle(std::move(options), prevent_close, source, prompt_suggestion,
                    auto_send);
@@ -992,6 +993,8 @@ void GlicInstanceCoordinatorImpl::OnMemoryPressure(
   if (level < kGlicMemoryPressureResponseLevel.Get()) {
     return;
   }
+
+  service_->web_contents_warming_pool().Clear();
 
   if (base::FeatureList::IsEnabled(kGlicHibernateAllOnMemoryPressure)) {
     warmed_instance_.reset();

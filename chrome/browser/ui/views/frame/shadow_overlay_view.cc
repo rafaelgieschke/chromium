@@ -6,7 +6,9 @@
 
 #include <memory>
 
+#include "base/feature_list.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/themed_background.h"
 #include "chrome/browser/ui/views/side_panel/side_panel.h"
@@ -47,7 +49,10 @@ class ShadowOverlayView::CornerView : public views::View {
   static constexpr float kCornerSubpixelOverpaint = 0.5f;
 
   CornerView(Corner corner, BrowserView& browser_view) : corner_(corner) {
-    SetBackground(std::make_unique<ThemedBackground>(&browser_view));
+    SetBackground(std::make_unique<ThemedBackground>(
+        &browser_view, base::FeatureList::IsEnabled(features::kDetachedTabs)
+                           ? ThemedBackground::ThemeChoice::kFrameTheme
+                           : ThemedBackground::ThemeChoice::kToolbarTheme));
   }
   ~CornerView() override = default;
 
@@ -159,12 +164,10 @@ class ShadowOverlayView::ShadowBox : public views::View {
     if (visible) {
       const int rounded_corner_radius =
           GetLayoutProvider()->GetCornerRadiusMetric(views::Emphasis::kHigh);
-      const int elevation =
-          GetLayoutProvider()->GetShadowElevationMetric(views::Emphasis::kHigh);
 
-      view_shadow_ = std::make_unique<views::ViewShadow>(this, elevation);
+      view_shadow_ =
+          std::make_unique<views::ViewShadow>(this, kShadowElevation);
       view_shadow_->SetRoundedCornerRadius(rounded_corner_radius);
-      view_shadow_->shadow()->SetElevation(kShadowElevation);
       UpdateShadowColors();
     } else {
       view_shadow_.reset();
@@ -258,7 +261,8 @@ ShadowOverlayView::~ShadowOverlayView() = default;
 
 void ShadowOverlayView::VisibilityChanged(View* starting_from, bool visible) {
   if (starting_from == this) {
-    shadow_box_->SetShadowVisible(visible);
+    shadow_box_->SetShadowVisible(
+        visible && !base::FeatureList::IsEnabled(features::kDetachedTabs));
 
     // Ensure the opacity matches the current animation value in cases where the
     // panel should not animate but is open such as swapping between tabs.
@@ -347,6 +351,10 @@ views::ProposedLayout ShadowOverlayView::CalculateProposedLayout(
 void ShadowOverlayView::OnAnimationSequenceProgressed(
     SidePanelAnimationId animation_id,
     double animation_value) {
+  if (base::FeatureList::IsEnabled(features::kDetachedTabs)) {
+    return;
+  }
+
   CHECK_EQ(kShadowOverlayOpacityAnimation, animation_id);
 
   shadow_box_->SetShadowOpacity(animation_value);
@@ -354,6 +362,10 @@ void ShadowOverlayView::OnAnimationSequenceProgressed(
 
 void ShadowOverlayView::OnAnimationSequenceEnded(
     SidePanelAnimationId animation_id) {
+  if (base::FeatureList::IsEnabled(features::kDetachedTabs)) {
+    return;
+  }
+
   // When the animation ends, set the final opacity based on whether the side
   // panel is closing or opening.
   const double ending_opacity =

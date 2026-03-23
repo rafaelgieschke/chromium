@@ -32,7 +32,6 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/browser/ui/sad_tab_helper.h"
 #include "chrome/browser/ui/tabs/features.h"
-#include "chrome/browser/ui/tabs/organization/metrics.h"
 #include "chrome/browser/ui/tabs/saved_tab_groups/saved_tab_group_utils.h"
 #include "chrome/browser/ui/tabs/split_tab_util.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
@@ -2047,9 +2046,24 @@ void TabDragController::RevertTabAt(size_t drag_index) {
   CHECK_NE(from_index, TabStripModel::kNoTab);
   int target_index = tab_data.source_model_index.value();
 
+  bool using_relative_group_index = false;
+  if (tab_data.tab_group_data.has_value()) {
+    // If the tab is going back to its original group, use the relative index
+    // to ensure it lands in a valid position within the group's current range.
+    const TabGroup* group =
+        source_context_->GetTabStripModel()->group_model()->GetTabGroup(
+            existing_group.value());
+    if (group) {
+      using_relative_group_index = true;
+      target_index =
+          group->ListTabs().start() + tab_data.tab_group_data->index_in_group;
+    }
+  }
+
   if (attached_context_ != source_context_) {
     // The Tab was inserted into another TabDragContext. We need to
     // put it back into the original one.
+
     std::unique_ptr<tabs::TabModel> detached_tab =
         attached_context_->GetTabStripModel()->DetachTabAtForInsertion(
             from_index);
@@ -2065,10 +2079,17 @@ void TabDragController::RevertTabAt(size_t drag_index) {
     // unreverted tabs will later be reverted to the right of the target
     // index, so we skip those indices.
     if (target_index > from_index) {
-      for (size_t i = drag_index + 1; i < drag_data_.tab_drag_data_.size();
-           ++i) {
-        if (drag_data_.tab_drag_data_[i].contents) {
-          ++target_index;
+      if (using_relative_group_index) {
+        // If the target index is relative to the group, then the calculation
+        // needs to exclude the tab being reverted too, since the group will
+        // be shifted back as a result of the move.
+        --target_index;
+      } else {
+        for (size_t i = drag_index + 1; i < drag_data_.tab_drag_data_.size();
+             ++i) {
+          if (drag_data_.tab_drag_data_[i].contents) {
+            ++target_index;
+          }
         }
       }
     }
@@ -2233,12 +2254,6 @@ void TabDragController::CompleteDrag() {
       selection.set_anchor(static_cast<size_t>(index));
       UpdateSelectionModel(model, selection);
     }
-  }
-
-  if (source_context_ == attached_context_) {
-    LogTabStripOrganizationUKM(
-        attached_context_->GetTabStripModel(),
-        SuggestedTabStripOrganizationReason::kDraggedWithinSameTabstrip);
   }
 }
 
@@ -2764,8 +2779,8 @@ void TabDragController::NotifyEventIfTabAddedToGroup() {
       continue;
     }
 
-    if (views::ElementTrackerViews::GetInstance()->NotifyCustomEvent(
-            kTabGroupedCustomEventId, tab_drag_datum.attached_view)) {
+    if (source_context_->NotifyCustomEvent(kTabGroupedCustomEventId,
+                                           tab_drag_datum.attached_view)) {
       break;
     }
   }

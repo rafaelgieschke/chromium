@@ -41,6 +41,7 @@ class VerticalTabGroupView
 
   // views::View:
   void OnThemeChanged() override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
 
   // views::LayoutDelegate:
   views::ProposedLayout CalculateProposedLayout(
@@ -54,17 +55,22 @@ class VerticalTabGroupView
   views::Widget* ShowGroupEditorBubble(
       bool stop_context_menu_propagation) override;
   std::u16string GetGroupContentString() const override;
-  void InitHeaderDrag(const ui::MouseEvent& event) override;
-  bool ContinueHeaderDrag(const ui::MouseEvent& event) override;
+  bool IsValid() const override;
+  void InitHeaderDrag(const ui::LocatedEvent& event) override;
+  bool ContinueHeaderDrag(const ui::LocatedEvent& event) override;
   void CancelHeaderDrag() override;
+  const TabGroup& GetTabGroup() const override;
+  void UpdateHoverCard() const override;
   void HideHoverCard() const override;
   void ShiftGroupUp() override;
   void ShiftGroupDown() override;
 
   // TabCollectionAnimatingLayoutManager::Delegate:
+  bool IsDragging() const override;
   bool IsViewDragging(const views::View& child_view) const override;
   bool ShouldAnimateOpacityForAddAndRemove(
       const views::View& child_view) const override;
+  bool ShouldSnapToTarget(const views::View& child_view) const override;
   void OnAnimationEnded() override;
 
   bool IsCollapsed() const;

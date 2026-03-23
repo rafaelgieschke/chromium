@@ -81,6 +81,8 @@
 #include "chrome/browser/ash/login/screens/family_link_notice_screen.h"
 #include "chrome/browser/ash/login/screens/fingerprint_setup_screen.h"
 #include "chrome/browser/ash/login/screens/fjord_fw_update_screen.h"
+#include "chrome/browser/ash/login/screens/fjord_image_download_screen.h"
+#include "chrome/browser/ash/login/screens/fjord_image_selection_screen.h"
 #include "chrome/browser/ash/login/screens/fjord_station_setup_screen.h"
 #include "chrome/browser/ash/login/screens/fjord_touch_controller_screen.h"
 #include "chrome/browser/ash/login/screens/gaia_info_screen.h"
@@ -109,6 +111,7 @@
 #include "chrome/browser/ash/login/screens/osauth/osauth_error_screen.h"
 #include "chrome/browser/ash/login/screens/osauth/password_selection_screen.h"
 #include "chrome/browser/ash/login/screens/osauth/recovery_eligibility_screen.h"
+#include "chrome/browser/ash/login/screens/osauth/remove_local_auth_factors_screen.h"
 #include "chrome/browser/ash/login/screens/packaged_license_screen.h"
 #include "chrome/browser/ash/login/screens/perks_discovery_screen.h"
 #include "chrome/browser/ash/login/screens/personalized_recommend_apps_screen.h"
@@ -186,6 +189,8 @@
 #include "chrome/browser/ui/webui/ash/login/family_link_notice_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/fingerprint_setup_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/fjord_fw_update_screen_handler.h"
+#include "chrome/browser/ui/webui/ash/login/fjord_image_download_screen_handler.h"
+#include "chrome/browser/ui/webui/ash/login/fjord_image_selection_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/fjord_station_setup_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/fjord_touch_controller_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/gaia_info_screen_handler.h"
@@ -222,6 +227,7 @@
 #include "chrome/browser/ui/webui/ash/login/recommend_apps_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/recovery_eligibility_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/remote_activity_notification_screen_handler.h"
+#include "chrome/browser/ui/webui/ash/login/remove_local_auth_factors_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/reset_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/saml_confirm_password_handler.h"
 #include "chrome/browser/ui/webui/ash/login/signin_fatal_error_screen_handler.h"
@@ -423,15 +429,18 @@ WizardController::WizardController(
     PrefService* local_state,
     ApplicationLocaleStorage* application_locale_storage,
     scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
+    scoped_refptr<component_updater::ComponentManagerAsh> component_manager_ash,
     WizardContext* wizard_context)
     : local_state_(CHECK_DEREF(local_state)),
       application_locale_storage_(CHECK_DEREF(application_locale_storage)),
       shared_url_loader_factory_(std::move(shared_url_loader_factory)),
+      component_manager_ash_(std::move(component_manager_ash)),
       quickstart_controller_(
           std::make_unique<quick_start::QuickStartController>(
               &local_state_.get())),
       screen_manager_(std::make_unique<ScreenManager>()),
       wizard_context_(wizard_context) {
+  CHECK(component_manager_ash_);
   const auto has_been_skipped =
       wizard_context_->skip_post_login_screens_for_tests;
   wizard_context_->skip_post_login_screens_for_tests =
@@ -696,7 +705,8 @@ WizardController::CreateScreens() {
       base::BindRepeating(&WizardController::OnUpdateScreenExit,
                           weak_factory_.GetWeakPtr())));
   append(std::make_unique<EnrollmentScreen>(
-      shared_url_loader_factory_, browser_policy_connector_ash,
+      &local_state_.get(), shared_url_loader_factory_,
+      browser_policy_connector_ash,
       oobe_ui->GetView<EnrollmentScreenHandler>()->AsWeakPtr(),
       oobe_ui->GetErrorScreen(),
       base::BindRepeating(&WizardController::OnEnrollmentScreenExit,
@@ -1075,6 +1085,25 @@ WizardController::CreateScreens() {
         oobe_ui->GetView<FjordFwUpdateScreenHandler>()->AsWeakPtr(),
         base::BindRepeating(&WizardController::OnFjordFwUpdateScreenExit,
                             weak_factory_.GetWeakPtr())));
+    if (fjord_util::ShouldShowFjordOobeImageSwitch()) {
+      append(std::make_unique<FjordImageSelectionScreen>(
+          oobe_ui->GetView<FjordImageSelectionScreenHandler>()->AsWeakPtr(),
+          base::BindRepeating(
+              &WizardController::OnFjordImageSelectionScreenExit,
+              weak_factory_.GetWeakPtr())));
+      append(std::make_unique<FjordImageDownloadScreen>(
+          oobe_ui->GetView<FjordImageDownloadScreenHandler>()->AsWeakPtr(),
+          base::BindRepeating(&WizardController::OnFjordImageDownloadScreenExit,
+                              weak_factory_.GetWeakPtr())));
+    }
+  }
+
+  if (features::IsManagedLocalPinAndPasswordEnabled()) {
+    append(std::make_unique<RemoveLocalAuthFactorsScreen>(
+        oobe_ui->GetView<RemoveLocalAuthFactorsScreenHandler>()->AsWeakPtr(),
+        base::BindRepeating(
+            &WizardController::OnRemoveLocalAuthFactorsScreenExit,
+            weak_factory_.GetWeakPtr())));
   }
 
   return result;
@@ -1450,6 +1479,14 @@ void WizardController::ShowFjordStationSetupScreen() {
 
 void WizardController::ShowFjordFwUpdateScreen() {
   SetCurrentScreen(GetScreen(FjordFwUpdateScreenView::kScreenId));
+}
+
+void WizardController::ShowFjordImageSelectionScreen() {
+  SetCurrentScreen(GetScreen(FjordImageSelectionScreenView::kScreenId));
+}
+
+void WizardController::ShowFjordImageDownloadScreen() {
+  SetCurrentScreen(GetScreen(FjordImageDownloadScreenView::kScreenId));
 }
 
 void WizardController::OnUserCreationScreenExit(
@@ -2300,6 +2337,11 @@ void WizardController::OnUpdateCompleted() {
   language_packs::LanguagePackManager::UpdatePacksForOobe(locale,
                                                           base::DoNothing());
 
+  if (fjord_util::ShouldShowFjordOobeImageSwitch()) {
+    ShowFjordImageSelectionScreen();
+    return;
+  }
+
   if (demo_setup_controller_) {
     ShowConsolidatedConsentScreen();
     return;
@@ -2788,6 +2830,19 @@ void WizardController::OnPinSetupScreenExit(PinSetupScreen::Result result) {
   }
 }
 
+void WizardController::OnRemoveLocalAuthFactorsScreenExit(
+    RemoveLocalAuthFactorsScreen::Result result) {
+  OnScreenExit(RemoveLocalAuthFactorsScreenView::kScreenId,
+               RemoveLocalAuthFactorsScreen::GetResultString(result));
+
+  switch (result) {
+    case RemoveLocalAuthFactorsScreen::Result::kSuccess:
+    case RemoveLocalAuthFactorsScreen::Result::kError:
+      // TODO: b/445628245 - Implement screen exit logic.
+      return;
+  }
+}
+
 void WizardController::ObtainContextAndFinalizeAuth() {
   CHECK(wizard_context_->extra_factors_token);
   auto token = std::move(wizard_context_->extra_factors_token);
@@ -3051,6 +3106,28 @@ void WizardController::OnFjordFwUpdateScreenExit() {
                                        FJORD_OOBE_STATE_READY_FOR_CALIBRATION);
   OnScreenExit(FjordFwUpdateScreenView::kScreenId, kDefaultExitReason);
   ShowFjordStationSetupScreen();
+}
+
+void WizardController::OnFjordImageSelectionScreenExit(
+    FjordImageSelectionScreen::Result result) {
+  OnScreenExit(FjordImageSelectionScreenView::kScreenId,
+               FjordImageSelectionScreen::GetResultString(result));
+  // Continue to enrollment if the chosen image type matches the current image
+  // type.
+  if ((result == FjordImageSelectionScreen::Result::kCuttlefish &&
+       policy::EnrollmentRequisitionManager::IsCuttlefishDevice()) ||
+      (result == FjordImageSelectionScreen::Result::kSquid &&
+       policy::EnrollmentRequisitionManager::IsSquidDevice())) {
+    ShowAutoEnrollmentCheckScreen();
+  } else {
+    ShowFjordImageDownloadScreen();
+  }
+}
+
+void WizardController::OnFjordImageDownloadScreenExit() {
+  // Image download screen is a terminal state because the image install will
+  // reboot the device.
+  OnScreenExit(FjordImageDownloadScreenView::kScreenId, kDefaultExitReason);
 }
 
 bool WizardController::ExitFjordTouchControllerScreen() {
@@ -3364,24 +3441,28 @@ void WizardController::UpdateOobeConfiguration() {
     VLOG(1) << "Using Device Requisition from configuration"
             << *requisition_value;
     policy::EnrollmentRequisitionManager::SetDeviceRequisition(
-        *requisition_value);
+        local_state_.get(), *requisition_value);
   } else if (policy::EnrollmentRequisitionManager::IsCuttlefishDevice()) {
     VLOG(1) << "Using default Device Requisition value for Cuttlefish build "
                "configuration"
             << policy::EnrollmentRequisitionManager::kCuttlefishRequisition;
     policy::EnrollmentRequisitionManager::SetDeviceRequisition(
+        local_state_.get(),
         policy::EnrollmentRequisitionManager::kCuttlefishRequisition);
   } else if (policy::EnrollmentRequisitionManager::IsSquidDevice()) {
     VLOG(1) << "Using default Device Requisition value for Squid build "
                "configuration"
             << policy::EnrollmentRequisitionManager::kSquidRequisition;
     policy::EnrollmentRequisitionManager::SetDeviceRequisition(
+        local_state_.get(),
         policy::EnrollmentRequisitionManager::kSquidRequisition);
-  } else if (policy::EnrollmentRequisitionManager::IsMeetDevice()) {
+  } else if (policy::EnrollmentRequisitionManager::IsMeetDevice(
+                 local_state_.get())) {
     VLOG(1) << "Using default Device Requisition value for CFM build "
                "configuration"
             << policy::EnrollmentRequisitionManager::kRemoraRequisition;
     policy::EnrollmentRequisitionManager::SetDeviceRequisition(
+        local_state_.get(),
         policy::EnrollmentRequisitionManager::kRemoraRequisition);
   }
 
@@ -3542,7 +3623,10 @@ void WizardController::AdvanceToScreen(OobeScreenId screen_id) {
              screen_id == QuickStartView::kScreenId ||
              screen_id == FjordStationSetupScreenView::kScreenId ||
              screen_id == FjordTouchControllerScreenView::kScreenId ||
-             screen_id == FjordFwUpdateScreenView::kScreenId) {
+             screen_id == FjordImageSelectionScreenView::kScreenId ||
+             screen_id == FjordImageDownloadScreenView::kScreenId ||
+             screen_id == FjordFwUpdateScreenView::kScreenId ||
+             screen_id == RemoveLocalAuthFactorsScreenView::kScreenId) {
     SetCurrentScreen(GetScreen(screen_id));
   } else {
     NOTREACHED();
@@ -3556,7 +3640,8 @@ bool WizardController::HandleAccelerator(LoginAcceleratorAction action) {
 void WizardController::StartDemoModeSetup() {
   // Start Demo Mode by initiate demo set up controller and showing the first
   // network screen in demo mode setup flow.
-  demo_setup_controller_ = std::make_unique<DemoSetupController>();
+  demo_setup_controller_ = std::make_unique<DemoSetupController>(
+      &local_state_.get(), component_manager_ash_);
   ShowNetworkScreen();
 }
 
@@ -3567,7 +3652,8 @@ void WizardController::CreateChoobeFlowController() {
 void WizardController::SimulateDemoModeSetupForTesting(
     std::optional<DemoSession::DemoModeConfig> demo_config) {
   if (!demo_setup_controller_) {
-    demo_setup_controller_ = std::make_unique<DemoSetupController>();
+    demo_setup_controller_ = std::make_unique<DemoSetupController>(
+        &local_state_.get(), component_manager_ash_);
   }
   if (demo_config.has_value()) {
     demo_setup_controller_->set_demo_config(*demo_config);

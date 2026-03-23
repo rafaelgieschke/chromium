@@ -9,6 +9,7 @@
 
 #include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/strings/strcat.h"
 #include "components/autofill/core/browser/autofill_field.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/form_structure.h"
@@ -33,6 +34,11 @@ const AutofillField* GetTriggerFieldForContactInfoPart(
     const std::vector<std::unique_ptr<AutofillField>>& fields,
     const AutofillField* original_trigger_field,
     LogManager* log_manager) {
+  auto record_outcome_metric = [](RetargetTriggerFieldResult result) {
+    base::UmaHistogramEnumeration(
+        "Autofill.Actor.ContactInfoSplitting.RetargetTriggerField", result);
+  };
+
   // For contact info we retarget to the first email or phone number field in
   // the section, which should come before any address field assuming that
   // ShouldSplitOutContactInfo was called and returned true.
@@ -42,6 +48,10 @@ const AutofillField* GetTriggerFieldForContactInfoPart(
     }
 
     if (HasContactInfoType(*field)) {
+      record_outcome_metric(
+          field.get() == original_trigger_field
+              ? RetargetTriggerFieldResult::kRetargetedToSameField
+              : RetargetTriggerFieldResult::kRetargetedToNewField);
       return field.get();
     }
 
@@ -52,6 +62,8 @@ const AutofillField* GetTriggerFieldForContactInfoPart(
           << LoggingScope::kAutofillActor
           << "GetTriggerFieldForContactInfoPart found an address field before "
              "a contact info field for a kContactInfo split.";
+      record_outcome_metric(
+          RetargetTriggerFieldResult::kErrorContactInfoAddressFirst);
       return original_trigger_field;
     }
   }
@@ -61,6 +73,7 @@ const AutofillField* GetTriggerFieldForContactInfoPart(
   LOG_AF(log_manager) << LoggingScope::kAutofillActor
                       << "GetTriggerFieldForContactInfoPart could not find an "
                          "appropriate kContactInfo trigger field.";
+  record_outcome_metric(RetargetTriggerFieldResult::kErrorContactInfoNotFound);
   return original_trigger_field;
 }
 
@@ -70,10 +83,16 @@ const AutofillField* GetTriggerFieldForAddressPart(
     const std::vector<std::unique_ptr<AutofillField>>& fields,
     const AutofillField* original_trigger_field,
     LogManager* log_manager) {
+  auto record_outcome_metric = [](RetargetTriggerFieldResult result) {
+    base::UmaHistogramEnumeration(
+        "Autofill.Actor.ContactInfoSplitting.RetargetTriggerField", result);
+  };
+
   // If the original trigger is already an address field, we can just return
   // that field, as it is guaranteed to be in the address part of the section.
   if (original_trigger_field->Type().GetGroups().contains(
           FieldTypeGroup::kAddress)) {
+    record_outcome_metric(RetargetTriggerFieldResult::kRetargetedToSameField);
     return original_trigger_field;
   }
 
@@ -84,6 +103,10 @@ const AutofillField* GetTriggerFieldForAddressPart(
     }
 
     if (field->Type().GetGroups().contains(FieldTypeGroup::kAddress)) {
+      record_outcome_metric(
+          field.get() == original_trigger_field
+              ? RetargetTriggerFieldResult::kRetargetedToSameField
+              : RetargetTriggerFieldResult::kRetargetedToNewField);
       return field.get();
     }
   }
@@ -93,6 +116,7 @@ const AutofillField* GetTriggerFieldForAddressPart(
   LOG_AF(log_manager) << LoggingScope::kAutofillActor
                       << "GetTriggerFieldForAddressPart could not find an "
                          "appropriate kAddress trigger field.";
+  record_outcome_metric(RetargetTriggerFieldResult::kErrorAddressNotFound);
   return original_trigger_field;
 }
 
@@ -196,7 +220,7 @@ bool ShouldSplitOutContactInfo(
     LogManager* log_manager) {
   // TODO(crbug.com/491031514): Consider moving metric record to
   // ActorFormFillingServiceImpl, in order to ensure it is only recorded once
-  // per `GetSuggestions` call.
+  // per FormFillingRequest.
   auto record_outcome_metric = [](ShouldSplitOutContactInfoResult status) {
     base::UmaHistogramEnumeration(
         "Autofill.Actor.ContactInfoSplitting.ShouldSplitContactInfo", status);
@@ -265,8 +289,14 @@ const AutofillField* RetargetTriggerFieldForSplittingIfNeeded(
     const AutofillField* original_trigger_field,
     SectionSplitPart split_part,
     LogManager* log_manager) {
+  // TODO(crbug.com/491031514): Consider moving metric record to
+  // ActorFormFillingServiceImpl, in order to ensure it is only recorded once
+  // per each split of a FormFillingRequest.
   switch (split_part) {
     case SectionSplitPart::kNoSplit:
+      base::UmaHistogramEnumeration(
+          "Autofill.Actor.ContactInfoSplitting.RetargetTriggerField",
+          RetargetTriggerFieldResult::kNotAttemptedNoSplit);
       return original_trigger_field;
     case SectionSplitPart::kContactInfo:
       return GetTriggerFieldForContactInfoPart(
@@ -282,7 +312,8 @@ const AutofillField* RetargetTriggerFieldForSplittingIfNeeded(
 base::flat_set<FieldGlobalId> GetBlockedFieldsForSplit(
     const FormStructure& form_structure,
     const FieldGlobalId& trigger_field_id,
-    SectionSplitPart split_part) {
+    SectionSplitPart split_part,
+    mojom::ActionPersistence action_persistence) {
   if (split_part == SectionSplitPart::kNoSplit) {
     return {};
   }
@@ -296,13 +327,32 @@ base::flat_set<FieldGlobalId> GetBlockedFieldsForSplit(
   SplitFormSectionFieldsResult split_fields =
       SplitFormSectionFields(form_structure, *trigger_field);
 
+  auto record_outcome_metric = [&](std::string_view suffix,
+                                   size_t field_count) {
+    // Metrics are only recorded when we are filling, to avoid over-reporting
+    // due to previews.
+    //
+    // TODO(crbug.com/491031514): Consider moving metric record to
+    // ActorFormFillingServiceImpl, to avoid this function having to know about
+    // the fill mode.
+    if (action_persistence == mojom::ActionPersistence::kFill) {
+      base::UmaHistogramCounts100(
+          base::StrCat({"Autofill.Actor.ContactInfoSplitting.", suffix}),
+          field_count);
+    }
+  };
+
   // Because this function returns a blocklist of fields, we return the
   // inverse set of fields for the given split part.
   switch (split_part) {
     case SectionSplitPart::kContactInfo:
+      record_outcome_metric("ContactInfoPartFieldCount",
+                            split_fields.contact_info_fields.size());
       // When filling contact info, block address fields.
       return std::move(split_fields.address_fields);
     case SectionSplitPart::kAddress:
+      record_outcome_metric("AddressPartFieldCount",
+                            split_fields.address_fields.size());
       // When filling address info, block contact info fields.
       return std::move(split_fields.contact_info_fields);
     case SectionSplitPart::kNoSplit:

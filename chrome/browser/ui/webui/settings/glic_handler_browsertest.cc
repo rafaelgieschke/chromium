@@ -7,6 +7,7 @@
 #include <memory>
 #include <tuple>
 
+#include "base/test/gmock_callback_support.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/values.h"
 #include "chrome/browser/background/glic/glic_launcher_configuration.h"
@@ -36,10 +37,13 @@ class MockActorLoginPermissionsManager
  public:
   MOCK_METHOD(void, AddObserver, (Observer*), (override));
   MOCK_METHOD(void, RemoveObserver, (Observer*), (override));
-  MOCK_METHOD(void, RevokePermission, (const std::string&), (override));
-  MOCK_METHOD(base::flat_set<password_manager::ActorLoginPermission>,
+  MOCK_METHOD(void,
+              RevokePermission,
+              (const std::string&, const std::string&),
+              (override));
+  MOCK_METHOD(void,
               GetAllPermissions,
-              (const syncer::SyncService*),
+              (const syncer::SyncService*, GetAllPermissionsResult),
               (override));
 };
 
@@ -58,6 +62,11 @@ class GlicHandlerBrowserTest : public InProcessBrowserTest {
     // browser process from closing which causes the test to hang.
     g_browser_process->local_state()->SetBoolean(
         glic::prefs::kGlicLauncherEnabled, false);
+
+    // Destroy the handler before the profile is destroyed to avoid dangling
+    // pointers to KeyedServices.
+    glic_handler_.reset();
+    web_ui_.reset();
   }
 
   GlicHandler* glic_handler() { return glic_handler_.get(); }
@@ -123,9 +132,9 @@ IN_PROC_BROWSER_TEST_F(GlicHandlerBrowserTest, GetActorLoginPermissions) {
   permission.username = u"user";
   permission.domain_info.name = "Example";
   permission.favicon_url = GURL("http://example.com/favicon.ico");
-  EXPECT_CALL(*mock_manager, GetAllPermissions(_))
-      .WillOnce(Return(base::flat_set<password_manager::ActorLoginPermission>(
-          {permission})));
+  EXPECT_CALL(*mock_manager, GetAllPermissions)
+      .WillOnce(base::test::RunOnceCallback<1>(
+          base::flat_set<password_manager::ActorLoginPermission>{permission}));
 
   glic_handler()->observation_.Reset();
   glic_handler()->actor_login_permissions_manager_ = std::move(mock_manager);
@@ -151,7 +160,7 @@ IN_PROC_BROWSER_TEST_F(GlicHandlerBrowserTest, RevokeActorLoginPermission) {
 
   auto mock_manager =
       std::make_unique<testing::NiceMock<MockActorLoginPermissionsManager>>();
-  EXPECT_CALL(*mock_manager, RevokePermission("example.com"));
+  EXPECT_CALL(*mock_manager, RevokePermission("example.com", "user"));
 
   glic_handler()->observation_.Reset();
   glic_handler()->actor_login_permissions_manager_ = std::move(mock_manager);
@@ -160,6 +169,7 @@ IN_PROC_BROWSER_TEST_F(GlicHandlerBrowserTest, RevokeActorLoginPermission) {
 
   base::ListValue args;
   args.Append("example.com");
+  args.Append("user");
   glic_handler()->HandleRevokeActorLoginPermission(args);
 }
 }  // namespace settings

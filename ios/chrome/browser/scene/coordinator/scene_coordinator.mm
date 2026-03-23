@@ -38,13 +38,16 @@
 #import "ios/chrome/browser/authentication/ui_bundled/signin/signin_utils.h"
 #import "ios/chrome/browser/authentication/ui_bundled/signin_notification_infobar_delegate.h"
 #import "ios/chrome/browser/cobrowse/coordinator/assistant_aim_coordinator.h"
+#import "ios/chrome/browser/cobrowse/model/cobrowse_context.h"
 #import "ios/chrome/browser/default_browser/model/utils.h"
 #import "ios/chrome/browser/feature_engagement/model/tracker_factory.h"
+#import "ios/chrome/browser/fullscreen/ui_bundled/fullscreen_controller.h"
 #import "ios/chrome/browser/history/ui_bundled/history_coordinator_factory.h"
 #import "ios/chrome/browser/incognito_interstitial/ui_bundled/incognito_interstitial_coordinator.h"
 #import "ios/chrome/browser/incognito_interstitial/ui_bundled/incognito_interstitial_coordinator_delegate.h"
 #import "ios/chrome/browser/incognito_reauth/ui_bundled/incognito_reauth_scene_agent.h"
 #import "ios/chrome/browser/infobars/model/infobar_manager_impl.h"
+#import "ios/chrome/browser/intelligence/bwg/utils/gemini_constants.h"
 #import "ios/chrome/browser/mailto_handler/model/mailto_handler_service.h"
 #import "ios/chrome/browser/mailto_handler/model/mailto_handler_service_factory.h"
 #import "ios/chrome/browser/main/ui/browser_layout_view_controller.h"
@@ -54,7 +57,9 @@
 #import "ios/chrome/browser/safari_data_import/coordinator/safari_data_import_main_coordinator.h"
 #import "ios/chrome/browser/safari_data_import/model/features.h"
 #import "ios/chrome/browser/safari_data_import/public/safari_data_import_entry_point.h"
+#import "ios/chrome/browser/scene/coordinator/scene_mediator.h"
 #import "ios/chrome/browser/scene/ui/scene_view_controller.h"
+#import "ios/chrome/browser/scene/ui/scene_view_controller_delegate.h"
 #import "ios/chrome/browser/settings/ui_bundled/password/password_checkup/password_checkup_coordinator.h"
 #import "ios/chrome/browser/settings/ui_bundled/settings_navigation_controller.h"
 #import "ios/chrome/browser/shared/coordinator/layout_guide/layout_guide_util.h"
@@ -70,6 +75,7 @@
 #import "ios/chrome/browser/shared/model/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/shared/public/commands/bookmarks_commands.h"
 #import "ios/chrome/browser/shared/public/commands/browser_coordinator_commands.h"
+#import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
 #import "ios/chrome/browser/shared/public/commands/command_dispatcher.h"
 #import "ios/chrome/browser/shared/public/commands/open_new_tab_command.h"
 #import "ios/chrome/browser/shared/public/commands/policy_change_commands.h"
@@ -143,6 +149,7 @@ void OnListFamilyMembersResponse(
                                 PasswordCheckupCoordinatorDelegate,
                                 PolicyWatcherBrowserAgentObserving,
                                 SafariDataImportMainCoordinatorDelegate,
+                                SceneViewControllerDelegate,
                                 SettingsNavigationControllerDelegate,
                                 YoutubeIncognitoCoordinatorDelegate>
 
@@ -165,6 +172,8 @@ void OnListFamilyMembersResponse(
   TabGridCoordinator* _tabGridCoordinator;
   // Coordinator for the AppBar.
   AppBarCoordinator* _appBarCoordinator;
+  // Mediator for the Scene coordinate.
+  SceneMediator* _sceneMediator;
   // Coordinator for the account menu.
   AccountMenuCoordinator* _accountMenuCoordinator;
   // Coordinator for the sign-in flow.
@@ -237,6 +246,7 @@ void OnListFamilyMembersResponse(
   if (IsUseSceneViewControllerEnabled()) {
     _viewController = [[SceneViewController alloc] init];
     _viewController.layoutGuideCenter = LayoutGuideCenterForBrowser(nil);
+    _viewController.delegate = self;
     UIViewController* tabGridViewController =
         _tabGridCoordinator.viewController;
     [_viewController addChildViewController:tabGridViewController];
@@ -244,6 +254,13 @@ void OnListFamilyMembersResponse(
     tabGridViewController.view.frame = _viewController.appContainer.bounds;
     [tabGridViewController didMoveToParentViewController:_viewController];
     self.sceneState.window.rootViewController = _viewController;
+
+    _sceneMediator = [[SceneMediator alloc]
+        initWithRegularFullscreenController:FullscreenController::FromBrowser(
+                                                _regularBrowser.get())
+              incognitoFullscreenController:FullscreenController::FromBrowser(
+                                                _incognitoBrowser)];
+    _sceneMediator.consumer = _viewController;
   }
 
   if (IsChromeNextIaEnabled()) {
@@ -281,6 +298,8 @@ void OnListFamilyMembersResponse(
   _AIPrototypingCoordinator = nil;
   [self stopAssistantAIMCoordinator];
   [self stopAssistantContainerCoordinator];
+  [_sceneMediator disconnect];
+  _sceneMediator = nil;
   [_tabGridCoordinator stop];
   [_appBarCoordinator stop];
   self.UIHandler = nil;
@@ -596,11 +615,15 @@ void OnListFamilyMembersResponse(
   if (!IsAssistantContainerEnabled()) {
     return;
   }
-  [_assistantAIMCoordinator stop];
+  [self stopAssistantAIMCoordinator];
   _assistantAIMCoordinator = [[AssistantAIMCoordinator alloc]
       initWithBaseViewController:self.activeViewController
                          browser:self.currentBrowser];
   [_assistantAIMCoordinator start];
+}
+
+- (void)hideAssistant {
+  [self stopAssistantAIMCoordinator];
 }
 
 - (void)closePresentedViewsAndOpenURL:(OpenNewTabCommand*)command {
@@ -1029,6 +1052,7 @@ void OnListFamilyMembersResponse(
 }
 
 // TODO(crbug.com/41352590) : Do not pass baseViewController through dispatcher.
+// The user must be signed-in and sign-in must be enabled.
 - (void)showSyncSettingsFromViewController:
     (UIViewController*)baseViewController {
   DCHECK(!self.isSigninInProgress);
@@ -1905,7 +1929,6 @@ void OnListFamilyMembersResponse(
   _passwordCheckupCoordinator = [[PasswordCheckupCoordinator alloc]
       initWithBaseNavigationController:_settingsNavigationController
                                browser:_regularBrowser.get()
-                          reauthModule:nil
                               referrer:referrer];
   _passwordCheckupCoordinator.delegate = self;
   [_passwordCheckupCoordinator start];
@@ -1959,6 +1982,20 @@ void OnListFamilyMembersResponse(
     // bookmarks or the recent tabs view.
     [self stopSigninCoordinatorWithCompletionAnimated:animated];
     resetAndDismiss();
+  }
+}
+
+#pragma mark - SceneViewControllerDelegate
+
+- (void)sceneViewControllerShowGeminiFloatyIfInvoked:
+    (SceneViewController*)viewController {
+  CommandDispatcher* dispatcher = _regularBrowser->GetCommandDispatcher();
+  if ([dispatcher dispatchingForProtocol:@protocol(BWGCommands)]) {
+    id<BWGCommands> geminiHandler = HandlerForProtocol(dispatcher, BWGCommands);
+    [geminiHandler
+        updateFloatyVisibilityIfEligibleAnimated:NO
+                                      fromSource:gemini::FloatyUpdateSource::
+                                                     ViewTransition];
   }
 }
 

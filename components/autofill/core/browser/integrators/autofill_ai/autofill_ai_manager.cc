@@ -76,6 +76,7 @@
 #include "components/autofill/core/common/logging/log_macros.h"
 #include "components/autofill/core/common/signatures.h"
 #include "components/autofill/core/common/unique_ids.h"
+#include "components/consent_auditor/consent_auditor.h"
 #include "components/strike_database/strike_database.h"
 #include "components/strings/grit/components_strings.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
@@ -381,6 +382,18 @@ void AutofillAiManager::HandlePromptResult(
     return;
   }
 
+  // Wallet import eligibility can change while the import bubble is visible
+  // (e.g., if the user disables Payments Sync in the settings). If the entity
+  // is no longer eligible by the time the user clicks "Accept", we abort the
+  // Wallet save.
+  if (entity.record_type() == EntityInstance::RecordType::kServerWallet &&
+      !MayPerformAutofillAiAction(*client_,
+                                  autofill::AutofillAiAction::kImportToWallet,
+                                  entity.type())) {
+    HandleIneligibleWalletFallback(prompt_type, std::move(entity));
+    return;
+  }
+
   if (!IsMaskedStorageSupported(entity.type(), entity.record_type())) {
     entity_manager.AddOrUpdateEntityInstance(std::move(entity));
     return;
@@ -396,13 +409,59 @@ void AutofillAiManager::HandlePromptResult(
     switch (prompt_type) {
       case AutofillClient::AutofillAiImportPromptType::kSave:
       case AutofillClient::AutofillAiImportPromptType::kMigrate:
-        wallet_manager->SaveWalletEntityInstance(entity, std::move(callback));
+        // TODO(crbug.com/489354073): Log consent and replace with the correct
+        // session ID.
+        wallet_manager->SaveWalletEntityInstance(
+            entity, consent_auditor::ConsentAuditor::GenerateSessionId(),
+            std::move(callback));
         break;
       case AutofillClient::AutofillAiImportPromptType::kUpdate:
         wallet_manager->UpdateWalletEntityInstance(entity, std::move(callback));
         break;
     }
   }
+}
+
+void AutofillAiManager::HandleIneligibleWalletFallback(
+    AutofillClient::AutofillAiImportPromptType prompt_type,
+    EntityInstance entity) {
+  // `HandlePromptResult()` is called synchronously from the UI's button
+  // handler. Attempting to close the bubble (which remains open for private
+  // passes) in the same call would destroy it while it's executing.
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          [](base::WeakPtr<AutofillAiManager> self,
+             AutofillClient::AutofillAiImportPromptType prompt_type,
+             EntityInstance entity) {
+            if (!self) {
+              return;
+            }
+            EntityDataManager* entity_manager =
+                self->client_->GetEntityDataManager();
+            if (!entity_manager) {
+              return;
+            }
+
+            // This is a no-op for public passes.
+            self->client_->CloseEntityImportBubble();
+
+            switch (prompt_type) {
+              case AutofillClient::AutofillAiImportPromptType::kSave:
+                // Fall back to a local save.
+                entity_manager->AddOrUpdateEntityInstance(
+                    entity.CopyWithNewRecordType(
+                        EntityInstance::RecordType::kLocal));
+                self->client_->ShowAutofillAiLocalSaveNotification();
+                break;
+              case AutofillClient::AutofillAiImportPromptType::kMigrate:
+              case AutofillClient::AutofillAiImportPromptType::kUpdate:
+                // Show the failure toast for update and migration.
+                self->client_->ShowAutofillAiSaveToWalletFailureNotification();
+                break;
+            }
+          },
+          GetWeakPtr(), prompt_type, std::move(entity)));
 }
 
 std::vector<Suggestion> AutofillAiManager::GetSuggestions(

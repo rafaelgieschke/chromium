@@ -11,6 +11,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
 #include "chrome/browser/ui/tabs/contents_observing_tab_feature.h"
+#include "chrome/browser/ui/views/indigo/indigo_toolbar.h"
 #include "components/optimization_guide/core/hints/optimization_guide_decision.h"
 #include "components/signin/public/identity_manager/identity_manager.h"
 #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
@@ -31,10 +32,13 @@ class TabInterface;
 
 namespace indigo {
 
+class IndigoOnboardingDialog;
+
 // Manages the Indigo page action and its various entry points, ensuring they
 // are correctly displayed.
 class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
-                                   public signin::IdentityManager::Observer {
+                                   public signin::IdentityManager::Observer,
+                                   public IndigoToolbar::Delegate {
  public:
   DECLARE_USER_DATA(IndigoPageActionController);
 
@@ -58,9 +62,18 @@ class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
       const signin::PrimaryAccountChangeEvent& event_details) override;
   void OnExtendedAccountInfoUpdated(const AccountInfo& info) override;
 
+  // IndigoToolbar::Delegate:
+  void OnClose(IndigoToolbar* toolbar) override;
+  void OnRegenerate(IndigoToolbar* toolbar) override;
+  void OnReplaceOriginalPhoto(IndigoToolbar* toolbar) override;
+  void OnDeleteOriginalPhoto(IndigoToolbar* toolbar) override;
+
  private:
   // Updates the visibility and states of all entry points.
   void UpdateEntryPointsState();
+
+  // Called when the onboarding dialog is closed.
+  void OnOnboardingDialogClosed();
 
   // Called when optimization guide has decided whether this feature should be
   // enabled for the page.
@@ -92,6 +105,12 @@ class IndigoPageActionController : public tabs::ContentsObservingTabFeature,
 
   // If true, the Indigo page action is currently shown.
   bool is_shown_ = false;
+
+  // The onboarding dialog, if shown.
+  std::unique_ptr<IndigoOnboardingDialog> onboarding_dialog_;
+
+  // The floating toolbar, if shown.
+  std::unique_ptr<IndigoToolbar> toolbar_;
 
   base::ScopedObservation<signin::IdentityManager,
                           signin::IdentityManager::Observer>

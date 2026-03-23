@@ -61,6 +61,7 @@ class OmniboxContextMenu;
 enum class OmniboxPart;
 class OmniboxPopupAimPresenter;
 class OmniboxPopupFileSelector;
+class OmniboxPopupUI;
 class OmniboxPopupView;
 class OmniboxViewViews;
 class OmniboxChipButton;
@@ -214,6 +215,7 @@ class LocationBarView
       override;
   ui::TrackedElement* GetAnchorOrNull() override;
   Browser* GetBrowser() override;
+  Profile* GetProfile() override;
 
   // True if this instance has been initialized by calling Init, which can only
   // be called when the receiving instance is attached to a view container.
@@ -223,6 +225,7 @@ class LocationBarView
   bool IsFullscreen() const override;
   void InvalidateLayout() override;
   gfx::Rect Bounds() const override;
+  gfx::Rect BoundsInScreen() const override;
   gfx::Size MinimumSize() const override;
   gfx::Size PreferredSize() const override;
   void Update(content::WebContents* contents) override;
@@ -285,7 +288,6 @@ class LocationBarView
   // 2. presentation_receiver_window_view is the other known case. However,
   // presentation_receiver_window_view is about to be sunsetted in a year or so.
   Browser* browser() { return browser_; }
-  Profile* profile() { return profile_; }
 
   // LocationIconView::Delegate:
   const LocationBarModel* GetLocationBarModel() const override;
@@ -296,8 +298,8 @@ class LocationBarView
   bool ShowPageInfoDialog() override;
   SkColor GetSecurityChipColor(
       security_state::SecurityLevel security_level) const override;
-  ui::ImageModel GetLocationIcon(LocationIconView::Delegate::IconFetchedCallback
-                                     on_icon_fetched) const override;
+  ui::ImageModel GetLocationIcon(
+      LocationIconView::Delegate::IconFetchedCallback on_icon_fetched) override;
   std::vector<raw_ptr<ContentSettingImageView, VectorExperimental>>&
   GetContentSettingViewsForTest() {
     return content_setting_views_;
@@ -325,6 +327,8 @@ class LocationBarView
                            IMEInlineAutocompletePosition);
   FRIEND_TEST_ALL_PREFIXES(LocationBarViewAddContextButtonBrowserTest,
                            AddContextButtonVisibilityAndClick);
+  FRIEND_TEST_ALL_PREFIXES(LocationBarViewAddContextButtonBrowserTest,
+                           PrefChangesAddContextButtonVisibility);
   using ContentSettingViews =
       std::vector<raw_ptr<ContentSettingImageView, VectorExperimental>>;
 
@@ -487,6 +491,18 @@ class LocationBarView
   page_actions::PageActionController* GetPageActionController();
 
   bool OpenContextMenu();
+
+  // Whether the "Add Context" button should be shown in place of the location
+  // bar page info icon button.
+  bool ShouldShowAddContextButton();
+
+  // Whether the Omnibox context menu contains at least one menu item that can
+  // be shown to the user.
+  bool HasAllowedInputs();
+
+  OmniboxPopupUI* GetOmniboxPopupUI();
+
+  content::WebContents* GetWrappedWebContents();
 
 #if BUILDFLAG(IS_MAC)
   // Called when app shims change.

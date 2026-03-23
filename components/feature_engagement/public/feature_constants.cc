@@ -323,6 +323,9 @@ BASE_FEATURE(kIPHAdaptiveButtonInTopToolbarCustomizationAddToBookmarksFeature,
 BASE_FEATURE(kIPHAdaptiveButtonInTopToolbarCustomizationReadAloudFeature,
              "IPH_AdaptiveButtonInTopToolbarCustomization_ReadAloud",
              base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kIPHAdaptiveButtonInTopToolbarCustomizationGlicFeature,
+             "IPH_AdaptiveButtonInTopToolbarCustomization_Glic",
+             base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHAdaptiveButtonInTopToolbarCustomizationPageSummaryWebFeature,
              "IPH_AdaptiveButtonInTopToolbarCustomization_PageSummary_Web",
              base::FEATURE_DISABLED_BY_DEFAULT);
@@ -550,6 +553,9 @@ BASE_FEATURE(kIPHTabSwitcherButtonFeature,
              base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHTabSwitcherButtonSwitchIncognitoFeature,
              "IPH_TabSwitcherButtonSwitchIncognito",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kIPHThreeDotMenuBackButton,
+             "IPH_ThreeDotMenuBackButton",
              base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHTouchToSearchCalloutFeature,
              "IPH_TouchToSearchCallout",
@@ -917,7 +923,7 @@ BASE_FEATURE(kIPHAutofillExternalAccountProfileSuggestionFeature,
              base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHAutofillHomeWorkProfileSuggestionFeature,
              "IPH_AutofillHomeWorkProfileSuggestion",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHAutofillAccountNameEmailSuggestionFeature,
              "IPH_AutofillAccountNameEmailSuggestion",
 #if BUILDFLAG(IS_IOS)
@@ -1011,10 +1017,10 @@ BASE_FEATURE(kIPHiOSEnhancedBrowsingDesktopFeature,
              base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHiOSTabGroupsDesktopFeature,
              "IPH_iOSTabGroupsDesktop",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE(kIPHiOSPriceTrackingDesktopFeature,
              "IPH_iOSPriceTrackingDesktop",
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 #endif  // !BUILDFLAG(IS_ANDROID)
 
 #if !BUILDFLAG(IS_IOS)

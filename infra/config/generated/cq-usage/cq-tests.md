@@ -523,7 +523,6 @@
 * [android-x86-rel](https://ci.chromium.org/ui/p/chromium/builders/try/android-x86-rel) ([definition](https://cs.chromium.org/search?q=file:/try/.*%5C.star$%20%22name%20=%20%5C%22android-x86-rel%5C%22%22))
 * [linux-chromeos-compile-dbg](https://ci.chromium.org/ui/p/chromium/builders/try/linux-chromeos-compile-dbg) ([definition](https://cs.chromium.org/search?q=file:/try/.*%5C.star$%20%22name%20=%20%5C%22linux-chromeos-compile-dbg%5C%22%22))
 * [linux-chromeos-rel](https://ci.chromium.org/ui/p/chromium/builders/try/linux-chromeos-rel) ([definition](https://cs.chromium.org/search?q=file:/try/.*%5C.star$%20%22name%20=%20%5C%22linux-chromeos-rel%5C%22%22))
-* [linux-rel](https://ci.chromium.org/ui/p/chromium/builders/try/linux-rel) ([definition](https://cs.chromium.org/search?q=file:/try/.*%5C.star$%20%22name%20=%20%5C%22linux-rel%5C%22%22))
 * [linux_chromium_asan_rel_ng](https://ci.chromium.org/ui/p/chromium/builders/try/linux_chromium_asan_rel_ng) ([definition](https://cs.chromium.org/search?q=file:/try/.*%5C.star$%20%22name%20=%20%5C%22linux_chromium_asan_rel_ng%5C%22%22))
 * [linux_chromium_compile_dbg_ng](https://ci.chromium.org/ui/p/chromium/builders/try/linux_chromium_compile_dbg_ng) ([definition](https://cs.chromium.org/search?q=file:/try/.*%5C.star$%20%22name%20=%20%5C%22linux_chromium_compile_dbg_ng%5C%22%22))
 * [mac-rel](https://ci.chromium.org/ui/p/chromium/builders/try/mac-rel) ([definition](https://cs.chromium.org/search?q=file:/try/.*%5C.star$%20%22name%20=%20%5C%22mac-rel%5C%22%22))
@@ -1283,7 +1282,6 @@
 * [linux-rel](https://ci.chromium.org/ui/p/chromium/builders/try/linux-rel) ([definition](https://cs.chromium.org/search?q=file:/try/.*%5C.star$%20%22name%20=%20%5C%22linux-rel%5C%22%22))
 
 ### not_site_per_process_blink_wpt_tests
-* [linux-rel](https://ci.chromium.org/ui/p/chromium/builders/try/linux-rel) ([definition](https://cs.chromium.org/search?q=file:/try/.*%5C.star$%20%22name%20=%20%5C%22linux-rel%5C%22%22))
 * [linux_chromium_compile_dbg_ng](https://ci.chromium.org/ui/p/chromium/builders/try/linux_chromium_compile_dbg_ng) ([definition](https://cs.chromium.org/search?q=file:/try/.*%5C.star$%20%22name%20=%20%5C%22linux_chromium_compile_dbg_ng%5C%22%22))
 
 ### not_site_per_process_headless_shell_wpt_tests
@@ -1898,12 +1896,6 @@
 * [android-x64-rel](https://ci.chromium.org/ui/p/chromium/builders/try/android-x64-rel) ([definition](https://cs.chromium.org/search?q=file:/try/.*%5C.star$%20%22name%20=%20%5C%22android-x64-rel%5C%22%22))
 
 ### webview_64_cts_hostside_tests instant_mode
-* [android-x64-rel](https://ci.chromium.org/ui/p/chromium/builders/try/android-x64-rel) ([definition](https://cs.chromium.org/search?q=file:/try/.*%5C.star$%20%22name%20=%20%5C%22android-x64-rel%5C%22%22))
-
-### webview_64_cts_tests full_mode
-* [android-x64-rel](https://ci.chromium.org/ui/p/chromium/builders/try/android-x64-rel) ([definition](https://cs.chromium.org/search?q=file:/try/.*%5C.star$%20%22name%20=%20%5C%22android-x64-rel%5C%22%22))
-
-### webview_64_cts_tests instant_mode
 * [android-x64-rel](https://ci.chromium.org/ui/p/chromium/builders/try/android-x64-rel) ([definition](https://cs.chromium.org/search?q=file:/try/.*%5C.star$%20%22name%20=%20%5C%22android-x64-rel%5C%22%22))
 
 ### webview_cts_tests full_mode

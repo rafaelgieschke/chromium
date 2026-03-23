@@ -43,6 +43,9 @@ VerticalPinnedTabContainerView::VerticalPinnedTabContainerView(
   collection_node->set_remove_child_from_node(base::BindRepeating(
       &TabCollectionAnimatingLayoutManager::AnimateAndDestroyChildView,
       base::Unretained(base::to_address(layout_manager_))));
+  collection_node->set_attach_child_to_node(base::BindRepeating(
+      &TabCollectionAnimatingLayoutManager::AnimateAndReparentView,
+      base::Unretained(&layout_manager_.get())));
 
   node_destroyed_subscription_ = collection_node_->RegisterWillDestroyCallback(
       base::BindOnce(&VerticalPinnedTabContainerView::ResetCollectionNode,
@@ -145,7 +148,14 @@ views::ProposedLayout VerticalPinnedTabContainerView::CalculateProposedLayout(
 
     layouts.child_layouts.emplace_back(child, true, bounds);
   }
-  layouts.host_size = gfx::Size(total_width, total_height);
+
+  // Make sure we snap to bounded width if defined. This is necessary as the
+  // `child_width` calculation above rounds width down and this can result in
+  // off-by-one width calculations when the number of children on a row changes.
+  // Changes in host width can be interpreted as a resize and animations may
+  // otherwise snap to target.
+  layouts.host_size =
+      gfx::Size(size_bounds.width().value_or(total_width), total_height);
   return layouts;
 }
 
@@ -166,6 +176,13 @@ gfx::Size VerticalPinnedTabContainerView::GetMinimumSize() const {
                    min_height);
 }
 
+bool VerticalPinnedTabContainerView::IsDragging() const {
+  if (!collection_node_ || !collection_node_->GetController()) {
+    return false;
+  }
+  return GetDragHandler().IsDragging();
+}
+
 bool VerticalPinnedTabContainerView::IsViewDragging(
     const views::View& child_view) const {
   if (!collection_node_ || !collection_node_->GetController()) {
@@ -178,6 +195,11 @@ bool VerticalPinnedTabContainerView::ShouldAnimateOpacityForAddAndRemove(
     const views::View& child_view) const {
   // Only animate opacity for tab views.
   return views::IsViewClass<VerticalTabView>(&child_view);
+}
+
+bool VerticalPinnedTabContainerView::ShouldSnapToTarget(
+    const views::View& child_view) const {
+  return views::IsViewClass<VerticalSplitTabView>(&child_view);
 }
 
 std::optional<BrowserRootView::DropIndex>

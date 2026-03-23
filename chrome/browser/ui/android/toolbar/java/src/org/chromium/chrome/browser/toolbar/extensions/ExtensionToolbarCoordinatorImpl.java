@@ -50,6 +50,8 @@ public class ExtensionToolbarCoordinatorImpl implements ExtensionToolbarCoordina
 
     private final MenuButtonWidthConsumer mMenuButtonWidthConsumer = new MenuButtonWidthConsumer();
     private final ActionListWidthConsumer mActionListWidthConsumer = new ActionListWidthConsumer();
+    private final PoppedOutActionWidthConsumer mPoppedOutActionWidthConsumer =
+            new PoppedOutActionWidthConsumer();
 
     @Override
     public void initializeWithNative(
@@ -131,6 +133,19 @@ public class ExtensionToolbarCoordinatorImpl implements ExtensionToolbarCoordina
     }
 
     @Override
+    public void showExtensionsMenu() {
+        ListMenuButton extensionsMenuButton = mContainer.findViewById(R.id.extensions_menu_button);
+        assert extensionsMenuButton != null;
+
+        extensionsMenuButton.performClick();
+    }
+
+    @Override
+    public PoppedOutActionWidthConsumer getPoppedOutActionWidthConsumer() {
+        return mPoppedOutActionWidthConsumer;
+    }
+
+    @Override
     public ToolbarWidthConsumer getMenuButtonWidthConsumer() {
         return mMenuButtonWidthConsumer;
     }
@@ -138,6 +153,27 @@ public class ExtensionToolbarCoordinatorImpl implements ExtensionToolbarCoordina
     @Override
     public ToolbarWidthConsumer getActionListWidthConsumer() {
         return mActionListWidthConsumer;
+    }
+
+    private class PoppedOutActionWidthConsumer implements ToolbarWidthConsumer {
+        @Override
+        public boolean isVisible() {
+            return mExtensionActionListCoordinator.hasPoppedOutAction();
+        }
+
+        @Override
+        public int updateVisibility(int availableWidth) {
+            // Do not update the UI here just yet. We will leave that to {@link
+            // ActionListWidthConsumer}, which will be called but later because it has lower
+            // priority.
+            return mExtensionActionListCoordinator.setCanShowPoppedOutAction(availableWidth);
+        }
+
+        @Override
+        public int updateVisibilityWithAnimation(
+                int availableWidth, Collection<Animator> animators) {
+            return updateVisibility(availableWidth);
+        }
     }
 
     private class MenuButtonWidthConsumer implements ToolbarWidthConsumer {

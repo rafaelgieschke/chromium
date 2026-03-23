@@ -123,8 +123,8 @@ Text* Text::splitText(unsigned offset, ExceptionState& exception_state) {
   EventQueueScope scope;
   String old_str = data();
   Text* new_text =
-      To<Text>(CloneWithData(GetDocument(), old_str.Substring(offset)));
-  SetDataWithoutUpdate(old_str.Substring(0, offset));
+      To<Text>(CloneWithData(GetDocument(), old_str.substr(offset)));
+  SetDataWithoutUpdate(old_str.substr(0, offset));
 
   DidModifyData(old_str, CharacterData::kUpdateFromNonParser);
 
@@ -253,7 +253,7 @@ String Text::nodeName() const {
 }
 
 static inline bool EndsWithWhitespace(const String& text) {
-  return text.length() && IsASCIISpace(text[text.length() - 1]);
+  return text.length() && IsAsciiSpace(text[text.length() - 1]);
 }
 
 static inline bool CanHaveWhitespaceChildren(

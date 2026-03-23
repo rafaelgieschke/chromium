@@ -175,6 +175,8 @@ FEATURE_CONSTANTS_DECLARE_FEATURE(
 FEATURE_CONSTANTS_DECLARE_FEATURE(
     kIPHAdaptiveButtonInTopToolbarCustomizationReadAloudFeature);
 FEATURE_CONSTANTS_DECLARE_FEATURE(
+    kIPHAdaptiveButtonInTopToolbarCustomizationGlicFeature);
+FEATURE_CONSTANTS_DECLARE_FEATURE(
     kIPHAdaptiveButtonInTopToolbarCustomizationPageSummaryWebFeature);
 FEATURE_CONSTANTS_DECLARE_FEATURE(
     kIPHAdaptiveButtonInTopToolbarCustomizationPageSummaryPdfFeature);
@@ -257,6 +259,7 @@ FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHTabGroupSyncOnStripFeature);
 FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHTabSwitcherAddToGroup);
 FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHTabSwitcherButtonFeature);
 FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHTabSwitcherButtonSwitchIncognitoFeature);
+FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHThreeDotMenuBackButton);
 FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHTranslateMenuButtonFeature);
 FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHTouchToSearchCalloutFeature);
 FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHVideoTutorialNTPChromeIntroFeature);

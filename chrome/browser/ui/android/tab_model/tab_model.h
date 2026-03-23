@@ -266,6 +266,8 @@ class TabModel : public TabListInterface {
   virtual void SetActiveIndex(int index) = 0;
   virtual void ForceCloseAllTabs() = 0;
   virtual void CloseTabAt(int index) = 0;
+  std::unique_ptr<content::WebContents> DetachWebContents(
+      tabs::TabHandle tab) override = 0;
 
   virtual tabs::TabInterface* CreateTab(
       TabAndroid* parent,
@@ -306,15 +308,13 @@ class TabModel : public TabListInterface {
   virtual void CloseTabsNavigatedInTimeWindow(const base::Time& begin_time,
                                               const base::Time& end_time) = 0;
 
-  // Returns the tab strip collection for this tab model.
-  virtual tabs::TabCollection* GetTabStripCollection() const = 0;
-
   chrome::android::ActivityType activity_type() const { return activity_type_; }
   const std::optional<chrome::android::CustomTabProfileType>&
   custom_tab_profile_type() const {
     return custom_tab_profile_type_;
   }
   TabModelType GetTabModelType() const { return tab_model_type_; }
+  bool IsEmptyRegularModelForEphemeralOrIncognitoCct() const;
 
   static bool EnableBrowserWindowInterfaceMobile();
 

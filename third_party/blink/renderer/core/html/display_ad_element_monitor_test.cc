@@ -79,7 +79,7 @@ TEST_F(DisplayAdElementMonitorTest, BasicReporting_InsertUpdateRemove) {
   EXPECT_CALL(MockClient(),
               OnMainFrameAdRectangleChanged(ad_element->GetDomNodeId(),
                                             gfx::Rect(100, 50, 300, 250)));
-  ad_element->SetIsAdRelated();
+  ad_element->SetIsAdRelated(NoProvenance{});
   UpdateLifecycle();
   testing::Mock::VerifyAndClearExpectations(&MockClient());
 
@@ -121,7 +121,7 @@ TEST_F(DisplayAdElementMonitorTest, ScrollingDoesNotSendNewReport) {
   EXPECT_CALL(MockClient(),
               OnMainFrameAdRectangleChanged(ad_element->GetDomNodeId(),
                                             gfx::Rect(100, 2050, 300, 250)));
-  ad_element->SetIsAdRelated();
+  ad_element->SetIsAdRelated(NoProvenance{});
   UpdateLifecycle();
   testing::Mock::VerifyAndClearExpectations(&MockClient());
 
@@ -177,7 +177,7 @@ TEST_F(DisplayAdElementMonitorTest, NestedAdElement) {
   EXPECT_CALL(MockClient(),
               OnMainFrameAdRectangleChanged(ad_element->GetDomNodeId(),
                                             gfx::Rect(110, 1550, 300, 250)));
-  ad_element->SetIsAdRelated();
+  ad_element->SetIsAdRelated(NoProvenance{});
   UpdateLifecycle();
   testing::Mock::VerifyAndClearExpectations(&MockClient());
 
@@ -214,7 +214,7 @@ TEST_F(DisplayAdElementMonitorTest, AdInitiallyOverlaidAndThenExposed) {
   EXPECT_CALL(MockClient(),
               OnMainFrameAdRectangleChanged(testing::_, testing::_))
       .Times(0);
-  ad_element->SetIsAdRelated();
+  ad_element->SetIsAdRelated(NoProvenance{});
   UpdateLifecycle();
   testing::Mock::VerifyAndClearExpectations(&MockClient());
 
@@ -259,7 +259,7 @@ TEST_F(DisplayAdElementMonitorTest,
   EXPECT_CALL(MockClient(),
               OnMainFrameAdRectangleChanged(ad_element->GetDomNodeId(),
                                             gfx::Rect(100, 700, 300, 250)));
-  ad_element->SetIsAdRelated();
+  ad_element->SetIsAdRelated(NoProvenance{});
   UpdateLifecycle();
   testing::Mock::VerifyAndClearExpectations(&MockClient());
 
@@ -318,7 +318,7 @@ TEST_F(DisplayAdElementMonitorTest,
   EXPECT_CALL(MockClient(),
               OnMainFrameAdRectangleChanged(testing::_, testing::_))
       .Times(0);
-  ad_element->SetIsAdRelated();
+  ad_element->SetIsAdRelated(NoProvenance{});
   UpdateLifecycle();
   testing::Mock::VerifyAndClearExpectations(&MockClient());
 
@@ -357,7 +357,7 @@ TEST_F(DisplayAdElementMonitorTest, ReportingForAdIframe_InsertUpdateHide) {
   ad_evidence.set_created_by_ad_script(
       mojom::FrameCreationStackEvidence::kCreatedByAdScript);
   ad_evidence.set_is_complete();
-  DynamicTo<LocalFrame>(ad_element->ContentFrame())->SetAdEvidence(ad_evidence);
+  To<LocalFrame>(*ad_element->ContentFrame()).SetAdEvidence(ad_evidence);
   UpdateLifecycle();
   testing::Mock::VerifyAndClearExpectations(&MockClient());
 

@@ -9,6 +9,7 @@ import("//extensions/buildflags/buildflags.gni")
 import("//pdf/features.gni")
 import("//rlz/buildflags/buildflags.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
+import("//third_party/protobuf/proto_library.gni")
 
 if (enable_desktop_android_extensions) {
   import("//build/config/android/rules.gni")
@@ -242,6 +243,8 @@ source_set("browser_sources") {
     "content_hash_reader.h",
     "content_hash_tree.cc",
     "content_hash_tree.h",
+    "content_settings_extension_install_time_permission_provider.cc",
+    "content_settings_extension_install_time_permission_provider.h",
     "content_verifier/content_hash.cc",
     "content_verifier/content_hash.h",
     "content_verifier/content_verifier.cc",
@@ -535,6 +538,8 @@ source_set("browser_sources") {
     "service_worker/worker_id_set.h",
     "service_worker_manager.cc",
     "service_worker_manager.h",
+    "shared_module_service.cc",
+    "shared_module_service.h",
     "state_store.cc",
     "state_store.h",
     "state_store_test_observer.cc",
@@ -1017,6 +1022,7 @@ source_set("unit_tests") {
     "computed_hashes_unittest.cc",
     "content_hash_fetcher_unittest.cc",
     "content_hash_tree_unittest.cc",
+    "content_settings_extension_install_time_permission_provider_unittest.cc",
     "content_verifier/content_hash_unittest.cc",
     "content_verifier/content_verifier_unittest.cc",
     "content_verifier/content_verifier_utils_unittest.cc",
@@ -1337,4 +1343,8 @@ if (enable_extensions) {
     # The fuzzed code needs more RAM that the default limit.
     libfuzzer_options = [ "rss_limit_mb=4096" ]
   }
+}
+
+proto_library("cws_item_service_proto") {
+  sources = [ "cws_item_service.proto" ]
 }

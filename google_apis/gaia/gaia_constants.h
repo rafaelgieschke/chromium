@@ -21,6 +21,7 @@ COMPONENT_EXPORT(GOOGLE_APIS) extern const char kChromeSource[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kUnexpectedServiceResponse[];
 
 // OAuth2 scopes.
+COMPONENT_EXPORT(GOOGLE_APIS) extern const char kAgenticPermissionOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kOAuth1LoginScope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kDeviceManagementServiceOAuth[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kAnyApiOAuth2Scope[];
@@ -34,7 +35,6 @@ extern const char kKidsSupervisionSetupChildOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kGoogleTalkOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kGoogleUserInfoEmail[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kGoogleUserInfoProfile[];
-COMPONENT_EXPORT(GOOGLE_APIS) extern const char kIpProtectionAuthScope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kParentApprovalOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS) extern const char kPeopleApiReadOnlyOAuth2Scope[];
 COMPONENT_EXPORT(GOOGLE_APIS)

@@ -55,7 +55,9 @@ class ContextualTasksUIInterface : public TaskInfoDelegate {
   virtual void OnSidePanelStateChanged() = 0;
 
   // Called when the active tab has been changed (e.g. new page loaded or title
-  // change). This is used to update the UI when rendered in the side panel.
+  // change). This is used to update the UI for both tab/side panel modes.
+  // Note that a title can be updated while the page is loading, so this can
+  // be called even when active tab has not changed.
   virtual void OnActiveTabContextStatusChanged() = 0;
 
   // Notifies the UI that the Lens overlay state has changed.
@@ -78,6 +80,8 @@ class ContextualTasksUIInterface : public TaskInfoDelegate {
 
   // Moves the UI associated with this WebUI to a new tab.
   virtual void MoveTaskUiToNewTab() = 0;
+
+  virtual GURL GetWebUiUrl() = 0;
 
   // Mojo & Session.
 

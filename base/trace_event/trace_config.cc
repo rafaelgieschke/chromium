@@ -215,7 +215,7 @@ TraceConfig::EventFilterConfig& TraceConfig::EventFilterConfig::operator=(
 bool TraceConfig::EventFilterConfig::IsEquivalentTo(
     const EventFilterConfig& other) const {
   return predicate_name_ == other.predicate_name_ &&
-         category_filter_.IsEquivalentTo(category_filter_) &&
+         category_filter_.IsEquivalentTo(other.category_filter_) &&
          args_ == other.args_;
 }
 
@@ -543,10 +543,10 @@ void TraceConfig::InitializeFromStrings(std::string_view category_filter_string,
           continue;
         }
         enable_systrace_ = true;
-        const std::vector<std::string> split_systrace_events = SplitString(
+        std::vector<std::string> split_systrace_events = SplitString(
             system_events.substr(1), " ", TRIM_WHITESPACE, SPLIT_WANT_NONEMPTY);
-        for (const std::string& systrace_event : split_systrace_events) {
-          systrace_events_.insert(systrace_event);
+        for (std::string& systrace_event : split_systrace_events) {
+          systrace_events_.insert(std::move(systrace_event));
         }
       } else if (token == kEnableArgumentFilter) {
         enable_argument_filter_ = true;

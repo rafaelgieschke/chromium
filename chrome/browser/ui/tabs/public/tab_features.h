@@ -106,6 +106,7 @@ class GlicTabIndicatorHelper;
 class GlicSidePanelCoordinator;
 class GlicSelectionObserver;
 class SelectionOverlayController;
+class GlicPageFeaturesManager;
 }  // namespace glic
 
 namespace memory_saver {
@@ -218,12 +219,6 @@ class TabFeatures {
   SetCustomizeChromeSidePanelControllerForTesting(
       std::unique_ptr<customize_chrome::SidePanelController>
           customize_chrome_side_panel_controller);
-
-  // This side-panel registry is tab-scoped. It is different from the browser
-  // window scoped SidePanelRegistry.
-  SidePanelRegistry* side_panel_registry() {
-    return side_panel_registry_.get();
-  }
 
   // TODO(crbug.com/447418049): This will be removed in the future when
   // ownership of this controller is migrated to ReadAnythingController.
@@ -510,6 +505,8 @@ class TabFeatures {
   std::unique_ptr<glic::GlicSelectionObserver> glic_selection_observer_;
   std::unique_ptr<glic::SelectionOverlayController>
       glic_selection_overlay_controller_;
+
+  std::unique_ptr<glic::GlicPageFeaturesManager> glic_page_features_manager_;
 
   std::unique_ptr<memory_saver::MemorySaverChipController>
       memory_saver_chip_controller_;

@@ -207,8 +207,8 @@ static bool IsValidExtendedLanguageRange(const String& range) {
 
       // First subtag must be alphabetic, subsequent ones can be alphanumeric.
       for (wtf_size_t j = subtag_start; j < pos; ++j) {
-        const bool valid = is_first_subtag ? IsASCIIAlpha(range[j])
-                                           : IsASCIIAlphanumeric(range[j]);
+        const bool valid = is_first_subtag ? IsAsciiAlpha(range[j])
+                                           : IsAsciiAlphanumeric(range[j]);
         if (!valid) {
           return false;
         }
@@ -712,6 +712,7 @@ SelectorChecker::FeaturelessMatch SelectorChecker::MatchShadowHost(
     case CSSSelector::kPseudoEmpty:
     case CSSSelector::kPseudoEnabled:
     case CSSSelector::kPseudoEnd:
+    case CSSSelector::kPseudoExpandIcon:
     case CSSSelector::kPseudoFileSelectorButton:
     case CSSSelector::kPseudoFiltered:
     case CSSSelector::kPseudoFirstChild:
@@ -2339,7 +2340,9 @@ bool SelectorChecker::CheckPseudoClass(const SelectorCheckingContext& context,
       if (IsTransitionPseudoElement(pseudo_id_to_check)) {
         ViewTransition* transition =
             ViewTransitionUtils::GetTransition(element);
-        CHECK(transition);
+        if (!transition) {
+          return false;
+        }
         DCHECK((transition->Scope() == &element && context.pseudo_id) ||
                element.IsPseudoElement());
         DCHECK(context.pseudo_argument || element.IsPseudoElement());

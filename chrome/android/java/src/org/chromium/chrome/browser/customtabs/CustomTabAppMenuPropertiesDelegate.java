@@ -22,7 +22,7 @@ import org.chromium.build.annotations.NullMarked;
 import org.chromium.build.annotations.Nullable;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ActivityTabProvider;
-import org.chromium.chrome.browser.DefaultBrowserInfo;
+import org.chromium.chrome.browser.DefaultBrowserMenuUtils;
 import org.chromium.chrome.browser.app.appmenu.AppMenuPropertiesDelegateImpl;
 import org.chromium.chrome.browser.bookmarks.BookmarkModel;
 import org.chromium.chrome.browser.browserservices.intents.BrowserServicesIntentDataProvider;
@@ -261,6 +261,9 @@ public class CustomTabAppMenuPropertiesDelegate extends AppMenuPropertiesDelegat
         // --- Icon Row ---
         if (iconRowVisible) {
             List<PropertyModel> iconModels = new ArrayList<>();
+            if (ChromeFeatureList.sThreeDotMenuBackButton.isEnabled()) {
+                iconModels.add(buildBackwardActionModel(currentTab));
+            }
             iconModels.add(buildForwardActionModel(currentTab));
 
             if (bookmarkItemVisible) {
@@ -271,7 +274,9 @@ public class CustomTabAppMenuPropertiesDelegate extends AppMenuPropertiesDelegat
                 iconModels.add(buildDownloadActionModel(currentTab));
             }
 
-            iconModels.add(buildPageInfoModel(currentTab));
+            if (!ChromeFeatureList.sThreeDotMenuBackButton.isEnabled()) {
+                iconModels.add(buildPageInfoModel(currentTab));
+            }
             iconModels.add(buildReloadModel(currentTab));
 
             modelList.add(
@@ -443,7 +448,7 @@ public class CustomTabAppMenuPropertiesDelegate extends AppMenuPropertiesDelegat
         } else if (mIsOpenedByChrome) {
             title = context.getString(R.string.menu_open_in_new_tab);
         } else {
-            title = DefaultBrowserInfo.getTitleOpenInDefaultBrowser(false);
+            title = DefaultBrowserMenuUtils.getTitleOpenInDefaultBrowser(false);
         }
         PropertyModel model =
                 buildBaseModelForTextItem(R.id.open_in_browser_id)

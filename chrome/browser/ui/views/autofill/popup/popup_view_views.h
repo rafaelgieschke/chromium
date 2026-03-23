@@ -29,6 +29,7 @@
 #include "ui/base/interaction/element_identifier.h"
 #include "ui/base/metadata/metadata_header_macros.h"
 #include "ui/events/event.h"
+#include "ui/views/controls/tabbed_pane/tabbed_pane_listener.h"
 #include "ui/views/widget/widget.h"
 
 namespace views {
@@ -67,7 +68,8 @@ class PopupViewViews : public PopupBaseView,
                        public AutofillPopupView,
                        public PopupRowView::SelectionDelegate,
                        public ExpandablePopupParentView,
-                       public PopupSearchBarView::Delegate {
+                       public PopupSearchBarView::Delegate,
+                       public views::TabbedPaneListener {
   METADATA_HEADER(PopupViewViews, PopupBaseView)
 
  public:
@@ -162,6 +164,9 @@ class PopupViewViews : public PopupBaseView,
   void SearchBarOnFocusLost() override;
   bool SearchBarHandleKeyPressed(const ui::KeyEvent& event) override;
 
+  // TabbedPaneListener::
+  void TabSelectedAt(int index) override;
+
  private:
   friend class PopupViewViewsTestApi;
 
@@ -187,9 +192,16 @@ class PopupViewViews : public PopupBaseView,
   // metadata.
   void ShowIPHFeaturePromos();
 
+  // Announces the title of the currently selected tab in `tabbed_pane_`, if it
+  // exists.
+  void MaybeAnnounceCurrentTab();
+
   // If the current suggestions are for password recovery, announces it to the
   // user.
   void MaybeAnnouncePasswordRecoveryPopup();
+
+  // If the current suggestions are for loading, announces it to the user.
+  void MaybeAnnounceLoadingState();
 
   // Returns the `PopupRowView` at line number `index`. Assumes that there is
   // such a view at that line number - otherwise the underlying variant will
@@ -318,6 +330,9 @@ class PopupViewViews : public PopupBaseView,
   // The latest row which was set as having a sub-popup open. Storing it
   // is required to maintain the invariant of at most one such a row.
   std::optional<size_t> row_with_open_sub_popup_;
+
+  // Stores the initial width of the popup to maintain when switching tabs.
+  std::optional<int> tabbed_pane_initial_width_ = std::nullopt;
 
   std::vector<RowPointer> rows_;
   const std::optional<const AutofillPopupView::SearchBarConfig>

@@ -1511,7 +1511,7 @@ CanvasResourceDispatcher* HTMLCanvasElement::GetOrCreateResourceDispatcher() {
 }
 
 bool HTMLCanvasElement::PushFrame(scoped_refptr<CanvasResource>&& image,
-                                  const SkIRect& damage_rect) {
+                                  std::optional<SkIRect> damage_rect) {
   NOTIMPLEMENTED();
   return false;
 }
@@ -1791,6 +1791,10 @@ void HTMLCanvasElement::RemovedFrom(ContainerNode& insertion_point) {
   ColorSchemeMayHaveChanged();
 }
 
+bool HTMLCanvasElement::ChildrenChangedAllChildrenRemovedNeedsList() const {
+  return RuntimeEnabledFeatures::CanvasDrawElementEnabled();
+}
+
 void HTMLCanvasElement::ChildrenChanged(const ChildrenChange& change) {
   HTMLElement::ChildrenChanged(change);
   if (hasChildren()) {
@@ -1798,6 +1802,30 @@ void HTMLCanvasElement::ChildrenChanged(const ChildrenChange& change) {
     if (firstElementChild()) {
       UseCounter::Count(GetDocument(),
                         WebFeature::kCanvasFallbackElementContent);
+    }
+  }
+
+  if (RuntimeEnabledFeatures::CanvasDrawElementEnabled()) {
+    if (change.type == ChildrenChangeType::kElementRemoved) {
+      if (auto* element = DynamicTo<Element>(change.sibling_changed)) {
+        ChildElementRemoved(*element);
+      }
+    } else if (change.type == ChildrenChangeType::kAllChildrenRemoved) {
+      for (Node* node : change.removed_nodes) {
+        if (auto* element = DynamicTo<Element>(node)) {
+          ChildElementRemoved(*element);
+        }
+      }
+    }
+  }
+}
+
+void HTMLCanvasElement::ChildElementRemoved(Element& child) {
+  if (auto* view = GetDocument().View()) {
+    if (auto* pac = view->GetPaintArtifactCompositor()) {
+      if (pac->HasCanvasChildPaintRecord(child.GetDomNodeId())) {
+        requestPaint();
+      }
     }
   }
 }

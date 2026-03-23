@@ -136,8 +136,9 @@ class CreditCardFormEventLogger : public FormEventLoggerBase {
     signin_state_for_metrics_ = state;
   }
 
-  // Logging when a BNPL suggestion was accepted.
-  void OnDidAcceptBnplSuggestion();
+  // Logging when the user decided to use BNPL (for example, accepting a BNPL
+  // suggestion chip if present).
+  void OnUserDecisionToUseBnpl();
 
   // Called by BrowserAutofillManager after the Save and Fill suggestion is
   // shown.
@@ -247,6 +248,11 @@ class CreditCardFormEventLogger : public FormEventLoggerBase {
   bool has_logged_save_and_fill_suggestion_accepted_ = false;
 
   CardMetadataLoggingContext metadata_logging_context_;
+  // Captures the `metadata_logging_context_` at the time of form filling. Used
+  // when logging submission metrics since `metadata_logging_context_` could get
+  // overwritten anytime a new suggestion fetch is triggered, e.g. a user
+  // focuses a CVC field after autofilling a card with benefits.
+  CardMetadataLoggingContext metadata_logging_context_at_fill_;
 
   // Set when a list of suggestion is shown.
   base::TimeTicks suggestion_shown_timestamp_;

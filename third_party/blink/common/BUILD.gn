@@ -242,6 +242,7 @@ source_set("common") {
     "page/drag_mojom_traits.cc",
     "page/drag_operation.cc",
     "page/page_zoom.cc",
+    "page/source_effect_allowed_mojom_util.cc",
     "page_state/page_state.cc",
     "page_state/page_state_serialization.cc",
     "peerconnection/webrtc_ip_handling_policy.cc",
@@ -350,10 +351,6 @@ source_set("common") {
   if (is_chromeos || is_android || is_win || is_castos || is_fuchsia) {
     defines = [ "ENABLE_PROTECTED_MEDIA_IDENTIFIER_PERMISSION" ]
   }
-
-  # TODO(crbug.com/40031409): Fix code that adds exit-time destructors and
-  # enable the diagnostic by removing this line.
-  configs += [ "//build/config/compiler:no_exit_time_destructors" ]
 }
 
 test("blink_common_unittests") {

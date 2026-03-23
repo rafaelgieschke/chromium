@@ -75,6 +75,7 @@
 #include "chrome/browser/web_applications/web_app_management_type.h"
 #include "chrome/browser/web_applications/web_app_provider.h"
 #include "chrome/browser/web_applications/web_app_registrar.h"
+#include "chrome/browser/web_applications/web_app_scope.h"
 #include "chrome/browser/web_applications/web_app_tab_helper.h"
 #include "chrome/browser/web_applications/web_app_ui_manager.h"
 #include "chrome/browser/web_applications/web_app_utils.h"
@@ -1067,7 +1068,7 @@ void WebAppPublisherHelper::LaunchAppWithIntent(
   CHECK(intent);
 
   if (IsShuttingDown()) {
-    std::move(callback).Run(apps::LaunchResult(apps::State::kFailed));
+    std::move(callback).Run(apps::LaunchResult::kFailed);
     return;
   }
 
@@ -1077,15 +1078,12 @@ void WebAppPublisherHelper::LaunchAppWithIntent(
         window_info ? window_info->display_id : display::kInvalidDisplayId;
     guest_os::LaunchTerminalWithIntent(
         profile_, display_id, std::move(intent),
-        base::BindOnce(
-            [](apps::LaunchCallback callback, bool success,
-               const std::string& failure_reason) {
-              if (!success) {
-                LOG(WARNING) << "Launch terminal failed: " << failure_reason;
-              }
-              std::move(callback).Run(apps::ConvertBoolToLaunchResult(success));
-            },
-            std::move(callback)));
+        base::BindOnce([](bool success, const std::string& failure_reason) {
+          LOG_IF(WARNING, !success)
+              << "Launch terminal failed: " << failure_reason;
+          return success ? apps::LaunchResult::kSuccess
+                         : apps::LaunchResult::kFailed;
+        }).Then(std::move(callback)));
     return;
   }
 #endif
@@ -1094,7 +1092,7 @@ void WebAppPublisherHelper::LaunchAppWithIntent(
       app_id, event_flags, std::move(intent), launch_source,
       window_info ? window_info->display_id : display::kInvalidDisplayId,
       base::BindOnce(
-          [](apps::LaunchCallback callback, apps::LaunchSource launch_source,
+          [](apps::LaunchSource launch_source,
              std::vector<content::WebContents*> web_contentses) {
 #if BUILDFLAG(IS_CHROMEOS)
             for (content::WebContents* web_contents : web_contentses) {
@@ -1107,10 +1105,11 @@ void WebAppPublisherHelper::LaunchAppWithIntent(
               }
             }
 #endif
-            std::move(callback).Run(
-                apps::ConvertBoolToLaunchResult(!web_contentses.empty()));
+            return !web_contentses.empty() ? apps::LaunchResult::kSuccess
+                                           : apps::LaunchResult::kFailed;
           },
-          std::move(callback), launch_source));
+          launch_source)
+          .Then(std::move(callback)));
 }
 
 void WebAppPublisherHelper::LaunchAppWithParams(
@@ -1529,6 +1528,38 @@ void WebAppPublisherHelper::OnWebAppUserDisplayModeChanged(
     if (web_app) {
       delegate_->PublishWebApp(CreateWebApp(web_app));
     }
+  }
+}
+
+void WebAppPublisherHelper::OnWebAppEffectiveScopeChanged(
+    const webapps::AppId& app_id,
+    const WebAppScope& new_scope) {
+  const WebApp* web_app = GetWebApp(app_id);
+  if (web_app) {
+    auto app = CreateWebApp(web_app);
+
+#if BUILDFLAG(IS_CHROMEOS)
+    auto* proxy = apps::AppServiceProxyFactory::GetForProfile(profile_);
+
+    bool iwa_capture_links_set_default =
+        registrar().AppMatches(app_id, WebAppFilter::IsIsolatedApp() |
+                                           WebAppFilter::IsIsolatedSubApp()) &&
+        (proxy->PreferredAppsList().IsPreferredAppForSupportedLinks(app_id) ||
+         // IsPreferredAppForSupportedLinks returns false if app has 0 intent
+         // filters, regardless of SetSupportedLinksPreference was called on
+         // install.
+         (!AppHasSupportedLinks(proxy, app_id) &&
+          !AreOtherAppsPreferredForLinks(proxy, app_id, app->intent_filters)));
+
+#endif  //  BUILDFLAG(IS_CHROMEOS)
+
+    delegate_->PublishWebApp(std::move(app));
+
+#if BUILDFLAG(IS_CHROMEOS)
+    if (iwa_capture_links_set_default) {
+      proxy->SetSupportedLinksPreference(app_id);
+    }
+#endif  //  BUILDFLAG(IS_CHROMEOS)
   }
 }
 

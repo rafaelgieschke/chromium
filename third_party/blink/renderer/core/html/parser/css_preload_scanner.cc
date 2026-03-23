@@ -140,13 +140,14 @@ inline void CSSPreloadScanner::Tokenize(UChar c,
         state_ = kComment;
       break;
     case kRuleStart:
-      if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+      if (IsAsciiAlpha(c)) {
         rule_.Clear();
         rule_value_.Clear();
         rule_.Append(c);
         state_ = kRule;
-      } else
+      } else {
         state_ = kInitial;
+      }
       break;
     case kRule:
       if (IsHTMLSpace<UChar>(c))
@@ -277,7 +278,7 @@ static String ParseCSSStringOrURL(const String& string) {
     reduced_length -= 2;
   }
 
-  return string.Substring(offset, reduced_length);
+  return string.substr(offset, reduced_length);
 }
 
 bool CSSPreloadScanner::CanPreloadImportRule() const {

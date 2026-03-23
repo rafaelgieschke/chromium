@@ -503,7 +503,9 @@ DataTypeSet AlwaysPreferredUserTypes() {
                        SEND_TAB_TO_SELF,
                        SUPERVISED_USER_SETTINGS,
                        SHARING_MESSAGE,
-                       SKILL};
+                       SKILL,
+                       AI_THREAD,
+                       GEMINI_THREAD};
   // TODO(crbug.com/412602018): Mark AlwaysPreferredUserTypes() method as
   // constexpr when removing the feature flag.
   if (!base::FeatureList::IsEnabled(
@@ -514,12 +516,6 @@ DataTypeSet AlwaysPreferredUserTypes() {
   // UserSelectableType or another toggle once feature is finalized.
   if (base::FeatureList::IsEnabled(kSyncAccessibilityAnnotation)) {
     types.Put(ACCESSIBILITY_ANNOTATION);
-  }
-  if (base::FeatureList::IsEnabled(syncer::kSyncAIThread)) {
-    types.Put(AI_THREAD);
-  }
-  if (base::FeatureList::IsEnabled(syncer::kSyncGeminiThread)) {
-    types.Put(GEMINI_THREAD);
   }
   return types;
 }
@@ -534,11 +530,9 @@ DataTypeSet EncryptableUserTypes() {
   encryptable_user_types.Remove(ACCESSIBILITY_ANNOTATION);
   // Account settings are read-only and therefore never encrypted.
   encryptable_user_types.Remove(ACCOUNT_SETTING);
-  if (base::FeatureList::IsEnabled(kSyncMakeAutofillValuableNonEncryptable)) {
-    // Valuables are never encrypted because they can be generated from outside
-    // of Chrome.
-    encryptable_user_types.Remove(AUTOFILL_VALUABLE);
-  }
+  // Valuables are never encrypted because they can be generated from outside
+  // of Chrome.
+  encryptable_user_types.Remove(AUTOFILL_VALUABLE);
   // Wallet data is not encrypted since it actually originates on the server.
   encryptable_user_types.Remove(AUTOFILL_WALLET_DATA);
   encryptable_user_types.Remove(AUTOFILL_WALLET_OFFER);

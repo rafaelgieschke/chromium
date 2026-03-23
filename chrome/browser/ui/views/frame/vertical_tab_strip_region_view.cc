@@ -50,6 +50,7 @@
 #include "components/tabs/public/tab_interface.h"
 #include "ui/base/clipboard/clipboard_constants.h"
 #include "ui/base/dragdrop/os_exchange_data.h"
+#include "ui/base/interaction/element_tracker.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/color/color_id.h"
@@ -58,10 +59,12 @@
 #include "ui/gfx/animation/animation.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/views/background.h"
+#include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/focus_ring.h"
 #include "ui/views/controls/resize_area.h"
 #include "ui/views/controls/scroll_view.h"
 #include "ui/views/controls/separator.h"
+#include "ui/views/interaction/element_tracker_views.h"
 #include "ui/views/layout/flex_layout.h"
 #include "ui/views/layout/flex_layout_types.h"
 #include "ui/views/layout/layout_types.h"
@@ -75,6 +78,9 @@ constexpr int kResizeAreaWidth = 5;
 constexpr int kCollapsedResizeAreaWidth = 2;
 constexpr int kKeyboardResizeWidth = 50;
 }  // namespace
+
+DEFINE_CLASS_CUSTOM_ELEMENT_EVENT_TYPE(VerticalTabStripRegionView,
+                                       kAnimationCompletedEvent);
 
 VerticalTabStripRegionView::VerticalTabStripRegionView(
     tabs::VerticalTabStripStateController* state_controller,
@@ -148,7 +154,7 @@ VerticalTabStripRegionView::VerticalTabStripRegionView(
           &VerticalTabStripRegionView::OnCollapsedStateChanged,
           base::Unretained(this)));
 
-  SetProperty(views::kElementIdentifierKey, kVerticalTabStripRegionElementId);
+  SetProperty(views::kElementIdentifierKey, kTabStripRegionElementId);
 
   GetViewAccessibility().SetRole(ax::mojom::Role::kTabList);
 
@@ -584,7 +590,10 @@ void VerticalTabStripRegionView::AnimationEnded(
   if (tab_strip_view_) {
     tab_strip_view_->SetIsAnimatingSize(false);
   }
+  views::ElementTrackerViews::GetInstance()->NotifyCustomEvent(
+      kAnimationCompletedEvent, this);
 }
+
 void VerticalTabStripRegionView::AnimationCanceled(
     const gfx::Animation* animation) {
   DCHECK_EQ(animation, &resize_animation_);
@@ -712,10 +721,11 @@ void VerticalTabStripRegionView::OnCollapsedStateChanged(
                                      gfx::Insets::VH(0, separator_padding));
   if (state_controller->IsCollapsed()) {
     // If the VT Strip is collapsed, then we need exactly |padding| on the top,
-    // left, and right.
+    // left, and right. The top padding is applied inside of the top container
+    // class to avoid animation issues on non-Mac platforms.
     top_button_container_->SetProperty(
         views::kMarginsKey,
-        gfx::Insets::TLBR(padding, padding, kRegionVerticalPadding, padding));
+        gfx::Insets::TLBR(0, padding, kRegionVerticalPadding, padding));
   } else {
     // If the VT Strip is not collapsed, then we want to align the heights of
     // the TopContainer w/ the the height of the toolbar. Both of these
@@ -911,22 +921,19 @@ gfx::Rect VerticalTabStripRegionView::GetLinkDropBounds(
 
   // If the rect doesn't fit on the monitor, push the arrow to the other side.
   display::Screen* screen = display::Screen::Get();
-  display::Display display =
-      screen->GetDisplayNearestView(GetWidget()->GetNativeView());
+  gfx::Rect display_bounds =
+      screen->GetDisplayNearestView(GetWidget()->GetNativeView()).bounds();
 
-  if (!display.bounds().Contains(drop_bounds)) {
-    // Only left/right arrows should be outside the display bounds.
-    CHECK_NE(*direction, DropArrow::Direction::kDown);
+  DropArrow::MaybeAdjustDisplayBounds(display_bounds);
 
-    const gfx::Size drop_arrow_size = DropArrow::GetSize();
-    if (base::i18n::IsRTL()) {
+  if (!display_bounds.Contains(drop_bounds)) {
+    if (base::i18n::IsRTL() && *direction == DropArrow::Direction::kLeft) {
       *direction = DropArrow::Direction::kRight;
-      drop_bounds.Offset(
-          -GetBoundsInScreen().width() - drop_arrow_size.height(), 0);
-    } else {
+      drop_bounds.Offset(-GetBoundsInScreen().width() - DropArrow::kSize, 0);
+    } else if (base::i18n::IsRTL() &&
+               *direction == DropArrow::Direction::kRight) {
       *direction = DropArrow::Direction::kLeft;
-      drop_bounds.Offset(GetBoundsInScreen().width() + drop_arrow_size.height(),
-                         0);
+      drop_bounds.Offset(GetBoundsInScreen().width() + DropArrow::kSize, 0);
     }
   }
 
@@ -1008,18 +1015,15 @@ gfx::Point VerticalTabStripRegionView::GetLinkDropArrowPosition(
 gfx::Rect VerticalTabStripRegionView::GetLinkDropBoundsFromPosition(
     gfx::Point position,
     DropArrow::Direction direction) {
-  gfx::Size drop_arrow_size = DropArrow::GetSize();
   if (direction == DropArrow::Direction::kRight) {
-    drop_arrow_size.Transpose();
-    position.Offset(-drop_arrow_size.width(), -drop_arrow_size.height() / 2);
+    position.Offset(-DropArrow::kSize, -DropArrow::kSize / 2);
   } else if (direction == DropArrow::Direction::kLeft) {
-    drop_arrow_size.Transpose();
-    position.Offset(drop_arrow_size.width(), -drop_arrow_size.height() / 2);
+    position.Offset(DropArrow::kSize, -DropArrow::kSize / 2);
   } else {
-    position.Offset(-drop_arrow_size.width() / 2, -drop_arrow_size.height());
+    position.Offset(-DropArrow::kSize / 2, -DropArrow::kSize);
   }
 
-  return gfx::Rect(position, drop_arrow_size);
+  return gfx::Rect(position, gfx::Size(DropArrow::kSize, DropArrow::kSize));
 }
 
 BEGIN_METADATA(VerticalTabStripRegionView)

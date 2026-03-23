@@ -7,10 +7,12 @@ package org.chromium.net.impl;
 import static org.chromium.net.impl.HttpEngineNativeProvider.EXT_API_LEVEL;
 import static org.chromium.net.impl.HttpEngineNativeProvider.EXT_VERSION;
 
+import android.util.Log;
+
 import androidx.annotation.Nullable;
+import androidx.annotation.RequiresApi;
 import androidx.annotation.RequiresExtension;
 
-import org.chromium.base.Log;
 import org.chromium.net.CronetException;
 import org.chromium.net.RequestFinishedInfo;
 import org.chromium.net.UrlResponseInfo;
@@ -18,6 +20,9 @@ import org.chromium.net.impl.VersionSafeCallbacks.RequestFinishedInfoListener;
 
 import java.util.Collection;
 
+// Note we specify both RequiresApi and RequiresExtension because some older linters may only
+// recognize the former.
+@RequiresApi(EXT_API_LEVEL)
 @RequiresExtension(extension = EXT_API_LEVEL, version = EXT_VERSION)
 class AndroidRequestFinishedInfoWrapper extends RequestFinishedInfoImpl {
     private static final String TAG = RequestFinishedInfoImpl.class.getSimpleName();

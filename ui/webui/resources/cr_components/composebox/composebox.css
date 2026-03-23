@@ -239,6 +239,11 @@ search-animated-glow {
 }
 
 #inputWrapper {
+  mask-image: linear-gradient(transparent 7px, black var(--text-input-top-spacing));
+  max-height: var(--text-input-max-height);
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
   position: relative;
   width: 100%;
 }
@@ -257,13 +262,10 @@ search-animated-glow {
 
 #mirror {
   color: transparent;
-  font-variant-ligatures: none;
-  height: 100%;
   left: 0;
   overflow: hidden;
   pointer-events: none;
   position: absolute;
-  text-rendering: geometricPrecision;
   top: 0;
   user-select: none;
   white-space: pre-wrap;
@@ -276,12 +278,6 @@ search-animated-glow {
   padding-inline-start: 0;
 }
 
-#input,
-#smartCompose {
-  min-height: 48px;
-  max-height: var(--text-input-max-height);
-  scrollbar-width: none;
-}
 
 :host(:not[searchbox-next-enabled]) #input {
   transition: padding var(--height-expand-duration) var(--standard-curve);
@@ -292,8 +288,7 @@ search-animated-glow {
   border: none;
   color: var(--color-composebox-font-light);
   field-sizing: content;
-  mask-image: linear-gradient(transparent 7px, black var(--text-input-top-spacing));
-  height: calc-size(fit-content, min(size + 4px, var(--text-input-max-height)));
+  padding-bottom: 4px;
   outline: none;
   position: relative;
   resize: none;
@@ -366,7 +361,7 @@ search-animated-glow {
 #smartCompose {
   pointer-events: none;
   position: absolute;
-  overflow: scroll;
+  overflow: hidden;
   top: 0;
   left: 0;
 }
@@ -506,11 +501,11 @@ search-animated-glow {
 
 #submitContainer {
   border-radius: 50%;
+  bottom: var(--input-bottom-spacing);
   cursor: default; /* For Lens side panel. */
   height: var(--cr-composebox-submit-container-size, var(--cr-icon-button-size));
-  bottom: var(--input-bottom-spacing);
-  position: absolute;
   inset-inline-end: 10px;
+  position: absolute;
   width: var(--cr-composebox-submit-container-size, var(--cr-icon-button-size));
 }
 
@@ -609,7 +604,7 @@ search-animated-glow {
 
 #carousel {
   box-sizing: border-box;
-  margin-bottom: var(--context-non-top-carousel-bottom-margin, 12px);
+  margin-bottom: var(--context-non-top-carousel-bottom-margin, 8px);
   margin-top: var(--context-non-top-carousel-top-margin, 4px);
   /* Prefer using margin, but from legacy var name, we should be using inset. */
   inset-inline-start: var(--context-carousel-inline-start-spacing, 50px);
@@ -637,12 +632,9 @@ search-animated-glow {
 }
 
 #toolChipsContainer {
-  margin-bottom: 12px;
-  padding-inline-start: 44px;
-}
-
-:host(:not([show-file-carousel_])) #toolChipsContainer {
-  padding-top: 6px;
+  padding-bottom: 4px;
+  padding-inline-start: 16px;
+  padding-top: 14px;
 }
 
 :host(:not([file-uploads-complete])) .upload-button {
@@ -674,7 +666,7 @@ search-animated-glow {
 
 :host([searchbox-next-enabled][searchbox-layout-mode='Compact']) #textContainer {
   --text-input-inline-start-spacing: 40px;
-  padding-block: 6px 0;
+  padding-block: 6px 2px;
 }
 
 :host([searchbox-next-enabled]) #input,
@@ -690,17 +682,14 @@ search-animated-glow {
   --cr-icon-button-icon-size: 12px;
 }
 
-:host([searchbox-next-enabled][searchbox-layout-mode='Compact']) #context {
-  margin-top: var(--cr-composebox-context-margin-top, -48px);
-}
-
 :host([expanding_][show-dropdown_][searchbox-next-enabled][searchbox-layout-mode='Compact']) cr-composebox-dropdown {
   padding-bottom: 0;
-  padding-top: 8px;
+  padding-top: 4px;
 }
 
-:host-context([searchbox-layout-mode='TallTopContext']) .carousel-divider {
-  margin-top: 10px;
+:host([searchbox-layout-mode='Compact'][show-dropdown_]) .carousel-divider {
+  --contextual-entrypoint-and-carousel-carousel-divider-margin-bottom: 8px;
+  --contextual-entrypoint-and-carousel-carousel-divider-margin-top: 12px;
 }
 
 #voiceSearchButton {
@@ -733,27 +722,6 @@ search-animated-glow {
   inset-inline-end: calc(var(--cr-icon-button-size) + 18px);
 }
 
-:host([searchbox-layout-mode='TallTopContext']) #voiceSearchButton {
-  margin-inline-end: 12px;
-  margin-inline-start: auto;
-  position: static;
-}
-
-:host([submit-enabled_][searchbox-layout-mode='TallTopContext']) #voiceSearchButton {
-  margin-inline-end: 0;
-}
-
-:host([submit-enabled_][searchbox-layout-mode='TallTopContext']) #submitContainer {
-  margin-inline-end: 10px;
-  margin-inline-start: var(--cr-composebox-submit-button-margin-inline-start, 4px);
-  position: static;
-}
-
-:host([submit-enabled_][searchbox-layout-mode='TallTopContext']) #submitIcon {
-  margin-inline-end: 12px;
-  position: relative;
-}
-
 :host([searchbox-layout-mode='Compact']) #voiceSearchButton {
   position: absolute;
   inset-inline-end: calc(var(--cr-composebox-submit-container-size) + 12px);
@@ -762,31 +730,19 @@ search-animated-glow {
 
 :host([searchbox-next-enabled][searchbox-layout-mode='Compact']) #carouselContainer,
 :host([searchbox-next-enabled][searchbox-layout-mode='TallBottomContext']) #carouselContainer {
-  align-items: flex-start;
+  align-items: flex-end;
   display: flex;
   flex-direction: row;
-  position: relative;
 }
 
 :host([submit-enabled_][searchbox-layout-mode='Compact']) #submitContainer {
-  margin-inline-end: 0;
-  margin-inline-start: auto;
+  inset-inline-end: 0;
+  margin-block: 12px 2px;
+  margin-inline: auto 10px;
   position: relative;
 }
 
-:host([submit-enabled_][searchbox-layout-mode='Compact'][in-tool-mode_]) #submitContainer,
-:host([submit-enabled_][searchbox-layout-mode='Compact'][show-file-carousel_]) #submitContainer {
-  position: absolute;
-  bottom: 12px;
-}
-
-:host([submit-enabled_][searchbox-layout-mode='Compact']:not([in-tool-mode_]):not([show-file-carousel_])) #submitContainer {
-  bottom: 0;
-  margin-top: 14px;
-}
-
 :host([submit-enabled_][searchbox-layout-mode='TallBottomContext']) #submitContainer {
-  inset-inline-end: 10px;
   position: absolute;
 }
 
@@ -802,13 +758,7 @@ search-animated-glow {
   --contextual-entrypoint-and-carousel-carousel-divider-margin-top: 50px;
 }
 
-:host([submit-enabled_][searchbox-layout-mode='Compact'][show-dropdown_]:not([show-file-carousel_])) .carousel-divider {
-  --contextual-entrypoint-and-carousel-carousel-divider-margin-top: 12px;
-}
-
-:host([submit-enabled_][searchbox-layout-mode='TallBottomContext'][show-dropdown_][show-file-carousel_]) .carousel-divider,
-:host([submit-enabled_][searchbox-layout-mode='Compact'][show-dropdown_][show-file-carousel_]) .carousel-divider,
-:host([searchbox-layout-mode='Compact'][show-dropdown_]:not([show-file-carousel_])) .carousel-divider {
+:host([submit-enabled_][searchbox-layout-mode='TallBottomContext'][show-dropdown_][show-file-carousel_]) .carousel-divider {
   --contextual-entrypoint-and-carousel-carousel-divider-margin-top: 8px;
 }
 
@@ -832,7 +782,8 @@ search-animated-glow {
 }
 
 :host([searchbox-next-enabled]) #carousel {
-  margin-top: 16px;
+  --context-non-top-carousel-bottom-margin: 4px;
+  --context-non-top-carousel-top-margin: 6px;
 }
 
 :host([is-omnibox-in-compact-mode_]) #carousel {

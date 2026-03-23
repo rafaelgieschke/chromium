@@ -74,7 +74,6 @@
 #include "chrome/browser/ui/webui/ash/login/terms_of_service_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/user_allowlist_check_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/user_creation_screen_handler.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/ash/components/attestation/attestation_flow_adaptive.h"
 #include "chromeos/ash/components/dbus/userdataauth/userdataauth_client.h"
@@ -230,10 +229,12 @@ CreateSecondDeviceAuthBroker() {
 LoginDisplayHostCommon::LoginDisplayHostCommon(
     PrefService* local_state,
     ApplicationLocaleStorage* application_locale_storage,
+    scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
     policy::BrowserPolicyConnectorAsh* browser_policy_connector_ash,
     bool update_geolocation_usage_allowed)
     : local_state_(CHECK_DEREF(local_state)),
       application_locale_storage_(CHECK_DEREF(application_locale_storage)),
+      shared_url_loader_factory_(std::move(shared_url_loader_factory)),
       browser_policy_connector_ash_(CHECK_DEREF(browser_policy_connector_ash)),
       keep_alive_(KeepAliveOrigin::LOGIN_DISPLAY_HOST_WEBUI,
                   KeepAliveRestartOption::DISABLED),
@@ -255,6 +256,8 @@ LoginDisplayHostCommon::LoginDisplayHostCommon(
               []() { return g_browser_process->local_state(); }),
           base::BindRepeating(
               []() { return g_browser_process->metrics_service(); }))) {
+  CHECK(shared_url_loader_factory_);
+
   if (features::IsOobeCrosEventsEnabled()) {
     oobe_cros_events_metrics_ = std::make_unique<OobeCrosEventsMetrics>(
         &local_state_.get(), oobe_metrics_helper_.get());
@@ -334,7 +337,7 @@ void LoginDisplayHostCommon::StartSignInScreen() {
 void LoginDisplayHostCommon::StartKiosk(const KioskAppId& kiosk_app_id,
                                         bool is_auto_launch) {
   VLOG(1) << "Login >> start kiosk of type "
-          << static_cast<int>(kiosk_app_id.type);
+          << std::to_underlying(kiosk_app_id.type);
 
   SetKioskLaunchStateCrashKey(KioskLaunchState::kAttemptToLaunch);
 
@@ -547,7 +550,7 @@ void LoginDisplayHostCommon::OnPowerwashAllowedCallback(
     // Force the TPM firmware update option to be enabled.
     local_state_->SetInteger(
         ash::prefs::kFactoryResetTPMFirmwareUpdateMode,
-        static_cast<int>(tpm_firmware_update_mode.value()));
+        std::to_underlying(tpm_firmware_update_mode.value()));
   }
   StartWizard(ResetView::kScreenId);
 }
@@ -627,7 +630,7 @@ void LoginDisplayHostCommon::StartEncryptionMigration(
 
 void LoginDisplayHostCommon::ShowSigninError(SigninError error,
                                              const std::string& details) {
-  VLOG(1) << "Show error, error_id: " << static_cast<int>(error);
+  VLOG(1) << "Show error, error_id: " << std::to_underlying(error);
 
   if (error == SigninError::kKnownUserFailedNetworkNotConnected ||
       error == SigninError::kKnownUserFailedNetworkConnected) {

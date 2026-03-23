@@ -11,9 +11,10 @@
 #include "base/functional/callback_helpers.h"
 #include "base/task/sequenced_task_runner.h"
 #include "chrome/browser/glic/host/host.h"
+#include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/glic/service/glic_instance_helper.h"
 #include "chrome/browser/glic/service/glic_instance_impl.h"
-
+#include "chrome/common/chrome_features.h"
 namespace glic {
 
 constexpr base::TimeDelta kDefaultTimeout = base::Minutes(1);
@@ -25,6 +26,7 @@ GlicInvokeHandler::GlicInvokeHandler(
     std::optional<InvokeWithAutoSubmitPasskey> auto_submit_passkey,
     CompletionCallback completion_callback)
     : instance_(instance),
+      tab_(tab),
       options_(std::move(options)),
       auto_submit_passkey_(auto_submit_passkey),
       completion_callback_(std::move(completion_callback)) {
@@ -46,10 +48,13 @@ void GlicInvokeHandler::Invoke() {
 
   // If we weren't able to set up tab destruction subscription, we should
   // treat this as an error.
-  if (!tab_destruction_subscription_) {
+  if (!tab_destruction_subscription_ || !tab_) {
     OnError(GlicInvokeError::kInvalidTab);
     return;
   }
+
+  instance_->Show(ShowOptions::ForSidePanel(
+      *tab_, GlicPinTrigger::kInstanceCreation, options_.invocation_source));
 
   if (instance_->host().IsReady()) {
     SendToClient();
@@ -59,15 +64,28 @@ void GlicInvokeHandler::Invoke() {
   host_observation_.Observe(&instance_->host());
 }
 
-void GlicInvokeHandler::ClientReadyToShow(const mojom::OpenPanelInfo&) {
+void GlicInvokeHandler::WebClientConnected() {
   host_observation_.Reset();
   SendToClient();
+}
+
+bool GlicInvokeHandler::RequiresAutoSubmitIncompatibleFre() const {
+  if (GlicEnabling::HasConsentedForProfile(instance_->profile())) {
+    return false;
+  }
+  return GlicEnabling::IsTrustFirstOnboardingEnabledForProfile(
+             instance_->profile()) &&
+         features::kGlicTrustFirstOnboardingArmParam.Get() == 1;
 }
 
 void GlicInvokeHandler::SendToClient() {
   if (!instance_->host().IsReady()) {
     OnError(GlicInvokeError::kTimeout);
     return;
+  }
+
+  if (auto_submit_passkey_ && RequiresAutoSubmitIncompatibleFre()) {
+    auto_submit_passkey_ = std::nullopt;
   }
 
   if (auto_submit_passkey_) {
@@ -83,6 +101,7 @@ void GlicInvokeHandler::SendToClient() {
 }
 
 void GlicInvokeHandler::OnTabClosed(tabs::TabInterface* tab) {
+  tab_ = nullptr;
   OnError(GlicInvokeError::kTabClosed);
 }
 

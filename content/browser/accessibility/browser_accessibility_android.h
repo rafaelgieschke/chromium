@@ -40,9 +40,11 @@ class CONTENT_EXPORT BrowserAccessibilityAndroid
   bool CanFireEvents() const override;
   void OnDataChanged() override;
   void OnLocationChanged() override;
+  BrowserAccessibility* PlatformGetLowestPlatformAncestor() const override;
   std::u16string GetLocalizedStringForImageAnnotationStatus(
       ax::mojom::ImageAnnotationStatus status) const override;
 
+  bool CanSetExtendedSelection() const;
   bool IsAndroidTextView() const;
   bool IsCheckable() const;
   bool IsChecked() const;
@@ -77,6 +79,7 @@ class CONTENT_EXPORT BrowserAccessibilityAndroid
   bool IsSubscript() const;
   bool IsSuperscript() const;
   bool IsTableHeader() const;
+  bool IsTextSelectable() const;
   bool IsVisibleToUser() const;
   bool ShouldUsePaneTitle() const;
 
@@ -202,8 +205,8 @@ class CONTENT_EXPORT BrowserAccessibilityAndroid
   int GetTextBackgroundColor() const;
   std::string GetFontFamily() const;
 
-  int GetItemIndex() const;
-  int GetItemCount() const;
+  std::optional<int> GetItemIndex() const;
+  std::optional<int> GetItemCount() const;
   int GetSelectedItemCount() const;
   int GetSelectionMode() const;
 
@@ -237,13 +240,13 @@ class CONTENT_EXPORT BrowserAccessibilityAndroid
   int AndroidLiveRegionType() const;
   int AndroidRangeType() const;
 
-  int RowCount() const;
-  int ColumnCount() const;
+  std::optional<int> RowCount() const;
+  std::optional<int> ColumnCount() const;
 
-  int RowIndex() const;
-  int RowSpan() const;
-  int ColumnIndex() const;
-  int ColumnSpan() const;
+  std::optional<int> RowIndex() const;
+  std::optional<int> RowSpan() const;
+  std::optional<int> ColumnIndex() const;
+  std::optional<int> ColumnSpan() const;
 
   // These are enums from
   // android.view.accessibility.AccessibilityNodeInfo.CollectionItemInfo in
@@ -333,9 +336,6 @@ class CONTENT_EXPORT BrowserAccessibilityAndroid
                                    const std::u16string& b);
   static size_t CommonEndLengths(const std::u16string& a,
                                  const std::u16string& b);
-
-  // BrowserAccessibility overrides.
-  BrowserAccessibility* PlatformGetLowestPlatformAncestor() const override;
 
   bool HasOnlyTextChildren() const;
   bool HasOnlyTextAndImageChildren() const;

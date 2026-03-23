@@ -80,7 +80,6 @@
 #include "chrome/browser/ui/webui/ash/login/welcome_screen_handler.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "chromeos/ash/components/audio/public/cpp/sounds/sounds_manager.h"
 #include "chromeos/ash/components/audio/sounds.h"
 #include "chromeos/ash/components/dbus/session_manager/session_manager_client.h"
@@ -269,6 +268,8 @@ void ShowLoginWizardFinish(
   PrefService* local_state = g_browser_process->local_state();
   ApplicationLocaleStorage* application_locale_storage =
       g_browser_process->GetFeatures()->application_locale_storage();
+  scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory =
+      g_browser_process->shared_url_loader_factory();
   policy::BrowserPolicyConnectorAsh* browser_policy_connector_ash =
       g_browser_process->platform_part()->browser_policy_connector_ash();
 
@@ -304,19 +305,20 @@ void ShowLoginWizardFinish(
     display_host = LoginDisplayHost::default_host();
   } else if (ShouldShowSigninScreen(first_screen)) {
     display_host = new LoginDisplayHostMojo(
-        local_state, application_locale_storage, browser_policy_connector_ash,
-        DisplayedScreen::SIGN_IN_SCREEN,
+        local_state, application_locale_storage, shared_url_loader_factory,
+        browser_policy_connector_ash, DisplayedScreen::SIGN_IN_SCREEN,
         /*update_geolocation_usage_allowed=*/true);
   } else if (first_screen == ArcVmDataMigrationScreenView::kScreenId) {
     display_host = new LoginDisplayHostMojo(
-        local_state, application_locale_storage, browser_policy_connector_ash,
-        DisplayedScreen::SIGN_IN_SCREEN,
+        local_state, application_locale_storage, shared_url_loader_factory,
+        browser_policy_connector_ash, DisplayedScreen::SIGN_IN_SCREEN,
         /*update_geolocation_usage_allowed=*/true);
     DCHECK(session_manager::SessionManager::Get());
     session_manager::SessionManager::Get()->NotifyLoginOrLockScreenVisible();
   } else {
     display_host = new LoginDisplayHostWebUI(
-        local_state, application_locale_storage, browser_policy_connector_ash);
+        local_state, application_locale_storage, shared_url_loader_factory,
+        browser_policy_connector_ash);
   }
 
   if (features::IsOobeAddUserDuringEnrollmentEnabled() && user_context) {
@@ -515,9 +517,11 @@ class LoginDisplayHostWebUI::KeyboardDrivenOobeKeyHandler
 LoginDisplayHostWebUI::LoginDisplayHostWebUI(
     PrefService* local_state,
     ApplicationLocaleStorage* application_locale_storage,
+    scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
     policy::BrowserPolicyConnectorAsh* browser_policy_connector_ash)
     : LoginDisplayHostCommon(local_state,
                              application_locale_storage,
+                             std::move(shared_url_loader_factory),
                              browser_policy_connector_ash,
                              /*update_geolocation_usage_allowed=*/true),
       oobe_startup_sound_played_(StartupUtils::IsOobeCompleted()) {
@@ -532,7 +536,7 @@ LoginDisplayHostWebUI::LoginDisplayHostWebUI(
 
   audio::SoundsManager* manager = audio::SoundsManager::Get();
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
-  manager->Initialize(static_cast<int>(Sound::kStartup),
+  manager->Initialize(std::to_underlying(Sound::kStartup),
                       bundle.GetRawDataResource(IDR_SOUND_STARTUP_WAV),
                       media::AudioCodec::kPCM);
 }
@@ -653,7 +657,9 @@ void LoginDisplayHostWebUI::StartWizard(OobeScreenId first_screen) {
     // TODO(crbug.com/404133029): Avoid using g_browser_process.
     wizard_controller_ = std::make_unique<WizardController>(
         &local_state_.get(), &application_locale_storage_.get(),
-        g_browser_process->shared_url_loader_factory(), GetWizardContext());
+        g_browser_process->shared_url_loader_factory(),
+        g_browser_process->platform_part()->component_manager_ash(),
+        GetWizardContext());
     NotifyWizardCreated();
     wizard_controller_->Init(first_screen);
   }
@@ -723,7 +729,9 @@ void LoginDisplayHostWebUI::OnStartAppLaunch() {
     // TODO(crbug.com/404133029): Avoid using g_browser_process.
     wizard_controller_ = std::make_unique<WizardController>(
         &local_state_.get(), &application_locale_storage_.get(),
-        g_browser_process->shared_url_loader_factory(), GetWizardContext());
+        g_browser_process->shared_url_loader_factory(),
+        g_browser_process->platform_part()->component_manager_ash(),
+        GetWizardContext());
     NotifyWizardCreated();
   }
 }
@@ -1084,7 +1092,8 @@ void LoginDisplayHostWebUI::OnLoginPromptVisible() {
 
 void LoginDisplayHostWebUI::CreateExistingUserController() {
   existing_user_controller_ = std::make_unique<ExistingUserController>(
-      &local_state_.get(), &application_locale_storage_.get());
+      &local_state_.get(), &application_locale_storage_.get(),
+      shared_url_loader_factory_);
 }
 
 void LoginDisplayHostWebUI::ShowGaiaDialog(const AccountId& prefilled_account) {
@@ -1230,6 +1239,8 @@ void ShowLoginWizard(OobeScreenId first_screen) {
   PrefService& local_state = CHECK_DEREF(g_browser_process->local_state());
   ApplicationLocaleStorage* application_locale_storage =
       g_browser_process->GetFeatures()->application_locale_storage();
+  scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory =
+      g_browser_process->shared_url_loader_factory();
   policy::BrowserPolicyConnectorAsh* browser_policy_connector_ash =
       g_browser_process->platform_part()->browser_policy_connector_ash();
 
@@ -1267,7 +1278,8 @@ void ShowLoginWizard(OobeScreenId first_screen) {
       first_screen == ash::OOBE_SCREEN_UNKNOWN) {
     // Manages its own lifetime. See ShutdownDisplayHost().
     auto* display_host = new LoginDisplayHostWebUI(
-        &local_state, application_locale_storage, browser_policy_connector_ash);
+        &local_state, application_locale_storage, shared_url_loader_factory,
+        browser_policy_connector_ash);
     // Shows networks screen instead of enrollment screen to resume the
     // interrupted auto start enrollment flow because enrollment screen does
     // not handle flaky network. See http://crbug.com/332572

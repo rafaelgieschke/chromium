@@ -7,6 +7,7 @@
 #include "build/android_buildflags.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_ui.h"
 #include "chrome/browser/glic/host/glic_ui.h"
 #include "chrome/browser/optimization_guide/optimization_guide_internals_ui.h"
 #include "chrome/browser/ui/webui/about/about_ui.h"
@@ -54,7 +55,6 @@
 #include "chrome/browser/ui/webui/translate_internals/translate_internals_ui.h"
 #include "chrome/browser/ui/webui/usb_internals/usb_internals_ui.h"
 #include "chrome/browser/ui/webui/version/version_ui.h"
-#include "chrome/browser/ui/webui/webnn_internals/webnn_internals_ui.h"
 #include "components/enterprise/buildflags/buildflags.h"
 #include "components/safe_browsing/buildflags.h"
 #include "components/security_interstitials/content/connection_help_ui.h"
@@ -74,7 +74,6 @@
 
 #if !BUILDFLAG(IS_ANDROID)
 #include "chrome/browser/actor/ui/actor_overlay_ui.h"
-#include "chrome/browser/contextual_tasks/contextual_tasks_ui.h"
 #include "chrome/browser/ui/tabs/tab_group_home/tab_group_home_ui.h"
 #include "chrome/browser/ui/webui/content_annotator_internals/content_annotator_internals_ui.h"
 #include "chrome/browser/ui/webui/webui_toolbar/webui_toolbar_ui.h"
@@ -126,6 +125,7 @@
 #include "chrome/browser/ui/webui/tab_search/tab_search_ui.h"
 #include "chrome/browser/ui/webui/user_education_internals/user_education_internals_ui.h"
 #include "chrome/browser/ui/webui/web_app_internals/web_app_internals_ui.h"
+#include "chrome/browser/ui/webui/webnn_internals/webnn_internals_ui.h"
 #include "chrome/browser/ui/webui/webui_gallery/webui_gallery_ui.h"
 #include "chrome/browser/ui/webui/webui_js_error/webui_js_error_ui.h"
 #else  // !BUILDFLAG(IS_ANDROID)
@@ -249,6 +249,7 @@ void RegisterChromeWebUIConfigs() {
   map.AddWebUIConfig(std::make_unique<commerce::CommerceInternalsUIConfig>());
   map.AddWebUIConfig(std::make_unique<ActorInternalsUIConfig>());
   map.AddWebUIConfig(std::make_unique<ComponentsUIConfig>());
+  map.AddWebUIConfig(std::make_unique<ContextualTasksUIConfig>());
   map.AddWebUIConfig(
       std::make_unique<security_interstitials::ConnectionHelpUIConfig>());
   map.AddWebUIConfig(
@@ -292,7 +293,6 @@ void RegisterChromeWebUIConfigs() {
   map.AddWebUIConfig(std::make_unique<user_actions_ui::UserActionsUIConfig>());
   map.AddWebUIConfig(std::make_unique<VersionUIConfig>());
   map.AddWebUIConfig(std::make_unique<WebRtcLogsUIConfig>());
-  map.AddWebUIConfig(std::make_unique<WebNNInternalsUIConfig>());
   map.AddWebUIConfig(
       std::make_unique<
           privacy_sandbox_internals::PrivacySandboxInternalsUIConfig>());
@@ -318,7 +318,9 @@ void RegisterChromeWebUIConfigs() {
 #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
   map.AddWebUIConfig(std::make_unique<media_router::CastFeedbackUIConfig>());
 #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
-  map.AddWebUIConfig(std::make_unique<ContentAnnotatorInternalsUIConfig>());
+  map.AddWebUIConfig(
+      std::make_unique<
+          content_annotator_internals::ContentAnnotatorInternalsUIConfig>());
   map.AddWebUIConfig(std::make_unique<actor::ui::ActorOverlayUIConfig>());
   map.AddWebUIConfig(std::make_unique<AppServiceInternalsUIConfig>());
   map.AddWebUIConfig(std::make_unique<AutofillMlInternalsUIConfig>());
@@ -327,7 +329,6 @@ void RegisterChromeWebUIConfigs() {
   map.AddWebUIConfig(std::make_unique<BookmarksUIConfig>());
   map.AddWebUIConfig(std::make_unique<ColorPipelineInternalsUIConfig>());
   map.AddWebUIConfig(std::make_unique<CommentsSidePanelUIConfig>());
-  map.AddWebUIConfig(std::make_unique<ContextualTasksUIConfig>());
   map.AddWebUIConfig(std::make_unique<CustomizeChromeUIConfig>());
   map.AddWebUIConfig(std::make_unique<DownloadsUIConfig>());
   map.AddWebUIConfig(std::make_unique<FeedbackUIConfig>());
@@ -367,6 +368,7 @@ void RegisterChromeWebUIConfigs() {
   map.AddWebUIConfig(std::make_unique<TermsUIConfig>());
   map.AddWebUIConfig(std::make_unique<UserEducationInternalsUIConfig>());
   map.AddWebUIConfig(std::make_unique<WebAppInternalsUIConfig>());
+  map.AddWebUIConfig(std::make_unique<WebNNInternalsUIConfig>());
   map.AddWebUIConfig(std::make_unique<WebUIBrowserUIConfig>());
   map.AddWebUIConfig(std::make_unique<WebuiGalleryUIConfig>());
   map.AddWebUIConfig(std::make_unique<WebUIJsErrorUIConfig>());

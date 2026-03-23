@@ -506,8 +506,8 @@ https://chromium.googlesource.com/chromium/src/tools/+/HEAD/metrics/histograms/R
   </summary>
 </histogram>
 
-<histogram name="Search.ChoiceScreenEvents{Context}"
-    enum="SearchEngineChoiceScreenEvents" expires_after="2026-08-19">
+<histogram name="Search.ChoiceScreenEvents{Context}{Profile}"
+    enum="SearchEngineChoiceScreenEvents" expires_after="2026-09-13">
   <owner>dgn@chromium.org</owner>
   <owner>samarchehade@chromium.org</owner>
   <owner>chrome-regionalcapabilities@google.com</owner>
@@ -519,8 +519,11 @@ https://chromium.googlesource.com/chromium/src/tools/+/HEAD/metrics/histograms/R
     have the same profile, the display event is only recorded once.
 
     {Context}
+
+    {Profile}
   </summary>
   <token key="Context" variants="ChoiceScreenContext"/>
+  <token key="Profile" variants="ProfileIndex"/>
 </histogram>
 
 <histogram name="Search.ChoiceScreenNavigationConditions{Context}"
@@ -1512,7 +1515,7 @@ https://chromium.googlesource.com/chromium/src/tools/+/HEAD/metrics/histograms/R
 </histogram>
 
 <histogram name="Search.RelatedSearches.AllUserPermissions"
-    enum="ContextualSearchPermissions" expires_after="2026-07-12">
+    enum="ContextualSearchPermissions" expires_after="2026-09-13">
   <owner>gangwu@chromium.org</owner>
   <owner>related-searches-vteam@google.com</owner>
   <summary>
@@ -1589,7 +1592,7 @@ https://chromium.googlesource.com/chromium/src/tools/+/HEAD/metrics/histograms/R
 </histogram>
 
 <histogram name="Search.RelatedSearches.QualifiedUsers" enum="Boolean"
-    expires_after="2026-07-12">
+    expires_after="2026-09-13">
   <owner>gangwu@chromium.org</owner>
   <owner>related-searches-vteam@google.com</owner>
   <summary>

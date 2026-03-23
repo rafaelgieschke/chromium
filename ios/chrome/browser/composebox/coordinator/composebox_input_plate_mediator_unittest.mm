@@ -194,7 +194,11 @@ class ComposeboxInputPlateMediatorTest : public PlatformTest {
                              modeHolder:[[ComposeboxModeHolder alloc] init]
                      templateURLService:template_url_service()
                   aimEligibilityService:aim_eligibility_service_.get()
-                            prefService:&pref_service_];
+                            prefService:&pref_service_
+                   cobrowseBrowserAgent:nil
+              browserCoordinatorHandler:nil
+                           sceneHandler:nil
+                             entrypoint:ComposeboxEntrypoint::kOther];
     consumer_ = [[TestComposeboxInputPlateConsumer alloc] init];
     mediator_.consumer = consumer_;
 
@@ -252,6 +256,8 @@ class ComposeboxInputPlateMediatorTest : public PlatformTest {
 
   void SetAIMEligible(bool AIMEligible) {
     EXPECT_CALL(*aim_eligibility_service_, IsAimEligible())
+        .WillRepeatedly(testing::Return(AIMEligible));
+    EXPECT_CALL(*aim_eligibility_service_, IsFuseboxEligible())
         .WillRepeatedly(testing::Return(AIMEligible));
   }
 

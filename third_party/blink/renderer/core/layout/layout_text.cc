@@ -487,7 +487,7 @@ String LayoutText::PlainText() const {
     // Append a trailing space of the last |text_box| if it was collapsed.
     const unsigned end_offset = text_box.dom_start_offset + text_box.dom_length;
     if (last_end_offset && text_box.dom_start_offset > last_end_offset &&
-        !IsASCIISpace(text_[end_offset - 1])) {
+        !IsAsciiSpace(text_[end_offset - 1])) {
       plain_text_builder.Append(uchar::kSpace);
     }
     last_end_offset = end_offset;
@@ -757,7 +757,7 @@ UChar32 LayoutText::FirstCharacterAfterWhitespaceCollapsing() const {
     cursor.MoveTo(*this);
     if (cursor) {
       const StringView text = cursor.Current().Text(cursor);
-      return text.length() ? text.CodepointAt(0) : 0;
+      return text.length() ? text.CodePointAt(0) : 0;
     }
   }
   return 0;
@@ -770,7 +770,7 @@ UChar32 LayoutText::LastCharacterAfterWhitespaceCollapsing() const {
     cursor.MoveTo(*this);
     if (cursor) {
       const StringView text = cursor.Current().Text(cursor);
-      return text.length() ? text.CodepointAt(text.length() - 1) : 0;
+      return text.length() ? text.CodePointAt(text.length() - 1) : 0;
     }
   }
   return 0;

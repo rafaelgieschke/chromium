@@ -390,6 +390,8 @@ bool PrerenderHost::AreHttpRequestHeadersCompatible(
   potential_activation_headers.RemoveHeader("RTT");
   prerender_headers.RemoveHeader("Downlink");
   potential_activation_headers.RemoveHeader("Downlink");
+  prerender_headers.RemoveHeader("ECT");
+  potential_activation_headers.RemoveHeader("ECT");
 
   // TODO(crbug.com/40244149): Instead of handling headers added by
   // embedders specifically, prerender should expose an interface to embedders
@@ -1817,7 +1819,8 @@ bool PrerenderHost::ShouldAbortNavigationBecausePrefetchUnavailable() const {
 
   // Use a prefetch (in many cases, aheaf of prerender) if it is about to be
   // used.
-  if (attributes_.preload_pipeline_info->is_prerender_matched_with_prefetch()) {
+  if (attributes_.preload_pipeline_info->IsPrerenderMatchedWithPrefetch(
+          prerender_host_id())) {
     return false;
   }
 

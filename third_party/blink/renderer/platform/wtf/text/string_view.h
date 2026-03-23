@@ -228,13 +228,13 @@ class WTF_EXPORT StringView {
   // string. If the offset points an unpaired surrogate, this function returns
   // the surrogate code unit as is. If you'd like to check such surroagtes,
   // use U_IS_SURROGATE() defined in unicode/utf.h.
-  UChar32 CodepointAt(size_type i) const;
+  UChar32 CodePointAt(size_type i) const;
 
   // Returns i+2 if a pair of [i] and [i+1] is a valid surrogate pair.
   // Returns i+1 otherwise.
   size_type NextCodePointOffset(size_type i) const;
 
-  // Does `CodepointAt()`, and the specified `i` is updated by
+  // Does `CodePointAt()`, and the specified `i` is updated by
   // `NextCodePointOffset()`.
   UChar32 CodePointAtAndNext(size_type& i) const;
 
@@ -394,7 +394,7 @@ class WTF_EXPORT StringView {
   // The odd lifetime of the returned object occurs because lowercasing may
   // require allocation. When that happens, |backing_store| is used as the
   // backing store and the returned StringView has the same lifetime.
-  StringView LowerASCIIMaybeUsingBuffer(StackBackingStore& backing_store) const;
+  StringView LowerAsciiMaybeUsingBuffer(StackBackingStore& backing_store) const;
 
   // Returns a substring removing leading and trailing white spaces.
   // This function removes spaces, \n, \t, \r, \f, \v, and unicode spaces such

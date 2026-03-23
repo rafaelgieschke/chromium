@@ -72,7 +72,8 @@ public class NotificationManager {
                         .setClass(context, ChromeLauncherActivity.class)
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         .putExtra(Browser.EXTRA_APPLICATION_ID, context.getPackageName())
-                        .putExtra(WebappConstants.REUSE_URL_MATCHING_TAB_ELSE_NEW_TAB, true);
+                        .putExtra(WebappConstants.REUSE_URL_MATCHING_TAB_ELSE_NEW_TAB, true)
+                        .putExtra(IntentHandler.EXTRA_FROM_SEND_TAB_TO_SELF, true);
 
         if (scrollToTextFragment != null
                 && ChromeFeatureList.isEnabled(
@@ -100,16 +101,16 @@ public class NotificationManager {
                 openUrl(intent.getData(), scrollToTextFragment);
                 hideNotification(guid);
                 SendTabToSelfAndroidBridge.deleteEntry(profile, guid);
-                MetricsRecorder.recordNotificationOpened();
+                SendTabToSelfMetricsRecorder.recordNotificationOpened();
                 break;
             case NOTIFICATION_ACTION_DISMISS:
                 hideNotification(guid);
                 SendTabToSelfAndroidBridge.dismissEntry(profile, guid);
-                MetricsRecorder.recordNotificationDismissed();
+                SendTabToSelfMetricsRecorder.recordNotificationDismissed();
                 break;
             case NOTIFICATION_ACTION_TIMEOUT:
                 SendTabToSelfAndroidBridge.dismissEntry(profile, guid);
-                MetricsRecorder.recordNotificationTimedOut();
+                SendTabToSelfMetricsRecorder.recordNotificationTimedOut();
                 break;
         }
     }
@@ -240,7 +241,7 @@ public class NotificationManager {
                             PendingIntent.FLAG_UPDATE_CURRENT
                                     | IntentUtils.getPendingIntentMutabilityFlag(false)));
         }
-        MetricsRecorder.recordNotificationShown();
+        SendTabToSelfMetricsRecorder.recordNotificationShown();
         return true;
     }
 }

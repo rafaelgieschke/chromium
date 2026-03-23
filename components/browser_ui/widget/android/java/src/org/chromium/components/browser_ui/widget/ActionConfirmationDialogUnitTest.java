@@ -20,15 +20,12 @@ import static org.robolectric.Shadows.shadowOf;
 
 import android.app.Activity;
 import android.content.Context;
-import android.content.res.Resources;
 import android.os.Looper;
 import android.view.View;
 import android.widget.CheckBox;
 import android.widget.TextView;
 
 import androidx.annotation.Nullable;
-import androidx.annotation.StringRes;
-import androidx.core.util.Function;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -46,6 +43,7 @@ import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.RobolectricUtil;
 import org.chromium.chrome.R;
 import org.chromium.components.browser_ui.widget.ActionConfirmationDialog.ConfirmationDialogHandler;
+import org.chromium.components.browser_ui.widget.ActionConfirmationDialog.ConfirmationDialogParams;
 import org.chromium.components.browser_ui.widget.ActionConfirmationDialog.DialogDismissType;
 import org.chromium.components.browser_ui.widget.ActionConfirmationDialog.DismissHandler;
 import org.chromium.components.browser_ui.widget.StrictButtonPressController.ButtonClickResult;
@@ -99,24 +97,17 @@ public class ActionConfirmationDialogUnitTest {
         }
     }
 
-    private Function<Resources, String> noSyncResolver(@StringRes int stringRes) {
-        return (resources) -> resources.getString(stringRes);
-    }
-
-    private Function<Resources, String> syncResolver(@StringRes int stringRes, String account) {
-        return (resources) -> resources.getString(stringRes, account);
-    }
-
     @Test
     public void testShowNoSync() {
         ActionConfirmationDialog dialog =
                 new ActionConfirmationDialog(mContext, mModalDialogManager);
         dialog.show(
-                noSyncResolver(R.string.title),
-                noSyncResolver(R.string.learn_more),
-                R.string.confirm,
-                R.string.cancel,
-                /* supportStopShowing= */ true,
+                new ConfirmationDialogParams(mContext)
+                        .withTitle(R.string.title)
+                        .withDescription(R.string.learn_more)
+                        .withPositiveButton(R.string.confirm)
+                        .withNegativeButton(R.string.cancel)
+                        .withSupportStopShowing(true),
                 mConfirmationDialogHandler);
 
         verify(mModalDialogManager)
@@ -135,11 +126,15 @@ public class ActionConfirmationDialogUnitTest {
                 new ActionConfirmationDialog(mContext, mModalDialogManager);
         // chip_remove_icon_content_description can be any string with formal args.
         dialog.show(
-                noSyncResolver(R.string.title),
-                syncResolver(R.string.chip_remove_icon_content_description, "test@gmail.com"),
-                R.string.confirm,
-                R.string.cancel,
-                /* supportStopShowing= */ true,
+                new ConfirmationDialogParams(mContext)
+                        .withTitle(R.string.title)
+                        .withDescription(
+                                mContext.getString(
+                                        R.string.chip_remove_icon_content_description,
+                                        "test@gmail.com"))
+                        .withPositiveButton(R.string.confirm)
+                        .withNegativeButton(R.string.cancel)
+                        .withSupportStopShowing(true),
                 mConfirmationDialogHandler);
 
         verify(mModalDialogManager)
@@ -156,11 +151,12 @@ public class ActionConfirmationDialogUnitTest {
         ActionConfirmationDialog dialog =
                 new ActionConfirmationDialog(mContext, mModalDialogManager);
         dialog.show(
-                noSyncResolver(R.string.title),
-                noSyncResolver(R.string.learn_more),
-                R.string.confirm,
-                R.string.cancel,
-                /* supportStopShowing= */ true,
+                new ConfirmationDialogParams(mContext)
+                        .withTitle(R.string.title)
+                        .withDescription(R.string.learn_more)
+                        .withPositiveButton(R.string.confirm)
+                        .withNegativeButton(R.string.cancel)
+                        .withSupportStopShowing(true),
                 mConfirmationDialogHandler);
 
         verify(mModalDialogManager)
@@ -183,11 +179,12 @@ public class ActionConfirmationDialogUnitTest {
         ActionConfirmationDialog dialog =
                 new ActionConfirmationDialog(mContext, mModalDialogManager);
         dialog.show(
-                noSyncResolver(R.string.title),
-                noSyncResolver(R.string.learn_more),
-                R.string.confirm,
-                R.string.cancel,
-                /* supportStopShowing= */ true,
+                new ConfirmationDialogParams(mContext)
+                        .withTitle(R.string.title)
+                        .withDescription(R.string.learn_more)
+                        .withPositiveButton(R.string.confirm)
+                        .withNegativeButton(R.string.cancel)
+                        .withSupportStopShowing(true),
                 mConfirmationDialogHandler);
 
         verify(mModalDialogManager)
@@ -210,11 +207,12 @@ public class ActionConfirmationDialogUnitTest {
         ActionConfirmationDialog dialog =
                 new ActionConfirmationDialog(mContext, mModalDialogManager);
         dialog.show(
-                noSyncResolver(R.string.title),
-                noSyncResolver(R.string.learn_more),
-                R.string.confirm,
-                R.string.cancel,
-                /* supportStopShowing= */ true,
+                new ConfirmationDialogParams(mContext)
+                        .withTitle(R.string.title)
+                        .withDescription(R.string.learn_more)
+                        .withPositiveButton(R.string.confirm)
+                        .withNegativeButton(R.string.cancel)
+                        .withSupportStopShowing(true),
                 mConfirmationDialogHandler);
 
         verify(mModalDialogManager)
@@ -241,11 +239,12 @@ public class ActionConfirmationDialogUnitTest {
         ActionConfirmationDialog dialog =
                 new ActionConfirmationDialog(mContext, mModalDialogManager);
         dialog.show(
-                noSyncResolver(R.string.title),
-                noSyncResolver(R.string.learn_more),
-                R.string.confirm,
-                R.string.cancel,
-                /* supportStopShowing= */ true,
+                new ConfirmationDialogParams(mContext)
+                        .withTitle(R.string.title)
+                        .withDescription(R.string.learn_more)
+                        .withPositiveButton(R.string.confirm)
+                        .withNegativeButton(R.string.cancel)
+                        .withSupportStopShowing(true),
                 mConfirmationDialogHandler);
 
         verify(mModalDialogManager)
@@ -272,11 +271,12 @@ public class ActionConfirmationDialogUnitTest {
         ActionConfirmationDialog dialog =
                 new ActionConfirmationDialog(mContext, mModalDialogManager);
         dialog.show(
-                noSyncResolver(R.string.title),
-                noSyncResolver(R.string.learn_more),
-                R.string.confirm,
-                R.string.cancel,
-                /* supportStopShowing= */ false,
+                new ConfirmationDialogParams(mContext)
+                        .withTitle(R.string.title)
+                        .withDescription(R.string.learn_more)
+                        .withPositiveButton(R.string.confirm)
+                        .withNegativeButton(R.string.cancel)
+                        .withSupportStopShowing(false),
                 mConfirmationDialogHandler);
 
         verify(mModalDialogManager)
@@ -293,11 +293,12 @@ public class ActionConfirmationDialogUnitTest {
         ActionConfirmationDialog dialog =
                 new ActionConfirmationDialog(mContext, mModalDialogManager);
         dialog.show(
-                noSyncResolver(R.string.title),
-                noSyncResolver(R.string.learn_more),
-                R.string.confirm,
-                R.string.cancel,
-                /* supportStopShowing= */ true,
+                new ConfirmationDialogParams(mContext)
+                        .withTitle(R.string.title)
+                        .withDescription(R.string.learn_more)
+                        .withPositiveButton(R.string.confirm)
+                        .withNegativeButton(R.string.cancel)
+                        .withSupportStopShowing(true),
                 mConfirmationDialogHandler);
 
         verify(mModalDialogManager)
@@ -329,11 +330,12 @@ public class ActionConfirmationDialogUnitTest {
         ActionConfirmationDialog dialog =
                 new ActionConfirmationDialog(mContext, mModalDialogManager);
         dialog.show(
-                noSyncResolver(R.string.title),
-                noSyncResolver(R.string.learn_more),
-                R.string.confirm,
-                R.string.cancel,
-                /* supportStopShowing= */ true,
+                new ConfirmationDialogParams(mContext)
+                        .withTitle(R.string.title)
+                        .withDescription(R.string.learn_more)
+                        .withPositiveButton(R.string.confirm)
+                        .withNegativeButton(R.string.cancel)
+                        .withSupportStopShowing(true),
                 mConfirmationDialogHandler);
 
         verify(mModalDialogManager)
@@ -371,11 +373,12 @@ public class ActionConfirmationDialogUnitTest {
         ActionConfirmationDialog dialog =
                 new ActionConfirmationDialog(mContext, mModalDialogManager);
         dialog.show(
-                noSyncResolver(R.string.title),
-                noSyncResolver(R.string.learn_more),
-                R.string.confirm,
-                R.string.cancel,
-                /* supportStopShowing= */ true,
+                new ConfirmationDialogParams(mContext)
+                        .withTitle(R.string.title)
+                        .withDescription(R.string.learn_more)
+                        .withPositiveButton(R.string.confirm)
+                        .withNegativeButton(R.string.cancel)
+                        .withSupportStopShowing(true),
                 mConfirmationDialogHandler);
 
         verify(mModalDialogManager)
@@ -413,11 +416,12 @@ public class ActionConfirmationDialogUnitTest {
         ActionConfirmationDialog dialog =
                 new ActionConfirmationDialog(mContext, mModalDialogManager);
         dialog.show(
-                noSyncResolver(R.string.title),
-                noSyncResolver(R.string.learn_more),
-                R.string.confirm,
-                R.string.cancel,
-                /* supportStopShowing= */ true,
+                new ConfirmationDialogParams(mContext)
+                        .withTitle(R.string.title)
+                        .withDescription(R.string.learn_more)
+                        .withPositiveButton(R.string.confirm)
+                        .withNegativeButton(R.string.cancel)
+                        .withSupportStopShowing(true),
                 mConfirmationDialogHandler);
 
         verify(mModalDialogManager)

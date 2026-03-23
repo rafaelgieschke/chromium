@@ -149,8 +149,10 @@ TabGroupHeader::TabGroupHeader(TabSlotController& tab_slot_controller,
         tab_group->GetTabGroupFeatures()->attention_indicator());
   }
 
-  chip_transition_animation_ = std::make_unique<gfx::SlideAnimation>(this);
-  chip_transition_animation_->SetSlideDuration(kChipAnimationDuration);
+  if (base::FeatureList::IsEnabled(features::kDetachedTabs)) {
+    chip_transition_animation_ = std::make_unique<gfx::SlideAnimation>(this);
+    chip_transition_animation_->SetSlideDuration(kChipAnimationDuration);
+  }
 }
 
 TabGroupHeader::~TabGroupHeader() = default;
@@ -169,6 +171,11 @@ void TabGroupHeader::Init(const tab_groups::TabGroupId& group) {
   title_->SetElideBehavior(gfx::FADE_TAIL);
   title_->SetLineHeight(20);
 
+  if (base::FeatureList::IsEnabled(features::kDetachedTabs)) {
+    title_->SetFontList(
+        title_->font_list().DeriveWithWeight(gfx::Font::Weight::SEMIBOLD));
+  }
+
   // Enable keyboard focus.
   SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
   views::FocusRing::Install(this);
@@ -182,7 +189,7 @@ void TabGroupHeader::Init(const tab_groups::TabGroupId& group) {
 
   SetProperty(views::kElementIdentifierKey, kTabGroupHeaderElementId);
   attention_indicator_->SetProperty(views::kElementIdentifierKey,
-                                    kAttentionIndicatorViewElementId);
+                                    kTabGroupHeaderAttentionIndicatorElementId);
 
   SetEventTargeter(std::make_unique<views::ViewTargeter>(this));
 
@@ -198,7 +205,8 @@ void TabGroupHeader::Init(const tab_groups::TabGroupId& group) {
 
   UpdateTooltipText();
 
-  if (!tab_slot_controller_->GetGroupTitle(group).empty()) {
+  if (!tab_slot_controller_->GetGroupTitle(group).empty() &&
+      chip_transition_animation_) {
     chip_transition_animation_->Reset(1.0);
   }
 }
@@ -208,8 +216,14 @@ void TabGroupHeader::OnAttentionStateChanged() {
 }
 
 void TabGroupHeader::AnimationProgressed(const gfx::Animation* animation) {
-  if (animation == chip_transition_animation_.get()) {
-    VisualsChanged();
+  if (!chip_transition_animation_ ||
+      animation != chip_transition_animation_.get()) {
+    return;
+  }
+  if (group_title_.empty()) {
+    CreateHeaderWithoutTitle();
+  } else {
+    CreateHeaderWithTitle();
   }
 }
 
@@ -219,6 +233,8 @@ bool TabGroupHeader::OnKeyPressed(const ui::KeyEvent& event) {
       !editor_bubble_tracker_.is_open()) {
     tab_slot_controller_->ToggleTabGroupCollapsedState(
         group().value(), ToggleTabGroupCollapsedStateOrigin::kKeyboard);
+    views::ElementTrackerViews::GetInstance()->NotifyViewActivated(
+        kTabGroupHeaderElementId, this);
     NotifyAccessibilityEventDeprecated(ax::mojom::Event::kSelection, true);
     return true;
   }
@@ -289,6 +305,8 @@ void TabGroupHeader::OnMouseReleased(const ui::MouseEvent& event) {
     } else if (toggle_collapse) {
       tab_slot_controller_->ToggleTabGroupCollapsedState(
           group().value(), ToggleTabGroupCollapsedStateOrigin::kMouse);
+      views::ElementTrackerViews::GetInstance()->NotifyViewActivated(
+          kTabGroupHeaderElementId, this);
     }
   }
 
@@ -309,6 +327,8 @@ void TabGroupHeader::OnGestureEvent(ui::GestureEvent* event) {
     case ui::EventType::kGestureTap:
       tab_slot_controller_->ToggleTabGroupCollapsedState(
           group().value(), ToggleTabGroupCollapsedStateOrigin::kGesture);
+      views::ElementTrackerViews::GetInstance()->NotifyViewActivated(
+          kTabGroupHeaderElementId, this);
       break;
     case ui::EventType::kGestureLongTap: {
       editor_bubble_tracker_.Opened(TabGroupEditorBubbleView::Show(
@@ -435,7 +455,8 @@ void TabGroupHeader::VisualsChanged() {
   const std::u16string old_title = group_title_;
   group_title_ = tab_slot_controller_->GetGroupTitle(tab_group_id);
 
-  if (old_title.empty() != group_title_.empty()) {
+  if (chip_transition_animation_ &&
+      (old_title.empty() != group_title_.empty())) {
     if (group_title_.empty()) {
       chip_transition_animation_->Hide();
     } else {
@@ -501,6 +522,10 @@ int TabGroupHeader::GetNamedChipHeight() const {
 }
 
 int TabGroupHeader::GetChipHeight() const {
+  if (!chip_transition_animation_) {
+    return group_style_->GetEmptyChipSize();
+  }
+
   const float animation_value = chip_transition_animation_->GetCurrentValue();
   const int empty_height = group_style_->GetEmptyChipSize();
   const int named_height = GetNamedChipHeight();
@@ -510,6 +535,10 @@ int TabGroupHeader::GetChipHeight() const {
 }
 
 int TabGroupHeader::GetChipY() const {
+  if (!chip_transition_animation_) {
+    return group_style_->GetTitleChipOffset(std::nullopt).y();
+  }
+
   const float animation_value = chip_transition_animation_->GetCurrentValue();
   const int named_height = GetNamedChipHeight();
 
@@ -556,13 +585,6 @@ void TabGroupHeader::SetCollapsedState() {
       tab_slot_controller_->IsGroupCollapsed(group().value());
   if (is_collapsed_ != collapsed_state) {
     is_collapsed_ = collapsed_state;
-
-    const ui::ElementIdentifier element_id =
-        GetProperty(views::kElementIdentifierKey);
-    if (element_id) {
-      views::ElementTrackerViews::GetInstance()->NotifyViewActivated(element_id,
-                                                                     this);
-    }
   }
 }
 
@@ -806,9 +828,6 @@ void TabGroupHeader::UpdateAccessibleName() {
   }
   GetViewAccessibility().SetName(final_name);
 }
-
-DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(TabGroupHeader,
-                                      kAttentionIndicatorViewElementId);
 
 BEGIN_METADATA(TabGroupHeader)
 ADD_READONLY_PROPERTY_METADATA(int, DesiredWidth)

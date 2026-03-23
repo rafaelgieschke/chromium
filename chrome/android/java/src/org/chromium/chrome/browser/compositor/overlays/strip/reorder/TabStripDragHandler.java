@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.compositor.overlays.strip.reorder;
 
 import static org.chromium.build.NullUtil.assertNonNull;
 import static org.chromium.build.NullUtil.assumeNonNull;
-import static org.chromium.chrome.browser.compositor.overlays.strip.StripLayoutUtils.isTabPinningFromStripEnabled;
 
 import android.app.Activity;
 import android.content.ClipDescription;
@@ -475,7 +474,7 @@ public class TabStripDragHandler extends TabDragHandlerBase {
             // Reject cross-model drops if incognito is opened as a new window.
             if (IncognitoUtils.shouldOpenIncognitoAsWindow()) return false;
 
-            mMultiInstanceManager.moveTabsToWindowByIdChecked(
+            mMultiInstanceOrchestrator.moveTabsToWindowByIdChecked(
                     destWindowId,
                     Collections.singletonList(tabBeingDragged),
                     getTabModelSelector().getModel(tabBeingDragged.isIncognito()).getCount(),
@@ -486,7 +485,7 @@ public class TabStripDragHandler extends TabDragHandlerBase {
             int tabIndex =
                     helper.getTabIndexForTabDrop(
                             dropEvent.getX() * mPxToDp, tabBeingDragged.getIsPinned());
-            mMultiInstanceManager.moveTabsToWindowByIdChecked(
+            mMultiInstanceOrchestrator.moveTabsToWindowByIdChecked(
                     destWindowId,
                     Collections.singletonList(tabBeingDragged),
                     tabIndex,
@@ -519,7 +518,7 @@ public class TabStripDragHandler extends TabDragHandlerBase {
             // Reject cross-model drops if incognito is opened as a new window.
             if (IncognitoUtils.shouldOpenIncognitoAsWindow()) return false;
 
-            mMultiInstanceManager.moveTabsToWindowByIdChecked(
+            mMultiInstanceOrchestrator.moveTabsToWindowByIdChecked(
                     destWindowId,
                     tabsBeingDragged,
                     getTabModelSelector()
@@ -532,7 +531,7 @@ public class TabStripDragHandler extends TabDragHandlerBase {
             int tabIndex =
                     helper.getTabIndexForTabDrop(
                             dropEvent.getX() * mPxToDp, isDraggingPinnedItem());
-            mMultiInstanceManager.moveTabsToWindowByIdChecked(
+            mMultiInstanceOrchestrator.moveTabsToWindowByIdChecked(
                     destWindowId,
                     tabsBeingDragged,
                     tabIndex,
@@ -689,7 +688,7 @@ public class TabStripDragHandler extends TabDragHandlerBase {
 
     public static boolean isDraggingPinnedItem() {
         DragDropGlobalState globalState = getDragDropGlobalState(/* dragEvent= */ null);
-        if (!isTabPinningFromStripEnabled() || globalState == null) return false;
+        if (globalState == null) return false;
 
         Tab tab = ChromeDragDropUtils.getTabFromGlobalState(globalState);
         if (tab != null && tab.getIsPinned()) return true;

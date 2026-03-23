@@ -76,8 +76,8 @@ void QuotedPrintableDecode(base::span<const char> data, Vector<uint8_t>& out) {
     if (upper_character == '\r' && lower_character == '\n')
       continue;
 
-    if (!IsASCIIHexDigit(upper_character) ||
-        !IsASCIIHexDigit(lower_character)) {
+    if (!IsAsciiHexDigit(upper_character) ||
+        !IsAsciiHexDigit(lower_character)) {
       // Invalid sequence, = followed by non hex digits, just insert the
       // characters as is.
       out.push_back('=');
@@ -86,7 +86,7 @@ void QuotedPrintableDecode(base::span<const char> data, Vector<uint8_t>& out) {
       continue;
     }
     out.push_back(
-        static_cast<char>(ToASCIIHexValue(upper_character, lower_character)));
+        static_cast<char>(ToAsciiHexValue(upper_character, lower_character)));
   }
 }
 
@@ -239,7 +239,7 @@ MIMEHeader* MIMEHeader::ParseHeader(SharedBufferChunkReader* buffer) {
 
 MIMEHeader::Encoding MIMEHeader::ParseContentTransferEncoding(
     const String& text) {
-  String encoding = text.StripWhiteSpace().LowerASCII();
+  String encoding = text.StripWhiteSpace().ToAsciiLower();
   if (encoding == "base64")
     return Encoding::kBase64;
   if (encoding == "quoted-printable")

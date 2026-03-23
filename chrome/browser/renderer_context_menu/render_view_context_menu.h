@@ -117,7 +117,8 @@ class RenderViewContextMenu
 
   RenderViewContextMenu(content::RenderFrameHost& render_frame_host,
                         const content::ContextMenuParams& params,
-                        bool is_paste_enabled);
+                        bool is_paste_enabled,
+                        bool is_paste_and_match_style_enabled);
 
   RenderViewContextMenu(const RenderViewContextMenu&) = delete;
   RenderViewContextMenu& operator=(const RenderViewContextMenu&) = delete;
@@ -222,6 +223,8 @@ class RenderViewContextMenu
                                bool started_from_context_menu) override;
 
  private:
+  void ExecGlic();
+
   friend class RenderViewContextMenuTest;
   friend class TestRenderViewContextMenu;
   friend class FormatUrlForClipboardTest;
@@ -327,7 +330,6 @@ class RenderViewContextMenu
   void AppendRegionSearchItem();
   void AppendLiveCaptionItem();
   void AppendSendTabToSelfItem(bool add_separator);
-  void AppendUserNotesItems();
   bool AppendQRCodeGeneratorItem(bool for_image,
                                  bool draw_icon,
                                  bool add_separator);
@@ -568,6 +570,9 @@ class RenderViewContextMenu
   // Whether the "Paste" menu item should be enabled.
   const bool is_paste_enabled_;
 
+  // Whether the "Paste and Match Style" menu item should be enabled.
+  const bool is_paste_and_match_style_enabled_;
+
   // Fenced frame can disable its untrusted network in exchange for access to
   // unpartitioned cross-site data. To prevent cross-site data from leaking out
   // of fenced frame, context menu commands should be gated on untrusted network
@@ -606,6 +611,9 @@ class RenderViewContextMenu
            // Image loading commands.
            IDC_CONTENT_CONTEXT_LOAD_IMAGE,
            IDC_CONTENT_CONTEXT_OPEN_ORIGINAL_IMAGE_NEW_TAB,
+
+           // Opening Glic
+           IDC_CONTENT_CONTEXT_GLIC,
 
            // Autofill commands.
            IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_AT_MEMORY});

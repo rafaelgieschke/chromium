@@ -36,6 +36,8 @@ chromium-metrics-reviews@google.com.
   <variant name="Glic" summary="Glic toggle on settings page."/>
   <variant name="GlicAppMenuNewBadge"
       summary="Glic menu item in the three dot menu."/>
+  <variant name="GlicContextMenu"
+      summary="Promotion for Glic in the context menu."/>
   <variant name="GlicKeyboardShortcutNewBadge"
       summary="Glic keyboard shortcut input on settings page."/>
   <variant name="LensOverlay"
@@ -132,7 +134,8 @@ chromium-metrics-reviews@google.com.
       summary="the module for Lens Overlay Full Page Translate"/>
   <variant name="Mobilepasswords"
       summary="the module for getting passwords on mobile"/>
-  <variant name="PdfInk2" summary="the module for PDF Ink Signatures"/>
+  <variant name="PdfInk2"
+      summary="the module for PDF Ink Signatures (obsolete)"/>
   <variant name="PdfSaveToDrive" summary="the module for PDF Save to Drive"/>
   <variant name="PerformanceInterventionUI"
       summary="the module for Performance Intervention"/>
@@ -276,7 +279,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="UserEducation.MessageNotShown" enum="PromoFailure"
-    expires_after="2026-07-12">
+    expires_after="2026-09-13">
   <owner>mickeyburks@chromium.org</owner>
   <owner>frizzle-team@google.com</owner>
   <summary>
@@ -750,7 +753,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="WhatsNew.LoadEvent" enum="WhatsNewLoadEvent"
-    expires_after="2026-07-12">
+    expires_after="2026-09-13">
   <owner>mickeyburks@chromium.org</owner>
   <owner>frizzle-team@google.com</owner>
   <summary>
@@ -765,7 +768,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="WhatsNew.LoadResponseCode"
-    enum="CombinedHttpResponseAndNetErrorCode" expires_after="2026-07-12">
+    enum="CombinedHttpResponseAndNetErrorCode" expires_after="2026-09-13">
   <owner>mickeyburks@chromium.org</owner>
   <owner>frizzle-team@google.com</owner>
   <summary>
@@ -776,7 +779,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="WhatsNew.StartupType" enum="WhatsNewStartupType"
-    expires_after="2026-07-12">
+    expires_after="2026-09-13">
   <owner>mickeyburks@chromium.org</owner>
   <owner>frizzle-team@google.com</owner>
   <summary>

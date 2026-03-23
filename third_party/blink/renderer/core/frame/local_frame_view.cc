@@ -54,6 +54,7 @@
 #include "third_party/blink/public/mojom/frame/remote_frame.mojom-blink.h"
 #include "third_party/blink/public/mojom/scroll/scroll_into_view_params.mojom-blink.h"
 #include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-blink.h"
+#include "third_party/blink/public/mojom/use_counter/metrics/web_feature.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/renderer/bindings/core/v8/capture_source_location.h"
@@ -755,9 +756,17 @@ void LocalFrameView::PerformLayout() {
           ++add_result.stored_value->value;
         }
       }
-      for (auto& root : layout_subtree_root_list_.Ordered()) {
-        bool should_rebuild_fragments = false;
+      HeapVector<LayoutObjectWithDepth> ordered_roots =
+          layout_subtree_root_list_.Ordered();
+      for (LayoutObjectWithDepth& root : ordered_roots) {
         LayoutObject& root_layout_object = *root;
+        if (!layout_subtree_root_list_.Contains(root_layout_object)) {
+          // A previous iteration removed the entry from the list.
+          // This can happen when interleaved style recalc sets the element
+          // associated the layout subtree root to display:none.
+          continue;
+        }
+        bool should_rebuild_fragments = false;
         LayoutBox* container_box = root->ContainingNGBox();
         if (container_box) {
           auto it = fragment_tree_spines.find(container_box);
@@ -3793,7 +3802,8 @@ void LocalFrameView::ServiceScrollAnimations(base::TimeTicks start_time) {
           start_time.since_origin().InSecondsF());
     }
 
-    if (!RuntimeEnabledFeatures::RunSnapshotPostLayoutStateStepsEnabled()) {
+    if (!RuntimeEnabledFeatures::RunSnapshotPostLayoutStateStepsEnabled() ||
+        !RuntimeEnabledFeatures::SnapshotScrollTimelinesPostLayoutEnabled()) {
       GetFrame().UpdatePostLayoutSnapshotClientsForServiceAnimations();
     }
     if (SVGDocumentExtensions::ServiceSmilOnAnimationFrame(*document)) {
@@ -5469,6 +5479,10 @@ void LocalFrameView::ExecutePendingScrollMarkerSelectionUpdates() {
     }
     pending_scroll_marker_selection_updates_->clear();
   }
+}
+
+mojom::blink::WebFeature LocalFrameView::SvgFilterPaintedCounter() const {
+  return mojom::blink::WebFeature::kSvgFilterPaintedOnLocalFrame;
 }
 
 }  // namespace blink

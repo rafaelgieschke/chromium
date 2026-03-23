@@ -1038,12 +1038,9 @@ IN_PROC_BROWSER_TEST_F(ServiceWorkerBrowserTest, GetRunningServiceWorkerInfos) {
                       kActivating == running_info.version_status ||
               content::ServiceWorkerRunningInfo::ServiceWorkerVersionStatus::
                       kActivated == running_info.version_status);
-  EXPECT_EQ(shell()
-                ->web_contents()
-                ->GetPrimaryMainFrame()
-                ->GetProcess()
-                ->GetDeprecatedID(),
-            running_info.render_process_id);
+  EXPECT_EQ(
+      shell()->web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID(),
+      running_info.render_process_id);
 }
 
 IN_PROC_BROWSER_TEST_F(ServiceWorkerBrowserTest, StartWorkerWhileInstalling) {
@@ -3733,11 +3730,8 @@ IN_PROC_BROWSER_TEST_P(ServiceWorkerCrossOriginIsolatedBrowserTest,
             running_info.script_url);
 
   bool is_in_process =
-      shell()
-          ->web_contents()
-          ->GetPrimaryMainFrame()
-          ->GetProcess()
-          ->GetDeprecatedID() == running_info.render_process_id;
+      shell()->web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID() ==
+      running_info.render_process_id;
   if (!IsPageCrossOriginIsolated() && !IsServiceWorkerCrossOriginIsolated()) {
     EXPECT_TRUE(is_in_process);
   }
@@ -3805,11 +3799,8 @@ IN_PROC_BROWSER_TEST_P(ServiceWorkerCrossOriginIsolatedBrowserTest,
             running_info.script_url);
 
   bool is_in_process =
-      shell()
-          ->web_contents()
-          ->GetPrimaryMainFrame()
-          ->GetProcess()
-          ->GetDeprecatedID() == running_info.render_process_id;
+      shell()->web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID() ==
+      running_info.render_process_id;
   bool should_be_in_process =
       IsPageCrossOriginIsolated() == IsServiceWorkerCrossOriginIsolated();
   EXPECT_EQ(is_in_process, should_be_in_process);
@@ -3856,11 +3847,8 @@ IN_PROC_BROWSER_TEST_P(ServiceWorkerCoopBrowserTest, FreshInstall) {
             running_info.script_url);
 
   bool is_in_process =
-      shell()
-          ->web_contents()
-          ->GetPrimaryMainFrame()
-          ->GetProcess()
-          ->GetDeprecatedID() == running_info.render_process_id;
+      shell()->web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID() ==
+      running_info.render_process_id;
   EXPECT_TRUE(is_in_process);
 }
 
@@ -3904,11 +3892,8 @@ IN_PROC_BROWSER_TEST_P(ServiceWorkerCoopBrowserTest, MAYBE_PostInstallRun) {
             running_info.script_url);
 
   bool is_in_process =
-      shell()
-          ->web_contents()
-          ->GetPrimaryMainFrame()
-          ->GetProcess()
-          ->GetDeprecatedID() == running_info.render_process_id;
+      shell()->web_contents()->GetPrimaryMainFrame()->GetProcess()->GetID() ==
+      running_info.render_process_id;
   EXPECT_TRUE(is_in_process);
 }
 
@@ -3994,8 +3979,7 @@ IN_PROC_BROWSER_TEST_F(
     // The service worker shares the process with the page that requested it.
     const ServiceWorkerRunningInfo& running_info = infos.begin()->second;
     EXPECT_EQ(service_worker_url, running_info.script_url);
-    EXPECT_EQ(rfh_1->GetProcess()->GetDeprecatedID(),
-              running_info.render_process_id);
+    EXPECT_EQ(rfh_1->GetProcess()->GetID(), running_info.render_process_id);
   }
 
   // Reload the page so that it would use the service worker.
@@ -4033,8 +4017,7 @@ IN_PROC_BROWSER_TEST_F(
     // The service worker also shares the same process as |rfh_2|.
     const ServiceWorkerRunningInfo& running_info = infos.begin()->second;
     EXPECT_EQ(service_worker_url, running_info.script_url);
-    EXPECT_EQ(rfh_2->GetProcess()->GetDeprecatedID(),
-              running_info.render_process_id);
+    EXPECT_EQ(rfh_2->GetProcess()->GetID(), running_info.render_process_id);
   }
 
   // Fetch something from the service worker.
@@ -4091,8 +4074,7 @@ IN_PROC_BROWSER_TEST_F(
     // The service worker shares the process with the page that requested it.
     const ServiceWorkerRunningInfo& running_info = infos.begin()->second;
     EXPECT_EQ(service_worker_url, running_info.script_url);
-    EXPECT_EQ(rfh_1->GetProcess()->GetDeprecatedID(),
-              running_info.render_process_id);
+    EXPECT_EQ(rfh_1->GetProcess()->GetID(), running_info.render_process_id);
   }
 
   // Reload the page so that it would use the service worker.
@@ -4143,10 +4125,8 @@ IN_PROC_BROWSER_TEST_F(
     // in |rfh_1|'s process).
     const ServiceWorkerRunningInfo& running_info = infos.begin()->second;
     EXPECT_EQ(service_worker_url, running_info.script_url);
-    EXPECT_NE(rfh_2->GetProcess()->GetDeprecatedID(),
-              running_info.render_process_id);
-    EXPECT_EQ(rfh_1->GetProcess()->GetDeprecatedID(),
-              running_info.render_process_id);
+    EXPECT_NE(rfh_2->GetProcess()->GetID(), running_info.render_process_id);
+    EXPECT_EQ(rfh_1->GetProcess()->GetID(), running_info.render_process_id);
   }
 
   // Fetch something from the service worker.
@@ -4388,7 +4368,7 @@ IN_PROC_BROWSER_TEST_P(ServiceWorkerFencedFrameProcessAllocationBrowserTest,
 
   // The service worker shares the process with the page that requested it.
   const ServiceWorkerRunningInfo& running_info = infos.begin()->second;
-  EXPECT_EQ(fenced_frame->GetProcess()->GetDeprecatedID(),
+  EXPECT_EQ(fenced_frame->GetProcess()->GetID(),
             running_info.render_process_id);
 }
 
@@ -7718,6 +7698,7 @@ class ServiceWorkerSyntheticResponseBrowserTest
               "Connection: close\r\n"
               "Content-Type: text/html\r\n"
               "Service-Worker-Synthetic-Response: ?1\r\n"
+              "Content-Security-Policy: script-src 'unsafe-inline'\r\n"
               "Date: Fri, 27 Jun 2025 10:50:00 JST\r\n"
               "Test-Duplicated-Header: x\r\n";
 
@@ -8205,6 +8186,8 @@ class InterceptorURLLoader : public network::mojom::URLLoader {
     auto response = network::mojom::URLResponseHead::New();
     response->headers = base::MakeRefCounted<net::HttpResponseHeaders>(
         "HTTP/1.1 200 OK\r\n"
+        "Service-Worker-Synthetic-Response: ?1\r\n"
+        "Content-Security-Policy: script-src 'unsafe-inline'\r\n"
         "Content-Type: text/html\r\n\r\n");
 
     mojo::ScopedDataPipeProducerHandle producer;

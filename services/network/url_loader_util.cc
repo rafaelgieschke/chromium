@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <optional>
 
-#include "base/containers/enum_set.h"
 #include "base/containers/to_vector.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
@@ -578,8 +577,8 @@ void ConfigureUrlRequest(const ResourceRequest& request,
     url_request.set_socket_tag(request.socket_tag);
   }
 
-  url_request.set_allows_device_bound_session_registration(
-      request.allows_device_bound_session_registration);
+  url_request.set_allows_device_bound_sessions(
+      request.allows_device_bound_sessions);
 
   if (base::FeatureList::IsEnabled(features::kSendSameSiteLaxForFedCM) &&
       (request.destination == mojom::RequestDestination::kWebIdentity ||

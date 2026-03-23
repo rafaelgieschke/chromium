@@ -14,7 +14,8 @@
 #include "base/no_destructor.h"
 #include "build/build_config.h"
 #include "chrome/browser/accessibility_annotator/accessibility_annotator_backend_factory.h"
-#include "chrome/browser/autofill/account_setting_service_factory.h"
+#include "chrome/browser/account_settings/account_setting_service_factory.h"
+#include "chrome/browser/autocomplete/aim_eligibility_service_factory.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/browser_process.h"
@@ -192,7 +193,7 @@ syncer::DataTypeController::TypeVector CreateCommonControllers(
   builder.SetAccessibilityAnnotatorBackend(
       AccessibilityAnnotatorBackendFactory::GetForProfile(profile));
   builder.SetAccountSettingService(
-      autofill::AccountSettingServiceFactory::GetForBrowserContext(profile));
+      AccountSettingServiceFactory::GetForBrowserContext(profile));
   // A callback is needed here because `autofill::PersonalDataManagerFactory`
   // already depends on `SyncServiceFactory`.
   builder.SetAddressDataManagerGetter(
@@ -208,6 +209,8 @@ syncer::DataTypeController::TypeVector CreateCommonControllers(
   builder.SetCollaborationService(
       collaboration::CollaborationServiceFactory::GetForProfile(profile));
 #if !BUILDFLAG(IS_ANDROID)
+  builder.SetAimEligibilityService(
+      AimEligibilityServiceFactory::GetForProfile(profile));
   builder.SetContextualTasksService(
       contextual_tasks::ContextualTasksServiceFactory::GetForProfile(profile));
 #endif
@@ -524,9 +527,10 @@ SyncServiceFactory::SyncServiceFactory()
   // actually plumbed in ChromeSyncClient, which this factory constructs.
   DependsOn(AboutSigninInternalsFactory::GetInstance());
   DependsOn(AccessibilityAnnotatorBackendFactory::GetInstance());
-  DependsOn(autofill::AccountSettingServiceFactory::GetInstance());
+  DependsOn(AccountSettingServiceFactory::GetInstance());
   DependsOn(AccountBookmarkSyncServiceFactory::GetInstance());
   DependsOn(AccountPasswordStoreFactory::GetInstance());
+  DependsOn(AimEligibilityServiceFactory::GetInstance());
   DependsOn(BookmarkModelFactory::GetInstance());
   DependsOn(BookmarkUndoServiceFactory::GetInstance());
   DependsOn(browser_sync::UserEventServiceFactory::GetInstance());

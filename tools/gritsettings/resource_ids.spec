@@ -234,7 +234,7 @@
     "includes": [2940],
   },
   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/certificate_manager/resources.grd": {
-    "META": {"sizes": {"includes": [40],}},
+    "META": {"sizes": {"includes": [50],}},
     "includes": [2950],
   },
   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/certificate_viewer/resources.grd": {
@@ -609,6 +609,10 @@
     "META": {"sizes": {"includes": [20]}},
     "includes": [4660],
   },
+   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/webui_toolbar/code_cache_resources.grd": {
+    "META": {"sizes": {"includes": [30]}},
+    "includes": [4665],
+  },
    "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/webui_toolbar/resources.grd": {
     "META": {"sizes": {"includes": [30]}},
     "includes": [4670],
@@ -799,6 +803,10 @@
   "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/webnn_internals/resources.grd": {
     "META": {"sizes": {"includes": [10]}},
     "includes": [5290],
+  },
+  "<(SHARED_INTERMEDIATE_DIR)/chrome/browser/resources/ai_overlay_dialog/resources.grd": {
+    "META": {"sizes": {"includes": [30]}},
+    "includes": [5300],
   },
   # END chrome/ WebUI resources section
 

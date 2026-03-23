@@ -60,6 +60,10 @@ public final class EventConstants {
     public static final String KEYBOARD_ACCESSORY_ACCOUNT_NAME_EMAIL_AUTOFILLED =
             "account_name_email_create_suggestion_feature_used";
 
+    /** The keyboard accessory was used to fill autofill valuables data into a form. */
+    public static final String KEYBOARD_ACCESSORY_AUTOFILL_AI_VALUABLES_AUTOFILLED =
+            "autofill_ai_valuables_feature_used";
+
     /** The keyboard accessory was used to fill address data into a form. */
     public static final String KEYBOARD_ACCESSORY_ADDRESS_AUTOFILLED =
             "keyboard_accessory_address_suggestion_accepted";
@@ -174,6 +178,11 @@ public final class EventConstants {
     /** AdaptiveButtonInTopToolbarCustomization add to bookmarks events. */
     public static final String ADAPTIVE_TOOLBAR_CUSTOMIZATION_ADD_TO_BOOKMARKS_OPENED =
             "adaptive_toolbar_customization_add_to_bookmarks_opened";
+
+    public static final String ADAPTIVE_TOOLBAR_GLIC_IPH_TRIGGER =
+            "adaptive_toolbar_glic_iph_trigger";
+    public static final String ADAPTIVE_TOOLBAR_CUSTOMIZATION_GLIC_CLICKED =
+            "adaptive_toolbar_customization_glic_clicked";
 
     /** Open new incognito tab from app menu. */
     public static final String APP_MENU_NEW_INCOGNITO_TAB_CLICKED =

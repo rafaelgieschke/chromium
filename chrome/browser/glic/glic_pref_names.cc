@@ -82,12 +82,12 @@ void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
       ui::Command::AcceleratorToString(
           LocalHotkeyManager::GetDefaultAccelerator(
               LocalHotkeyManager::Hotkey::kFocusToggle)));
-  registry->RegisterBooleanPref(
-      prefs::kGlicMultiInstanceEnabledBySubscriptionTier, false);
   registry->RegisterStringPref(prefs::kGlicGuestUrlPresetAutopush, "");
   registry->RegisterStringPref(prefs::kGlicGuestUrlPresetStaging, "");
   registry->RegisterStringPref(prefs::kGlicGuestUrlPresetPreprod, "");
   registry->RegisterStringPref(prefs::kGlicGuestUrlPresetProd, "");
+  registry->RegisterStringPref(
+      prefs::kGlicWebContinuityOriginatingHostUrlPreset, "");
 }
 
 }  // namespace glic::prefs

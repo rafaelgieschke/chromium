@@ -5,11 +5,11 @@
 #import "ios/chrome/browser/autofill/model/autofill_ai_util.h"
 
 #import "base/strings/string_util.h"
+#import "components/account_settings/account_setting_service.h"
 #import "components/autofill/core/browser/data_model/autofill_ai/entity_type_names.h"
 #import "components/autofill/core/browser/permissions/autofill_ai/autofill_ai_permission_utils.h"
-#import "components/autofill/core/browser/webdata/account_settings/account_setting_service.h"
 #import "components/variations/service/variations_service.h"
-#import "ios/chrome/browser/autofill/model/ios_account_setting_service_factory.h"
+#import "ios/chrome/browser/account_settings/model/ios_account_setting_service_factory.h"
 #import "ios/chrome/browser/autofill/model/ios_autofill_entity_data_manager_factory.h"
 #import "ios/chrome/browser/metrics/model/google_groups_manager_factory.h"
 #import "ios/chrome/browser/shared/model/application_context/application_context.h"
@@ -30,7 +30,7 @@ const std::string GetCountryCodeFromVariations() {
 }
 
 bool IsWalletPublicPassStorageEnabled(ProfileIOS* profile) {
-  AccountSettingService* setting_service =
+  account_settings::AccountSettingService* setting_service =
       IOSAccountSettingServiceFactory::GetForProfile(profile);
   return setting_service &&
          setting_service->IsWalletPrivacyContextualSurfacingEnabled();
@@ -68,43 +68,6 @@ bool CanPerformAutofillAiAction(ProfileIOS* profile, AutofillAiAction action) {
       SyncServiceFactory::GetForProfile(profile),
       IsWalletPublicPassStorageEnabled(profile), profile->IsOffTheRecord(),
       GeoIpCountryCode(GetCountryCodeFromVariations()), action);
-}
-
-UIImage* DefaultIconForAutofillAiEntityType(EntityTypeName entity_type_name,
-                                            CGFloat symbol_point_size) {
-  NSString* symbol_name = nil;
-  switch (entity_type_name) {
-    case EntityTypeName::kPassport:
-      return SymbolWithPalette(
-          CustomSymbolWithPointSize(kPassportSymbol, symbol_point_size), @[
-            [UIColor colorNamed:kTextPrimaryColor],
-          ]);
-    case EntityTypeName::kDriversLicense:
-    case EntityTypeName::kNationalIdCard:
-      symbol_name = kPersonTextRectangleSymbol;
-      break;
-    case EntityTypeName::kVehicle:
-      symbol_name = kCarSymbol;
-      break;
-    case EntityTypeName::kKnownTravelerNumber:
-    case EntityTypeName::kRedressNumber:
-      symbol_name = kPersonFillCheckmarkSymbol;
-      break;
-    case EntityTypeName::kFlightReservation:
-      if (@available(iOS 26, *)) {
-        symbol_name = kAirplaneUpRightSymbol;
-      } else {
-        symbol_name = kAirplaneSymbol;
-      }
-      break;
-    default:
-      return nil;
-  }
-
-  return SymbolWithPalette(
-      DefaultSymbolWithPointSize(symbol_name, symbol_point_size), @[
-        [UIColor colorNamed:kTextPrimaryColor],
-      ]);
 }
 
 bool IsEnhancedAutofillEnabled(ProfileIOS* profile) {

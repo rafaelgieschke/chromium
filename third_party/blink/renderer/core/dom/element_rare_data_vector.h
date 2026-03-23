@@ -20,6 +20,10 @@
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/type_traits.h"
 
+namespace viz {
+enum class TrackedElementFeature;
+}  // namespace viz
+
 namespace blink {
 
 class CSSStyleDeclaration;
@@ -202,6 +206,7 @@ class CORE_EXPORT ElementRareDataVector final
   PseudoElement* GetPseudoElement(
       PseudoId,
       const AtomicString& document_transition_tag = g_null_atom) const;
+  bool HasAnyPseudos() const;
   bool HasScrollButtonOrMarkerGroupPseudos() const;
   PseudoElementData::PseudoElementVector GetPseudoElements() const;
 
@@ -266,9 +271,6 @@ class CORE_EXPORT ElementRareDataVector final
   [[nodiscard]] ElementRareDataVector* SetPart(DOMTokenList* part);
   DOMTokenList* GetPart() const;
 
-  [[nodiscard]] ElementRareDataVector* SetMarker(DOMTokenList* marker);
-  DOMTokenList* GetMarker() const;
-
   [[nodiscard]] ElementRareDataVector* SetPartNamesMap(
       const AtomicString part_names);
   const NamesMap* PartNamesMap() const;
@@ -307,10 +309,14 @@ class CORE_EXPORT ElementRareDataVector final
   [[nodiscard]] ElementRareDataVector* SetRegionCaptureCropId(
       std::unique_ptr<RegionCaptureCropId> crop_id);
 
-  const TrackedElementRect* GetTrackedElementRect() const;
-  [[nodiscard]] ElementRareDataVector* SetTrackedElementRect(
-      std::unique_ptr<TrackedElementRect> rect);
-  void ClearTrackedElementRect();
+  const TrackedElementSubRect* GetTrackedElementSubRect(
+      viz::TrackedElementFeature feature) const;
+  [[nodiscard]] ElementRareDataVector* SetTrackedElementSubRect(
+      viz::TrackedElementFeature feature,
+      const TrackedElementSubRect& rect);
+  void ClearTrackedElementSubRect(viz::TrackedElementFeature feature);
+
+  const TrackedElementSubRects* GetTrackedElementSubRects() const;
 
   // Returns the ID backing a RestrictionTarget if one was set on the Element,
   // or nullptr otherwise.
@@ -413,7 +419,7 @@ class CORE_EXPORT ElementRareDataVector final
   DisplayAdElementMonitor* GetDisplayAdElementMonitor() const;
   std::pair<std::reference_wrapper<DisplayAdElementMonitor>,
             ElementRareDataVector*>
-  EnsureDisplayAdElementMonitor(Element*);
+  EnsureDisplayAdElementMonitor(Element*, AdProvenance);
 
   void SetDidAttachInternals() { flags_.did_attach_internals = true; }
   bool DidAttachInternals() const { return flags_.did_attach_internals; }
@@ -624,8 +630,7 @@ class CORE_EXPORT ElementRareDataVector final
     kFlatTreeNodeData = 46,
     kScrollTimelines = 47,
     kDOMNodeId = 49,
-    kMarker = 50,
-    kNumFields = 51,
+    kNumFields = 50,
   };
 
   inline const Member<ElementRareDataField>* ArrayBase() const {

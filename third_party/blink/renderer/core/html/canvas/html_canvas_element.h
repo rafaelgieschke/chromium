@@ -214,7 +214,7 @@ class CORE_EXPORT HTMLCanvasElement final
   void DiscardResourceDispatcher() override { frame_dispatcher_ = nullptr; }
 
   bool PushFrame(scoped_refptr<CanvasResource>&& image,
-                 const SkIRect& damage_rect) override;
+                 std::optional<SkIRect> damage_rect) override;
 
   // ExecutionContextLifecycleObserver and PageVisibilityObserver implementation
   void ContextDestroyed() override;
@@ -396,7 +396,9 @@ class CORE_EXPORT HTMLCanvasElement final
   static std::pair<blink::Image*, float> BrokenCanvas(
       float device_scale_factor);
 
+  bool ChildrenChangedAllChildrenRemovedNeedsList() const final;
   void ChildrenChanged(const ChildrenChange&) override;
+  void ChildElementRemoved(Element&);
 
   FRIEND_TEST_ALL_PREFIXES(HTMLCanvasElementTest, BrokenCanvasHighRes);
 

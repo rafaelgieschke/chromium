@@ -323,7 +323,9 @@ bool PopupViewViews::Show(
     }
   }
 
+  MaybeAnnounceCurrentTab();
   MaybeAnnouncePasswordRecoveryPopup();
+  MaybeAnnounceLoadingState();
   MaybeA11yFocusInformationalSuggestion();
 
   return !CanActivate() || (GetWidget() && GetWidget()->IsActive());
@@ -593,7 +595,7 @@ bool PopupViewViews::HandleKeyPressEventForAtMemory(
       }
       if (search_bar_) {
         controller_->SetFilter(
-            AutofillPopupController::SuggestionFilter(search_bar_->GetText()));
+            AutofillPopupController::StringFilter(search_bar_->GetText()));
         return true;
       }
       return false;
@@ -681,6 +683,15 @@ bool PopupViewViews::SelectNextHorizontalCell() {
       return true;
     }
   }
+
+  if (tabbed_pane_) {
+    const size_t current_tab = tabbed_pane_->GetSelectedTabIndex();
+    if (current_tab + 1 < tabbed_pane_->GetTabCount()) {
+      tabbed_pane_->SelectTabAt(current_tab + 1);
+      return true;
+    }
+  }
+
   return false;
 }
 
@@ -694,6 +705,15 @@ bool PopupViewViews::SelectPreviousHorizontalCell() {
         PopupCellSelectionSource::kKeyboard);
     return true;
   }
+
+  if (tabbed_pane_) {
+    const size_t current_tab = tabbed_pane_->GetSelectedTabIndex();
+    if (current_tab > 0) {
+      tabbed_pane_->SelectTabAt(current_tab - 1);
+      return true;
+    }
+  }
+
   return false;
 }
 
@@ -746,7 +766,9 @@ void PopupViewViews::OnSuggestionsChanged(bool prefer_prev_arrow_side) {
     return;
   }
 
+  MaybeAnnounceCurrentTab();
   MaybeAnnouncePasswordRecoveryPopup();
+  MaybeAnnounceLoadingState();
   MaybeA11yFocusInformationalSuggestion();
   ShowIPHFeaturePromos();
 }
@@ -806,7 +828,7 @@ void PopupViewViews::SearchBarOnInputChanged(std::u16string_view query) {
   if (controller_) {
     controller_->SetFilter(
         query.empty() ? std::nullopt
-                      : std::optional(AutofillPopupController::SuggestionFilter(
+                      : std::optional(AutofillPopupController::StringFilter(
                             std::u16string(query))));
   }
 }
@@ -837,6 +859,10 @@ bool PopupViewViews::SearchBarHandleKeyPressed(const ui::KeyEvent& event) {
   // the search bar) enables keyboard navigation when the search bar input
   // field is focused.
   return controller_->HandleKeyPressEvent(input::NativeWebKeyboardEvent(event));
+}
+
+void PopupViewViews::TabSelectedAt(int index) {
+  controller_->SetFilter(SuggestionTabIndex(index));
 }
 
 void PopupViewViews::SetSelectedCell(
@@ -929,6 +955,16 @@ void PopupViewViews::ShowIPHFeaturePromos() {
   }
 }
 
+void PopupViewViews::MaybeAnnounceCurrentTab() {
+  if (tabbed_pane_) {
+    a11y_announcer_.Run(
+        std::u16string(
+            tabbed_pane_->GetTabAt(tabbed_pane_->GetSelectedTabIndex())
+                ->GetTitleText()),
+        /*polite=*/true);
+  }
+}
+
 void PopupViewViews::MaybeAnnouncePasswordRecoveryPopup() {
   if (!controller_ || controller_->GetSuggestions().empty()) {
     return;
@@ -940,6 +976,19 @@ void PopupViewViews::MaybeAnnouncePasswordRecoveryPopup() {
         l10n_util::GetStringUTF16(
             IDS_PASSWORD_MANAGER_UI_PASSWORD_RECOVERY_SHOWN_A11Y_ANNOUNCEMENT),
         /*polite=*/true);
+  }
+}
+
+void PopupViewViews::MaybeAnnounceLoadingState() {
+  if (!controller_ || controller_->GetSuggestions().empty()) {
+    return;
+  }
+
+  if (controller_->GetSuggestionAt(0).type ==
+      SuggestionType::kLoadingThrobber) {
+    a11y_announcer_.Run(l10n_util::GetStringUTF16(
+                            IDS_AUTOFILL_BNPL_PROGRESS_DIALOG_LOADING_MESSAGE),
+                        /*polite=*/true);
   }
 }
 
@@ -1018,16 +1067,8 @@ void PopupViewViews::CreateSuggestionViews() {
   rows_.reserve(suggestions.size());
   size_t current_line_number = 0u;
 
-  // No suggestions (or only footer ones, which are not filterable) with
-  // a non-empty filter query means that there are no results matching
-  // the query. Show a corresponding message.
-  if ((suggestions.empty() ||
-       std::ranges::all_of(suggestions,
-                           [](const Suggestion& suggestion) {
-                             return suggestion.filtration_policy ==
-                                    Suggestion::FiltrationPolicy::kStatic;
-                           })) &&
-      search_bar_ && controller_->HasFilteredOutSuggestions()) {
+  // Show the "no results" message if the controller identifies this state.
+  if (search_bar_ && controller_->ShouldShowNoSuggestionsMessage()) {
     suggestions_container_->AddChildView(
         std::make_unique<PopupNoSuggestionsView>(
             search_bar_config_->no_results_message));
@@ -1229,17 +1270,26 @@ void PopupViewViews::CreateSuggestionViews() {
 
 gfx::Size PopupViewViews::CalculatePreferredSize(
     const views::SizeBounds& available_size) const {
-  gfx::Size size = views::View::CalculatePreferredSize(available_size);
-  if (size.width() > kAutofillPopupMaxWidth) {
-    // TODO(crbug.com/40232718): When we set the vertical axis to stretch,
-    // BoxLayout will occupy the entire vertical axis size. Two calculations are
-    // needed to correct this.
-    //
-    // Following crrev.com/c/5828724, the dialog box will fit the text more
-    // closely. But this will break the pixel test, so make it a fixed size.
+  gfx::Size size;
+  // Use the original popup width if a tabbed pane is present to maintain the
+  // same popup width during tab switches.
+  if (tabbed_pane_initial_width_.has_value()) {
     size = views::View::CalculatePreferredSize(
-        views::SizeBounds(kAutofillPopupMaxWidth, {}));
-    size.set_width(kAutofillPopupMaxWidth);
+        views::SizeBounds(tabbed_pane_initial_width_.value(), {}));
+    size.set_width(tabbed_pane_initial_width_.value());
+  } else {
+    size = views::View::CalculatePreferredSize(available_size);
+    if (size.width() > kAutofillPopupMaxWidth) {
+      // TODO(crbug.com/40232718): When we set the vertical axis to stretch,
+      // BoxLayout will occupy the entire vertical axis size. Two calculations
+      // are needed to correct this.
+      //
+      // Following crrev.com/c/5828724, the dialog box will fit the text more
+      // closely. But this will break the pixel test, so make it a fixed size.
+      size = views::View::CalculatePreferredSize(
+          views::SizeBounds(kAutofillPopupMaxWidth, {}));
+      size.set_width(kAutofillPopupMaxWidth);
+    }
   }
 
   if (controller_ &&
@@ -1283,6 +1333,10 @@ void PopupViewViews::CreateTabbedPaneView() {
   // Calculate and set the preferred size for the tabbed pane based on its
   // contents.
   tabbed_pane->SetPreferredSize(tabbed_pane->GetPreferredSize());
+  tabbed_pane->SetListener(this);
+
+  // Filter suggestions for the default tab.
+  controller_->SetFilter(kDefaultSuggestionTabIndex);
 
   tabbed_pane_ = AddChildView(std::move(tabbed_pane));
 }
@@ -1293,6 +1347,13 @@ bool PopupViewViews::DoUpdateBoundsAndRedrawPopup() {
 
 bool PopupViewViews::DoUpdateBoundsAndRedrawPopup(bool prefer_prev_arrow_side) {
   gfx::Size preferred_size = CalculatePreferredSize({});
+
+  // Store the original width if a tabbed pane is present to maintain the same
+  // popup width during tab switches.
+  if (tabbed_pane_ && !tabbed_pane_initial_width_) {
+    tabbed_pane_initial_width_ = preferred_size.width();
+  }
+
   gfx::Rect popup_bounds;
 
   const gfx::Rect content_area_bounds = GetContentAreaBounds();

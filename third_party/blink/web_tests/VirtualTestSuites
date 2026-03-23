@@ -318,7 +318,7 @@
       "http/tests/inspector-protocol/issues/connection-allowlists"
     ],
     "exclusive_tests": "ALL",
-    "args": [ "--enable-features=ConnectionAllowlists" ],
+    "args": [ "--enable-features=ConnectionAllowlists,OverrideConnectionAllowlistOriginTrial" ],
     "expires": "Jul 1, 2026"
   },
   {
@@ -488,7 +488,7 @@
     "owners": ["samomekarajr@microsoft.com", "kbabbitt@microsoft.com"]
   },
   {
-    "prefix": "css-line-clamp-line-breaking-ellipsis",
+    "prefix": "disable-css-line-clamp-line-breaking-ellipsis",
     "platforms": [
       "Linux"
     ],
@@ -530,12 +530,13 @@
       "fast/deprecated-flexbox/line-clamp-removed-dynamically.html",
       "fast/overflow/line-clamp-and-columns.html",
       "fast/overflow/line-clamp-ellipsis-in-free-space.html",
+      "fast/overflow/line-clamp-floats-dont-grow-container.html",
       "fast/overflow/line-clamp-hides-trailing-anchor.html",
       "fast/overflow/line-clamp.html",
       "paint/invalidation/text-line-clamp-truncation.html"
     ],
     "args": [
-      "--enable-blink-features=CSSLineClamp,CSSLineClampLineBreakingEllipsis"
+      "--disable-blink-features=CSSLineClampLineBreakingEllipsis"
     ],
     "owners": [
       "abotella@igalia.com"
@@ -677,6 +678,7 @@
     "args": [
       "--enable-features=DevToolsWebMCPSupport"
     ],
+    "exclusive_tests": "ALL",
     "expires": "Sep 28, 2026",
     "owners": [
       "pfaffe@google.com"
@@ -744,7 +746,20 @@
       "external/wpt/css/css-overflow/line-clamp",
       "external/wpt/css/css-overflow/parsing",
       "external/wpt/css/css-overflow/inheritance.html",
+      "external/wpt/css/css-flexbox/alignment/flex-align-baseline-line-clamp-001.tentative.html",
+      "external/wpt/css/css-flexbox/alignment/flex-align-baseline-line-clamp-002.tentative.html",
+      "external/wpt/css/css-flexbox/alignment/flex-align-baseline-line-clamp-003.tentative.html",
+      "external/wpt/css/css-grid/alignment/grid-align-baseline-line-clamp-001.tentative.html",
+      "external/wpt/css/css-grid/alignment/grid-align-baseline-line-clamp-002.tentative.html",
+      "external/wpt/css/css-grid/alignment/grid-align-baseline-line-clamp-003.tentative.html",
+      "external/wpt/css/css-inline/baseline-source/baseline-source-first-001.html",
+      "external/wpt/css/css-inline/baseline-source/baseline-source-first-002.html",
+      "external/wpt/css/css-inline/baseline-source/baseline-source-first-003.html",
+      "external/wpt/css/css-inline/baseline-source/baseline-source-last-001.html",
+      "external/wpt/css/css-inline/baseline-source/baseline-source-last-002.html",
+      "external/wpt/css/css-inline/baseline-source/baseline-source-last-003.html",
       "external/wpt/css/css-inline/text-box-trim/text-box-trim-line-clamp-001.html",
+      "external/wpt/css/css-inline/text-box-trim/text-box-trim-line-clamp-002.html",
       "external/wpt/css/css-text/white-space/text-wrap-balance-005.html",
       "external/wpt/css/css-text/white-space/text-wrap-balance-line-clamp-001.html",
       "external/wpt/css/css-text/white-space/text-wrap-balance-line-clamp-002.html",
@@ -754,7 +769,17 @@
       "external/wpt/css/css-text/white-space/text-wrap-balance-line-clamp-006.html",
       "external/wpt/css/css-text/white-space/text-wrap-balance-line-clamp-007.html",
       "external/wpt/css/css-text/white-space/text-wrap-pretty-line-clamp-crash-001.html",
-      "fast/overflow"
+      "external/wpt/css/css-ui/text-overflow-string-001.html",
+      "external/wpt/css/css-ui/text-overflow-string-002.html",
+      "external/wpt/css/css-ui/text-overflow-string-003.html",
+      "external/wpt/css/css-ui/text-overflow-string-004.html",
+      "external/wpt/css/css-ui/text-overflow-string-005.html",
+      "external/wpt/css/css-ui/text-overflow-string-006.html",
+      "fast/deprecated-flexbox/dynamically-change-line-clamp.html",
+      "fast/deprecated-flexbox/line-clamp-crash.html",
+      "fast/deprecated-flexbox/line-clamp-removed-dynamically.html",
+      "fast/overflow",
+      "paint/invalidation/text-line-clamp-truncation.html"
     ],
     "args": [
       "--disable-blink-features=CSSLineClamp"
@@ -1281,40 +1306,6 @@
     ]
   },
   {
-    "prefix": "force-allow-storage-access",
-    "owners": [
-      "arichiv@chromium.org",
-      "cfredric@chromium.org"
-    ],
-    "platforms": [
-      "Android",
-      "Fuchsia",
-      "Linux",
-      "Mac",
-      "Win"
-    ],
-    "bases": [
-      "external/wpt/storage-access-api/storage-access-beyond-cookies.BlobURLDedicatedWorker.sub.https.tentative.window.html",
-      "external/wpt/storage-access-api/storage-access-beyond-cookies.BlobURLSharedWorker.sub.https.tentative.window.html",
-      "external/wpt/storage-access-api/storage-access-beyond-cookies.BroadcastChannel.sub.https.window.html",
-      "external/wpt/storage-access-api/storage-access-beyond-cookies.SharedWorker.sub.https.window.html",
-      "external/wpt/storage-access-api/storage-access-beyond-cookies.blobStorage.sub.https.window.html",
-      "external/wpt/storage-access-api/storage-access-beyond-cookies.caches.sub.https.window.html",
-      "external/wpt/storage-access-api/storage-access-beyond-cookies.estimate.sub.https.window.html",
-      "external/wpt/storage-access-api/storage-access-beyond-cookies.getDirectory.sub.https.window.html",
-      "external/wpt/storage-access-api/storage-access-beyond-cookies.indexedDB.sub.https.window.html",
-      "external/wpt/storage-access-api/storage-access-beyond-cookies.localStorage.sub.https.window.html",
-      "external/wpt/storage-access-api/storage-access-beyond-cookies.locks.sub.https.window.html",
-      "external/wpt/storage-access-api/storage-access-beyond-cookies.none.sub.https.window.html",
-      "external/wpt/storage-access-api/storage-access-beyond-cookies.sessionStorage.sub.https.window.html",
-      "external/wpt/storage-access-api/storage-access-beyond-cookies.thirdPartyBlobStorage.sub.https.window.html"
-    ],
-    "args": [
-      "--enable-features=ForceAllowStorageAccess"
-    ],
-    "expires": "May 14, 2026"
-  },
-  {
     "prefix": "force-eager",
     "owners": [
       "mlippautz@chromium.org"
@@ -1474,8 +1465,6 @@
   "The GenericSensorExtraClasses feature is controlled by a flag, which has ",
   "an expiration date. |expires| below is set to 'never' to avoid having to ",
   "manage the expiration date in two locations.",
-  "",
-  "N.B. skip_base_tests is needed only because of https://crbug.com/1471996",
   {
     "prefix": "generic-sensor-extra-classes",
     "owners": [
@@ -1493,9 +1482,6 @@
       "wpt_internal/generic-sensor/reference-frame-tests.https.window.js"
     ],
     "exclusive_tests": "ALL",
-    "skip_base_tests": [
-      "wpt_internal/generic-sensor/reference-frame-tests.https.window.html"
-    ],
     "args": [
       "--enable-features=GenericSensorExtraClasses"
     ],
@@ -2806,7 +2792,7 @@
     "expires": "Nov 29, 2025"
   },
   {
-    "prefix": "run-snapshot-post-layout",
+    "prefix": "snapshot-scroll-timelines-post-layout",
     "owners": [
       "futhark@chromium.org",
       "flackr@chromium.org"
@@ -2815,13 +2801,11 @@
       "Linux"
     ],
     "bases": [
-      "external/wpt/css/css-anchor-position/",
-      "external/wpt/css/css-conditional/container-queries/scroll-state/",
       "external/wpt/scroll-animations/",
       "fast/animation/scroll-animations/"
     ],
     "args": [
-      "--enable-blink-features=RunSnapshotPostLayoutStateSteps"
+      "--enable-blink-features=SnapshotScrollTimelinesPostLayout"
     ],
     "expires": "Jun 1, 2026"
   },
@@ -4698,7 +4682,6 @@
       "external/wpt/css/css-overflow/scroll-markers/scroll-markers-updated-by-programmatic-scroll.html",
       "external/wpt/css/cssom-view/overflow-hidden-smooth-scroll-crash.html",
       "external/wpt/css/cssom-view/scroll-behavior-smooth-after-hiding-iframe.html",
-      "external/wpt/feature-policy/experimental-features",
       "external/wpt/fetch/compression-dictionary/dictionary-fetch-with-link-element.tentative.https.html",
       "external/wpt/fetch/compression-dictionary/dictionary-fetch-with-link-header.tentative.https.html",
       "external/wpt/html/canvas/offscreen/manual/convert-to-blob",
@@ -4724,6 +4707,7 @@
       "synthetic_gestures",
       "transitions",
       "view-transition",
+      "wpt_internal/html/canvas/drawElementImage/invalidation-during-onpaint.html",
       "wpt_internal/html/script-execution",
       "wpt_internal/scheduler/integration_tests",
       "wpt_internal/view-transition",
@@ -4739,7 +4723,6 @@
       "external/wpt/trusted-types/trusted-types-reporting.html"
     ],
     "exclusive_tests": [
-      "external/wpt/feature-policy/experimental-features/vertical-scroll-touch-block-manual.tentative.html",
       "external/wpt/fetch/compression-dictionary/dictionary-fetch-with-link-element.tentative.https.html",
       "external/wpt/fetch/compression-dictionary/dictionary-fetch-with-link-header.tentative.https.html",
       "external/wpt/permissions-policy/experimental-features/vertical-scroll-touch-block-manual.tentative.html",
@@ -4886,7 +4869,7 @@
       "Win"
     ],
     "bases": [
-      "external/wpt/feature-policy"
+      "external/wpt/permissions-policy"
     ],
     "args": [
       "--autoplay-policy=document-user-activation-required"
@@ -6244,6 +6227,7 @@
       "fast/deprecated-flexbox/line-clamp-removed-dynamically.html",
       "fast/overflow/line-clamp-and-columns.html",
       "fast/overflow/line-clamp-ellipsis-in-free-space.html",
+      "fast/overflow/line-clamp-floats-dont-grow-container.html",
       "fast/overflow/line-clamp-hides-trailing-anchor.html",
       "fast/overflow/line-clamp.html",
       "paint/invalidation/text-line-clamp-truncation.html"
@@ -6306,6 +6290,22 @@
     "args": ["--enable-blink-features=SingleAxisScrollContainers"],
     "owners": [
       "freedebreuil@google.com"
+    ],
+    "expires": "Jan 1, 2027"
+  },
+  {
+    "prefix": "css-argument-grammar-disabled",
+    "platforms": ["Linux"],
+    "bases": [
+      "external/wpt/css/css-values/attr-namespace-wildcard.html",
+      "external/wpt/css/cssom/serialize-values.html",
+      "fast/css/attr-parsing.html",
+      "wpt_internal/css/css-values/attr-type-url-invalid.html"
+    ],
+    "exclusive_tests": "ALL",
+    "args": ["--disable-blink-features=CSSArgumentGrammar"],
+    "owners": [
+      "moonira@google.com"
     ],
     "expires": "Jan 1, 2027"
   }

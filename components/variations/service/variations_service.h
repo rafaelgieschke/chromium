@@ -239,6 +239,8 @@ class VariationsService
   // The seed type used.
   SeedType GetSeedType() const;
 
+  VariationsSource GetVariationsSource() const;
+
   int request_count() const { return request_count_; }
 
   // Cancels the currently pending fetch request.
@@ -285,6 +287,7 @@ class VariationsService
   virtual void StoreSeed(std::string seed_data,
                          std::string seed_signature,
                          std::string country_code,
+                         std::string geo_level1,
                          base::Time date_fetched,
                          bool is_delta_compressed,
                          bool is_gzip_compressed);

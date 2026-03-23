@@ -30,6 +30,7 @@
 #include "chrome/browser/glic/actor/glic_actor_task_manager.h"
 #include "chrome/browser/glic/common/application_hotkey_delegate.h"
 #include "chrome/browser/glic/common/future_browser_features.h"
+#include "chrome/browser/glic/common/glic_navigation.h"
 #include "chrome/browser/glic/fre/glic_fre_controller.h"
 #include "chrome/browser/glic/glic_enums.h"
 #include "chrome/browser/glic/glic_pref_names.h"
@@ -56,8 +57,11 @@
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/tab_list/tab_list_interface.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface_iterator.h"
 #include "chrome/common/actor/action_result.h"
 #include "chrome/common/actor/journal_details_builder.h"
 #include "chrome/common/chrome_features.h"
@@ -121,13 +125,6 @@ std::unique_ptr<GlicWindowController> CreateWindowController(
     GlicKeyedService* glic_service,
     GlicEnabling* glic_enabling,
     contextual_cueing::ContextualCueingService* contextual_cueing_service) {
-  // Update the eligibility state for future runs of Chrome in case this
-  // newly loaded profile was not captured in the initial eligibility check.
-  // This will not affect the multi-instance eligibiltiy state of the current
-  // run.
-  GlicEnabling::GetAndUpdateEligibilityForGlicMultiInstanceTieredRollout(
-      profile);
-
 #if !BUILDFLAG(IS_ANDROID)
   if (UseDefaultWindowController()) {
     return std::make_unique<GlicWindowControllerImpl>(
@@ -278,6 +275,12 @@ GlicKeyedService::GlicKeyedService(
   // This is only used by automation for tests.
   glic_profile_manager->MaybeAutoOpenGlicPanel();
 
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(&GlicKeyedService::InitializeAfterConstruction,
+                                GetWeakPtr()));
+}
+
+void GlicKeyedService::InitializeAfterConstruction() {
 #if !BUILDFLAG(IS_ANDROID)
   if (base::FeatureList::IsEnabled(media::kHeadlessCaptionEarlyStart)) {
     GlicMediaIntegration::GetFor(profile_);
@@ -307,7 +310,7 @@ void GlicKeyedService::Shutdown() {
   } else {
     CloseAndShutdown();
   }
-  web_contents_warming_pool_->Shutdown();
+  web_contents_warming_pool_->Clear();
 
   GlicProfileManager* glic_profile_manager = GlicProfileManager::GetInstance();
   if (glic_profile_manager) {
@@ -329,19 +332,6 @@ void GlicKeyedService::ToggleUI(BrowserWindowInterface* bwi,
   ToggleUI(bwi, prevent_close, source, std::nullopt);
 }
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-void GlicKeyedService::ShowUiWithConversationID(BrowserWindowInterface* bwi,
-                                                mojom::InvocationSource source,
-                                                std::string conversation_id) {
-  CHECK(source == mojom::InvocationSource::kNavigationCapture);
-
-  ToggleUIInternal(
-      bwi, /*prevent_close=*/true, source, /*prompt_suggestion=*/std::nullopt,
-      /*auto_send=*/false, std::make_optional(std::move(conversation_id)));
-}
-#pragma clang diagnostic pop
-
 void GlicKeyedService::ToggleUIInternal(
     BrowserWindowInterface* bwi,
     bool prevent_close,
@@ -360,9 +350,7 @@ void GlicKeyedService::ToggleUIInternal(
   }
 
   // Show the FRE if not yet completed, and if we have a browser to use.
-  // Ignore ShouldBypassFreUi if auto_send is true.
-  if ((!GlicEnabling::ShouldBypassFreUi(profile_, source) || auto_send) &&
-      fre_controller_->ShouldShowFreDialog()) {
+  if (fre_controller_->ShouldShowFreDialog()) {
     fre_controller_->MarkFreStartAttempt();
 #if !BUILDFLAG(IS_ANDROID)  // Single instance only
     if (!GlicEnabling::IsUnifiedFreEnabled(profile_)) {
@@ -425,7 +413,7 @@ void GlicKeyedService::OpenFreDialogInNewTab(BrowserWindowInterface* bwi,
   if (glic_profile_manager) {
     glic_profile_manager->SetActiveGlic(this);
   }
-  fre_controller().OpenFreDialogInNewTab(bwi, source);
+  fre_controller().OpenFreDialogInNewTab(bwi->GetWeakPtr(), source);
 #else
   NOTIMPLEMENTED() << "OpenFreDialogInNewTab";
 #endif
@@ -632,12 +620,43 @@ tabs::TabInterface* GlicKeyedService::CreateTab(
     std::move(callback).Run(nullptr);
     return nullptr;
   }
-  NavigateParams params(profile_, url, ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
-  params.disposition = open_in_background
-                           ? WindowOpenDisposition::NEW_BACKGROUND_TAB
-                           : WindowOpenDisposition::NEW_FOREGROUND_TAB;
+  std::unique_ptr<NavigateParams> params;
+  BrowserWindowInterface* last_active_bwi = nullptr;
+
+  if (base::FeatureList::IsEnabled(features::kGlicCreateTabAdjacent)) {
+    // Find the most recently active browser window for this profile.
+    ForEachCurrentBrowserWindowInterfaceOrderedByActivation(
+        [&](BrowserWindowInterface* browser) {
+          if (browser->GetProfile() == profile_) {
+            last_active_bwi = browser;
+            return false;
+          }
+          return true;
+        });
+
+    if (last_active_bwi) {
+      // By setting the `source_contents` and using `PAGE_TRANSITION_LINK`, the
+      // new tab will be opened adjacent to the currently active tab and inherit
+      // its tab group.
+      params = std::make_unique<NavigateParams>(last_active_bwi, url,
+                                                ui::PAGE_TRANSITION_LINK);
+      params->source_contents = TabListInterface::From(last_active_bwi)
+                                    ->GetActiveTab()
+                                    ->GetContents();
+    } else {
+      params = std::make_unique<NavigateParams>(profile_, url,
+                                                ui::PAGE_TRANSITION_LINK);
+    }
+  } else {
+    params = std::make_unique<NavigateParams>(
+        profile_, url, ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
+  }
+
+  params->disposition = open_in_background
+                            ? WindowOpenDisposition::NEW_BACKGROUND_TAB
+                            : WindowOpenDisposition::NEW_FOREGROUND_TAB;
   base::WeakPtr<content::NavigationHandle> navigation_handle =
-      DoNavigate(&params);
+      glic::Navigate(std::move(params));
   if (!navigation_handle.get()) {
     std::move(callback).Run(nullptr);
     return nullptr;
@@ -673,8 +692,10 @@ void GlicKeyedService::CreateTask(
     actor::webui::mojom::TaskOptionsPtr options,
     mojom::WebClientHandler::CreateTaskCallback callback) {
   if (actor_task_manager_) {
+    // No conversation id but this code path is going away so it's ok.
     actor_task_manager_->CreateTask(weak_ptr_factory_.GetWeakPtr(),
-                                    std::move(options), std::move(callback));
+                                    /*conversation_id=*/"", std::move(options),
+                                    std::move(callback));
   } else {
     std::move(callback).Run(
         base::unexpected(mojom::CreateTaskErrorReason::kTaskSystemUnavailable));
@@ -778,6 +799,11 @@ void GlicKeyedService::CaptureRegion(
     mojo::PendingRemote<mojom::CaptureRegionObserver> observer) {
   region_capture_controller_->CaptureRegion(tab, std::move(observer));
 }
+
+void GlicKeyedService::DeleteCapturedRegion(tabs::TabInterface* tab,
+                                            const base::UnguessableToken& id) {
+  region_capture_controller_->DeleteRegion(tab, id);
+}
 #endif
 
 void GlicKeyedService::ShareContextImage(tabs::TabInterface* tab,
@@ -828,7 +854,6 @@ void GlicKeyedService::TryPreloadAfterDelay() {
         base::BindOnce(&GlicKeyedService::FinishPreload, GetWeakPtr()));
   }
 }
-
 
 void GlicKeyedService::Reload(content::RenderFrameHost* render_frame_host) {
   if (fre_controller_->IsShowingDialog()) {
@@ -885,7 +910,6 @@ void GlicKeyedService::FinishPreload(GlicPrewarmingChecksResult result) {
   }
 }
 
-
 bool GlicKeyedService::IsProcessHostForGlic(
     content::RenderProcessHost* process_host) {
   auto* fre_contents = fre_controller().GetWebContents();
@@ -911,8 +935,14 @@ GlicInstance* GlicKeyedService::GetInstanceForTab(tabs::TabInterface* tab) {
 
 GlicInstance* GlicKeyedService::GetInstanceForActiveTab(
     BrowserWindowInterface* bwi) {
-  return window_controller().GetInstanceForTab(
-      bwi ? TabListInterface::From(bwi)->GetActiveTab() : nullptr);
+  if (!bwi) {
+    return window_controller().GetInstanceForTab(nullptr);
+  }
+  auto* tab_list = TabListInterface::From(bwi);
+  if (!tab_list) {
+    return nullptr;
+  }
+  return window_controller().GetInstanceForTab(tab_list->GetActiveTab());
 }
 
 void GlicKeyedService::SendAdditionalContext(

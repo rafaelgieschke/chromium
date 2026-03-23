@@ -2,11 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <memory>
+
 #include "base/base64.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
+#include "chrome/browser/page_load_metrics/page_load_metrics_initialize.h"
 #include "chrome/browser/ui/waap/waap_utils.h"
 #include "chrome/browser/ui/webui/webui_embedding_context.h"
 #include "chrome/browser/ui/webui/webui_toolbar/adapters/navigation_controls_state_fetcher_impl.h"
@@ -15,15 +18,19 @@
 #include "chrome/common/webui_url_constants.h"
 #include "chrome/common/webui_url_utils.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/ui_test_utils.h"
 #include "components/metrics/content/subprocess_metrics_provider.h"
 #include "components/metrics/mapping/metrics_mapping_features.h"
 #include "components/metrics/mapping/metrics_name_mapping.pb.h"
+#include "components/ukm/test_ukm_recorder.h"
 #include "content/public/common/content_features.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "content/public/test/test_utils.h"
 #include "content/public/test/web_ui_browsertest_util.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
+#include "services/metrics/public/cpp/ukm_source.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -89,6 +96,8 @@ class ToolbarDependencyProvider : public WebUIToolbarUI::DependencyProvider {
               toolbar_ui_api::mojom::ReloadControlState::New(),
               toolbar_ui_api::mojom::SplitTabsControlState::New(),
               std::move(back_forward_state),
+              toolbar_ui_api::mojom::HomeControlState::New(),
+              toolbar_ui_api::mojom::ContentSettingState::New(),
               /*layout_constants_version=*/0);
         }));
   }
@@ -120,7 +129,14 @@ class InitialWebUIBrowserTestBase : public InProcessBrowserTest {
         {});
   }
 
- protected:
+  void SetUpOnMainThread() override {
+    InProcessBrowserTest::SetUpOnMainThread();
+    ukm_recorder_ = std::make_unique<ukm::TestAutoSetUkmRecorder>();
+  }
+
+  protected:
+  ukm::TestAutoSetUkmRecorder& ukm_recorder() { return *ukm_recorder_; }
+
   std::unique_ptr<content::WebContents> CreateAndNavigateWebContents(
       const GURL& url,
       WebUIControllerInitalizer* initializer) {
@@ -139,6 +155,11 @@ class InitialWebUIBrowserTestBase : public InProcessBrowserTest {
       initializer->Watch(new_web_contents.get());
     }
     webui::SetBrowserWindowInterface(new_web_contents.get(), browser());
+    // UKM PageLoad metrics for Initial WebUI are recorded by
+    // `UkmPageLoadMetricsObserver`, which is attached to the WebContents via
+    // `MetricsWebContentsObserver`. For "bare" WebContents created manually in
+    // tests, we must explicitly call this to ensure the observer is attached.
+    InitializePageLoadMetricsForWebContents(new_web_contents.get());
 
     // Navigate to `url`.
     content::NavigationController& controller =
@@ -159,6 +180,7 @@ class InitialWebUIBrowserTestBase : public InProcessBrowserTest {
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
+  std::unique_ptr<ukm::TestAutoSetUkmRecorder> ukm_recorder_;
 };
 
 class InitialWebUINavigationBrowserTest : public InitialWebUIBrowserTestBase {};
@@ -251,6 +273,39 @@ IN_PROC_BROWSER_TEST_F(InitialWebUINavigationBrowserTest,
   EXPECT_NE(
       non_initial_webui_web_contents2->GetPrimaryMainFrame()->GetProcess(),
       initial_webui_web_contents->GetPrimaryMainFrame()->GetProcess());
+}
+
+// Verifies that UKM PageLoad metrics are correctly recorded for an Initial
+// WebUI navigation. This test checks that:
+// 1. The UKM recorder is active and receives entries.
+// 2. `MetricsWebContentsObserver` is correctly attached to the WebContents.
+// 3. The UKM flush (triggered by WebContents destruction) correctly records
+//    the buffered PageLoad metrics.
+IN_PROC_BROWSER_TEST_F(InitialWebUINavigationBrowserTest, RecordPageLoadUKM) {
+  using PageLoad = ukm::builders::PageLoad;
+
+  // 1) Navigate to initial WebUI.
+  GURL url(chrome::kChromeUIWebUIToolbarURL);
+  WebUIToolbarInitializer initializer;
+  std::unique_ptr<content::WebContents> initial_webui_web_contents =
+      CreateAndNavigateWebContents(url, &initializer);
+
+  // 2) Set up a RunLoop to wait for the UKM entry.
+  base::RunLoop ukm_loop;
+  ukm_recorder().SetOnAddEntryCallback(PageLoad::kEntryName,
+                                       ukm_loop.QuitClosure());
+
+  // 3) Close the WebContents to trigger the UKM flush.
+  initial_webui_web_contents.reset();
+
+  // 4) Wait for the UKM entry to be recorded.
+  if (ukm_recorder().GetEntriesByName(PageLoad::kEntryName).empty()) {
+    ukm_loop.Run();
+  }
+
+  // 5) Verify UKM recording.
+  auto entries = ukm_recorder().GetEntriesByName(PageLoad::kEntryName);
+  EXPECT_FALSE(entries.empty());
 }
 
 class InitialWebUIMetricsMappingBrowserTest
@@ -449,5 +504,28 @@ IN_PROC_BROWSER_TEST_F(InitialWebUIMetricsDropBrowserTest,
   // as-is).
   histogram_tester.ExpectTotalCount(kTestMetricName, 0);
 }
+
+// TODO(crbug.com/493786816): Add test case for startup metrics verification
+// once flaky behaviors on ChromeOS are fixed.
+// Note: On ChromeOS when run with `WebUIReloadButtonDeferBrowserViewShow=true`,
+// the `UserSessionManager::LaunchBrowser()` function is responsible for
+// triggering startup metrics profiling by calling
+// `metrics::BeginFirstWebContentsProfiling()`. However, it contains an explicit
+// guard that only triggers profiling if the browser window is "active"
+// according to the window manager:
+// ```cpp
+//   aura::Window* active_window = ash::window_util::GetActiveWindow();
+//   bool is_browser_window_active =
+//       active_window && active_window->GetProperty(chromeos::kAppTypeKey) ==
+//                            chromeos::AppType::BROWSER;
+//   if (is_browser_window_active) {
+//     metrics::BeginFirstWebContentsProfiling();
+//   }
+// ```
+// When the deferral feature is enabled, `is_browser_window_active` evaluates to
+// false at this initial trigger point. Hence,
+// `metrics::BeginFirstWebContentsProfiling()` is skipped, and the startup
+// metrics, such as `Startup.FirstWebContents.NonEmptyPaint3`, are never
+// recorded.
 
 }  // namespace waap

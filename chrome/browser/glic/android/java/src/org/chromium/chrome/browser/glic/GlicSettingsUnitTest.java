@@ -14,6 +14,11 @@ import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.GLIC_AUTO_BROWSE_SETTING_ENABLED;
+import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.GLIC_BUTTON_PINNED;
+import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.GLIC_PRECISE_LOCATION_SETTING_ENABLED;
+import static org.chromium.chrome.browser.preferences.ChromePreferenceKeys.GLIC_SHARE_CURRENT_TAB_DEFAULT_ACCESS_ENABLED;
+
 import android.content.Context;
 
 import androidx.fragment.app.FragmentManager;
@@ -30,10 +35,8 @@ import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
-import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
 import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.components.browser_ui.settings.ChromeExpandableSwitchPreference;
 import org.chromium.components.browser_ui.settings.ChromeSwitchPreference;
 import org.chromium.components.browser_ui.settings.SettingsCustomTabLauncher;
 import org.chromium.components.prefs.PrefService;
@@ -119,72 +122,38 @@ public class GlicSettingsUnitTest {
 
     @Test
     public void testGlicButtonPinnedInitialState_Enabled() {
-        doTestInitialState(ChromePreferenceKeys.GLIC_BUTTON_PINNED, "glic_button", true);
+        doTestInitialState(GLIC_BUTTON_PINNED, "glic_button", true);
     }
 
     @Test
     public void testGlicButtonPinnedInitialState_Disabled() {
-        doTestInitialState(ChromePreferenceKeys.GLIC_BUTTON_PINNED, "glic_button", false);
+        doTestInitialState(GLIC_BUTTON_PINNED, "glic_button", false);
     }
 
     @Test
     public void testGlicButtonPinnedToggle() {
-        ChromeSharedPreferences.getInstance()
-                .writeBoolean(ChromePreferenceKeys.GLIC_BUTTON_PINNED, false);
-        GlicSettings fragment = launchFragment();
-        ChromeSwitchPreference preference = fragment.findPreference("glic_button");
-
-        preference.getOnPreferenceChangeListener().onPreferenceChange(preference, true);
-        assertTrue(
-                ChromeSharedPreferences.getInstance()
-                        .readBoolean(ChromePreferenceKeys.GLIC_BUTTON_PINNED, false));
-
-        preference.getOnPreferenceChangeListener().onPreferenceChange(preference, false);
-        assertFalse(
-                ChromeSharedPreferences.getInstance()
-                        .readBoolean(ChromePreferenceKeys.GLIC_BUTTON_PINNED, true));
+        doTestToggle(GLIC_BUTTON_PINNED, "glic_button");
     }
 
     @Test
     public void testLocationPermissionInitialState_Enabled() {
-        doTestInitialState(
-                ChromePreferenceKeys.GLIC_PRECISE_LOCATION_SETTING_ENABLED,
-                "permissions_location",
-                true);
+        doTestInitialState(GLIC_PRECISE_LOCATION_SETTING_ENABLED, "permissions_location", true);
     }
 
     @Test
     public void testLocationPermissionInitialState_Disabled() {
-        doTestInitialState(
-                ChromePreferenceKeys.GLIC_PRECISE_LOCATION_SETTING_ENABLED,
-                "permissions_location",
-                false);
+        doTestInitialState(GLIC_PRECISE_LOCATION_SETTING_ENABLED, "permissions_location", false);
     }
 
     @Test
     public void testLocationPermissionToggle() {
-        ChromeSharedPreferences.getInstance()
-                .writeBoolean(ChromePreferenceKeys.GLIC_PRECISE_LOCATION_SETTING_ENABLED, false);
-        GlicSettings fragment = launchFragment();
-        ChromeSwitchPreference preference = fragment.findPreference("permissions_location");
-
-        preference.getOnPreferenceChangeListener().onPreferenceChange(preference, true);
-        assertTrue(
-                ChromeSharedPreferences.getInstance()
-                        .readBoolean(
-                                ChromePreferenceKeys.GLIC_PRECISE_LOCATION_SETTING_ENABLED, false));
-
-        preference.getOnPreferenceChangeListener().onPreferenceChange(preference, false);
-        assertFalse(
-                ChromeSharedPreferences.getInstance()
-                        .readBoolean(
-                                ChromePreferenceKeys.GLIC_PRECISE_LOCATION_SETTING_ENABLED, true));
+        doTestToggle(GLIC_PRECISE_LOCATION_SETTING_ENABLED, "permissions_location");
     }
 
     @Test
     public void testTabAccessPermissionInitialState_Enabled() {
         doTestInitialState(
-                ChromePreferenceKeys.GLIC_SHARE_CURRENT_TAB_DEFAULT_ACCESS_ENABLED,
+                GLIC_SHARE_CURRENT_TAB_DEFAULT_ACCESS_ENABLED,
                 "glic_permissions_default_tab_access",
                 true);
     }
@@ -192,68 +161,49 @@ public class GlicSettingsUnitTest {
     @Test
     public void testTabAccessPermissionInitialState_Disabled() {
         doTestInitialState(
-                ChromePreferenceKeys.GLIC_SHARE_CURRENT_TAB_DEFAULT_ACCESS_ENABLED,
+                GLIC_SHARE_CURRENT_TAB_DEFAULT_ACCESS_ENABLED,
                 "glic_permissions_default_tab_access",
                 false);
     }
 
     @Test
     public void testTabAccessPermissionToggle() {
-        ChromeSharedPreferences.getInstance()
-                .writeBoolean(
-                        ChromePreferenceKeys.GLIC_SHARE_CURRENT_TAB_DEFAULT_ACCESS_ENABLED, false);
-        GlicSettings fragment = launchFragment();
-        ChromeExpandableSwitchPreference preference =
-                fragment.findPreference("glic_permissions_default_tab_access");
-
-        preference.getOnPreferenceChangeListener().onPreferenceChange(preference, true);
-        assertTrue(
-                ChromeSharedPreferences.getInstance()
-                        .readBoolean(
-                                ChromePreferenceKeys.GLIC_SHARE_CURRENT_TAB_DEFAULT_ACCESS_ENABLED,
-                                false));
-
-        preference.getOnPreferenceChangeListener().onPreferenceChange(preference, false);
-        assertFalse(
-                ChromeSharedPreferences.getInstance()
-                        .readBoolean(
-                                ChromePreferenceKeys.GLIC_SHARE_CURRENT_TAB_DEFAULT_ACCESS_ENABLED,
-                                true));
+        doTestToggle(
+                GLIC_SHARE_CURRENT_TAB_DEFAULT_ACCESS_ENABLED,
+                "glic_permissions_default_tab_access");
     }
 
     @Test
     public void testAutoBrowsePermissionInitialState_Enabled() {
-        doTestInitialState(
-                ChromePreferenceKeys.GLIC_AUTO_BROWSE_SETTING_ENABLED,
-                "glic_permissions_auto_browse",
-                true);
+        doTestInitialState(GLIC_AUTO_BROWSE_SETTING_ENABLED, "glic_permissions_auto_browse", true);
     }
 
     @Test
     public void testAutoBrowsePermissionInitialState_Disabled() {
-        doTestInitialState(
-                ChromePreferenceKeys.GLIC_AUTO_BROWSE_SETTING_ENABLED,
-                "glic_permissions_auto_browse",
-                false);
+        doTestInitialState(GLIC_AUTO_BROWSE_SETTING_ENABLED, "glic_permissions_auto_browse", false);
     }
 
     @Test
     public void testAutoBrowsePermissionToggle() {
-        ChromeSharedPreferences.getInstance()
-                .writeBoolean(ChromePreferenceKeys.GLIC_AUTO_BROWSE_SETTING_ENABLED, false);
-        GlicSettings fragment = launchFragment();
-        ChromeExpandableSwitchPreference preference =
-                fragment.findPreference("glic_permissions_auto_browse");
+        doTestToggle(GLIC_AUTO_BROWSE_SETTING_ENABLED, "glic_permissions_auto_browse");
+    }
 
+    private void doTestToggle(String sharedPreferenceKey, String preferenceKey) {
+        ChromeSharedPreferences.getInstance().writeBoolean(sharedPreferenceKey, false);
+        GlicSettings fragment = launchFragment();
+        ChromeSwitchPreference preference = fragment.findPreference(preferenceKey);
+
+        // Test toggling on
         preference.getOnPreferenceChangeListener().onPreferenceChange(preference, true);
         assertTrue(
-                ChromeSharedPreferences.getInstance()
-                        .readBoolean(ChromePreferenceKeys.GLIC_AUTO_BROWSE_SETTING_ENABLED, false));
+                "After toggling on, " + sharedPreferenceKey + " should be true.",
+                ChromeSharedPreferences.getInstance().readBoolean(sharedPreferenceKey, false));
 
+        // Test toggling off
         preference.getOnPreferenceChangeListener().onPreferenceChange(preference, false);
         assertFalse(
-                ChromeSharedPreferences.getInstance()
-                        .readBoolean(ChromePreferenceKeys.GLIC_AUTO_BROWSE_SETTING_ENABLED, true));
+                "After toggling off, " + sharedPreferenceKey + " should be false.",
+                ChromeSharedPreferences.getInstance().readBoolean(sharedPreferenceKey, true));
     }
 
     private void doTestInitialState(String prefKey, String prefName, boolean initialState) {

@@ -53,8 +53,10 @@
 #include "chrome/browser/extensions/forced_extensions/install_stage_tracker_factory.h"
 #include "chrome/browser/extensions/install_tracker_factory.h"
 #include "chrome/browser/extensions/pref_mapping.h"
+#include "chrome/browser/extensions/shared_module_service_factory.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/extensions/updater/chrome_update_client_config.h"
+#include "chrome/browser/extensions/updater/extension_updater.h"
 #include "chrome/browser/extensions/user_script_listener.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
 #include "chrome/browser/media/webrtc/media_device_salt_service_factory.h"
@@ -177,7 +179,9 @@ std::unique_ptr<ScopedBrowserContextKeepAlive> CreateExtensionKeepAlive(
 }
 
 bool ShouldLogExtensionAction(content::BrowserContext* browser_context,
-                              const ExtensionId& extension_id) {
+                              const ExtensionId& extension_id,
+                              Action::ActionType action_type,
+                              const std::string& api_name) {
   // We only send these IPCs if activity logging is enabled, but due to race
   // conditions (e.g. logging gets disabled but the renderer sends the message
   // before it gets updated), we still need this check here.
@@ -186,7 +190,8 @@ bool ShouldLogExtensionAction(content::BrowserContext* browser_context,
          g_browser_process->profile_manager()->IsValidProfile(
              browser_context) &&
          ActivityLog::GetInstance(browser_context) &&
-         ActivityLog::GetInstance(browser_context)->ShouldLog(extension_id);
+         ActivityLog::GetInstance(browser_context)
+             ->ShouldLog(extension_id, action_type, api_name);
 }
 
 // Logs an action to the extension activity log for the specified profile.
@@ -676,6 +681,12 @@ bool ChromeExtensionsBrowserClient::IsActivityLoggingEnabled(
   return activity_log && activity_log->is_active();
 }
 
+bool ChromeExtensionsBrowserClient::IsTelemetryLoggingEnabled(
+    content::BrowserContext* context) {
+  ActivityLog* activity_log = ActivityLog::GetInstance(context);
+  return activity_log && activity_log->IsTelemetryLoggingActive();
+}
+
 void ChromeExtensionsBrowserClient::GetTabAndWindowIdForWebContents(
     content::WebContents* web_contents,
     int* tab_id,
@@ -884,7 +895,8 @@ void ChromeExtensionsBrowserClient::AddDOMActionToActivityLog(
     const GURL& url,
     const std::u16string& url_title,
     int call_type) {
-  if (!ShouldLogExtensionAction(browser_context, extension_id)) {
+  if (!ShouldLogExtensionAction(browser_context, extension_id,
+                                Action::ACTION_DOM_ACCESS, call_name)) {
     return;
   }
 
@@ -905,7 +917,8 @@ void ChromeExtensionsBrowserClient::AddAPIActionOrEventToActivityLog(
     const std::string& call_name,
     base::ListValue args,
     const std::string& extra) {
-  if (!ShouldLogExtensionAction(browser_context, extension_id)) {
+  if (!ShouldLogExtensionAction(browser_context, extension_id, action_type,
+                                call_name)) {
     return;
   }
 
@@ -1142,6 +1155,19 @@ InstallStageTracker* ChromeExtensionsBrowserClient::GetInstallStageTracker(
 InstallTracker* ChromeExtensionsBrowserClient::GetInstallTracker(
     content::BrowserContext* context) {
   return InstallTrackerFactory::GetForBrowserContext(context);
+}
+
+SharedModuleService* ChromeExtensionsBrowserClient::GetSharedModuleService(
+    content::BrowserContext* context) {
+  return SharedModuleServiceFactory::GetForBrowserContext(context);
+}
+
+void ChromeExtensionsBrowserClient::UpdateCheckIfEnabled(
+    content::BrowserContext* context) {
+  auto* extension_updater = ExtensionUpdater::Get(context);
+  if (extension_updater->enabled()) {
+    extension_updater->CheckSoon();
+  }
 }
 
 }  // namespace extensions

@@ -163,6 +163,7 @@ _CONFIG = [
             'base::span',
             'base::span(_with_nul)?_from_cstring',
             'base::Span(OrSize|Reader|Writer)',
+            'base::subtle::reinterpret_span',
             'base::StringPiece',
             'base::StrongAlias',
             'base::SubstringSetMatcher',
@@ -181,6 +182,7 @@ _CONFIG = [
             'base::ToString',
             'base::TrackEvent',
             'base::trace_event::.*',
+            'base::unchecked',
             'base::unexpected',
             'base::UnguessableToken',
             'base::UnguessableTokenHash',
@@ -701,6 +703,7 @@ _CONFIG = [
             'cc::THUMB',
             'cc::TRACK_BUTTONS_TICKMARKS',
             'cc::VERTICAL',
+            'viz::TrackedElementFeature',
 
             # Animation
             "cc::PropertyChangeForcesCommitCriteria",
@@ -1083,6 +1086,14 @@ _CONFIG = [
         ],
     },
     {
+        'paths': [
+            'third_party/blink/renderer/controller/memory_usage_monitor_posix.cc',
+        ],
+        'allowed': [
+            'base::StringToUint64',
+        ],
+    },
+    {
         'paths': ['third_party/blink/renderer/core/animation'],
         'allowed': [
             '[a-z_]+_functions::.+',
@@ -1433,6 +1444,9 @@ _CONFIG = [
             # In blink-internal code we use blink::PersistentLocation but
             # we don't expose that in the public API.
             'cppgc::SourceLocation',
+
+            # Needed to set the stack marker from outside Blink.
+            'cppgc::StackStartMarker',
         ],
     },
     {
@@ -1548,6 +1562,16 @@ _CONFIG = [
             'third_party/blink/public/web/web_dom_activity_logger.h',
         ],
         'allowed': [
+            'v8::Local',
+            'v8::Value',
+        ],
+    },
+    {
+        'paths': [
+            'third_party/blink/public/web/web_serialized_script_value.h',
+        ],
+        'allowed': [
+            'v8::Isolate',
             'v8::Local',
             'v8::Value',
         ],
@@ -2265,6 +2289,15 @@ _CONFIG = [
     },
     {
         'paths': [
+            'third_party/blink/renderer/modules/storage/cached_storage_area.cc',
+            'third_party/blink/renderer/modules/storage/cached_storage_area.h',
+        ],
+        'allowed': [
+            'absl::flat_hash_map',
+        ],
+    },
+    {
+        'paths': [
             'third_party/blink/renderer/modules/animationworklet/',
         ],
         'allowed': [
@@ -2778,6 +2811,15 @@ _CONFIG = [
     },
     {
         'paths': [
+            "third_party/blink/renderer/modules/ml/webnn/webnn_introspection_impl.cc",
+        ],
+        'allowed': [
+            'base::BindOnce',
+            'base::Unretained',
+        ]
+    },
+    {
+        'paths': [
             "third_party/blink/renderer/modules/ml/webnn/ml_graph_transform/utils/ml_graph_dump.h",
             "third_party/blink/renderer/modules/ml/webnn/ml_graph_transform/utils/ml_graph_dump.cc",
         ],
@@ -2911,16 +2953,6 @@ _CONFIG = [
         ]
     },
     {
-        # TODO(crbug.com/418169222): Remove this entry once the device
-        # bound session credentials origin trial is complete.
-        'paths': [
-            'third_party/blink/common/loader/throttling_url_loader.cc',
-        ],
-        'allowed': [
-            'mojom::OriginTrialFeature',
-        ]
-    },
-    {
         'paths': [
             'third_party/blink/common/loader/code_cache_util.cc',
             'third_party/blink/public/common/loader/code_cache_util.h',
@@ -3008,6 +3040,12 @@ _CONFIG = [
             'third_party/blink/public/common/use_counter/webdx_feature_maps.h',
         ],
         'allowed': ['base::NoDestructor', 'base::flat_map']
+    },
+    {
+        'paths': [
+            'third_party/blink/common/scheduler/web_scheduler_tracked_feature.cc',
+        ],
+        'allowed': ['base::NoDestructor']
     },
 ]
 

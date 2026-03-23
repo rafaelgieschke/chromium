@@ -7,13 +7,17 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "base/barrier_closure.h"
 #include "base/cfi_buildflags.h"
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/values_util.h"
 #include "base/memory/raw_ptr.h"
+#include "base/no_destructor.h"
 #include "base/run_loop.h"
 #include "base/scoped_multi_source_observation.h"
 #include "base/strings/strcat.h"
@@ -302,6 +306,62 @@ GURL GetSyncConfirmationURL() {
                                            /*is_sync_promo=*/true);
 }
 
+std::string_view GetRejectHistoryOptinScript() {
+  if (base::FeatureList::IsEnabled(switches::kFirstRunDesktopRefresh)) {
+    static constexpr std::string_view kScript = R"(
+      (() => {
+        const appElement =
+            document.querySelector('history-sync-optin-app-refresh');
+        const rejectButton =
+            appElement.shadowRoot.querySelector('#rejectButton');
+        rejectButton.click();
+        return true;
+      })();
+    )";
+    return kScript;
+  } else {
+    static constexpr std::string_view kScript = R"(
+      (() => {
+        const appElement =
+            document.querySelector('history-sync-optin-app');
+        const rejectButton =
+            appElement.shadowRoot.querySelector('#rejectButton');
+        rejectButton.click();
+        return true;
+      })();
+    )";
+    return kScript;
+  }
+}
+
+std::string_view GetAcceptHistoryOptinScript() {
+  if (base::FeatureList::IsEnabled(switches::kFirstRunDesktopRefresh)) {
+    static constexpr std::string_view kScript = R"(
+      (() => {
+        const appElement =
+            document.querySelector('history-sync-optin-app-refresh');
+        const acceptButton =
+            appElement.shadowRoot.querySelector('#acceptButton');
+        acceptButton.click();
+        return true;
+      })();
+    )";
+    return kScript;
+  } else {
+    static constexpr std::string_view kScript = R"(
+      (() => {
+        const appElement =
+            document.querySelector('history-sync-optin-app');
+        const acceptButton =
+            appElement.shadowRoot.querySelector('#acceptButton');
+        acceptButton.click();
+        return true;
+      })();
+    )";
+    return kScript;
+  }
+}
+
 class BrowserAddedWaiter : public BrowserCollectionObserver {
  public:
   explicit BrowserAddedWaiter(size_t total_count) : total_count_(total_count) {
@@ -465,29 +525,35 @@ void WaitForBrowserUrl(const GURL& url, content::WebContents* target) {
   EXPECT_EQ(target->GetLastCommittedURL(), url);
 }
 
+GURL GetManagedUserProfileNoticeUrl() {
+  return base::FeatureList::IsEnabled(switches::kFirstRunDesktopRefresh)
+             ? GURL(chrome::kChromeUIManagedUserProfileNoticeRefreshURL)
+             : GURL(chrome::kChromeUIManagedUserProfileNoticeUrl);
+}
+
 // Browser extra part used to be notified early enough to track the
 // `ProfileManager` in `g_browser_process` before any profile creation.
+// Uses `PreProfileInit()` to run after `GlobalBrowserCollection` is created.
 class ProfileManagerInitializationInterceptExtraParts
     : public ChromeBrowserMainExtraParts {
  public:
   explicit ProfileManagerInitializationInterceptExtraParts(
-      base::OnceClosure on_post_early_initialization_callback,
+      base::OnceClosure on_pre_profile_init_callback,
       base::OnceClosure on_post_main_message_loop_run_callback)
-      : on_post_early_initialization_callback_(
-            std::move(on_post_early_initialization_callback)),
+      : on_pre_profile_init_callback_(std::move(on_pre_profile_init_callback)),
         on_post_main_message_loop_run_callback_(
             std::move(on_post_main_message_loop_run_callback)) {}
 
   // ChromeBrowserMainExtraParts:
-  void PostEarlyInitialization() override {
-    std::move(on_post_early_initialization_callback_).Run();
+  void PreProfileInit() override {
+    std::move(on_pre_profile_init_callback_).Run();
   }
   void PostMainMessageLoopRun() override {
     std::move(on_post_main_message_loop_run_callback_).Run();
   }
 
  private:
-  base::OnceClosure on_post_early_initialization_callback_;
+  base::OnceClosure on_pre_profile_init_callback_;
   base::OnceClosure on_post_main_message_loop_run_callback_;
 };
 
@@ -504,7 +570,7 @@ class ProfileManagementCounter : public ProfileManagerObserver,
         static_cast<ChromeBrowserMainParts*>(parts);
     chrome_browser_main_parts->AddParts(
         std::make_unique<ProfileManagerInitializationInterceptExtraParts>(
-            base::BindOnce(&ProfileManagementCounter::OnPostEarlyInitialization,
+            base::BindOnce(&ProfileManagementCounter::OnPreProfileInit,
                            base::Unretained(this)),
             base::BindOnce(&ProfileManagementCounter::OnPostMainMessageLoopRun,
                            base::Unretained(this))));
@@ -539,8 +605,8 @@ class ProfileManagementCounter : public ProfileManagerObserver,
 
  private:
   // Callbacks from `ProfileManagerInitializationInterceptExtraParts` to
-  // intercept ProfileManager initialization/descrution.
-  void OnPostEarlyInitialization() {
+  // intercept ProfileManager initialization/destruction.
+  void OnPreProfileInit() {
     CHECK(g_browser_process);
     ProfileManager* profile_manager = g_browser_process->profile_manager();
     CHECK(profile_manager);
@@ -891,36 +957,18 @@ class ProfilePickerCreationFlowBrowserTest
 
   // TODO(crbug.com/447584795): Add retry logic.
   void RejectHistoryOptin() {
-    ASSERT_TRUE(base::FeatureList::IsEnabled(
+    CHECK(base::FeatureList::IsEnabled(
         syncer::kReplaceSyncPromosWithSignInPromos));
-    constexpr char kRejectHistory[] =
-        "(() => {"
-        "  const historySyncOptinApp = "
-        "      document.querySelector('history-sync-optin-app');"
-        "  const rejectButton = "
-        "      historySyncOptinApp.shadowRoot.querySelector('#rejectButton');"
-        "  rejectButton.click();"
-        "  return true;"
-        "})();";
-
-    EXPECT_EQ(true, content::EvalJs(web_contents(), kRejectHistory));
+    CHECK_EQ(content::EvalJs(web_contents(), GetRejectHistoryOptinScript()),
+             true);
   }
 
   // TODO(crbug.com/447584795): Add retry logic.
   void AcceptHistoryOptin() {
-    ASSERT_TRUE(base::FeatureList::IsEnabled(
+    CHECK(base::FeatureList::IsEnabled(
         syncer::kReplaceSyncPromosWithSignInPromos));
-    constexpr char kAcceptHistory[] =
-        "(() => {"
-        "  const historySyncOptinApp = "
-        "      document.querySelector('history-sync-optin-app');"
-        "  const acceptButton = "
-        "      historySyncOptinApp.shadowRoot.querySelector('#acceptButton');"
-        "  acceptButton.click();"
-        "  return true;"
-        "})();";
-
-    EXPECT_EQ(true, content::EvalJs(web_contents(), kAcceptHistory));
+    CHECK_EQ(content::EvalJs(web_contents(), GetAcceptHistoryOptinScript()),
+             true);
   }
 
  protected:
@@ -1873,6 +1921,9 @@ IN_PROC_BROWSER_TEST_P(ForceSigninProfilePickerCreationFlowBrowserTest,
   EXPECT_TRUE(new_browser);
   EXPECT_EQ(new_browser->GetProfile(), default_profile);
   EXPECT_FALSE(default_profile_entry->IsSigninRequired());
+
+  ui_test_utils::WaitForBrowserSetLastActive(
+      new_browser, /*wait_for_set_last_active_observed=*/false);
 
   // Default profile is now active.
   EXPECT_NE(default_profile_entry->GetActiveTime(), base::Time());
@@ -3235,7 +3286,7 @@ IN_PROC_BROWSER_TEST_F(ProfilePickerEnterpriseCreationFlowBrowserTest,
   // actually start which would add overhead in mocking further stuff.
   // Enterprise domain needed for this profile being detected as Work.
   Profile* profile_being_created =
-      SignInForNewProfile(GURL(chrome::kChromeUIManagedUserProfileNoticeUrl),
+      SignInForNewProfile(GetManagedUserProfileNoticeUrl(),
                           "joe.enterprise@gmail.com", "Joe", "enterprise.com");
 
   profiles::testing::ExpectPickerManagedUserNoticeScreenTypeAndProceed(
@@ -3505,7 +3556,7 @@ IN_PROC_BROWSER_TEST_F(ProfilePickerEnterpriseCreationFlowBrowserTest,
       kTwoFactorIntersitialUrl, content::Referrer(),
       ui::PAGE_TRANSITION_AUTO_TOPLEVEL, std::string());
 
-  WaitForLoadStop(GURL(chrome::kChromeUIManagedUserProfileNoticeUrl));
+  WaitForLoadStop(GetManagedUserProfileNoticeUrl());
   profiles::testing::ExpectPickerManagedUserNoticeScreenTypeAndProceed(
       /*expected_type=*/
       base::FeatureList::IsEnabled(syncer::kReplaceSyncPromosWithSignInPromos)
@@ -3577,7 +3628,7 @@ IN_PROC_BROWSER_TEST_F(ProfilePickerEnterpriseCreationFlowBrowserTest,
 
   // Wait for the sign-in to propagate to the flow, resulting in managed user
   // notice screen getting displayed.
-  WaitForLoadStop(GURL(chrome::kChromeUIManagedUserProfileNoticeUrl));
+  WaitForLoadStop(GetManagedUserProfileNoticeUrl());
 
   BrowserAddedWaiter browser_waiter(2u);
   profiles::testing::ExpectPickerManagedUserNoticeScreenTypeAndProceed(
@@ -3634,12 +3685,12 @@ IN_PROC_BROWSER_TEST_F(ProfilePickerEnterpriseCreationFlowBrowserTest,
   // actually start which would add overhead in mocking further stuff.
   // Enterprise domain needed for this profile being detected as Work.
   Profile* profile_being_created =
-      SignInForNewProfile(GURL(chrome::kChromeUIManagedUserProfileNoticeUrl),
+      SignInForNewProfile(GetManagedUserProfileNoticeUrl(),
                           "joe.enterprise@gmail.com", "Joe", "enterprise.com");
 
   // Wait for the sign-in to propagate to the flow, resulting in managed user
   // notice screen getting displayed.
-  WaitForLoadStop(GURL(chrome::kChromeUIManagedUserProfileNoticeUrl));
+  WaitForLoadStop(GetManagedUserProfileNoticeUrl());
 
   profiles::testing::ExpectPickerManagedUserNoticeScreenTypeAndProceed(
       /*expected_type=*/
@@ -3689,13 +3740,13 @@ IN_PROC_BROWSER_TEST_F(ProfilePickerEnterpriseCreationFlowBrowserTest, Cancel) {
   // actually start which would add overhead in mocking further stuff.
   // Enterprise domain needed for this profile being detected as Work.
   Profile* profile_being_created =
-      SignInForNewProfile(GURL(chrome::kChromeUIManagedUserProfileNoticeUrl),
+      SignInForNewProfile(GetManagedUserProfileNoticeUrl(),
                           "joe.enterprise@gmail.com", "Joe", "enterprise.com");
   base::FilePath profile_being_created_path = profile_being_created->GetPath();
 
   // Wait for the sign-in to propagate to the flow, resulting in managed user
   // notice screen getting displayed.
-  WaitForLoadStop(GURL(chrome::kChromeUIManagedUserProfileNoticeUrl));
+  WaitForLoadStop(GetManagedUserProfileNoticeUrl());
 
   ProfileDeletionObserver observer;
   profiles::testing::ExpectPickerManagedUserNoticeScreenTypeAndProceed(
@@ -3728,14 +3779,14 @@ IN_PROC_BROWSER_TEST_F(ProfilePickerEnterpriseCreationFlowBrowserTest,
   // actually start which would add overhead in mocking further stuff.
   // Enterprise domain needed for this profile being detected as Work.
   Profile* profile_being_created =
-      SignInForNewProfile(GURL(chrome::kChromeUIManagedUserProfileNoticeUrl),
+      SignInForNewProfile(GetManagedUserProfileNoticeUrl(),
                           "joe.enterprise@gmail.com", "Joe", "enterprise.com",
                           /*start_on_management_page=*/true);
   base::FilePath profile_being_created_path = profile_being_created->GetPath();
 
   // Wait for the sign-in to propagate to the flow, resulting in managed user
   // notice screen getting displayed.
-  WaitForLoadStop(GURL(chrome::kChromeUIManagedUserProfileNoticeUrl));
+  WaitForLoadStop(GetManagedUserProfileNoticeUrl());
 
   ProfileDeletionObserver observer;
   profiles::testing::ExpectPickerManagedUserNoticeScreenTypeAndProceed(

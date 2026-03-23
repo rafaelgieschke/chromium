@@ -34,6 +34,8 @@
 #include "ui/views/controls/highlight_path_generator.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
+#include "ui/views/controls/scroll_view.h"
+#include "ui/views/interaction/element_tracker_views.h"
 #include "ui/views/layout/layout_types.h"
 #include "ui/views/view.h"
 #include "ui/views/view_class_properties.h"
@@ -47,6 +49,18 @@ constexpr int kFocusRingInset = 2;
 constexpr int kAttentionIndicatorWidth = 8;
 // The amount of padding between the label and any sync icon.
 constexpr int kSyncIconLabelPadding = 2;
+
+views::ScrollView* GetScrollView(views::View* view) {
+  views::View* ancestor = view;
+  while (ancestor) {
+    if (auto* scroll_view =
+            views::ScrollView::GetScrollViewForContents(ancestor)) {
+      return scroll_view;
+    }
+    ancestor = ancestor->parent();
+  }
+  return nullptr;
+}
 
 void ConfigureEditorBubbleButton(views::LabelButton* button) {
   button->SetHasInkDropActionOnClick(true);
@@ -70,6 +84,8 @@ void ConfigureEditorBubbleButton(views::LabelButton* button) {
       VerticalTabGroupHeaderView::FocusBehavior::ACCESSIBLE_ONLY);
   button->SetVisible(false);
   views::FocusRing::Install(button);
+  button->SetProperty(views::kElementIdentifierKey,
+                      kTabGroupEditorBubbleButtonElementId);
 }
 
 void UpdateEditorButtonColors(views::LabelButton* button,
@@ -108,7 +124,9 @@ VerticalTabGroupHeaderView::VerticalTabGroupHeaderView(
     Delegate& delegate,
     tabs::VerticalTabStripStateController* state_controller,
     const tab_groups::TabGroupVisualData* tab_group_visual_data)
-    : sync_icon_(AddChildView(std::make_unique<views::ImageView>())),
+    : HoverCardAnchorTarget(this),
+      tab_group_visual_data_(*tab_group_visual_data),
+      sync_icon_(AddChildView(std::make_unique<views::ImageView>())),
       group_header_label_(
           AddChildView(std::make_unique<VerticalTabGroupHeaderLabel>())),
       attention_indicator_(AddChildView(std::make_unique<views::ImageView>())),
@@ -119,6 +137,8 @@ VerticalTabGroupHeaderView::VerticalTabGroupHeaderView(
       delegate_(delegate),
       editor_bubble_tracker_(state_controller) {
   SetProperty(views::kElementIdentifierKey, kTabGroupHeaderElementId);
+  attention_indicator_->SetProperty(views::kElementIdentifierKey,
+                                    kTabGroupHeaderAttentionIndicatorElementId);
   SetNotifyEnterExitOnChild(true);
 
   ConfigureEditorBubbleButton(editor_bubble_button_);
@@ -182,6 +202,8 @@ bool VerticalTabGroupHeaderView::OnKeyPressed(const ui::KeyEvent& event) {
       event.key_code() == ui::VKEY_RETURN) {
     delegate_->ToggleCollapsedState(
         ToggleTabGroupCollapsedStateOrigin::kKeyboard);
+    views::ElementTrackerViews::GetInstance()->NotifyViewActivated(
+        kTabGroupHeaderElementId, this);
     return true;
   }
 
@@ -218,6 +240,9 @@ bool VerticalTabGroupHeaderView::OnMousePressed(const ui::MouseEvent& event) {
     return false;
   }
 
+  // Hide the group hovercard if it is currently showing.
+  delegate_->HideHoverCard();
+
   // Potentially start the drag for the mouse press.
   // Follow-up mouse-movement events will update the drag controller and
   // eventually kick off the drag-loop.
@@ -241,22 +266,42 @@ void VerticalTabGroupHeaderView::OnMouseReleased(const ui::MouseEvent& event) {
     ShowEditorBubble();
   } else if (toggle_collapse) {
     delegate_->ToggleCollapsedState(ToggleTabGroupCollapsedStateOrigin::kMouse);
+    views::ElementTrackerViews::GetInstance()->NotifyViewActivated(
+        kTabGroupHeaderElementId, this);
   }
 }
 
 void VerticalTabGroupHeaderView::OnGestureEvent(ui::GestureEvent* event) {
+  delegate_->HideHoverCard();
+
   switch (event->type()) {
+    case ui::EventType::kGestureTapDown:
+      // Required to allow the touch system to know this is a gesture target
+      // for subsequent events like LongPress and Scroll.
+      event->SetHandled();
+      break;
+
     case ui::EventType::kGestureTap:
       delegate_->ToggleCollapsedState(
           ToggleTabGroupCollapsedStateOrigin::kGesture);
+      views::ElementTrackerViews::GetInstance()->NotifyViewActivated(
+          kTabGroupHeaderElementId, this);
+      event->SetHandled();
       break;
+
+    case ui::EventType::kGestureLongPress:
+      delegate_->InitHeaderDrag(*event);
+      event->SetHandled();
+      break;
+
     case ui::EventType::kGestureLongTap:
       ShowEditorBubble();
+      event->SetHandled();
       break;
+
     default:
       break;
   }
-  event->SetHandled();
 }
 
 void VerticalTabGroupHeaderView::OnMouseMoved(const ui::MouseEvent& event) {
@@ -266,7 +311,8 @@ void VerticalTabGroupHeaderView::OnMouseMoved(const ui::MouseEvent& event) {
 }
 
 void VerticalTabGroupHeaderView::OnMouseEntered(const ui::MouseEvent& event) {
-  delegate_->HideHoverCard();
+  SetHoverCardDataFrom(delegate_->GetTabGroup());
+  delegate_->UpdateHoverCard();
   UpdateEditorBubbleButtonVisibility();
 }
 
@@ -282,6 +328,8 @@ void VerticalTabGroupHeaderView::OnMouseExited(const ui::MouseEvent& event) {
 
 void VerticalTabGroupHeaderView::OnFocus() {
   UpdateEditorBubbleButtonVisibility();
+  SetHoverCardDataFrom(delegate_->GetTabGroup());
+  delegate_->UpdateHoverCard();
 }
 
 void VerticalTabGroupHeaderView::OnBlur() {
@@ -291,6 +339,7 @@ void VerticalTabGroupHeaderView::OnBlur() {
 void VerticalTabGroupHeaderView::AddedToWidget() {
   views::FlexLayoutView::AddedToWidget();
   GetFocusManager()->AddFocusChangeListener(this);
+  editor_bubble_tracker_.SetScrollView(GetScrollView(this));
 }
 
 void VerticalTabGroupHeaderView::RemovedFromWidget() {
@@ -305,13 +354,16 @@ void VerticalTabGroupHeaderView::OnWillChangeFocus(views::View* focused_before,
     // If navigating upward from below, the button is initially hidden and gets
     // skipped. We detect reverse focus traversal (from a view physically below
     // this one) and manually forward the focus to the button.
-    if (focused_now == this &&
+    if (focused_now == this && focused_before &&
         focused_before->GetBoundsInScreen().y() > GetBoundsInScreen().y()) {
       base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
           FROM_HERE, base::BindOnce(
                          [](base::WeakPtr<VerticalTabGroupHeaderView> view) {
                            if (view && view->editor_bubble_button_) {
-                             view->editor_bubble_button_->RequestFocus();
+                             view->GetFocusManager()->SetFocusedViewWithReason(
+                                 view->editor_bubble_button_,
+                                 views::FocusManager::FocusChangeReason::
+                                     kFocusTraversal);
                            }
                          },
                          weak_ptr_factory_.GetWeakPtr()));
@@ -361,29 +413,43 @@ void VerticalTabGroupHeaderView::ShowContextMenuForViewImpl(
       delegate_->ShowGroupEditorBubble(kStopContextMenuPropagation));
 }
 
+bool VerticalTabGroupHeaderView::NeedsToShowThumbnail() const {
+  return false;
+}
+
+bool VerticalTabGroupHeaderView::IsValidHoverCardTarget() const {
+  return delegate_->IsValid();
+}
+
+views::BubbleBorder::Arrow VerticalTabGroupHeaderView::GetAnchorPosition()
+    const {
+  return views::BubbleBorder::LEFT_TOP;
+}
+
 void VerticalTabGroupHeaderView::OnDataChanged(
     const tab_groups::TabGroupVisualData* tab_group_visual_data,
-    bool needs_attention,
     bool is_shared) {
-  group_header_label_->SetText(tab_group_visual_data->title());
+  tab_group_visual_data_ = *tab_group_visual_data;
+  is_shared_ = is_shared;
+
+  group_header_label_->SetText(tab_group_visual_data_.title());
   if (GetColorProvider()) {
     SkColor background_color = GetColorProvider()->GetColor(
-        GetTabGroupTabStripColorId(tab_group_visual_data->color(),
+        GetTabGroupTabStripColorId(tab_group_visual_data_.color(),
                                    GetWidget()->ShouldPaintAsActive()));
-    SkColor foreground_color =
-        color_utils::GetColorWithMaxContrast(background_color);
+    SkColor foreground_color = GetForegroundColor();
 
     // Update label.
     group_header_label_->SetEnabledColor(foreground_color);
 
     // Update save tab group related items, the sync icon and attention
     // indicator.
-    sync_icon_->SetVisible(is_shared);
-    if (is_shared) {
+    sync_icon_->SetVisible(is_shared_);
+    if (is_shared_) {
       sync_icon_->SetImage(ui::ImageModel::FromVectorIcon(
           kPeopleGroupIcon, foreground_color, kIconSize));
     }
-    if (tab_group_visual_data->is_collapsed() && needs_attention) {
+    if (tab_group_visual_data_.is_collapsed() && needs_attention_) {
       attention_indicator_->SetVisible(true);
       attention_indicator_->SetImage(ui::ImageModel::FromVectorIcon(
           kDefaultTouchFaviconMaskIcon, foreground_color,
@@ -397,7 +463,7 @@ void VerticalTabGroupHeaderView::OnDataChanged(
 
     // Update collapse icon.
     collapse_icon_->SetImage(
-        ui::ImageModel::FromVectorIcon(tab_group_visual_data->is_collapsed()
+        ui::ImageModel::FromVectorIcon(tab_group_visual_data_.is_collapsed()
                                            ? kKeyboardArrowDownChromeRefreshIcon
                                            : kKeyboardArrowUpChromeRefreshIcon,
                                        foreground_color, kIconSize));
@@ -407,9 +473,31 @@ void VerticalTabGroupHeaderView::OnDataChanged(
                                                      kGroupHeaderCornerRadius));
   }
 
-  UpdateIsCollapsed(tab_group_visual_data);
-  UpdateAccessibleName(tab_group_visual_data, needs_attention, is_shared);
-  UpdateTooltipText();
+  UpdateIsCollapsed();
+  UpdateAccessibleName();
+  SetHoverCardDataFrom(delegate_->GetTabGroup());
+}
+
+void VerticalTabGroupHeaderView::OnAttentionStateChanged(bool needs_attention) {
+  if (needs_attention_ == needs_attention) {
+    return;
+  }
+  needs_attention_ = needs_attention;
+
+  if (tab_group_visual_data_.is_collapsed() && needs_attention_) {
+    attention_indicator_->SetVisible(true);
+    attention_indicator_->SetImage(ui::ImageModel::FromVectorIcon(
+        kDefaultTouchFaviconMaskIcon, GetForegroundColor(),
+        kAttentionIndicatorWidth));
+  } else {
+    attention_indicator_->SetVisible(false);
+  }
+
+  UpdateAccessibleName();
+}
+
+void VerticalTabGroupHeaderView::SetHoverCardDataForTesting() {
+  SetHoverCardDataFrom(delegate_->GetTabGroup());
 }
 
 void VerticalTabGroupHeaderView::UpdateTooltipText() {
@@ -425,9 +513,8 @@ void VerticalTabGroupHeaderView::UpdateTooltipText() {
   }
 }
 
-void VerticalTabGroupHeaderView::UpdateIsCollapsed(
-    const tab_groups::TabGroupVisualData* tab_group_visual_data) {
-  const bool is_collapsed = tab_group_visual_data->is_collapsed();
+void VerticalTabGroupHeaderView::UpdateIsCollapsed() {
+  const bool is_collapsed = tab_group_visual_data_.is_collapsed();
   if (is_collapsed) {
     GetViewAccessibility().SetIsCollapsed();
   } else {
@@ -435,11 +522,8 @@ void VerticalTabGroupHeaderView::UpdateIsCollapsed(
   }
 }
 
-void VerticalTabGroupHeaderView::UpdateAccessibleName(
-    const tab_groups::TabGroupVisualData* tab_group_visual_data,
-    bool needs_attention,
-    bool is_shared) {
-  const std::u16string title = tab_group_visual_data->title();
+void VerticalTabGroupHeaderView::UpdateAccessibleName() {
+  const std::u16string title = tab_group_visual_data_.title();
 
   const std::u16string contents = delegate_->GetGroupContentString();
   std::u16string group_status = std::u16string();
@@ -447,16 +531,16 @@ void VerticalTabGroupHeaderView::UpdateAccessibleName(
   // Windows screen readers reads out the collapsed state based on the
   // accessibility node data information.
 #if !BUILDFLAG(IS_WIN)
-  const bool is_collapsed = tab_group_visual_data->is_collapsed();
+  const bool is_collapsed = tab_group_visual_data_.is_collapsed();
   group_status = is_collapsed
                      ? l10n_util::GetStringUTF16(IDS_GROUP_AX_LABEL_COLLAPSED)
                      : l10n_util::GetStringUTF16(IDS_GROUP_AX_LABEL_EXPANDED);
 #endif
 
   std::u16string shared_state = u"";
-  if (is_shared) {
+  if (is_shared_) {
     shared_state = l10n_util::GetStringUTF16(IDS_SAVED_GROUP_AX_LABEL_SHARED);
-    if (tab_group_visual_data->is_collapsed() && needs_attention) {
+    if (tab_group_visual_data_.is_collapsed() && needs_attention_) {
       shared_state += u", " + l10n_util::GetStringUTF16(
                                   DATA_SHARING_GROUP_LABEL_NEW_ACTIVITY);
     }
@@ -474,6 +558,16 @@ void VerticalTabGroupHeaderView::UpdateAccessibleName(
   }
 
   GetViewAccessibility().SetName(final_name);
+}
+
+SkColor VerticalTabGroupHeaderView::GetForegroundColor() const {
+  if (GetColorProvider()) {
+    SkColor background_color = GetColorProvider()->GetColor(
+        GetTabGroupTabStripColorId(tab_group_visual_data_.color(),
+                                   GetWidget()->ShouldPaintAsActive()));
+    return color_utils::GetColorWithMaxContrast(background_color);
+  }
+  return SK_ColorBLACK;
 }
 
 void VerticalTabGroupHeaderView::UpdateEditorBubbleButtonVisibility() {

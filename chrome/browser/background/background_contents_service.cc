@@ -147,14 +147,20 @@ class CrashNotificationDelegate : public message_center::NotificationDelegate {
   extensions::ExtensionId extension_id_;
 };
 
-void ReloadExtension(const std::string& extension_id, Profile* profile) {
-  if (g_browser_process->IsShuttingDown() ||
-      !g_browser_process->profile_manager()->IsValidProfile(profile)) {
+void ReloadExtension(const std::string& extension_id,
+                     base::WeakPtr<Profile> profile) {
+  if (!profile) {
     return;
   }
 
-  auto* extension_registrar = extensions::ExtensionRegistrar::Get(profile);
-  auto* extension_registry = extensions::ExtensionRegistry::Get(profile);
+  if (g_browser_process->IsShuttingDown() ||
+      !g_browser_process->profile_manager()->IsValidProfile(profile.get())) {
+    return;
+  }
+
+  auto* extension_registrar =
+      extensions::ExtensionRegistrar::Get(profile.get());
+  auto* extension_registry = extensions::ExtensionRegistry::Get(profile.get());
   if (!extension_registrar || !extension_registry) {
     return;
   }
@@ -410,8 +416,12 @@ void BackgroundContentsService::RestartForceInstalledExtensionOnCrash(
   // TODO(devlin): This would be unnecessary if we listened to the
   // OnExtensionUnloaded() notification and checked the unload reason.
   DCHECK_GT(restart_delay, 0);
+  if (zero_restart_delay_for_test_) {
+    restart_delay = 0;
+  }
   base::SingleThreadTaskRunner::GetCurrentDefault()->PostDelayedTask(
-      FROM_HERE, base::BindOnce(&ReloadExtension, extension->id(), profile_),
+      FROM_HERE,
+      base::BindOnce(&ReloadExtension, extension->id(), profile_->GetWeakPtr()),
       base::Milliseconds(restart_delay));
 }
 
@@ -671,11 +681,12 @@ void BackgroundContentsService::AddWebContents(
     WindowOpenDisposition disposition,
     const blink::mojom::WindowFeatures& window_features,
     bool* was_blocked) {
-  Browser* browser = chrome::FindLastActiveWithProfile(
+  BrowserWindowInterface* const browser = chrome::FindLastActiveWithProfile(
       Profile::FromBrowserContext(new_contents->GetBrowserContext()));
   if (browser) {
-    chrome::AddWebContents(browser, nullptr, std::move(new_contents),
-                           target_url, disposition, window_features);
+    chrome::AddWebContents(browser->GetBrowserForMigrationOnly(), nullptr,
+                           std::move(new_contents), target_url, disposition,
+                           window_features);
   }
 }
 

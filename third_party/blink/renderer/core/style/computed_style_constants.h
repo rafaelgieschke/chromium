@@ -70,6 +70,7 @@ enum PseudoId : uint8_t {
   kPseudoIdCheckMark,
   kPseudoIdBefore,
   kPseudoIdAfter,
+  kPseudoIdExpandIcon,
   kPseudoIdPickerIcon,
   kPseudoIdInterestHint,
   kPseudoIdMarker,
@@ -628,12 +629,6 @@ inline PositionVisibility& operator|=(PositionVisibility& a,
   return a = a | b;
 }
 
-inline PositionVisibility InitialPositionVisibilityKeyword() {
-  if (RuntimeEnabledFeatures::AnchorsVisibleInitialValueEnabled()) {
-    return PositionVisibility::kAnchorsVisible;
-  }
-  return PositionVisibility::kAlways;
-}
 
 enum class FlexWrapMode : uint8_t { kNowrap, kWrap, kWrapReverse };
 

@@ -133,6 +133,7 @@
 #include "third_party/blink/renderer/core/paint/timing/image_element_timing.h"
 #include "third_party/blink/renderer/core/paint/timing/paint_timing_detector.h"
 #include "third_party/blink/renderer/core/scroll/scroll_into_view_util.h"
+#include "third_party/blink/renderer/core/style/computed_style_base_constants.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/style/content_data.h"
 #include "third_party/blink/renderer/core/style/cursor_data.h"
@@ -150,6 +151,7 @@
 #include "third_party/blink/renderer/platform/wtf/size_assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 #include "third_party/skia/include/docs/SkPDFDocument.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 
@@ -1891,7 +1893,7 @@ bool LayoutObject::ComputeIsFixedContainer(const ComputedStyle& style) const {
   if (IsEligibleForPaintOrLayoutContainment() &&
       (ShouldApplyPaintContainment(style) ||
        ShouldApplyLayoutContainment(style) ||
-       style.WillChangeProperties().Contains(CSSPropertyID::kContain))) {
+       style.HasWillChangeProperty(CSSPropertyID::kContain))) {
     return true;
   }
 
@@ -1903,7 +1905,7 @@ bool LayoutObject::ComputeIsAbsoluteContainer(const ComputedStyle& style,
   NOT_DESTROYED();
   return is_fixed_container ||
          (style.GetPosition() != EPosition::kStatic ||
-          style.WillChangeProperties().Contains(CSSPropertyID::kPosition)) ||
+          style.HasWillChangeProperty(CSSPropertyID::kPosition)) ||
          // crbug.com/1153042: If <fieldset> is an absolute container, its
          // anonymous content box should be an absolute container.
          (IsAnonymous() && Parent() && Parent()->IsFieldset() &&
@@ -2847,6 +2849,7 @@ void LayoutObject::SetPseudoElementStyle(const LayoutObject& owner,
   DCHECK(pseudo_style->StyleType() == kPseudoIdCheckMark ||
          pseudo_style->StyleType() == kPseudoIdBefore ||
          pseudo_style->StyleType() == kPseudoIdAfter ||
+         pseudo_style->StyleType() == kPseudoIdExpandIcon ||
          pseudo_style->StyleType() == kPseudoIdPickerIcon ||
          pseudo_style->StyleType() == kPseudoIdInterestHint ||
          pseudo_style->StyleType() == kPseudoIdMarker ||
@@ -3888,8 +3891,12 @@ PhysicalOffset LayoutObject::OffsetFromContainerInternal(
     MapCoordinatesFlags mode) const {
   NOT_DESTROYED();
   DCHECK_EQ(o, Container());
-  return o->IsScrollContainer() ? OffsetFromScrollableContainer(o, mode)
-                                : PhysicalOffset();
+  PhysicalOffset offset;
+  if (o->IsScrollContainer()) {
+    offset += OffsetFromScrollableContainer(o, mode);
+  }
+  offset += OffsetFromOverscrollContainer(o, mode);
+  return offset;
 }
 
 PhysicalOffset LayoutObject::OffsetFromScrollableContainer(
@@ -3913,6 +3920,39 @@ PhysicalOffset LayoutObject::OffsetFromScrollableContainer(
   // ScrollOrigin accounts for other writing modes whose content's origin is not
   // at the top-left.
   return PhysicalOffset(box->GetScrollableArea()->ScrollOrigin());
+}
+
+PhysicalOffset LayoutObject::OffsetFromOverscrollContainer(
+    const LayoutObject* container,
+    MapCoordinatesFlags mode) const {
+  if (container->InternalOverscrollArea() != EInternalOverscrollArea::kAuto) {
+    // Container is not a shifting overscroll area container.
+    return PhysicalOffset();
+  }
+  OverscrollAreaTracker* tracker =
+      To<Element>(container->GetNode())->GetOverscrollAreaTracker();
+  if (!tracker) {
+    return PhysicalOffset();
+  }
+  const VectorOf<Element>& overscroll_areas = tracker->DOMSortedElements();
+  // If we have a non-overlay overscroll area, the content is shifted by the
+  // scroll of all overscroll areas, and each individual overscroll area is
+  // shifted by each one before it.
+  wtf_size_t affecting_overscroll_areas =
+      IsPseudoElementContent(kPseudoIdOverscrollAreaParent)
+          ? overscroll_areas.Find(
+                &To<PseudoElement>(GetNode())->UltimateOriginatingElement())
+          : overscroll_areas.size();
+
+  PhysicalOffset offset;
+  for (wtf_size_t i = 0; i < affecting_overscroll_areas; ++i) {
+    offset += OffsetFromScrollableContainer(
+        overscroll_areas[i]
+            ->GetPseudoElement(kPseudoIdOverscrollAreaParent)
+            ->GetLayoutObject(),
+        mode);
+  }
+  return offset;
 }
 
 PhysicalOffset LayoutObject::OffsetFromAncestor(
@@ -4470,6 +4510,7 @@ const ComputedStyle* LayoutObject::GetCachedPseudoElementStyle(
   DCHECK_NE(pseudo, kPseudoIdBefore);
   DCHECK_NE(pseudo, kPseudoIdCheckMark);
   DCHECK_NE(pseudo, kPseudoIdAfter);
+  DCHECK_NE(pseudo, kPseudoIdExpandIcon);
   DCHECK_NE(pseudo, kPseudoIdPickerIcon);
   DCHECK_NE(pseudo, kPseudoIdInterestHint);
   if (!GetNode())
@@ -4488,6 +4529,7 @@ const ComputedStyle* LayoutObject::GetUncachedPseudoElementStyle(
   DCHECK_NE(request.pseudo_id, kPseudoIdBefore);
   DCHECK_NE(request.pseudo_id, kPseudoIdCheckMark);
   DCHECK_NE(request.pseudo_id, kPseudoIdAfter);
+  DCHECK_NE(request.pseudo_id, kPseudoIdExpandIcon);
   DCHECK_NE(request.pseudo_id, kPseudoIdPickerIcon);
   DCHECK_NE(request.pseudo_id, kPseudoIdInterestHint);
   if (!GetNode())
@@ -4593,15 +4635,18 @@ void LayoutObject::ImageNotifyFinished(ImageResourceContent* image) {
   if (LocalFrameView* frame_view = GetFrameView())
     frame_view->GetPaintTimingDetector().NotifyImageFinished(*this, image);
 
-  if (!image->ErrorOccurred() && image->GetAdProvenance()) {
-    if (auto* element = DynamicTo<Element>(GetNode())) {
-      // Skip setting the ad status for `HTMLFrameOwnerElement`, as frame owners
-      // manage their ad status separately (i.e., requires content frame
-      // notifications and allows untagging).
-      //
-      // TODO(yaoxia): Determine if this can be replaced with a DCHECK.
-      if (!IsA<HTMLFrameOwnerElement>(element)) {
-        element->SetIsAdRelated();
+  if (!image->ErrorOccurred()) {
+    if (const std::optional<AdProvenance>& ad_provenance =
+            image->GetAdProvenance()) {
+      if (auto* element = DynamicTo<Element>(GetNode())) {
+        // Skip setting the ad status for `HTMLFrameOwnerElement`, as frame
+        // owners manage their ad status separately (i.e., requires content
+        // frame notifications and allows untagging).
+        //
+        // TODO(yaoxia): Determine if this can be replaced with a DCHECK.
+        if (!IsA<HTMLFrameOwnerElement>(element)) {
+          element->SetIsAdRelated(*ad_provenance);
+        }
       }
     }
   }
@@ -4612,7 +4657,14 @@ Element* LayoutObject::ScrollParent(const Element* base) const {
 
   // 1. If any of the following holds true,
   //    return null and terminate this algorithm...
-  if (IsDocumentElement() || IsBody()) {
+  if (IsDocumentElement()) {
+    return nullptr;
+  }
+
+  // Body element should only return null iif it's the scrolling element.
+  // See:
+  // https://github.com/w3c/csswg-drafts/issues/12723#issuecomment-3998966905
+  if (IsBody() && GetDocument().ScrollingElementNoLayout() == GetNode()) {
     return nullptr;
   }
 

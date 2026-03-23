@@ -12,6 +12,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/contextual_tasks/ai_mode_context_library_converter.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks.mojom-shared.h"
+#include "chrome/browser/contextual_tasks/contextual_tasks_ui.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_ui_service.h"
 #include "chrome/browser/contextual_tasks/contextual_tasks_utils.h"
 #include "chrome/browser/feedback/public/feedback_source.h"
@@ -44,10 +45,6 @@
 #include "third_party/omnibox_proto/chrome_aim_entry_point.pb.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
-
-#if !BUILDFLAG(IS_ANDROID)
-#include "chrome/browser/contextual_tasks/contextual_tasks_ui.h"
-#endif
 
 namespace {
 constexpr char kMyActivityUrl[] = "https://myactivity.google.com/myactivity";
@@ -202,20 +199,18 @@ void ContextualTasksPageHandler::GetUrlForTask(const base::Uuid& uuid,
     return;
   }
 
-  GURL aim_url = web_ui_controller_->GetAimUrl();
-  if (!aim_url.is_empty()) {
-    std::move(callback).Run(aim_url);
-    return;
-  }
-
   // There's a slight difference in the callback signature between the mojo
   // api (wants a reference) and the ui service (provided a moved object).
   // The latter can't provide a reference since we're not keeping it
   // long-term, hence wrapping this in a base::BindOnce.
   ui_service_->GetThreadUrlFromTaskId(
-      uuid, base::BindOnce([](GetUrlForTaskCallback callback,
-                              GURL url) { std::move(callback).Run(url); },
-                           std::move(callback)));
+      uuid,
+      base::BindOnce(
+          [](GetUrlForTaskCallback callback, GURL webui_url, GURL url) {
+            std::move(callback).Run(contextual_tasks::ContextualTasksUiService::
+                                        CopyParamsFromWebUIUrl(url, webui_url));
+          },
+          std::move(callback), web_ui_controller_->GetWebUiUrl()));
 }
 
 void ContextualTasksPageHandler::SetTaskId(const base::Uuid& uuid) {
@@ -231,11 +226,7 @@ void ContextualTasksPageHandler::SetThreadTitle(const std::string& title) {
 
 void ContextualTasksPageHandler::IsZeroState(const GURL& url,
                                              IsZeroStateCallback callback) {
-#if !BUILDFLAG(IS_ANDROID)
   std::move(callback).Run(ContextualTasksUI::IsZeroState(url, ui_service_));
-#else
-  std::move(callback).Run(false);
-#endif
 }
 
 void ContextualTasksPageHandler::IsAiPage(const GURL& url,
@@ -282,6 +273,7 @@ void ContextualTasksPageHandler::OpenHelpUi() {
       }
     }
   }
+#if !BUILDFLAG(IS_ANDROID)
   chrome::ShowFeedbackPage(page_url, web_ui_controller_->GetProfile(),
                            feedback::kFeedbackSourceAI,
                            /*description_template=*/std::string(),
@@ -289,6 +281,7 @@ void ContextualTasksPageHandler::OpenHelpUi() {
                            l10n_util::GetStringUTF8(IDS_LENS_SEND_FEEDBACK),
                            /*category_tag=*/"cobrowse",
                            /*extra_diagnostics=*/std::string());
+#endif
 }
 
 void ContextualTasksPageHandler::OpenOnboardingHelpUi() {

@@ -596,7 +596,9 @@ void URLRequest::Start() {
     return;
 
   if (context_->require_network_anonymization_key()) {
-    DCHECK(!isolation_info_.IsEmpty());
+    DCHECK(!isolation_info_.IsEmpty() ||
+           NetworkIsolationPartitionAlwaysAllowEmptyPartition(
+               isolation_info_.GetNetworkIsolationPartition()));
   }
 
   // Some values can be NULL, but the job factory must not be.
@@ -1331,7 +1333,7 @@ void URLRequest::RecordReferrerGranularityMetrics(
 
 IsolationInfo URLRequest::CreateIsolationInfoFromNetworkAnonymizationKey(
     const NetworkAnonymizationKey& network_anonymization_key) {
-  if (!network_anonymization_key.IsFullyPopulated()) {
+  if (network_anonymization_key.IsEmpty()) {
     return IsolationInfo();
   }
 

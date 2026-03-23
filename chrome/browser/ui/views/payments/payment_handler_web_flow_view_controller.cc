@@ -12,11 +12,14 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/vector_icons/vector_icons.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/task_manager/web_contents_tags.h"
 #include "chrome/browser/themes/theme_service.h"
+#include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/color/chrome_color_id.h"
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view.h"
 #include "chrome/browser/ui/views/payments/payment_request_views_util.h"
@@ -317,9 +320,11 @@ void PaymentHandlerWebFlowViewController::FillContentView(
   PaymentHandlerNavigationThrottle::MarkPaymentHandlerWebContents(
       web_contents());
   web_contents()->SetDelegate(this);
-  DCHECK_NE(log_.web_contents(), web_contents());
+  content::WebContents* parent_tab_web_contents = log_.web_contents();
+
+  DCHECK_NE(parent_tab_web_contents, web_contents());
   content::PaymentAppProvider::GetOrCreateForWebContents(
-      /*payment_request_web_contents=*/log_.web_contents())
+      /*payment_request_web_contents=*/parent_tab_web_contents)
       ->SetOpenedWindow(
           /*payment_handler_web_contents=*/web_contents());
 
@@ -334,6 +339,17 @@ void PaymentHandlerWebFlowViewController::FillContentView(
       web_contents());
   web_modal::WebContentsModalDialogManager::FromWebContents(web_contents())
       ->SetDelegate(&dialog_manager_delegate_);
+
+  // If the web-contents for the parent tab has devtools open and the "Auto-open
+  // DevTools for pop-ups" setting is enabled, trigger devtools for the Payment
+  // Handler modal. This does not happen by default as Payment Handler is not a
+  // regular pop-up window.
+  DevToolsWindow* window = DevToolsWindow::GetInstanceForInspectedWebContents(
+      parent_tab_web_contents);
+  if (window && window->OpenNewWindowForPopups()) {
+    DevToolsWindow::OpenDevToolsWindow(
+        web_contents(), DevToolsOpenedByAction::kAutomaticForNewTarget);
+  }
 
   // The webview must get an explicitly set height otherwise the layout doesn't
   // make it fill its container. This is likely because it has no content at the
@@ -489,7 +505,8 @@ content::WebContents* PaymentHandlerWebFlowViewController::AddNewContents(
     bool* was_blocked) {
   // Open new foreground tab or popup triggered by user activation in payment
   // handler window in browser.
-  Browser* browser = chrome::FindLastActiveWithProfile(profile_);
+  BrowserWindowInterface* const browser =
+      chrome::FindLastActiveWithProfile(profile_);
   if (browser && user_gesture &&
       (disposition == WindowOpenDisposition::NEW_FOREGROUND_TAB ||
        disposition == WindowOpenDisposition::NEW_POPUP)) {

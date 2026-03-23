@@ -90,7 +90,6 @@ FakeLayerTreeHost::CreateLayerTreeHostImplInternal(
     scoped_refptr<base::SequencedTaskRunner>,
     LayerTreeHostSchedulingClient*,
     RenderingStatsInstrumentation*,
-    std::unique_ptr<UkmRecorderFactory>&,
     base::WeakPtr<CompositorDelegateForInput>&) {
   DCHECK(!host_impl_);
   auto host_impl = std::make_unique<FakeLayerTreeHostImpl>(
@@ -127,6 +126,7 @@ LayerImpl* FakeLayerTreeHost::CommitToTree(LayerTreeImpl* tree) {
   PropertyTreesChangeState change_state;
   property_trees()->GetChangeState(change_state);
   std::swap(change_state, pending_commit_state()->property_trees_change_state);
+  pending_commit_state()->property_trees = *property_trees();
   host_impl_->FinishCommit(*pending_commit_state(),
                            thread_unsafe_commit_state());
   std::swap(change_state, pending_commit_state()->property_trees_change_state);

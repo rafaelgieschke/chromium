@@ -12,6 +12,7 @@
 
 #include "base/base64url.h"
 #include "base/compiler_specific.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/feature_list.h"
 #include "base/format_macros.h"
 #include "base/functional/bind.h"
@@ -601,8 +602,8 @@ void HttpNetworkTransaction::DidDrainBodyForAuthRestart(bool keep_alive) {
       next_state_ = STATE_CREATE_STREAM;
     } else {
       // Renewed streams shouldn't carry over sent or received bytes.
-      DCHECK_EQ(0, new_stream->GetTotalReceivedBytes());
-      DCHECK_EQ(0, new_stream->GetTotalSentBytes());
+      DCHECK_EQ(base::ByteSize(0), new_stream->GetTotalReceivedBytes());
+      DCHECK_EQ(base::ByteSize(0), new_stream->GetTotalSentBytes());
       next_state_ = STATE_CONNECTED_CALLBACK;
     }
     stream_ = std::move(new_stream);
@@ -655,17 +656,19 @@ int HttpNetworkTransaction::Read(IOBuffer* buf,
 void HttpNetworkTransaction::StopCaching() {}
 
 int64_t HttpNetworkTransaction::GetTotalReceivedBytes() const {
-  int64_t total_received_bytes = total_received_bytes_;
-  if (stream_)
+  base::ByteSize total_received_bytes = total_received_bytes_;
+  if (stream_) {
     total_received_bytes += stream_->GetTotalReceivedBytes();
-  return total_received_bytes;
+  }
+  return total_received_bytes.InBytes();
 }
 
 int64_t HttpNetworkTransaction::GetTotalSentBytes() const {
-  int64_t total_sent_bytes = total_sent_bytes_;
-  if (stream_)
+  base::ByteSize total_sent_bytes = total_sent_bytes_;
+  if (stream_) {
     total_sent_bytes += stream_->GetTotalSentBytes();
-  return total_sent_bytes;
+  }
+  return total_sent_bytes.InBytes();
 }
 
 int64_t HttpNetworkTransaction::GetReceivedBodyBytes() const {
@@ -729,6 +732,10 @@ bool HttpNetworkTransaction::GetLoadTimingInfo(
 
 void HttpNetworkTransaction::PopulateLoadTimingInternalInfo(
     LoadTimingInternalInfo* load_timing_internal_info) const {
+  if (stream_) {
+    stream_->PopulateLoadTimingInternalInfo(load_timing_internal_info);
+  }
+
   if (!create_stream_start_time_.is_null() &&
       !create_stream_end_time_.is_null()) {
     CHECK_LE(create_stream_start_time_, create_stream_end_time_);
@@ -2087,9 +2094,9 @@ int HttpNetworkTransaction::HandleIOError(int error) {
       if (ShouldResendRequest()) {
         if (retry_attempts_on_connection_errors_ >=
             kMaxRetryAttemptsOnConnectionErrors) {
-          NOTREACHED() << "Failed after "
-                       << retry_attempts_on_connection_errors_
-                       << " retry attempts for connection errors.";
+          base::UmaHistogramBoolean(
+              "Net.NetworkTransaction.TooManyRetriesOnConnectionErrors", true);
+          return ERR_TOO_MANY_RETRIES;
         }
         retry_attempts_on_connection_errors_++;
         net_log_.AddEventWithNetErrorCode(

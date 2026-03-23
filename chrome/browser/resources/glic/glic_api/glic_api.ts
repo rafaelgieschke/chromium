@@ -86,6 +86,7 @@ export declare interface AdditionalContextPart {
   pdf?: PdfDocumentData;
   tabContext?: TabContextResult;
   region?: CapturedRegion;
+  pendingRegion?: PendingCapturedRegion;
 }
 
 /** Options for invoking Glic. */
@@ -487,6 +488,14 @@ export declare interface GlicBrowserHost {
    * be terminated and a new one will begin.
    */
   captureRegion?(): ObservableValue<CaptureRegionResult>;
+
+  /**
+   * Deletes a captured region.
+   *
+   * @param tabId The ID of the tab from which the region was captured.
+   * @param id The ID of the captured region to delete.
+   */
+  deleteCapturedRegion?(tabId: string, id: string): void;
 
   /**
    * @todo All actuation should eventually be moved onto PerformActions.
@@ -1069,6 +1078,8 @@ export declare interface ConversationInfo {
    * lookup or opaque serialized data.
    */
   clientData?: string;
+  /** Optional turn ID to open this conversation at. */
+  turnId?: string;
 }
 
 /** Fields of interest from the system settings page. */
@@ -1138,6 +1149,14 @@ export declare interface CreateActorTabOptions {
 export declare interface GlicBrowserHostMetrics {
   /** Called when the user has submitted input via the web client. */
   onUserInputSubmitted?(mode: WebClientMode): void;
+
+  /**
+   * Called when the web client sends a browser actuation result over the
+   * network. This is used to track metrics for model responses. For a single
+   * actuation, this may be called multiple times if retries occur.
+   * @param isRetry Whether this request is a retry of a previous attempt.
+   */
+  onPerformActionResultSubmitted?(isRetry?: boolean): void;
 
   /**
    * Called after user input is submitted, but before a response starts,
@@ -1238,6 +1257,14 @@ export declare interface CapturedRegion {
    * document's bounds.
    */
   rect?: Rect;
+}
+
+/** The captured region with an ID. */
+export declare interface PendingCapturedRegion {
+  /** The ID of the captured region. */
+  id: string;
+  /** The captured region. */
+  region: CapturedRegion;
 }
 
 /** The result of a successful region capture. */
@@ -1631,6 +1658,7 @@ export declare interface PageMetadata {
  * available while the page is being loaded or if not provided by the page
  * itself.
  */
+
 export declare interface TabData {
   /**
    * Unique ID of the tab that owns the page. These values are unique across
@@ -1710,6 +1738,8 @@ export declare interface TabData {
    * WARNING: This is not implemented on Android, and is always true.
    */
   isWindowActive?: boolean;
+  /** Lightweight page features detected on the page. */
+  lightweightPageFeatures?: LightweightPageFeature[];
 }
 
 /** A candidate for pinning. */
@@ -2130,6 +2160,8 @@ export declare interface SkillPreview {
   source: SkillSource;
   /** The description of the skill. */
   description?: string;
+  /** The image URL to show when rendering this skill. */
+  image_url?: string;
   /** Whether the skill is contextually relevant to the current tab. */
   isContextual?: boolean;
 }
@@ -2448,6 +2480,9 @@ export enum CreateTaskErrorReason {
   EXISTING_ACTIVE_TASK = 2,
   // The user's browser policy or account settings prevent creating actor tasks.
   BLOCKED_BY_POLICY = 3,
+  // CreateTask was called on a Glic instance which does not have a registered
+  // conversation.
+  CONVERSATION_NOT_REGISTERED = 4,
 }
 
 ///////////////////////////////////////////////
@@ -2760,6 +2795,10 @@ export enum InvocationSource {
   CAPTURE_REGION_HOTKEY = 20,
   // From the in-product-help (IPH) entrypoint.
   IPH = 21,
+  // User clicked an anchored contextual cue chip.
+  ANCHORED_CONTEXTUAL_CUE = 22,
+  // From the context menu.
+  WEB_CONTENTS_CONTEXT_MENU = 23,
 }
 
 ///////////////////////////////////////////////
@@ -2818,6 +2857,15 @@ export enum AdditionalContextSource {
   SHARE_CONTEXT_MENU = 0,
   REGION_SELECTION = 1,
   TEXT_SELECTION = 3,
+}
+
+///////////////////////////////////////////////
+// WARNING - GENERATED FROM MOJOM, DO NOT EDIT.
+// Lightweight page features detected on the page.
+export enum LightweightPageFeature {
+  UNKNOWN = 0,
+  // The YouTube "Ask" button is visible.
+  YT_ASK_BUTTON_PRESENT = 1,
 }
 
 ///////////////////////////////////////////////

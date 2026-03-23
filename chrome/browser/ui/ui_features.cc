@@ -35,7 +35,7 @@ BASE_FEATURE(kCreateNewTabGroupAppMenuTopLevel,
 
 BASE_FEATURE(kTabStripDeclutter, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kGlassToolbar, base::FEATURE_DISABLED_BY_DEFAULT);
-
+BASE_FEATURE(kToolbarGlowUp, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kDetachedTabs, base::FEATURE_DISABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
@@ -116,14 +116,44 @@ BASE_FEATURE(kPreloadTopChromeWebUILessNavigations,
 BASE_FEATURE(kPressAndHoldEscToExitBrowserFullscreen,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
+#if BUILDFLAG(IS_WIN)
+// Enables the UI for Process Isolation in chrome://settings/system.
+BASE_FEATURE(kProcessIsolationSettings, base::FEATURE_DISABLED_BY_DEFAULT);
+#endif  // BUILDFLAG(IS_WIN)
+
 #if BUILDFLAG(IS_MAC)
 // Add tab group colours when viewing tab groups using the top mac OS menu bar.
 BASE_FEATURE(kShowTabGroupsMacSystemMenu, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_MAC)
 
-BASE_FEATURE(kSideBySide, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kSplitViewTabDraggingUpdates, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE_PARAM(base::TimeDelta,
+                   kShowDropTargetForTabDelay,
+                   &kSplitViewTabDraggingUpdates,
+                   "show_drop_target_for_tab_delay",
+                   base::Milliseconds(1000));
 
-BASE_FEATURE(kSideBySideLinkMenuNewBadge, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE(kSplitViewDragAndDropVelocity, base::FEATURE_ENABLED_BY_DEFAULT);
+BASE_FEATURE_PARAM(base::TimeDelta,
+                   kSplitViewDragAndDropMinDelay,
+                   &kSplitViewDragAndDropVelocity,
+                   "min_delay",
+                   base::Milliseconds(1000));
+BASE_FEATURE_PARAM(base::TimeDelta,
+                   kSplitViewDragAndDropMaxDelay,
+                   &kSplitViewDragAndDropVelocity,
+                   "max_delay",
+                   base::Milliseconds(1000));
+BASE_FEATURE_PARAM(int,
+                   kSplitViewDragAndDropMinDistanceThreshold,
+                   &kSplitViewDragAndDropVelocity,
+                   "min_distance_threshold",
+                   20);
+BASE_FEATURE_PARAM(int,
+                   kSplitViewDragAndDropMaxDistanceThreshold,
+                   &kSplitViewDragAndDropVelocity,
+                   "max_distance_threshold",
+                   20);
 
 BASE_FEATURE(kTabDuplicateMetrics, base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -167,42 +197,9 @@ bool IsTabOrganization() {
   return base::FeatureList::IsEnabled(features::kTabOrganization);
 }
 
-BASE_FEATURE_PARAM(base::TimeDelta,
-                   kTabOrganizationTriggerPeriod,
-                   &kTabOrganization,
-                   "trigger_period",
-                   base::Hours(6));
-
-BASE_FEATURE_PARAM(double,
-                   kTabOrganizationTriggerBackoffBase,
-                   &kTabOrganization,
-                   "backoff_base",
-                   2.0);
-
-BASE_FEATURE_PARAM(double,
-                   kTabOrganizationTriggerThreshold,
-                   &kTabOrganization,
-                   "trigger_threshold",
-                   7.0);
-
-BASE_FEATURE_PARAM(double,
-                   kTabOrganizationTriggerSensitivityThreshold,
-                   &kTabOrganization,
-                   "trigger_sensitivity_threshold",
-                   0.5);
-
-BASE_FEATURE_PARAM(bool,
-                   KTabOrganizationTriggerDemoMode,
-                   &kTabOrganization,
-                   "trigger_demo_mode",
-                   false);
-
 BASE_FEATURE(kTabOrganizationModelStrategy, base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kTabOrganizationUserInstruction,
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
-BASE_FEATURE(kTabOrganizationEnableNudgeForEnterprise,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 // Enables creating a web app window when tearing off a tab with a url
@@ -268,8 +265,6 @@ BASE_FEATURE(kWebUITabStripContextMenuAfterTap,
 );
 
 #if BUILDFLAG(IS_MAC)
-BASE_FEATURE(kViewsFirstRunDialog, base::FEATURE_ENABLED_BY_DEFAULT);
-
 BASE_FEATURE(kViewsJSAppModalDialog, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
@@ -282,12 +277,6 @@ BASE_FEATURE(kPageSpecificDataDialogRelatedInstalledAppsSection,
 
 BASE_FEATURE(kEnableManagementPromotionBanner,
              base::FEATURE_ENABLED_BY_DEFAULT);
-
-#if BUILDFLAG(IS_CHROMEOS)
-BASE_FEATURE(kEnablePolicyPromotionBanner, base::FEATURE_ENABLED_BY_DEFAULT);
-#else
-BASE_FEATURE(kEnablePolicyPromotionBanner, base::FEATURE_ENABLED_BY_DEFAULT);
-#endif
 
 BASE_FEATURE(kInlineFullscreenPerfExperiment, base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -336,34 +325,10 @@ BASE_FEATURE_PARAM(bool,
                    false);
 
 BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationAutofillAddress,
-                   &kPageActionsMigration,
-                   "autofill_address",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationFind,
-                   &kPageActionsMigration,
-                   "find",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationCollaborationMessaging,
-                   &kPageActionsMigration,
-                   "collaboration_messaging",
-                   true);
-
-BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationAutofillMandatoryReauth,
                    &kPageActionsMigration,
                    "mandatory_reauth",
                    false);
-
-BASE_FEATURE_PARAM(bool,
-                   kPageActionsMigrationClickToCall,
-                   &kPageActionsMigration,
-                   "click_to_call",
-                   true);
 
 BASE_FEATURE_PARAM(bool,
                    kPageActionsMigrationSharingHub,
@@ -490,7 +455,19 @@ bool IsAndroidAnimatedProgressBarInBrowserEnabled() {
 }
 #endif  // BUILDFLAG(IS_ANDROID)
 
-BASE_FEATURE(kWhatsNewDesktopRefresh, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE(kWhatsNewDesktopRefresh, base::FEATURE_ENABLED_BY_DEFAULT);
+
+BASE_FEATURE(kAiOverlayDialog, base::FEATURE_DISABLED_BY_DEFAULT);
+BASE_FEATURE_PARAM(std::string,
+                   kAiOverlayDialogApiKey,
+                   &kAiOverlayDialog,
+                   "api_key",
+                   "");
+BASE_FEATURE_PARAM(std::string,
+                   kAiOverlayDialogMockJsonPath,
+                   &kAiOverlayDialog,
+                   "mock_json_path",
+                   "");
 
 BASE_FEATURE(kTabGroupsFocusing, base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -501,13 +478,15 @@ BASE_FEATURE_PARAM(bool,
                    false);
 
 BASE_FEATURE_PARAM(bool,
+                   kTabGroupsFocusingAutoClose,
+                   &kTabGroupsFocusing,
+                   "tab_groups_focusing_auto_close",
+                   false);
+
+BASE_FEATURE_PARAM(bool,
                    kTabGroupsFocusingDefaultToFocused,
                    &kTabGroupsFocusing,
                    "tab_groups_focusing_default_to_focused",
                    false);
-
-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
-BASE_FEATURE(kUpdaterUI, base::FEATURE_DISABLED_BY_DEFAULT);
-#endif
 
 }  // namespace features

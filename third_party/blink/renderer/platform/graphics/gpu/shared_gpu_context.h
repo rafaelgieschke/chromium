@@ -10,7 +10,6 @@
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr_exclusion.h"
 #include "base/memory/weak_ptr.h"
-#include "base/threading/sequence_local_storage_slot.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/platform/web_graphics_shared_image_interface_provider.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_resource_provider.h"
@@ -18,6 +17,10 @@
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/thread_specific.h"
+
+namespace gpu {
+class SharedImageInterface;
+}
 
 namespace blink {
 
@@ -29,6 +32,8 @@ class WebGraphicsContext3DProvider;
 // Platform::CreateSharedOffscreenGraphicsContext3DProvider, and the
 // same query as Platform::IsGPUCompositingEnabled().
 class PLATFORM_EXPORT SharedGpuContext {
+  DISALLOW_NEW();
+
  public:
   // Thread-safe query if gpu compositing is enabled. This should be done before
   // calling ContextProviderWrapper() if the context will be used to make
@@ -43,36 +48,18 @@ class PLATFORM_EXPORT SharedGpuContext {
   static base::WeakPtr<WebGraphicsContext3DProviderWrapper>
   GetExistingContextProviderWrapper();
 
-  // May re-create context provider if context was lost.
-  using ContextProviderCallback = base::OnceCallback<void(
-      base::WeakPtr<WebGraphicsContext3DProviderWrapper>)>;
-  static void ContextProviderWrapperAsync(ContextProviderCallback);
-
   static bool AllowSoftwareToAcceleratedCanvasUpgrade();
   static bool IsValidWithoutRestoringForTesting();
 
   static WebGraphicsSharedImageInterfaceProvider*
   SharedImageInterfaceProvider();
 
-  // "ImageChromium" refers to putting a canvas into a hardware layer which is
-  // directly scanned out of display, bypassing chromium's own GPU composite.
-  // It is the same "ImageChromium" referenced by
-  // `WebGLImageChromiumEnabled` for example.
-  // The name is out of date and refers to the system that morphed into
-  // SharedImage.
-  // This method performs context-specific check that's not available when
-  // RuntimeEnabledFeatures is set.
-#if BUILDFLAG(IS_ANDROID)
-  static bool MaySupportWebGLImageChromium();
-#else
-  static bool MaySupportWebGLImageChromium() { return true; }
-#endif
+  // Whether WebGL content should be placed into overlays.
+  static bool UseOverlaysForWebGL();
 
-  static bool WebGLImageChromiumEnabled();
-
-  // Forces WebGLImageChromiumEnabled() to return the passed-in value.
+  // Forces UseOverlaysForWebGL() to return the passed-in value.
   // Cleared on the next invocation of Reset() of the global context.
-  static void SetWebGLImageChromiumEnabledForTesting(bool enable);
+  static void SetUseOverlaysForWebGLForTesting(bool enable);
 
   // Whether mappable SharedImages should be used for canvas2d content with CPU
   // raster.
@@ -91,6 +78,14 @@ class PLATFORM_EXPORT SharedGpuContext {
   // CONCURRENT_READ_WRITE).
   static bool LowLatencyUsageSupportedForCanvas2D(RasterMode raster_mode);
 
+  // Whether SharedImages used for WebGL content may be given usage optimized
+  // for low-latency (SCANOUT and CONCURRENT_READ_WRITE).
+  static bool LowLatencyUsageSupportedForWebGL(gpu::SharedImageInterface*);
+
+  // Forces LowLatencyUsageSupportedForWebGL() to return the passed-in value.
+  // Cleared on the next invocation of Reset() of the global context.
+  static void SetLowLatencyUsageSupportedForWebGLForTesting(bool enable);
+
   // Forces LowLatencyUsageSupportedForCanvas2D() to return the
   // passed-in value. Cleared on the next invocation of Reset() of the global
   // context.
@@ -105,14 +100,12 @@ class PLATFORM_EXPORT SharedGpuContext {
   static void Reset();
 
  private:
-  friend class base::GenericSequenceLocalStorageSlot<SharedGpuContext>;
+  friend class ThreadSpecific<SharedGpuContext>;
 
-  static SharedGpuContext* GetInstanceForCurrentSequence();
+  static SharedGpuContext* GetInstanceForCurrentThread();
 
   SharedGpuContext();
   void CreateContextProviderIfNeeded(bool only_if_gpu_compositing);
-  // Checks if context provider can be created without posting to main thread.
-  bool CreateContextProviderIfNeededNoPost(bool only_if_gpu_compositing);
   void CreateSharedImageInterfaceProviderIfNeeded();
 
   // Can be overridden for tests.

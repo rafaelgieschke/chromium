@@ -4,6 +4,7 @@
 
 #include "cc/mojo_embedder/viz_layer_context.h"
 
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -369,7 +370,8 @@ std::vector<viz::mojom::StickyPositionNodeDataPtr> SerializeStickyPositionData(
   std::vector<viz::mojom::StickyPositionNodeDataPtr> wire_data;
   for (const auto& data : entries) {
     auto wire = viz::mojom::StickyPositionNodeData::New();
-    wire->scroll_ancestor = data.scroll_ancestor;
+    wire->x_scroll_ancestor = data.x_scroll_ancestor;
+    wire->y_scroll_ancestor = data.y_scroll_ancestor;
     wire->is_anchored_left = data.constraints.is_anchored_left;
     wire->is_anchored_right = data.constraints.is_anchored_right;
     wire->is_anchored_top = data.constraints.is_anchored_top;
@@ -432,9 +434,15 @@ viz::mojom::TransformTreeUpdatePtr ComputeTransformTreePropertiesUpdate(
 
   auto wire = viz::mojom::TransformTreeUpdate::New();
   wire->page_scale_factor = new_tree.page_scale_factor();
+  DUMP_WILL_BE_CHECK_GT(wire->page_scale_factor, 0.f);
+  DUMP_WILL_BE_CHECK(std::isfinite(wire->page_scale_factor));
   wire->device_scale_factor = new_tree.device_scale_factor();
+  DUMP_WILL_BE_CHECK_GT(wire->device_scale_factor, 0.f);
+  DUMP_WILL_BE_CHECK(std::isfinite(wire->device_scale_factor));
   wire->device_transform_scale_factor =
       new_tree.device_transform_scale_factor();
+  DUMP_WILL_BE_CHECK_GT(wire->device_transform_scale_factor, 0.f);
+  DUMP_WILL_BE_CHECK(std::isfinite(wire->device_transform_scale_factor));
   wire->nodes_affected_by_outer_viewport_bounds_delta =
       new_tree.nodes_affected_by_outer_viewport_bounds_delta();
   wire->nodes_affected_by_safe_area_bottom =
@@ -995,7 +1003,8 @@ void SerializeLayer(LayerImpl& layer,
             picture_layer.is_backdrop_filter_mask();
         tile_display_extra->is_directly_composited_image =
             picture_layer.IsDirectlyCompositedImage();
-        tile_display_extra->nearest_neighbor = picture_layer.nearest_neighbor();
+        tile_display_extra->nearest_neighbor =
+            picture_layer.GetNearestNeighbor();
         tile_display_extra->content_color_usage =
             picture_layer.GetContentColorUsage();
         tile_display_extra->recorded_bounds =
@@ -1356,12 +1365,16 @@ void VizLayerContext::SetVisible(bool visible) {
   service_->SetVisible(visible);
 }
 
+void VizLayerContext::SetTargetLocalSurfaceId(
+    const viz::LocalSurfaceId& target_local_surface_id) {
+  service_->SetTargetLocalSurfaceId(target_local_surface_id);
+}
+
 base::TimeTicks VizLayerContext::UpdateDisplayTreeFrom(
     LayerTreeImpl& tree,
     viz::ClientResourceProvider& resource_provider,
     gpu::SharedImageInterface* shared_image_interface,
     const gfx::Rect& viewport_damage_rect,
-    const viz::LocalSurfaceId& target_local_surface_id,
     bool frame_has_damage,
     std::vector<ui::LatencyInfo> latency_info) {
   TRACE_EVENT0("viz", "VizLayerContext::UpdateDisplayTreeFrom");
@@ -1375,22 +1388,33 @@ base::TimeTicks VizLayerContext::UpdateDisplayTreeFrom(
       tree.primary_main_frame_item_sequence_number();
   update->selection = tree.selection();
   update->page_scale_factor = tree.page_scale_factor()->Current(true);
+  DUMP_WILL_BE_CHECK_GT(update->page_scale_factor, 0.f);
+  DUMP_WILL_BE_CHECK(std::isfinite(update->page_scale_factor));
   update->min_page_scale_factor = tree.min_page_scale_factor();
+  DUMP_WILL_BE_CHECK_GT(update->min_page_scale_factor, 0.f);
+  DUMP_WILL_BE_CHECK(std::isfinite(update->min_page_scale_factor));
   update->max_page_scale_factor = tree.max_page_scale_factor();
+  DUMP_WILL_BE_CHECK_GT(update->max_page_scale_factor, 0.f);
+  DUMP_WILL_BE_CHECK(std::isfinite(update->max_page_scale_factor));
+  DUMP_WILL_BE_CHECK_GE(update->max_page_scale_factor,
+                        update->min_page_scale_factor);
   update->external_page_scale_factor = tree.external_page_scale_factor();
+  DUMP_WILL_BE_CHECK_GT(update->external_page_scale_factor, 0.f);
+  DUMP_WILL_BE_CHECK(std::isfinite(update->external_page_scale_factor));
   update->frame_has_damage = frame_has_damage;
   update->latency_info = std::move(latency_info);
   update->device_viewport = tree.GetDeviceViewport();
   update->device_scale_factor = tree.device_scale_factor();
+  DUMP_WILL_BE_CHECK_GT(update->device_scale_factor, 0.f);
+  DUMP_WILL_BE_CHECK(std::isfinite(update->device_scale_factor));
   update->painted_device_scale_factor = tree.painted_device_scale_factor();
+  DUMP_WILL_BE_CHECK_GT(update->painted_device_scale_factor, 0.f);
+  DUMP_WILL_BE_CHECK(std::isfinite(update->painted_device_scale_factor));
   update->display_color_spaces = tree.display_color_spaces();
   if (tree.local_surface_id_from_parent().is_valid()) {
     update->local_surface_id_from_parent = tree.local_surface_id_from_parent();
   }
   update->current_local_surface_id = host_impl_->GetCurrentLocalSurfaceId();
-  if (target_local_surface_id.is_valid()) {
-    update->target_local_surface_id = target_local_surface_id;
-  }
   DCHECK_NE(host_impl_->next_frame_token(), viz::kInvalidFrameToken);
   update->next_frame_token = host_impl_->next_frame_token();
   update->send_frame_token_to_embedder =
@@ -1412,6 +1436,8 @@ base::TimeTicks VizLayerContext::UpdateDisplayTreeFrom(
       host_impl_->may_throttle_if_undrawn_frames();
   update->is_viewport_mobile_optimized =
       host_impl_->viewport_mobile_optimized();
+  update->browser_controls_shrink_blink_size =
+      tree.browser_controls_shrink_blink_size();
   update->is_animating_hud_contents = tree.IsAnimatingHUDContents();
   update->max_safe_area_inset_bottom = tree.max_safe_area_inset_bottom();
   update->browser_controls_params = tree.browser_controls_params();
@@ -1478,7 +1504,8 @@ base::TimeTicks VizLayerContext::UpdateDisplayTreeFrom(
                        /*needs_full_sync=*/true);
       }
     } else {
-      for (LayerImpl* layer : tree.LayersThatShouldPushProperties()) {
+      for (auto* layer : tree.LayersThatShouldPushProperties()) {
+        DCHECK(layer);
         SerializeLayer(*layer, resource_provider, shared_image_interface,
                        *update,
                        /*needs_full_sync=*/false);

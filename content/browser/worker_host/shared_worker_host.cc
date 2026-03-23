@@ -686,7 +686,11 @@ void SharedWorkerHost::CreateWebSocketConnector(
           GlobalRenderFrameHostId(GetProcessHost()->GetID(),
                                   IPC::mojom::kRoutingIdNone),
           storage_key.origin(), storage_key.ToPartialNetIsolationInfo(),
-          worker_client_security_state_->Clone()),
+          worker_client_security_state_->Clone(),
+          // TODO(crbug.com/492462310): Pass network_restrictions_id so
+          // Connection-Allowlist is enforced for shared worker WebSocket
+          // connections.
+          /*network_restrictions_id=*/std::nullopt),
       std::move(receiver));
 }
 
@@ -797,7 +801,7 @@ void SharedWorkerHost::BindPressureService(
 void SharedWorkerHost::CreateCodeCacheHost(
     mojo::PendingReceiver<blink::mojom::CodeCacheHost> receiver) {
   // Create a new CodeCacheHostImpl and bind it to the given receiver.
-  code_cache_host_receivers_.Add(GetProcessHost()->GetDeprecatedID(),
+  code_cache_host_receivers_.Add(GetProcessHost()->GetID(),
                                  GetNetworkIsolationKey(), GetStorageKey(),
                                  std::move(receiver));
 }

@@ -29,8 +29,6 @@ class NetworkAnonymizationKey;
 class ProxyInfo;
 class ProxyChain;
 
-constexpr size_t kDefaultMaxSocketsPerProxyChain = 32;
-
 class NET_EXPORT_PRIVATE ClientSocketPoolManager {
  public:
   ClientSocketPoolManager();
@@ -55,6 +53,7 @@ class NET_EXPORT_PRIVATE ClientSocketPoolManager {
       HttpNetworkSession::SocketPoolType pool_type);
   // Unlike the other `set_` methods, this one is used in production code and
   // thus cannot be marked as `_for_test`. Usage should be carefully audited.
+  // Caller is responsible for following max/min CHECKs on socket_count.
   static void set_max_sockets_per_proxy_chain(
       HttpNetworkSession::SocketPoolType pool_type,
       size_t socket_count);
@@ -99,7 +98,7 @@ int InitSocketHandleForHttpRequest(
 // A helper method that uses the passed in proxy information to initialize a
 // ClientSocketHandle with the relevant socket pool. Use this method for
 // HTTP/HTTPS requests for WebSocket handshake. This function uses
-// WEBSOCKET_SOCKET_POOL socket pools.
+// kWebSocket socket pools.
 int InitSocketHandleForWebSocketRequest(
     url::SchemeHostPort endpoint,
     int request_load_flags,
@@ -128,7 +127,7 @@ int PreconnectSocketsForHttpRequest(
     SecureDnsPolicy secure_dns_policy,
     const NetLogWithSource& net_log,
     int num_preconnect_streams,
-    CompletionOnceCallback callback);
+    ClientSocketPool::PreconnectCompletionCallback callback);
 
 }  // namespace net
 

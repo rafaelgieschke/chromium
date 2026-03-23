@@ -24,6 +24,7 @@ import java.lang.annotation.RetentionPolicy;
     FeatureConstants.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_TRANSLATE_FEATURE,
     FeatureConstants.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_ADD_TO_BOOKMARKS_FEATURE,
     FeatureConstants.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_READ_ALOUD_FEATURE,
+    FeatureConstants.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_GLIC_FEATURE,
     FeatureConstants.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_PAGE_SUMMARY_WEB_FEATURE,
     FeatureConstants.ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_PAGE_SUMMARY_PDF_FEATURE,
     FeatureConstants.PAGE_SUMMARY_WEB_MENU_FEATURE,
@@ -59,6 +60,7 @@ import java.lang.annotation.RetentionPolicy;
     FeatureConstants.KEYBOARD_ACCESSORY_BAR_SWIPING_FEATURE,
     FeatureConstants.KEYBOARD_ACCESSORY_HOME_WORK_PROFILE_SUGGESTION_FEATURE,
     FeatureConstants.KEYBOARD_ACCESSORY_ACCOUNT_NAME_EMAIL_SUGGESTION_FEATURE,
+    FeatureConstants.KEYBOARD_ACCESSORY_AUTOFILL_AI_VALUABLES_FEATURE,
     FeatureConstants.KEYBOARD_ACCESSORY_ENABLE_LOYALTY_CARDS_FEATURE,
     FeatureConstants.KEYBOARD_ACCESSORY_PASSWORD_FILLING_FEATURE,
     FeatureConstants.KEYBOARD_ACCESSORY_PAYMENT_FILLING_FEATURE,
@@ -85,6 +87,7 @@ import java.lang.annotation.RetentionPolicy;
     FeatureConstants.TAB_GROUPS_REMOTE_GROUP,
     FeatureConstants.TAB_GROUPS_SURFACE,
     FeatureConstants.TAB_GROUPS_SURFACE_ON_HIDE,
+    FeatureConstants.THREE_DOT_MENU_BACK_BUTTON,
     FeatureConstants.FEED_HEADER_MENU_FEATURE,
     FeatureConstants.FEED_SWIPE_REFRESH_FEATURE,
     FeatureConstants.GENERIC_ALWAYS_TRIGGER_HELP_UI_FEATURE,
@@ -151,6 +154,8 @@ public @interface FeatureConstants {
             "IPH_AdaptiveButtonInTopToolbarCustomization_AddToBookmarks";
     String ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_READ_ALOUD_FEATURE =
             "IPH_AdaptiveButtonInTopToolbarCustomization_ReadAloud";
+    String ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_GLIC_FEATURE =
+            "IPH_AdaptiveButtonInTopToolbarCustomization_Glic";
     String ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_PAGE_SUMMARY_WEB_FEATURE =
             "IPH_AdaptiveButtonInTopToolbarCustomization_PageSummary_Web";
     String ADAPTIVE_BUTTON_IN_TOP_TOOLBAR_CUSTOMIZATION_PAGE_SUMMARY_PDF_FEATURE =
@@ -193,6 +198,7 @@ public @interface FeatureConstants {
             "IPH_AutofillHomeWorkProfileSuggestion";
     String KEYBOARD_ACCESSORY_ACCOUNT_NAME_EMAIL_SUGGESTION_FEATURE =
             "IPH_AutofillAccountNameEmailSuggestion";
+    String KEYBOARD_ACCESSORY_AUTOFILL_AI_VALUABLES_FEATURE = "IPH_AutofillAiValuables";
     String KEYBOARD_ACCESSORY_PASSWORD_FILLING_FEATURE = "IPH_KeyboardAccessoryPasswordFilling";
     String KEYBOARD_ACCESSORY_PAYMENT_CARD_INFO_RETRIEVAL_FEATURE =
             "IPH_AutofillCardInfoRetrievalSuggestion";
@@ -321,6 +327,9 @@ public @interface FeatureConstants {
      * hiding a tab group.
      */
     String TAB_GROUPS_SURFACE_ON_HIDE = "IPH_TabGroupsSurfaceOnHide";
+
+    /** An IPH feature to prompt users to use the back button on the three dot app menu. */
+    String THREE_DOT_MENU_BACK_BUTTON = "IPH_ThreeDotMenuBackButton";
 
     /**
      * An IPH feature to show a video tutorial card on NTP to educate about an introduction to

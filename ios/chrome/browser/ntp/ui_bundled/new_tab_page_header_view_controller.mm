@@ -396,7 +396,7 @@ const CGFloat kIdentityDiscMaxFontSize = 24;
   self.headerView.allowFontScaleAnimation = allowFontScaleAnimation;
 }
 
-- (void)omniboxDidResignFirstResponder {
+- (void)omniboxDidEndEditing {
   // Return early if the view is already showing.
   if (self.view.alpha == 1) {
     return;
@@ -1084,6 +1084,7 @@ const CGFloat kIdentityDiscMaxFontSize = 24;
   _identityDiscTrailingConstraint.constant = -identityAvatarPadding;
 }
 
+// `name` may be nil, `email` must not be nil.
 - (void)updateIdentityDiscAccessibilityLabelWithName:(NSString*)name
                                                email:(NSString*)email {
   NSString* accountButtonLabel;

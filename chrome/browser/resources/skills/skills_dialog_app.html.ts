@@ -16,7 +16,7 @@ ${this.shouldShowErrorPage_ ? html`<error-page></error-page>` : html`
       <h1 id="header">${this.dialogTitle_}</h1>
       <p class="description">$i18n{skillDescription}</p>
     </div>
-    <div slot="body">
+    <div slot="body" @keydown="${this.onKeydown_}">
         <div id="nameWrapper">
           <div id="nameLabel" class="cr-form-field-label" aria-hidden="true">$i18n{name}
           </div>
@@ -48,13 +48,19 @@ ${this.shouldShowErrorPage_ ? html`<error-page></error-page>` : html`
                   .value="${this.skill_.icon}" @click="${this.onEmojiBtnClick_}"
                   @input="${this.onEmojiInput_}"
                   @keydown="${this.onEmojiKeydown_}" title="$i18n{chooseIcon}"
-                  aria-label="$i18n{chooseIcon}">
+                  aria-label="$i18n{chooseIcon}" readonly>
               </div>
             </cr-input>
             <div id="nameErrorMessage" class="error-message"
                 ?hidden="${!this.hasNameCharLimitError_}">
               $i18n{nameCharLimitError}
             </div>
+            ${this.showEmojiPicker_ ? html`
+              <skills-emoji-picker id="emojiPicker"
+                  @emoji-selected="${this.onEmojiSelected_}"
+                  @picker-close="${this.onEmojiPickerClose_}">
+              </skills-emoji-picker>
+            ` : ''}
             `}
         </div>
         <div id="instructionsWrapper">
@@ -117,7 +123,7 @@ ${this.shouldShowErrorPage_ ? html`<error-page></error-page>` : html`
         <div id="saveErrorMessage" class="error-message">$i18n{saveError}</div>
       </div>
       <div class="buttons-group">
-        <cr-button id="deleteButton" ?hidden="${this.isAddDialog_()}"
+        <cr-button id="deleteButton" ?hidden="${this.isAddDialog_}"
             @click="${this.onDeleteSkillClick_}">
           $i18n{delete}
         </cr-button>

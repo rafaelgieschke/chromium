@@ -51,6 +51,7 @@ import androidx.core.view.inputmethod.EditorInfoCompat;
 
 import org.jni_zero.CalledByNative;
 import org.jni_zero.JNINamespace;
+import org.jni_zero.JniType;
 import org.jni_zero.NativeMethods;
 
 import org.chromium.base.ContextUtils;
@@ -103,8 +104,11 @@ import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * Implementation of the interface {@link ImeAdapter} providing an interface in both ways native <->
@@ -141,6 +145,13 @@ public class ImeAdapterImpl
 
     // Color used by AOSP Android for a SuggestionSpan with FLAG_EASY_CORRECT set
     private static final int DEFAULT_SUGGESTION_SPAN_COLOR = 0x88C8C8C8;
+
+    // A map of native helper objects to their Java counterparts allows unlimited scaling in number
+    // of tabs. The UserDataHost owns the ImeAdapterImpl objects. This is used since
+    // UserData#destroy() is not always called when the WebContents are destroyed, leading to memory
+    // leaks.
+    private static final Map<Long, WeakReference<ImeAdapterImpl>> sNativeHelperMap =
+            new HashMap<>();
 
     private long mNativeImeAdapterAndroid;
     private InputMethodManagerWrapper mInputMethodManagerWrapper;
@@ -269,6 +280,12 @@ public class ImeAdapterImpl
                 ImeAdapterImpl.class, UserDataFactoryLazyHolder.INSTANCE);
     }
 
+    @CalledByNative
+    private static @Nullable ImeAdapterImpl get(long nativeObj) {
+        WeakReference<ImeAdapterImpl> imeAdapterRef = sNativeHelperMap.get(nativeObj);
+        return imeAdapterRef != null ? imeAdapterRef.get() : null;
+    }
+
     /** Returns an instance of the default {@link InputMethodManagerWrapper} */
     public static InputMethodManagerWrapper createDefaultInputMethodManagerWrapper(
             Context context,
@@ -279,9 +296,11 @@ public class ImeAdapterImpl
 
     /**
      * Create {@link ImeAdapterImpl} instance.
+     *
      * @param webContents WebContents instance.
      */
-    public ImeAdapterImpl(WebContents webContents) {
+    @VisibleForTesting
+    ImeAdapterImpl(WebContents webContents) {
         mWebContents = (WebContentsImpl) webContents;
         ViewAndroidDelegate viewDelegate = mWebContents.getViewAndroidDelegate();
         assert viewDelegate != null;
@@ -327,7 +346,8 @@ public class ImeAdapterImpl
                             }
                         });
         mInputMethodManagerWrapper = wrapper;
-        mNativeImeAdapterAndroid = ImeAdapterImplJni.get().init(ImeAdapterImpl.this, mWebContents);
+        mNativeImeAdapterAndroid = ImeAdapterImplJni.get().init(mWebContents);
+        sNativeHelperMap.put(mNativeImeAdapterAndroid, new WeakReference<>(this));
         WindowEventObserverManager.from(mWebContents).addObserver(this);
         if (ContentFeatureMap.isEnabled(ContentFeatures.ANDROID_PK_AUTOCORRECT_UNDERLINE)) {
             mAutocorrectManager = new AutocorrectManager(this);
@@ -359,6 +379,12 @@ public class ImeAdapterImpl
                             SelectRangeGesture.class,
                             DeleteRangeGesture.class);
             outAttrs.setSupportedHandwritingGestures(supportedGestures);
+            outAttrs.setSupportedHandwritingGesturePreviews(
+                    Set.of(
+                            SelectGesture.class,
+                            DeleteGesture.class,
+                            SelectRangeGesture.class,
+                            DeleteRangeGesture.class));
         }
         // Update whether stylus handwriting should be enabled in editor info.
         // This prevents the stylus handwriting toolbar from appearing and ensures the
@@ -372,20 +398,33 @@ public class ImeAdapterImpl
         return inputConnection;
     }
 
-    void handleGesture(OngoingGesture request) {
-        mOngoingGestures.put(request.getId(), request);
-
-        // Offset the gesture rectangles to convert from screen coordinates to window coordinates.
+    // Offset the gesture rectangles to convert from screen coordinates to window coordinates.
+    private void adjustForWindowPosition(StylusWritingGestureData gestureData) {
         int[] screenLocation = new int[2];
         getContainerView().getLocationOnScreen(screenLocation);
-        StylusWritingGestureData gestureData = request.getGestureData();
         gestureData.startRect.x -= screenLocation[0];
         gestureData.startRect.y -= screenLocation[1];
         if (gestureData.endRect != null) {
             gestureData.endRect.x -= screenLocation[0];
             gestureData.endRect.y -= screenLocation[1];
         }
+    }
 
+    /**
+     * Sends preview gesture data to blink for handling
+     *
+     * @param gestureData Instance of StylusWritingGestureData that contains the data of the gesture
+     *     like coordinates
+     */
+    public void previewGesture(StylusWritingGestureData gestureData) {
+        adjustForWindowPosition(gestureData);
+        getStylusWritingImeCallback().handleStylusWritingGestureAction(-1, gestureData);
+    }
+
+    void handleGesture(OngoingGesture request) {
+        mOngoingGestures.put(request.getId(), request);
+        StylusWritingGestureData gestureData = request.getGestureData();
+        adjustForWindowPosition(gestureData);
         getStylusWritingImeCallback()
                 .handleStylusWritingGestureAction(request.getId(), gestureData);
     }
@@ -1026,9 +1065,10 @@ public class ImeAdapterImpl
     }
 
     @CalledByNative
-    private void onNativeDestroyed() {
+    private void destroyFromNative() {
+        if (mNativeImeAdapterAndroid == 0) return;
+
         resetAndHideKeyboard();
-        mNativeImeAdapterAndroid = 0;
         mIsConnected = false;
         if (mCursorAnchorInfoController != null) {
             mCursorAnchorInfoController.focusedNodeChanged(false);
@@ -1037,6 +1077,11 @@ public class ImeAdapterImpl
         if (mWebContents.getStylusWritingHandler() != null) {
             mWebContents.getStylusWritingHandler().onImeAdapterDestroyed();
         }
+
+        WeakReference<ImeAdapterImpl> oldValue = sNativeHelperMap.remove(mNativeImeAdapterAndroid);
+        assert oldValue != null;
+        assert oldValue.get() == this;
+        mNativeImeAdapterAndroid = 0;
     }
 
     /**
@@ -1720,10 +1765,13 @@ public class ImeAdapterImpl
      */
     void updateCursorAnchorInfo(InputCursorAnchorInfo cursorAnchorInfo) {
         View containerView = getContainerView();
-        mCursorAnchorInfoController.updateCursorAnchorInfoData(cursorAnchorInfo, containerView);
+        boolean isSelectionMove =
+                mCursorAnchorInfoController.updateCursorAnchorInfoData(
+                        cursorAnchorInfo, containerView);
 
         // Request view system keep caret on screen when moved.
-        if (cursorAnchorInfo.insertionMarker != null
+        if (isSelectionMove
+                && cursorAnchorInfo.insertionMarker != null
                 && ContentFeatureList.sAccessibilityMagnificationFollowsFocus.isEnabled()) {
             // Convert caret bounds from CSS pixels to device pixels relative to root view.
             var caretCss = cursorAnchorInfo.insertionMarker;
@@ -1841,7 +1889,8 @@ public class ImeAdapterImpl
     }
 
     @CalledByNative
-    private void populateImeTextSpansFromJava(CharSequence text, long imeTextSpans) {
+    @VisibleForTesting
+    void populateImeTextSpansFromJava(CharSequence text, long imeTextSpans) {
         if (DEBUG_LOGS) {
             Log.i(
                     TAG,
@@ -1851,8 +1900,14 @@ public class ImeAdapterImpl
         }
         if (!(text instanceof SpannableString)) return;
 
+        final boolean blockMisspellingInComposition =
+                ContentFeatureMap.isEnabled(
+                        ContentFeatureList
+                                .ANDROID_BLOCK_MISSPELLING_SUGGESTION_SPAN_IN_COMPOSITION_MODE);
+
         SpannableString spannableString = ((SpannableString) text);
         CharacterStyle[] spans = spannableString.getSpans(0, text.length(), CharacterStyle.class);
+
         for (CharacterStyle span : spans) {
             final int spanFlags = spannableString.getSpanFlags(span);
             if (span instanceof BackgroundColorSpan) {
@@ -1900,6 +1955,13 @@ public class ImeAdapterImpl
                         (suggestionSpan.getFlags() & SuggestionSpan.FLAG_AUTO_CORRECTION) != 0;
 
                 if (!isEasyCorrectSpan && !isMisspellingSpan && !isAutoCorrectionSpan) continue;
+
+                // Some IMEs (Gboard) require the additional suggestion spans with FLAG_MISSPELLED
+                // present in the surrounding text to guide their custom spell check bar. We should
+                // not report these "artificial" suggestion spans to Blink.
+                if (!isEasyCorrectSpan && isMisspellingSpan && blockMisspellingInComposition) {
+                    continue;
+                }
 
                 // Copied from Android's Editor.java so we use the same colors
                 // as the native Android text widget.
@@ -1977,7 +2039,7 @@ public class ImeAdapterImpl
 
     @NativeMethods
     interface Natives {
-        long init(ImeAdapterImpl caller, WebContents webContents);
+        long init(@JniType("WebContents*") WebContents webContents);
 
         boolean sendKeyEvent(
                 long nativeImeAdapterAndroid,

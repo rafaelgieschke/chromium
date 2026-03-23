@@ -235,7 +235,6 @@ constexpr auto kContentSettingsTypeGroupNames = std::to_array<
     {ContentSettingsType::FILE_SYSTEM_ACCESS_EXTENDED_PERMISSION, nullptr},
     {ContentSettingsType::TPCD_HEURISTICS_GRANTS, nullptr},
     {ContentSettingsType::FILE_SYSTEM_ACCESS_RESTORE_PERMISSION, nullptr},
-    {ContentSettingsType::SUB_APP_INSTALLATION_PROMPTS, nullptr},
     {ContentSettingsType::DIRECT_SOCKETS, nullptr},
     {ContentSettingsType::REVOKED_ABUSIVE_NOTIFICATION_PERMISSIONS, nullptr},
     {ContentSettingsType::DISPLAY_MEDIA_SYSTEM_AUDIO, nullptr},
@@ -258,6 +257,7 @@ constexpr auto kContentSettingsTypeGroupNames = std::to_array<
     {ContentSettingsType::DEVICE_ATTRIBUTES, nullptr},
     {ContentSettingsType::PERMISSION_ACTIONS_HISTORY, nullptr},
     {ContentSettingsType::SUSPICIOUS_NOTIFICATION_SHOW_ORIGINAL, nullptr},
+    {ContentSettingsType::DEPRECATED_SUB_APP_INSTALLATION_PROMPTS, nullptr},
 });
 
 static_assert(
@@ -727,6 +727,7 @@ SiteSettingSource ProviderTypeToSiteSettingsSource(
     case ProviderType::kSupervisedProvider:
       return SiteSettingSource::kPolicy;
     case ProviderType::kCustomExtensionProvider:
+    case ProviderType::kExtensionInstallTimePermissionProvider:
       return SiteSettingSource::kExtension;
     case ProviderType::kInstalledWebappProvider:
       return SiteSettingSource::kHostedApp;
@@ -753,6 +754,7 @@ std::string_view ProviderToDefaultSettingSourceString(
     case ProviderType::kSupervisedProvider:
       return "supervised_user";
     case ProviderType::kCustomExtensionProvider:
+    case ProviderType::kExtensionInstallTimePermissionProvider:
       return "extension";
     case ProviderType::kOneTimePermissionProvider:
     case ProviderType::kPrefProvider:
@@ -992,8 +994,11 @@ UrlIdentity GetUrlIdentityForGURL(Profile* profile,
             .name = base::UTF8ToUTF16(url.spec())};
   }
 
+  GURL url_to_use =
+      url.SchemeIs(webapps::kIsolatedAppScheme) ? url : origin.GetURL();
+
   return UrlIdentity::CreateFromUrl(
-      profile, origin.GetURL(), kUrlIdentityAllowedTypes,
+      profile, url_to_use, kUrlIdentityAllowedTypes,
       hostname_only ? kUrlIdentityOptionsHostOnly
                     : kUrlIdentityOptionsOmitHttps);
 }

@@ -128,7 +128,7 @@
   }];
 }
 
-// Did dismisses the Consent UI.
+// Did dismiss the Consent UI.
 - (void)didRefuseGeminiConsent {
   [_delegate dismissBWGFlow];
 }
@@ -140,7 +140,6 @@
 
 // Open a new tab page given a URL.
 - (void)openNewTabWithURL:(const GURL&)URL {
-  [self FREWillBeBackgrounded];
   OpenNewTabCommand* command = [OpenNewTabCommand commandWithURLFromChrome:URL];
   [self.sceneHandler openURLInNewTab:command];
 }
@@ -233,17 +232,7 @@
   _geminiBrowserAgent->UpdateFloatyPageContext(std::move(response));
 }
 
-// Notifies the currently active WebState's BWG tab helper that the FRE will be
-// backgrounded.
-- (void)FREWillBeBackgrounded {
-  BwgTabHelper* BWGTabHelper = [self activeWebStateBWGTabHelper];
-  if (!BWGTabHelper) {
-    return;
-  }
 
-  BWGTabHelper->SetBwgUiShowing(false);
-  BWGTabHelper->PrepareBwgFreBackgrounding();
-}
 
 // Returns the currently active WebState's BWG tab helper.
 - (BwgTabHelper*)activeWebStateBWGTabHelper {

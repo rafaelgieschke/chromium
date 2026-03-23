@@ -274,7 +274,7 @@ OmniboxViewViews::OmniboxViewViews(bool popup_window_mode,
   // presentation_receiver_window_view. See crbug.com/379534750.
   if (location_bar_view_ && location_bar_view_->browser()) {
     pref_change_registrar_.Init(
-        location_bar_view_->browser()->profile()->GetPrefs());
+        location_bar_view_->browser()->GetProfile()->GetPrefs());
     pref_change_registrar_.Add(
         omnibox::kPreventUrlElisionsInOmnibox,
         base::BindRepeating(&OmniboxViewViews::Update, base::Unretained(this)));
@@ -329,7 +329,7 @@ void OmniboxViewViews::Init() {
 
   if (location_bar_view_) {
     // Set whether the text should be used to improve typing suggestions.
-    SetShouldDoLearning(!location_bar_view_->profile()->IsOffTheRecord());
+    SetShouldDoLearning(!location_bar_view_->GetProfile()->IsOffTheRecord());
   }
 
   // Override the default FocusableBorder from Textfield, since the
@@ -427,7 +427,7 @@ void OmniboxViewViews::InstallPlaceholderText() {
                                                 ->GetDefaultSearchProvider()) {
     const bool aim_popup_enabled =
         location_bar_view_ &&
-        omnibox::IsAimPopupEnabled(location_bar_view_->profile());
+        omnibox::IsAimPopupEnabled(location_bar_view_->GetProfile());
     if (aim_popup_enabled &&
         search::DefaultSearchProviderIsGoogle(
             controller()->client()->GetTemplateURLService())) {
@@ -770,16 +770,16 @@ void OmniboxViewViews::ShowContextMenuForViewImpl(
   GetClipboardText(
       /*notify_if_restricted=*/false,
       base::BindOnce(&OmniboxViewViews::ShowContextMenuForViewImplComplete,
-                     weak_factory_.GetWeakPtr(), source, point, source_type));
+                     weak_factory_.GetWeakPtr(), point, source_type));
 }
 
 void OmniboxViewViews::ShowContextMenuForViewImplComplete(
-    views::View* source,
     const gfx::Point& point,
     ui::mojom::MenuSourceType source_type,
     std::u16string text) {
-  clipboard_text_ = text;
-  Textfield::ShowContextMenuForViewImpl(source, point, source_type);
+  clipboard_text_for_menu_ = std::move(text);
+  // `source` is not used in `Textfield::ShowContextMenuForViewImpl()`.
+  Textfield::ShowContextMenuForViewImpl(/*source=*/nullptr, point, source_type);
 }
 
 void OmniboxViewViews::OnInputMethodChanged() {
@@ -1389,18 +1389,17 @@ std::u16string OmniboxViewViews::GetLabelForCommandId(int command_id) const {
   )
     return l10n_util::GetStringUTF16(IDS_PASTE_AND_GO_EMPTY);
 
-  const std::u16string clipboard_text = clipboard_text_;
-
-  if (clipboard_text.empty()) {
+  if (clipboard_text_for_menu_.empty()) {
     return l10n_util::GetStringUTF16(IDS_PASTE_AND_GO_EMPTY);
   }
 
   constexpr size_t kMaxSelectionTextLength = 50;
   std::u16string selection_text = gfx::TruncateString(
-      clipboard_text, kMaxSelectionTextLength, gfx::WORD_BREAK);
+      clipboard_text_for_menu_, kMaxSelectionTextLength, gfx::WORD_BREAK);
 
   AutocompleteMatch match;
-  controller()->edit_model()->ClassifyString(clipboard_text, &match, nullptr);
+  controller()->edit_model()->ClassifyString(clipboard_text_for_menu_, &match,
+                                             nullptr);
   if (AutocompleteMatch::IsSearchType(match.type)) {
     return l10n_util::GetStringFUTF16(IDS_PASTE_AND_SEARCH, selection_text);
   }
@@ -1814,7 +1813,7 @@ void OmniboxViewViews::OnBlur() {
 bool OmniboxViewViews::IsCommandIdEnabled(int command_id) const {
   if (command_id ==
       std::to_underlying(ui::TouchEditable::MenuCommands::kPaste)) {
-    return !GetReadOnly() && CanGetClipboardText();
+    return !GetReadOnly() && !clipboard_text_for_menu_.empty();
   }
   if (command_id == IDC_PASTE_AND_GO) {
     if (GetReadOnly()) {
@@ -1844,7 +1843,7 @@ bool OmniboxViewViews::IsCommandIdEnabled(int command_id) const {
     // know if there are valid values on the clipboard to enable paste-and-go
     // with confidence.
     if (ui::PasteMightBlockWithPrivacyAlert()) {
-      if (CanGetClipboardText()) {
+      if (!clipboard_text_for_menu_.empty()) {
         constexpr char16_t kSomeValidText[] = u"validtext";
         return controller()->edit_model()->CanPasteAndGo(kSomeValidText);
       } else {
@@ -1853,7 +1852,7 @@ bool OmniboxViewViews::IsCommandIdEnabled(int command_id) const {
     }
 #endif
 
-    return controller()->edit_model()->CanPasteAndGo(clipboard_text_);
+    return controller()->edit_model()->CanPasteAndGo(clipboard_text_for_menu_);
   }
 
   // These menu items are only shown when they are valid.
@@ -1913,9 +1912,9 @@ bool OmniboxViewViews::IsTextEditCommandEnabled(
   switch (command) {
     case ui::TextEditCommand::MOVE_UP:
     case ui::TextEditCommand::MOVE_DOWN:
-      return !GetReadOnly();
+    // Assume the clipboard contains text like the Textfield parent class.
     case ui::TextEditCommand::PASTE:
-      return !GetReadOnly() && CanGetClipboardText();
+      return !GetReadOnly();
     default:
       return Textfield::IsTextEditCommandEnabled(command);
   }
@@ -2372,7 +2371,7 @@ void OmniboxViewViews::UpdateContextMenu(ui::SimpleMenuModel* menu_contents) {
                                      IDS_MANAGE_SEARCH_ENGINES_AND_SITE_SEARCH);
 
   const PrefService::Preference* show_full_urls_pref =
-      location_bar_view_->profile()->GetPrefs()->FindPreference(
+      location_bar_view_->GetProfile()->GetPrefs()->FindPreference(
           omnibox::kPreventUrlElisionsInOmnibox);
   if (!show_full_urls_pref->IsManaged()) {
     menu_contents->AddCheckItemWithStringId(IDC_SHOW_FULL_URLS,
@@ -2396,7 +2395,8 @@ void OmniboxViewViews::UpdateContextMenu(ui::SimpleMenuModel* menu_contents) {
         IDS_CONTEXT_MENU_SHOW_GOOGLE_LENS_SHORTCUT);
   }
 
-  if (omnibox::ShouldShowAimContextMenuOption(location_bar_view_->profile())) {
+  if (omnibox::ShouldShowAimContextMenuOption(
+          location_bar_view_->GetProfile())) {
     menu_contents->AddCheckItemWithStringId(
         IDC_SHOW_AI_MODE_OMNIBOX_BUTTON,
         IDS_CONTEXT_MENU_SHOW_AI_MODE_OMNIBOX_BUTTON);
@@ -2435,19 +2435,19 @@ void OmniboxViewViews::UpdateSelectionClipboard() {
 
 bool OmniboxViewViews::IsCommandIdChecked(int id) const {
   if (id == IDC_SHOW_FULL_URLS) {
-    return location_bar_view_->profile()->GetPrefs()->GetBoolean(
+    return location_bar_view_->GetProfile()->GetPrefs()->GetBoolean(
         omnibox::kPreventUrlElisionsInOmnibox);
   }
   if (id == IDC_SHOW_GOOGLE_LENS_SHORTCUT) {
-    return location_bar_view_->profile()->GetPrefs()->GetBoolean(
+    return location_bar_view_->GetProfile()->GetPrefs()->GetBoolean(
         omnibox::kShowGoogleLensShortcut);
   }
   if (id == IDC_SHOW_SEARCH_TOOLS) {
-    return location_bar_view_->profile()->GetPrefs()->GetBoolean(
+    return location_bar_view_->GetProfile()->GetPrefs()->GetBoolean(
         omnibox::kShowSearchTools);
   }
   if (id == IDC_SHOW_AI_MODE_OMNIBOX_BUTTON) {
-    return location_bar_view_->profile()->GetPrefs()->GetBoolean(
+    return location_bar_view_->GetProfile()->GetPrefs()->GetBoolean(
         omnibox::kShowAiModeOmniboxButton);
   }
   return false;
@@ -2629,7 +2629,7 @@ bool OmniboxViewViews::AreAimHintImpressionLimitsReached() const {
 
   const auto& config = omnibox_feature_configs::AiModeOmniboxEntryPoint::Get();
   if (config.enable_hint_impression_limits) {
-    PrefService* prefs = location_bar_view_->profile()->GetPrefs();
+    PrefService* prefs = location_bar_view_->GetProfile()->GetPrefs();
 
     // Check total impressions.
     const int total_impressions =
@@ -2657,7 +2657,7 @@ bool OmniboxViewViews::ShouldInstallAimPlaceholderText() const {
 
   const auto* aim_eligibility_service =
       AimEligibilityServiceFactory::GetForProfile(
-          location_bar_view_->profile());
+          location_bar_view_->GetProfile());
   const bool is_aim_entrypoint_enabled =
       OmniboxFieldTrial::IsAimOmniboxEntrypointEnabled(aim_eligibility_service);
 
@@ -2696,7 +2696,7 @@ void OmniboxViewViews::RecordAimHintImpression() {
     return;
   }
 
-  PrefService* prefs = location_bar_view_->profile()->GetPrefs();
+  PrefService* prefs = location_bar_view_->GetProfile()->GetPrefs();
 
   // Increment the total impressions count.
   const int total_impressions =

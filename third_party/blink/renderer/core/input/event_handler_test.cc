@@ -3564,7 +3564,7 @@ TEST_F(EventHandlerSimTest, DiscardEventsToRecentlyMovedIframe) {
   EXPECT_NE(event_result, WebInputEventResult::kHandledSuppressed);
 
   Element* iframe =
-      GetDocument().getElementById(AtomicString::FromUTF8("iframe"));
+      GetDocument().getElementById(AtomicString::FromUtf8("iframe"));
   ASSERT_TRUE(iframe);
 
   // Move iframe, but within the threshold for discarding. Events should not be
@@ -3670,10 +3670,11 @@ TEST_F(EventHandlerSimTest, ValidClickPointerIdForUnseenPointerEvent) {
 TEST_F(EventHandlerSimTest, GestureTapHoverState) {
   ResizeView(gfx::Size(800, 600));
 
-  // With this feature enabled, RecomputeMouseHoverState() fires synthetic
-  // mouse events for inactive pages. If the feature is disabled, we need to
-  // focus the page to avoid the early exit in RecomputeMouseHoverState().
-  // See crbug.com/385474535 for more details.
+  // With this feature enabled, RecomputeMouseHoverStateIfNeeded() fires
+  // synthetic mouse events for inactive pages. If the feature is disabled, we
+  // need to focus the page to avoid the early exit in
+  // RecomputeMouseHoverStateIfNeeded(). See crbug.com/385474535 for more
+  // details.
   if (!RuntimeEnabledFeatures::SyntheticMouseHoverOverInactivePageEnabled()) {
     GetPage().SetFocused(true);
   }

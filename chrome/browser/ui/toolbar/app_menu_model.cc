@@ -73,8 +73,6 @@
 #include "chrome/browser/ui/startup/default_browser_prompt/default_browser_prompt_manager.h"
 #include "chrome/browser/ui/tab_search_feature.h"
 #include "chrome/browser/ui/tabs/features.h"
-#include "chrome/browser/ui/tabs/organization/tab_organization_service_factory.h"
-#include "chrome/browser/ui/tabs/organization/tab_organization_utils.h"
 #include "chrome/browser/ui/tabs/recent_tabs_sub_menu_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/vertical_tab_strip_state_controller.h"
@@ -505,18 +503,22 @@ ProfileSubMenuModel::ProfileSubMenuModel(
     // If the profile is being deleted, profile_attributes may be null.
     if (profile_attributes) {
       AccountInfo account_info = GetAccountInfoFromProfile(profile);
-      gfx::Image avatar_image =
+      auto [avatar_image, icon_type] =
           account_info.IsEmpty()
-              ? profile_attributes->GetAvatarIcon(
+              ? profile_attributes->GetAvatarIconWithType(
                     avatar_icon_size, /*use_high_res_file=*/true,
                     GetPlaceholderAvatarIconParamsDependingOnTheme(
                         ThemeServiceFactory::GetForProfile(profile),
                         /*background_color_id=*/ui::kColorMenuBackground,
                         *color_provider))
-              : account_info.account_image;
+              : std::make_pair(account_info.account_image,
+                               AvatarIconType::kNonPlaceholder);
       // The avatar image can be empty if the account image hasn't been
       // fetched yet, if there is no image, or in tests.
-      if (!avatar_image.IsEmpty()) {
+      // Keep the default vector icon for placeholder avatars so that
+      // MenuItemView can re-color it on hover in forced-colors mode.
+      if (!avatar_image.IsEmpty() &&
+          icon_type != AvatarIconType::kPlaceholder) {
         avatar_image_model_ =
             ui::ImageModel::FromImage(profiles::GetSizedAvatarIcon(
                 avatar_image, avatar_icon_size, avatar_icon_size,
@@ -986,9 +988,8 @@ ToolsMenuModel::~ToolsMenuModel() = default;
 // - Developer tools.
 // - Option to enable profiling.
 void ToolsMenuModel::Build(Browser* browser) {
-  // Tablet mode does not have a Tab Search button, so tab organization is
-  // unavailable. We should not show tablet mode users these menu
-  // items.
+  // Tablet mode does not have a Tab Search button. We should not show tablet
+  // mode users these menu items.
   bool is_tablet_mode = false;
 #if BUILDFLAG(IS_CHROMEOS)
   is_tablet_mode = display::Screen::Get()->InTabletMode();

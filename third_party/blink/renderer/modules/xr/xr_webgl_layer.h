@@ -75,6 +75,11 @@ class XRWebGLLayer final : public XRLayer, public XrLayerClient {
   // The consumers should not attempt to delete the texture themselves.
   WebGLTexture* GetCameraTexture();
 
+  void OnFrameStartForCamera();
+  void OnFrameEndForCamera();
+  void OnFrameEndWithoutSubmit();
+  void SubmitLayer();
+
   void OnFrameStart() override;
   void OnFrameEnd() override;
   void OnResize() override;

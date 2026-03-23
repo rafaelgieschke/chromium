@@ -461,9 +461,8 @@ ScopedServiceWorkerClient
 ServiceWorkerClientOwner::CreateServiceWorkerClientForWorker(
     ChildProcessId process_id,
     ServiceWorkerClientInfo client_info) {
-  // TODO(crbug.com/379869738) Remove GetUnsafeValue().
-  auto client = std::make_unique<ServiceWorkerClient>(
-      context_->AsWeakPtr(), process_id.GetUnsafeValue(), client_info);
+  auto client = std::make_unique<ServiceWorkerClient>(context_->AsWeakPtr(),
+                                                      process_id, client_info);
   auto weak_client = client->AsWeakPtr();
   auto inserted = service_worker_clients_by_uuid_
                       .emplace(weak_client->client_uuid(), std::move(client))
@@ -957,7 +956,8 @@ void ServiceWorkerContextCore::RemoveLiveVersion(int64_t id) {
     observer_list_->Notify(FROM_HERE,
                            &ServiceWorkerContextCoreObserver::OnStopped, id);
     for (auto& observer : sync_observer_list_->observers) {
-      observer.OnStoppedSync(id, version->scope());
+      observer.OnStoppedSync(id, version->scope(),
+                             *version->start_worker_token());
     }
   }
 
@@ -1029,7 +1029,8 @@ void ServiceWorkerContextCore::DeleteAndStartOver(StatusCallback callback) {
         blink::EmbeddedWorkerStatus::kStopped) {
       for (auto& observer : sync_observer_list_->observers) {
         observer.OnStoppedSync(live_version->version_id(),
-                               live_version->scope());
+                               live_version->scope(),
+                               *live_version->start_worker_token());
       }
     }
   }
@@ -1255,7 +1256,8 @@ void ServiceWorkerContextCore::OnRunningStateChanged(
                              &ServiceWorkerContextCoreObserver::OnStopped,
                              version->version_id());
       for (auto& observer : sync_observer_list_->observers) {
-        observer.OnStoppedSync(version->version_id(), version->scope());
+        observer.OnStoppedSync(version->version_id(), version->scope(),
+                               *version->start_worker_token());
       }
       break;
     case blink::EmbeddedWorkerStatus::kStarting:
@@ -1275,7 +1277,9 @@ void ServiceWorkerContextCore::OnRunningStateChanged(
                              &ServiceWorkerContextCoreObserver::OnStopping,
                              version->version_id());
       for (auto& observer : sync_observer_list_->observers) {
-        observer.OnStoppingSync(version->version_id(), version->scope());
+        CHECK(version->start_worker_token());
+        observer.OnStoppingSync(version->version_id(), version->scope(),
+                                *version->start_worker_token());
       }
       break;
   }
@@ -1353,7 +1357,7 @@ void ServiceWorkerContextCore::OnReportConsoleMessage(
   for (auto& observer : sync_observer_list_->observers) {
     observer.OnReportConsoleMessageSync(
         version->embedded_worker() ? version->embedded_worker()->process_id()
-                                   : ChildProcessHost::kInvalidUniqueID,
+                                   : ChildProcessId(),
         version->version_id(), version->scope(), console_message);
   }
 }

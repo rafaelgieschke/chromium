@@ -137,12 +137,14 @@ EnrollmentScreen* EnrollmentScreen::Get(ScreenManager* manager) {
 }
 
 EnrollmentScreen::EnrollmentScreen(
+    PrefService* local_state,
     scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
     const policy::BrowserPolicyConnectorAsh* browser_policy_connector_ash,
     base::WeakPtr<EnrollmentScreenView> view,
     ErrorScreen* error_screen,
     const ScreenExitCallback& exit_callback)
     : BaseScreen(EnrollmentScreenView::kScreenId, OobeScreenPriority::DEFAULT),
+      local_state_(CHECK_DEREF(local_state)),
       shared_url_loader_factory_(std::move(shared_url_loader_factory)),
       browser_policy_connector_ash_(CHECK_DEREF(browser_policy_connector_ash)),
       view_(std::move(view)),
@@ -300,7 +302,9 @@ void EnrollmentScreen::UpdateFlowType() {
     return;
   }
 
-  const bool cfm = policy::EnrollmentRequisitionManager::IsMeetDevice();
+  const bool cfm =
+      policy::EnrollmentRequisitionManager::IsMeetDevice(local_state_.get());
+  const bool is_squid = policy::EnrollmentRequisitionManager::IsSquidDevice();
   if (cfm) {
     view_->SetFlowType(EnrollmentScreenView::FlowType::kCFM);
     view_->SetGaiaButtonsType(EnrollmentScreenView::GaiaButtonsType::kDefault);
@@ -314,6 +318,10 @@ void EnrollmentScreen::UpdateFlowType() {
         WizardContext::EnrollmentPreference::kKiosk) {
       view_->SetGaiaButtonsType(
           EnrollmentScreenView::GaiaButtonsType::kKioskPreferred);
+    } else if (is_squid) {
+      // Use default Gaia buttons for squid devices to match cfm.
+      view_->SetGaiaButtonsType(
+          EnrollmentScreenView::GaiaButtonsType::kDefault);
     } else {
       view_->SetGaiaButtonsType(
           EnrollmentScreenView::GaiaButtonsType::kEnterprisePreferred);

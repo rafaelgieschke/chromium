@@ -501,6 +501,11 @@ export class HostMessageHandler implements HostMessageHandlerInterface {
     }
   }
 
+  glicBrowserDeleteCapturedRegion(request: {tabId: string, regionId: string}) {
+    this.handler.deleteCapturedRegion(
+        idFromClient(request.tabId), request.regionId);
+  }
+
   async glicBrowserCaptureScreenshot(_request: void, extras: ResponseExtras):
       Promise<{screenshot: Screenshot}> {
     const {
@@ -599,6 +604,10 @@ export class HostMessageHandler implements HostMessageHandlerInterface {
 
   glicBrowserOnReaction(request: {reactionType: number}): void {
     this.handler.onReaction(request.reactionType);
+  }
+
+  glicBrowserOnActionSubmitted(request: {isRetry?: boolean}): void {
+    this.handler.onActionSubmitted(request.isRetry ?? false);
   }
 
   glicBrowserOnResponseStarted(): void {
@@ -967,6 +976,17 @@ export class CaptureRegionObserverImpl implements CaptureRegionObserver {
       private sender: GatedSender, private handler: WebClientHandlerInterface,
       public observationId: number) {
     this.connectToSource();
+  }
+
+  disconnectFromSource() {
+    if (!this.receiver) {
+      return;
+    }
+    this.sender.sendWhenActive('glicWebClientCaptureRegionUpdate', {
+      reason: enumToClient(CaptureRegionErrorReasonMojo.kUnknown),
+      observationId: this.observationId,
+    });
+    this.destroy();
   }
 
   // Stops requesting updates.

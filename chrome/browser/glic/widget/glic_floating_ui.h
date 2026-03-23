@@ -93,8 +93,8 @@ class GlicFloatingUi : public GlicUiEmbedder,
   void OnWidgetDestroyed(views::Widget* widget) override;
   void OnWidgetBoundsChanged(views::Widget* widget,
                              const gfx::Rect& new_bounds) override;
-  void OnWidgetUserResizeStarted() override;
-  void OnWidgetUserResizeEnded() override;
+  void OnWidgetUserResizeStarted(views::Widget* widget) override;
+  void OnWidgetUserResizeEnded(views::Widget* widget) override;
 
   // LocalHotkeyManager::Panel:
   void FocusIfOpen() override;
@@ -117,6 +117,10 @@ class GlicFloatingUi : public GlicUiEmbedder,
   bool ShouldConstrainDialogBoundsByHost() override;
   void AddObserver(web_modal::ModalDialogHostObserver* observer) override;
   void RemoveObserver(web_modal::ModalDialogHostObserver* observer) override;
+
+  GlicWindowEventObserver* GetWindowEventObserverForTesting() {
+    return window_event_observer_.get();
+  }
 
  private:
   void ClearWebContentsDelegate();

@@ -266,7 +266,7 @@ BASE_FEATURE_PARAM(bool,
 //
 // Spec: https://wicg.github.io/local-network-access/
 BASE_FEATURE(kLocalNetworkAccessChecksWebSockets,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables Local Network Access checks for WebTransport.
 // Blocks local network requests without user permission to prevent exploitation
@@ -274,7 +274,7 @@ BASE_FEATURE(kLocalNetworkAccessChecksWebSockets,
 //
 // Spec: https://wicg.github.io/local-network-access/
 BASE_FEATURE(kLocalNetworkAccessChecksWebTransport,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Splits the Local Network Access permission into 2 permissions. See
 // crbug.com/465491626.
@@ -583,9 +583,6 @@ BASE_FEATURE_PARAM(int,
 BASE_FEATURE(kPopulatePermissionsPolicyOnRequest,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kProtectedAudienceCorsSafelistKVv2Signals,
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 BASE_FEATURE(kStorageAccessHeadersRespectPermissionsPolicy,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -660,6 +657,6 @@ BASE_FEATURE_PARAM(int,
                    kDurableMessagesGlobalBufferSize,
                    &kDurableMessages,
                    /*name=*/"max_global_buffer_size",
-                   /*default_value=*/0);
+                   /*default_value=*/base::MiB(350).InBytes());
 
 }  // namespace network::features

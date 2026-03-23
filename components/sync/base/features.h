@@ -24,12 +24,6 @@ inline constexpr base::FeatureParam<int>
 // Enables syncing of settings from the user's account.
 BASE_DECLARE_FEATURE(kSyncAccountSettings);
 
-// Enables syncing of Loyalty Cards coming from Google Wallet.
-BASE_DECLARE_FEATURE(kSyncAutofillLoyaltyCard);
-
-// Makes the AUTOFILL_VALUABLE sync type non-encryptable.
-BASE_DECLARE_FEATURE(kSyncMakeAutofillValuableNonEncryptable);
-
 // Enables syncing of usage metadata from Google Wallet passes.
 BASE_DECLARE_FEATURE(kSyncAutofillValuableMetadata);
 
@@ -88,7 +82,14 @@ BASE_DECLARE_FEATURE(kSyncEnableContactInfoDataTypeForDasherUsers);
 BASE_DECLARE_FEATURE(kSeparateLocalAndAccountSearchEngines);
 
 // Feature flag to replace all sync-related UI with sign-in ones.
+// Do not use this flag directly in production code. Use
+// `syncer::IsReplaceSyncPromosWithSignInPromosEnabled()` instead.
 BASE_DECLARE_FEATURE(kReplaceSyncPromosWithSignInPromos);
+
+// Returns true if the replace sync promos with sign-in promos feature is
+// enabled. The launch may be controlled by multiple `base::Feature` flags,
+// prefer using this function over checking the feature flags directly.
+bool IsReplaceSyncPromosWithSignInPromosEnabled();
 
 // Enables syncing extensions only if the user newly signs in to Chrome, not if
 // they were already signed in by the time `kReplaceSyncPromosWithSignInPromos`
@@ -233,6 +234,9 @@ BASE_DECLARE_FEATURE(kSyncDeviceInfoUseWallClockTimer);
 // If enabled, validate the access token before sending the request to the
 // server.
 BASE_DECLARE_FEATURE(kSyncValidateAccessToken);
+
+// If enabled, Sync invalidations will bypass the scheduler on Android.
+BASE_DECLARE_FEATURE(kSyncInvalidationsBypassScheduler);
 
 }  // namespace syncer
 

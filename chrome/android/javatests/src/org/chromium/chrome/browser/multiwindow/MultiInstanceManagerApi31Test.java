@@ -53,8 +53,8 @@ import org.chromium.chrome.browser.multiwindow.MultiInstanceManager.NewWindowApp
 import org.chromium.chrome.browser.multiwindow.MultiInstanceManager.PersistedInstanceType;
 import org.chromium.chrome.browser.ntp.RecentlyClosedEntry;
 import org.chromium.chrome.browser.ntp.RecentlyClosedWindow;
-import org.chromium.chrome.browser.preferences.ChromePreferenceKeys;
-import org.chromium.chrome.browser.preferences.ChromeSharedPreferences;
+import org.chromium.chrome.browser.preferences.MultiInstancePreferenceKeys;
+import org.chromium.chrome.browser.preferences.MultiInstanceSharedPreferences;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabGroupMetadata;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
@@ -112,15 +112,15 @@ public class MultiInstanceManagerApi31Test {
 
     @After
     public void teardown() throws InterruptedException {
-        ChromeSharedPreferences.getInstance()
-                .removeKey(ChromePreferenceKeys.MULTI_INSTANCE_RESTORATION_MESSAGE_SHOWN);
-        ChromeSharedPreferences.getInstance()
-                .removeKey(ChromePreferenceKeys.MULTI_INSTANCE_INSTANCE_LIMIT_DOWNGRADE_TRIGGERED);
+        MultiInstanceSharedPreferences.getInstance()
+                .removeKey(
+                        MultiInstancePreferenceKeys
+                                .MULTI_INSTANCE_INSTANCE_LIMIT_DOWNGRADE_TRIGGERED);
         for (ChromeTabbedActivity activity : mExtraActivities) {
             ThreadUtils.runOnUiThreadBlocking(
                     () ->
                             mMultiInstanceManager.closeWindows(
-                                    Collections.singletonList(activity.getWindowIdForTesting()),
+                                    Collections.singletonList(activity.getWindowId()),
                                     CloseWindowAppSource.OTHER));
         }
     }
@@ -145,13 +145,12 @@ public class MultiInstanceManagerApi31Test {
                 "Regular tab count should be written to persistent store after tab state"
                         + " initialization.",
                 1,
-                MultiInstancePersistentStore.readNormalTabCount(activity.getWindowIdForTesting()));
+                ChromeMultiInstancePersistentStore.readNormalTabCount(activity.getWindowId()));
         Assert.assertEquals(
                 "Incognito tab count should be written to persistent store after tab state"
                         + " initialization.",
                 0,
-                MultiInstancePersistentStore.readIncognitoTabCount(
-                        activity.getWindowIdForTesting()));
+                ChromeMultiInstancePersistentStore.readIncognitoTabCount(activity.getWindowId()));
 
         // Restore the original value of |mCreatedTabOnStartup|.
         activity.setCreatedTabOnStartupForTesting(createdTabOnStartup);
@@ -189,14 +188,12 @@ public class MultiInstanceManagerApi31Test {
         var newActivity =
                 createNewWindow(
                         firstActivity,
-                        otherActivities[2].getWindowIdForTesting(),
+                        otherActivities[2].getWindowId(),
                         /* addIncognitoExtras= */ false);
         mActivityTestRule.getActivityTestRule().setActivity(newActivity);
         mActivityTestRule.waitForActivityCompletelyLoaded();
 
         verifyInstanceState(/* expectedActiveInstances= */ 2, /* expectedTotalInstances= */ 4);
-        waitForMessage(
-                newActivity, MessageIdentifier.MULTI_INSTANCE_RESTORATION_ON_DOWNGRADED_LIMIT);
     }
 
     // Initial state: max limit = 3, active tasks = 2, inactive tasks = 1.
@@ -232,12 +229,10 @@ public class MultiInstanceManagerApi31Test {
         var newActivity =
                 createNewWindow(
                         otherActivities[0],
-                        otherActivities[0].getWindowIdForTesting(),
+                        otherActivities[0].getWindowId(),
                         /* addIncognitoExtras= */ false);
 
         verifyInstanceState(/* expectedActiveInstances= */ 2, /* expectedTotalInstances= */ 3);
-        waitForMessage(
-                newActivity, MessageIdentifier.MULTI_INSTANCE_RESTORATION_ON_DOWNGRADED_LIMIT);
     }
 
     @Test
@@ -259,8 +254,7 @@ public class MultiInstanceManagerApi31Test {
                 () ->
                         mMultiInstanceManager.closeWindows(
                                 Collections.singletonList(
-                                        otherActivities[otherActivities.length - 1]
-                                                .getWindowIdForTesting()),
+                                        otherActivities[otherActivities.length - 1].getWindowId()),
                                 CloseWindowAppSource.WINDOW_MANAGER));
 
         // Check state of instances after one instance is closed - the closed window should become
@@ -288,8 +282,7 @@ public class MultiInstanceManagerApi31Test {
                 () ->
                         mMultiInstanceManager.closeWindows(
                                 Collections.singletonList(
-                                        otherActivities[otherActivities.length - 1]
-                                                .getWindowIdForTesting()),
+                                        otherActivities[otherActivities.length - 1].getWindowId()),
                                 CloseWindowAppSource.WINDOW_MANAGER));
 
         // Check state of instances after one instance is closed - the window should be fully
@@ -321,8 +314,7 @@ public class MultiInstanceManagerApi31Test {
                 () ->
                         mMultiInstanceManager.closeWindows(
                                 Collections.singletonList(
-                                        otherActivities[otherActivities.length - 1]
-                                                .getWindowIdForTesting()),
+                                        otherActivities[otherActivities.length - 1].getWindowId()),
                                 CloseWindowAppSource.WINDOW_MANAGER));
 
         // Check state of instances after one instance is closed - the closed window should become
@@ -342,8 +334,7 @@ public class MultiInstanceManagerApi31Test {
                 () ->
                         mMultiInstanceManager.closeWindows(
                                 Collections.singletonList(
-                                        otherActivities[otherActivities.length - 2]
-                                                .getWindowIdForTesting()),
+                                        otherActivities[otherActivities.length - 2].getWindowId()),
                                 CloseWindowAppSource.WINDOW_MANAGER));
 
         // Check state of instances after the second instance is closed - the closed window should
@@ -387,7 +378,7 @@ public class MultiInstanceManagerApi31Test {
         ThreadUtils.runOnUiThreadBlocking(
                 () ->
                         mMultiInstanceManager.closeWindows(
-                                Collections.singletonList(otherActivity.getWindowIdForTesting()),
+                                Collections.singletonList(otherActivity.getWindowId()),
                                 CloseWindowAppSource.WINDOW_MANAGER));
 
         // Check state of instances after one instance is closed - the closed window should be
@@ -425,8 +416,7 @@ public class MultiInstanceManagerApi31Test {
                 () ->
                         mMultiInstanceManager.closeWindows(
                                 Collections.singletonList(
-                                        otherActivities[otherActivities.length - 1]
-                                                .getWindowIdForTesting()),
+                                        otherActivities[otherActivities.length - 1].getWindowId()),
                                 CloseWindowAppSource.WINDOW_MANAGER));
 
         // Check state of instances after one instance is closed - the closed window should become

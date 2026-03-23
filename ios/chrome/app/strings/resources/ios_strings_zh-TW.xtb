@@ -298,7 +298,6 @@
 <translation id="2012723204723845092">歡迎回來！</translation>
 <translation id="2015722694326466240">你必須先在裝置上設定螢幕解鎖密碼才能查看密碼。</translation>
 <translation id="201759455285471444">展開分頁群組。</translation>
-<translation id="202070562065520783">說明一下</translation>
 <translation id="2044394949148788042">開啟分頁方格</translation>
 <translation id="2044681667265133332">這個帳戶 (<ph name="USER_EMAIL" />) 是由 <ph name="HOSTED_DOMAIN" /> 管理，管理者或許可以查看部分資訊。<ph name="BEGIN_LINK" />瞭解詳情<ph name="END_LINK" /></translation>
 <translation id="20485545164632846">新項目</translation>
@@ -395,6 +394,7 @@
 <translation id="2360196772093551345">切換為行動版網站</translation>
 <translation id="2362083820973145409">目前登入的帳戶是<ph name="USER_NAME" />。<ph name="USER_EMAIL" />。開啟設定。</translation>
 <translation id="2371084566192454134">分頁和分頁群組</translation>
+<translation id="2371303771137626249">新增</translation>
 <translation id="2381405137052800939">基本</translation>
 <translation id="2384692388811649784">隱藏無痕分頁</translation>
 <translation id="2386793615875593361">已選取 1 張</translation>
@@ -480,6 +480,7 @@
 <translation id="2691653761409724435">無法離線使用</translation>
 <translation id="2697530870203420261">暱稱無效</translation>
 <translation id="269819437389494246">系統會顯示造訪過的網頁，你也可以將這些網頁從歷史記錄中刪除</translation>
+<translation id="2704295676501803339">左移</translation>
 <translation id="2704606927547763573">已複製</translation>
 <translation id="2708051474374549906">系統會根據你傳送到 Google 的瀏覽資料，即時、主動防範危險的網站、下載內容和擴充功能</translation>
 <translation id="2709516037105925701">自動填入</translation>
@@ -637,6 +638,7 @@
 <translation id="3324193307694657476">地址 2</translation>
 <translation id="3328801116991980348">網站資訊</translation>
 <translation id="333229797575847124">如何啟用這項功能</translation>
+<translation id="334004756946755423">說明一下：</translation>
 <translation id="3344233834747405775">持卡人姓名錯誤</translation>
 <translation id="3344485292736684439">{count,plural, =1{書籤已儲存到帳戶 ({email}) 中的「{title}」}other{書籤已儲存到帳戶 ({email}) 中的「{title}」}}</translation>
 <translation id="334690320928261823">最近關閉的分頁</translation>
@@ -690,6 +692,7 @@
 <translation id="3530206579861815432">快速尋找所有已同步裝置上目前開啟和最近關閉的分頁</translation>
 <translation id="3530767473765895035">管理這部裝置上的帳戶</translation>
 <translation id="3533436815740441613">新分頁</translation>
+<translation id="3534738261102690620">問問 Gemini</translation>
 <translation id="3540141921715814660">加入書籤</translation>
 <translation id="3546122170015471515">Google.com 上的地圖預覽</translation>
 <translation id="3547356470684043247">閱讀消費者的產品/服務/體驗評價後再做決定</translation>
@@ -960,6 +963,7 @@
 <translation id="454217142158335225">你可以透過「最近關閉的分頁」或「分頁群組」部分，重新開啟關閉的項目。系統不會關閉固定分頁。</translation>
 <translation id="4547181496285029457">返回「最近」分頁</translation>
 <translation id="4552042254369397518">複製中…</translation>
+<translation id="4553044860350038560">更多密碼金鑰</translation>
 <translation id="4564893319561643483">隱藏「<ph name="TITLE" />」</translation>
 <translation id="4565377596337484307">隱藏密碼</translation>
 <translation id="4568230126482344545">隱藏「最近開啟的分頁」</translation>
@@ -1088,6 +1092,7 @@
 <translation id="4944543191714094452">在網頁中尋找…</translation>
 <translation id="4945756290001680296">存取密碼設定</translation>
 <translation id="4949302115427722371">管理設定…</translation>
+<translation id="4952050521954075618">相機膠卷中的相片不會在各裝置間同步</translation>
 <translation id="4958444002117714549">展開清單</translation>
 <translation id="496392417432935267">已在其他視窗開啟</translation>
 <translation id="4970724460420203313">使用代管帳戶登入 Chrome 後，就能將貴機構相關瀏覽資料 (包括分頁、歷史記錄和密碼) 與其他瀏覽資料分開</translation>
@@ -1287,6 +1292,7 @@
 <translation id="5647702255748985085">要退出群組嗎？</translation>
 <translation id="5648166631817621825">過去 7 天</translation>
 <translation id="5652623411397330904">你追蹤的產品會顯示在這裡。</translation>
+<translation id="5653100054596780862">所有分頁</translation>
 <translation id="5656431592348714536">加強型日曆</translation>
 <translation id="5659593005791499971">電子郵件</translation>
 <translation id="5665739277590037307">適用《<ph name="GOOGLE_TERMS" />》和《<ph name="GEMINI_APPS_PRIVACY" />》。Gemini 可能會&lt;br&gt;出錯，因此請查證回覆內容。</translation>
@@ -1614,6 +1620,7 @@
 <translation id="672735642903863329">在任何裝置上存取書籤、密碼及其他設定。</translation>
 <translation id="6729493062119577923">共用分頁群組活動</translation>
 <translation id="6732087373923685049">攝影機</translation>
+<translation id="6736243959894955139">位址</translation>
 <translation id="6746338529702829275">查看帳戶資料</translation>
 <translation id="6750456911389438250">{count,plural, =1{已匯入 {count} 個歷史記錄項目}other{已匯入 {count} 個歷史記錄項目}}</translation>
 <translation id="6755200887046212842">管理帳戶</translation>
@@ -1656,6 +1663,7 @@
 <translation id="6899890595581608884">安全檢查通知已關閉</translation>
 <translation id="6900532703269623216">強化防護</translation>
 <translation id="6900702165119149418">你已登出帳戶</translation>
+<translation id="6903282483217634857">右移</translation>
 <translation id="6903907808598579934">開啟同步功能</translation>
 <translation id="6906448540340261898">確保你隨時可以使用 Google 帳戶中的密碼</translation>
 <translation id="6908734251759299256">更新瀏覽器</translation>
@@ -1718,6 +1726,7 @@
 <translation id="7149893636342594995">過去 24 小時</translation>
 <translation id="7154417656353909837">移除地址</translation>
 <translation id="7161230316646448869">同步你在所有裝置上的密碼、歷史記錄和其他設定</translation>
+<translation id="7165323152084385463">車輛識別碼</translation>
 <translation id="7173114856073700355">開啟設定</translation>
 <translation id="7173721738069475737">{count,plural, =1{已儲存書籤}other{已儲存 {count} 個書籤}}</translation>
 <translation id="7176183551031110427">縮小</translation>
@@ -1751,6 +1760,7 @@
 <translation id="7300448350764260141">多添一層防護，有效防範線上威脅。</translation>
 <translation id="7311244614769792472">找不到任何結果</translation>
 <translation id="7313347584264171202">這裡會顯示你的無痕分頁</translation>
+<translation id="7322186060879266048">{count,plural, =1{鍵盤上方顯示 {count} 個自動填入選項。}other{鍵盤上方顯示 {count} 個自動填入選項。}}</translation>
 <translation id="7328162502911382168">(<ph name="COUNT" />)</translation>
 <translation id="7336264872878993241">已下載 <ph name="PERCENT" /> %</translation>
 <translation id="7345061034321640811">不允許匯入</translation>
@@ -1820,7 +1830,6 @@
 <translation id="7537586195939242955">很抱歉，目前無法將您的通行票證加到 Passbook。</translation>
 <translation id="754655535278952384">上次檢查時間：<ph name="TIME" /></translation>
 <translation id="7554645225856321710">全部關閉</translation>
-<translation id="7554791636758816595">新分頁</translation>
 <translation id="7557508262441527045">已登出</translation>
 <translation id="7561196759112975576">一律使用</translation>
 <translation id="7561982940498449837">關閉選單</translation>
@@ -2212,6 +2221,7 @@
 <translation id="8863067612494559785">正在傳送至 <ph name="DEVICE_NAME" />…</translation>
 <translation id="8863431381414769983">透過 Google 地圖規劃路線及取得當地資訊</translation>
 <translation id="8871974300055371298">內容設定</translation>
+<translation id="8876661425082386199">請檢查連線狀態</translation>
 <translation id="8877788021141246043">設定提醒</translation>
 <translation id="8879604564928138696">輕觸兩下即可試用</translation>
 <translation id="8879952635974818770">個人化內容</translation>
@@ -2250,7 +2260,6 @@
 <translation id="8988107725234939347"><ph name="WEBSITE_TITLE" />，釘選的網站</translation>
 <translation id="8990960056509724223">根據貴機構的政策，無法儲存檔案</translation>
 <translation id="8998289560386111590">這項功能無法在你的裝置上使用</translation>
-<translation id="9000532564152265066">所有分頁</translation>
 <translation id="9003677638446136377">重新檢查</translation>
 <translation id="9006453925669499173">「選單」→「新增無痕分頁」</translation>
 <translation id="9008201768610948239">略過</translation>
@@ -2314,7 +2323,6 @@
 <translation id="926455622548529175">切換並刪除</translation>
 <translation id="929748059769569925">醒目顯示的文字</translation>
 <translation id="932305336591073205">{count,plural, =1{關閉分頁}other{關閉分頁}}</translation>
-<translation id="932327136139879170">住家</translation>
 <translation id="939472100615258482">目前網站</translation>
 <translation id="939598580284253335">請輸入通關密語</translation>
 <translation id="939736085109172342">新增資料夾</translation>

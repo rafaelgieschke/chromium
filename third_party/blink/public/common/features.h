@@ -236,6 +236,8 @@ BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kCanvas2DHibernationNoSmallCanvas);
 BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(
     kCanvas2DHibernationReleaseTransferMemory);
 
+BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kCapStringBuilderLengthTo1GiB);
+
 BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kCaptureJSExecutionLocation);
 
 // If enabled, the Clear-Site-Data header will handle "prefetchCache" and
@@ -708,6 +710,9 @@ BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kIgnoreInputWhileHidden);
 // If enabled, a fix for image loading prioritization based on visibility is
 // applied. See https://crbug.com/1369823.
 BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kImageLoadingPrioritizationFix);
+
+// If enabled, allows the browser to render new content in place of an image.
+BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kImageReplacement);
 
 #if !BUILDFLAG(IS_ANDROID)
 // If enabled, the initial WebUI will not interact with extensions. This feature
@@ -1214,9 +1219,9 @@ BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kLoadingTasksUnfreezable);
 BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(
     kLogUnexpectedIPCPostedToBackForwardCachedDocuments);
 
-BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kLowLatencyCanvas2dImageChromium);
-
-BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kLowLatencyWebGLImageChromium);
+#if BUILDFLAG(IS_ANDROID)
+BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kLowLatencyUsageSupportedForCanvas);
+#endif
 
 // If enabled, async scripts will be run on a lower priority task queue.
 // See https://crbug.com/1348467.
@@ -1931,7 +1936,6 @@ BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kWebAppManifestLockScreen);
 
 BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kWebAppMigrationApi);
 
-BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kWebAudioAllowDenormalInProcessing);
 BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kWebAudioDeferPullStatusUpdate);
 
 BLINK_COMMON_EXPORT BASE_DECLARE_FEATURE(kWebFontsCacheAwareTimeoutAdaption);
@@ -1979,6 +1983,8 @@ BLINK_COMMON_EXPORT bool IsCanvas2DHibernationEnabled();
 BLINK_COMMON_EXPORT bool DisplayWarningDeprecateURNIframesUseFencedFrames();
 
 BLINK_COMMON_EXPORT bool IsFencedFramesEnabled();
+
+BLINK_COMMON_EXPORT bool IsMemoryPurgeOnBackgroundingEnabled();
 
 BLINK_COMMON_EXPORT bool IsParkableStringsToDiskEnabled();
 

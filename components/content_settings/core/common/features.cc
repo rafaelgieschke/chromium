@@ -27,9 +27,6 @@ BASE_FEATURE(kSafetyCheckUnusedSitePermissions,
              base::FEATURE_ENABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_ANDROID)
 
-BASE_FEATURE(kSafetyCheckUnusedSitePermissionsForSupportedChooserPermissions,
-             base::FEATURE_DISABLED_BY_DEFAULT);
-
 BASE_FEATURE(kActiveContentSettingExpiry, base::FEATURE_DISABLED_BY_DEFAULT);
 
 const base::FeatureParam<bool> kSafetyCheckUnusedSitePermissionsNoDelay{
@@ -65,12 +62,6 @@ const base::FeatureParam<base::TimeDelta> kUserBypassUIReloadBubbleTimeout{
 BASE_FEATURE(kUserBypassFeedback, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kLeftHandSideActivityIndicators, base::FEATURE_ENABLED_BY_DEFAULT);
-
-#if BUILDFLAG(IS_CHROMEOS)
-BASE_FEATURE(kCrosSystemLevelPermissionBlockedWarnings,
-             "CrosBlockWarnings",
-             base::FEATURE_ENABLED_BY_DEFAULT);
-#endif
 
 BASE_FEATURE(kTrackingProtection3pcd, base::FEATURE_DISABLED_BY_DEFAULT);
 
@@ -134,8 +125,6 @@ const base::FeatureParam<EnableForIframeTypes>
         &content_settings::features::kTpcdHeuristicsGrants,
         kTpcdPopupHeuristicEnableForIframeInitiatorName,
         EnableForIframeTypes::kAll, &kEnableForIframeTypesOptions};
-
-BASE_FEATURE(kForceAllowStorageAccess, base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace features
 }  // namespace content_settings

@@ -12,7 +12,9 @@
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/notimplemented.h"
+#include "chrome/browser/indigo/indigo_agent_host.h"
 #include "chrome/browser/indigo/indigo_alpha_rpc.h"
+#include "chrome/browser/indigo/onboarding/indigo_onboarding_dialog.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service.h"
 #include "chrome/browser/optimization_guide/optimization_guide_keyed_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -34,6 +36,8 @@ namespace indigo {
 
 namespace {
 const char kForceIndigoSwitch[] = "force-indigo";
+const char kForceIndigoOnboardingSwitch[] = "force-indigo-onboarding";
+const char kForceIndigoToolbarSwitch[] = "force-indigo-toolbar";
 }  // namespace
 
 DEFINE_USER_DATA(IndigoPageActionController);
@@ -64,7 +68,15 @@ IndigoPageActionController::IndigoPageActionController(
   UpdateEntryPointsState();
 }
 
-IndigoPageActionController::~IndigoPageActionController() = default;
+IndigoPageActionController::~IndigoPageActionController() {
+  // If there is a toolbar, hide it before anything else. This makes sure that
+  // the OnClose delegate function isn't called after some members have been
+  // destroyed.
+  if (toolbar_) {
+    toolbar_->Hide();
+    toolbar_.reset();
+  }
+}
 
 // static
 IndigoPageActionController* IndigoPageActionController::From(
@@ -78,12 +90,46 @@ IndigoPageActionController* IndigoPageActionController::From(
 void IndigoPageActionController::InvokeAction() {
   base::RecordAction(base::UserMetricsAction("Indigo.PageAction.Click"));
 
-  // TODO: b/482792874 - Analyze the page and act on it, instead of just opening
-  // a tab based on a fixed input.
   content::WebContents* web_contents = tab().GetContents();
   if (!web_contents) {
     return;
   }
+
+  // For now, onboarding is only triggered when forced, and the URL is specified
+  // in the command line switch. In the future, this will typically be triggered
+  // automatically based on the user's enrolment status, and the URL will be
+  // determined by a feature param.
+  std::string onboarding_url =
+      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+          kForceIndigoOnboardingSwitch);
+  if (!onboarding_url.empty()) {
+    onboarding_dialog_ = IndigoOnboardingDialog::Show(
+        tab(), GURL(onboarding_url),
+        base::BindOnce(&IndigoPageActionController::OnOnboardingDialogClosed,
+                       weak_ptr_factory_.GetWeakPtr()));
+    return;
+  }
+
+  if (IndigoAgentHost::GetOrCreateForPage(web_contents->GetPrimaryPage())
+          ->Invoke()) {
+    return;
+  }
+
+  // The toolbar isn't quite ready yet (nor is it integrated with anything else)
+  // but it's useful to force it to show for manual testing.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          kForceIndigoToolbarSwitch)) {
+    if (!toolbar_) {
+      toolbar_ = std::make_unique<IndigoToolbar>(this);
+    }
+    toolbar_->Show(web_contents->GetNativeView());
+    return;
+  }
+
+  // TODO: b/482792874 - Analyze the page and act on it, instead of just opening
+  // a tab based on a fixed input.
+  LOG(WARNING) << "IndigoAgentHost doesn't expect to be able to load. "
+               << "Directly invoking generate RPC (for prototyping).";
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
   if (!profile) {
@@ -124,6 +170,11 @@ void IndigoPageActionController::DidFinishNavigation(
     return;
   }
 
+  if (toolbar_) {
+    toolbar_->Hide();
+    toolbar_.reset();
+  }
+
   optimization_guide_decision_ =
       optimization_guide::OptimizationGuideDecision::kUnknown;
   UpdateEntryPointsState();
@@ -147,6 +198,23 @@ void IndigoPageActionController::OnExtendedAccountInfoUpdated(
   UpdateEntryPointsState();
 }
 
+void IndigoPageActionController::OnClose(IndigoToolbar* toolbar) {
+  NOTIMPLEMENTED();
+}
+
+void IndigoPageActionController::OnRegenerate(IndigoToolbar* toolbar) {
+  NOTIMPLEMENTED();
+}
+
+void IndigoPageActionController::OnReplaceOriginalPhoto(
+    IndigoToolbar* toolbar) {
+  NOTIMPLEMENTED();
+}
+
+void IndigoPageActionController::OnDeleteOriginalPhoto(IndigoToolbar* toolbar) {
+  NOTIMPLEMENTED();
+}
+
 void IndigoPageActionController::UpdateEntryPointsState() {
   CHECK(base::FeatureList::IsEnabled(features::kIndigo));
 
@@ -167,6 +235,10 @@ void IndigoPageActionController::UpdateEntryPointsState() {
     page_action_controller_->Hide(kActionIndigo);
   }
   is_shown_ = should_show;
+}
+
+void IndigoPageActionController::OnOnboardingDialogClosed() {
+  onboarding_dialog_.reset();
 }
 
 void IndigoPageActionController::OnOptimizationGuideDecision(

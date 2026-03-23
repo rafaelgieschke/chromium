@@ -29,6 +29,7 @@ chromium-metrics-reviews@google.com.
 </variants>
 
 <variants name="AnnotationType">
+  <variant name="CategoryClassifier" summary="Category Classifier"/>
   <variant name="ContentVisibility" summary="Content Visibility"/>
   <variant name="Deprecated PageEntities" summary="Deprecated - Page Entities"/>
   <variant name="Unknown" summary="Unknown"/>
@@ -71,10 +72,13 @@ chromium-metrics-reviews@google.com.
 
 <variants name="ModelExecutionFeature">
   <variant name="AmountExtraction" summary="Amount Extraction"/>
+  <variant name="AnnotationReducerQueryClassifier"
+      summary="User Query Classification"/>
   <variant name="BlingPrototyping" summary="Bling Prototyping"/>
   <variant name="Compose" summary="Compose"/>
   <variant name="ContentAnnotation" summary="Content Annotation"/>
   <variant name="EnhancedCalendar" summary="Enhanced Calendar"/>
+  <variant name="Finds" summary="Chrome finds"/>
   <variant name="FormsAnnotations" summary="Forms Annotations"/>
   <variant name="FormsClassifications" summary="Forms Classifications"/>
   <variant name="FormsPredictions" summary="Forms Predictions"/>
@@ -402,6 +406,8 @@ chromium-metrics-reviews@google.com.
   <variant name="FedCmClickthroughRate"
       summary="Provides information about FedCM API clickthrough rate
                aggregated across all users on the page."/>
+  <variant name="FindsPageTheme"
+      summary="Provides information about the page theme for Finds."/>
   <variant name="FormsAnnotations"
       summary="Provides information about whether a URL is eligible for
                generating user annotations derived from forms."/>
@@ -454,6 +460,8 @@ chromium-metrics-reviews@google.com.
       summary="Allowlist for the NTP-Next deep dive action chip."/>
   <variant name="NtpNextDeepDiveActionChipBlocklist"
       summary="Blocklist for the NTP-Next deep dive action chip."/>
+  <variant name="OmniboxAutofillIframeAllowlist"
+      summary="Allowlist for Omnibox-chip-triggered Autofill."/>
   <variant name="OptimizationGuideIconView"
       summary="Provides information for what to show in the debug
                optimization guide icon view."/>
@@ -675,7 +683,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="OptimizationGuide.AnnotatedPageContent.TotalNodeCount.{AIPageContentMode}"
-    units="nodes" expires_after="2026-07-12">
+    units="nodes" expires_after="2026-09-13">
   <owner>khushalsagar@chromium.org</owner>
   <owner>abigailbklein@google.com</owner>
   <owner>gklassen@chromium.org</owner>
@@ -689,7 +697,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="OptimizationGuide.AnnotatedPageContent.TotalSize2.{AIPageContentMode}"
-    units="KB" expires_after="2026-07-12">
+    units="KB" expires_after="2026-09-13">
   <owner>khushalsagar@chromium.org</owner>
   <owner>abigailbklein@google.com</owner>
   <owner>gklassen@chromium.org</owner>
@@ -765,7 +773,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="OptimizationGuide.HintCacheLevelDBStore.Status"
     enum="OptimizationGuideHintCacheLevelDBStoreStatus"
-    expires_after="2026-07-12">
+    expires_after="2026-09-13">
   <owner>rajendrant@chromium.org</owner>
   <owner>catliu@chromium.org</owner>
   <summary>
@@ -1148,7 +1156,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="OptimizationGuide.ModelExecution.OnDeviceFirstResponseTime.{ModelExecutionFeature}"
-    units="ms" expires_after="2026-07-12">
+    units="ms" expires_after="2026-09-13">
   <owner>cduvall@chromium.org</owner>
   <owner>holte@chromium.org</owner>
   <summary>
@@ -1631,7 +1639,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="OptimizationGuide.ModelHandler.HandlerCreatedToModelAvailable.{OptimizationTarget}"
-    units="ms" expires_after="2026-07-12">
+    units="ms" expires_after="2026-09-13">
   <owner>wittman@chromium.org</owner>
   <owner>rajendrant@chromium.org</owner>
   <summary>
@@ -1793,6 +1801,28 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram
+    name="OptimizationGuide.PageContentAnnotations.CategoryClassifier.EducationScore"
+    units="%" expires_after="2026-09-10">
+  <owner>zekunjiang@google.com</owner>
+  <owner>chrome-intelligence-core@google.com</owner>
+  <summary>
+    Records the score (0-100) produced by the On Device Category Classifier for
+    the Education category. Recorded once for every page load.
+  </summary>
+</histogram>
+
+<histogram
+    name="OptimizationGuide.PageContentAnnotations.CategoryClassifier.ShoppingScore"
+    units="%" expires_after="2026-09-10">
+  <owner>zekunjiang@google.com</owner>
+  <owner>chrome-intelligence-core@google.com</owner>
+  <summary>
+    Records the score (0-100) produced by the On Device Category Classifier for
+    the Shopping category. Recorded once for every page load.
+  </summary>
+</histogram>
+
+<histogram
     name="OptimizationGuide.PageContentAnnotations.GoogleSearchMetadataExtracted"
     enum="Boolean" expires_after="2026-03-29">
   <owner>sophiechang@chromium.org</owner>
@@ -1903,7 +1933,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="OptimizationGuide.PageContentCache.AddPageContentResult"
-    enum="BooleanSuccess" expires_after="2026-07-12">
+    enum="BooleanSuccess" expires_after="2026-09-13">
   <owner>ssid@chromium.org</owner>
   <owner>chrome-intelligence-core@google.com</owner>
   <summary>
@@ -1913,7 +1943,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="OptimizationGuide.PageContentCache.AvgPageSize" units="KB"
-    expires_after="2026-07-12">
+    expires_after="2026-09-13">
   <owner>ssid@chromium.org</owner>
   <owner>chrome-intelligence-core@google.com</owner>
   <summary>
@@ -1923,7 +1953,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="OptimizationGuide.PageContentCache.CachedTabsCount"
-    units="tabs" expires_after="2026-07-12">
+    units="tabs" expires_after="2026-09-13">
   <owner>ssid@chromium.org</owner>
   <owner>chrome-intelligence-core@google.com</owner>
   <summary>
@@ -1934,7 +1964,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="OptimizationGuide.PageContentCache.EligibleTabsCachedPercentage"
-    units="%" expires_after="2026-07-12">
+    units="%" expires_after="2026-09-13">
   <owner>ssid@chromium.org</owner>
   <owner>chrome-intelligence-core@google.com</owner>
   <summary>
@@ -1945,7 +1975,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="OptimizationGuide.PageContentCache.ExtractionAndCachingStatus"
-    enum="PageContentExtractionAndCachingStatus" expires_after="2026-07-12">
+    enum="PageContentExtractionAndCachingStatus" expires_after="2026-09-13">
   <owner>ssid@chromium.org</owner>
   <owner>chrome-intelligence-core@google.com</owner>
   <summary>
@@ -1955,7 +1985,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="OptimizationGuide.PageContentCache.NotCachedTabsCount"
-    units="tabs" expires_after="2026-07-12">
+    units="tabs" expires_after="2026-09-13">
   <owner>ssid@chromium.org</owner>
   <owner>chrome-intelligence-core@google.com</owner>
   <summary>
@@ -1966,7 +1996,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram
     name="OptimizationGuide.PageContentCache.RemovePageContentForTabResult"
-    enum="BooleanSuccess" expires_after="2026-07-12">
+    enum="BooleanSuccess" expires_after="2026-09-13">
   <owner>ssid@chromium.org</owner>
   <owner>chrome-intelligence-core@google.com</owner>
   <summary>
@@ -1976,7 +2006,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="OptimizationGuide.PageContentCache.StaleCacheEntriesCount"
-    units="entries" expires_after="2026-07-12">
+    units="entries" expires_after="2026-09-13">
   <owner>ssid@chromium.org</owner>
   <owner>chrome-intelligence-core@google.com</owner>
   <summary>
@@ -1986,12 +2016,23 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="OptimizationGuide.PageContentCache.TotalCacheSize" units="KB"
-    expires_after="2026-07-12">
+    expires_after="2026-09-13">
   <owner>ssid@chromium.org</owner>
   <owner>chrome-intelligence-core@google.com</owner>
   <summary>
     Records the total size of the page content cache on disk. Recorded after a
     delay post-startup.
+  </summary>
+</histogram>
+
+<histogram
+    name="OptimizationGuide.PageContentScreenshotService.RequestScreenshot.IsHandlingInput"
+    units="bool" expires_after="M155">
+  <owner>thiabaud@google.com</owner>
+  <owner>jonross@chromium.org</owner>
+  <summary>
+    Records whether Chrome was handling input, at the time when we requested a
+    screenshot.
   </summary>
 </histogram>
 

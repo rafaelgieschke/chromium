@@ -485,7 +485,7 @@ class ReplaceNonASCII {
     unsigned len = source_string.length();
     for (unsigned i = 0; i < len; ++i) {
       UChar current = source_string[i];
-      if (IsASCII(current)) {
+      if (IsAscii(current)) {
         builder_.Append(current);
       } else {
         builder_.Append('?');
@@ -1305,19 +1305,7 @@ scoped_refptr<DrawingBuffer> WebGLRenderingContextBase::CreateDrawingBuffer(
                                                       ? DrawingBuffer::kPreserve
                                                       : DrawingBuffer::kDiscard;
 
-  // On Mac OS, DrawingBuffer is using an IOSurface as its backing storage, this
-  // allows WebGL-rendered canvases to be composited by the OS rather than
-  // Chrome.
-  // IOSurfaces are only compatible with the GL_TEXTURE_RECTANGLE_ARB binding
-  // target. So to avoid the knowledge of GL_TEXTURE_RECTANGLE_ARB type textures
-  // being introduced into more areas of the code, we use the code path of
-  // non-WebGLImageChromium for OffscreenCanvas.
-  // See detailed discussion in crbug.com/649668.
-  DrawingBuffer::ChromiumImageUsage chromium_image_usage =
-      SharedGpuContext::MaySupportWebGLImageChromium() &&
-              !Host()->IsOffscreenCanvas()
-          ? DrawingBuffer::kAllowChromiumImage
-          : DrawingBuffer::kDisallowChromiumImage;
+  const bool is_offscreen_canvas = Host()->IsOffscreenCanvas();
 
   gl::GpuPreference gpu_preference =
       PowerPreferenceToGpuPreference(attrs.power_preference);
@@ -1327,7 +1315,7 @@ scoped_refptr<DrawingBuffer> WebGLRenderingContextBase::CreateDrawingBuffer(
       std::move(context_provider), context_info, this, ClampedCanvasSize(),
       premultiplied_alpha, want_alpha_channel, want_depth_buffer,
       want_stencil_buffer, want_antialiasing, desynchronized, preserve,
-      context_type_, chromium_image_usage, drawing_buffer_color_space_,
+      context_type_, is_offscreen_canvas, drawing_buffer_color_space_,
       gpu_preference);
 }
 
@@ -1630,10 +1618,8 @@ bool WebGLRenderingContextBase::PushFrameNoCopy() {
   auto canvas_resource = GetDrawingBuffer()->ExportCanvasResource();
   if (!canvas_resource)
     return false;
-  const int width = GetDrawingBuffer()->Size().width();
-  const int height = GetDrawingBuffer()->Size().height();
-  const bool submitted_frame = Host()->PushFrame(
-      std::move(canvas_resource), SkIRect::MakeWH(width, height));
+  const bool submitted_frame =
+      Host()->PushFrame(std::move(canvas_resource), std::nullopt);
 
   MarkLayerComposited();
   return submitted_frame;
@@ -1653,11 +1639,9 @@ bool WebGLRenderingContextBase::PushFrameWithCopy() {
   auto* resource_provider =
       PaintRenderingResultsToResourceProvider(kBackBuffer);
   if (resource_provider && resource_provider_has_content_for_frame_push_) {
-    const int width = GetDrawingBuffer()->Size().width();
-    const int height = GetDrawingBuffer()->Size().height();
-    auto size = SkIRect::MakeWH(width, height);
     submitted_frame = Host()->PushFrame(
-        resource_provider->ProduceCanvasResource(FlushReason::kOther), size);
+        resource_provider->ProduceCanvasResource(FlushReason::kOther),
+        std::nullopt);
     resource_provider_has_content_for_frame_push_ = false;
   }
   MarkLayerComposited();
@@ -1989,8 +1973,7 @@ WebGLRenderingContextBase::GetSharedImageResourceProvider() {
     gpu::SharedImageUsageSet shared_image_usage_flags =
         gpu::SHARED_IMAGE_USAGE_DISPLAY_READ;
 
-    if (SharedGpuContext::MaySupportWebGLImageChromium() &&
-        SharedGpuContext::WebGLImageChromiumEnabled()) {
+    if (SharedGpuContext::UseOverlaysForWebGL()) {
       shared_image_usage_flags |= gpu::SHARED_IMAGE_USAGE_SCANOUT;
     }
     resource_provider_ = CanvasNon2DResourceProviderSharedImage::Create(
@@ -2104,7 +2087,8 @@ bool WebGLRenderingContextBase::CopyRenderingResultsFromDrawingBuffer(
     gpu::raster::RasterInterface* raster_interface =
         shared_context_wrapper->ContextProvider().RasterInterface();
     gpu::SyncToken sync_token;
-    auto client_si = resource_provider->BeginExternalWrite(sync_token);
+    auto client_si = resource_provider->BeginExternalWrite(
+        sync_token, /*is_overwrite=*/false);
     if (!client_si) {
       return false;
     }
@@ -2115,8 +2099,7 @@ bool WebGLRenderingContextBase::CopyRenderingResultsFromDrawingBuffer(
 
     std::optional<gpu::SyncToken> external_sync_token =
         GetDrawingBuffer()->CopyToPlatformSharedImage(
-            raster_interface, client_si, sync_token, gfx::Point(0, 0),
-            gfx::Rect(drawing_buffer_->Size()), source_buffer);
+            raster_interface, client_si, sync_token, source_buffer);
 
     if (external_sync_token) {
       resource_provider->EndExternalWrite(external_sync_token.value());
@@ -2249,7 +2232,6 @@ void WebGLRenderingContextBase::Reshape(int width, int height) {
 
   // We don't have to mark the canvas as dirty, since the newly created image
   // buffer will also start off clear (and this matches what reshape will do).
-  GetDrawingBuffer()->set_low_latency_enabled(Host()->LowLatencyEnabled());
   GetDrawingBuffer()->Resize(gfx::Size(width, height));
   GetDrawingBuffer()->MarkContentsChanged();
 

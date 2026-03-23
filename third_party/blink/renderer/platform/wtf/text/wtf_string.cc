@@ -95,10 +95,10 @@ String::size_type String::rfind(const StringView& value,
   return impl_ ? impl_->ReverseFind(value, start) : npos;
 }
 
-UChar32 String::CharacterStartingAt(size_type i) const {
+UChar32 String::CodePointAtOrZero(size_type i) const {
   if (!impl_ || i >= impl_->length())
     return 0;
-  return impl_->CharacterStartingAt(i);
+  return impl_->CodePointAtOrZero(i);
 }
 
 CodePointIterator String::begin() const {
@@ -121,14 +121,12 @@ void String::Ensure16Bit() {
   }
 }
 
-void String::Truncate(size_type length) {
-  if (impl_)
-    impl_ = impl_->Truncate(length);
-}
-
-void String::Remove(size_type start, size_type length_to_remove) {
-  if (impl_)
-    impl_ = impl_->Remove(start, length_to_remove);
+String& String::erase(size_type pos, size_type len) {
+  CHECK_LE(pos, length());
+  if (impl_) {
+    impl_ = impl_->Remove(pos, len);
+  }
+  return *this;
 }
 
 String String::Substring(size_type pos, size_type len) const {
@@ -153,10 +151,10 @@ String String::DeprecatedLower() const {
   return blink::CaseMap::FastToLowerInvariant(impl_.get());
 }
 
-String String::LowerASCII() const {
+String String::ToAsciiLower() const {
   if (!impl_)
     return String();
-  return impl_->LowerASCII();
+  return impl_->ToAsciiLower();
 }
 
 String String::ToAsciiUpper() const {

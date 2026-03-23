@@ -573,23 +573,31 @@ public class SettingsSearchCoordinator
     }
 
     /**
+     * Ensures the Settings search index is built and ready to use. Safe to call multiple times; it
+     * will only build if necessary.
+     */
+    public static SettingsIndexData ensureIndexBuilt(Context context, Profile profile) {
+        SettingsIndexData indexData = SettingsIndexData.getInstance();
+        if (indexData == null) {
+            indexData = SettingsIndexData.createInstance();
+        }
+
+        if (indexData.needsIndexing()) {
+            buildIndexInternal(context, profile, indexData);
+            indexData.resetNeedsIndexing();
+        }
+
+        return indexData;
+    }
+
+    /**
      * Initializes the in-memory search index for all settings. It uses the providers found in
      * {@link SearchIndexProviderRegistry.ALL_PROVIDERS}.
      */
     @Initializer
     @EnsuresNonNull("mIndexData")
     private void initIndex() {
-        SettingsIndexData indexData = SettingsIndexData.getInstance();
-        if (indexData == null) {
-            mIndexData = SettingsIndexData.createInstance();
-        } else {
-            mIndexData = indexData;
-            if (!mIndexData.needsIndexing()) return;
-        }
-
-        buildIndexInternal(mActivity, mProfile, mIndexData);
-
-        mIndexData.resetNeedsIndexing();
+        mIndexData = ensureIndexBuilt(mActivity, mProfile);
     }
 
     @VisibleForTesting
@@ -1188,10 +1196,9 @@ public class SettingsSearchCoordinator
                     public void onInitializeAccessibilityNodeInfo(
                             View host, AccessibilityNodeInfo info) {
                         super.onInitializeAccessibilityNodeInfo(host, info);
+                        String orgText = info.getText() == null ? "" : info.getText().toString();
                         info.setText(
-                                info.getText() == null
-                                        ? mActivity.getString(R.string.search_in_settings_hint)
-                                        : info.getText().toString());
+                                mActivity.getString(R.string.search_in_settings_hint, orgText));
                     }
                 });
     }

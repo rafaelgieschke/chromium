@@ -22,6 +22,7 @@
 #include "chrome/browser/ui/toolbar/app_menu_model.h"
 #include "chrome/browser/ui/toolbar/bookmark_sub_menu_model.h"
 #include "chrome/browser/ui/toolbar/pinned_toolbar/pinned_toolbar_actions_model.h"
+#include "chrome/browser/ui/ui_features.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/side_panel/side_panel.h"
 #include "chrome/browser/ui/views/side_panel/side_panel_coordinator.h"
@@ -81,10 +82,8 @@ class SidePanelInteractiveTest : public InteractiveBrowserTest {
   auto RegisterAndShowBasicSidePanel(ui::ElementIdentifier ready_indicator_id) {
     return Steps(
         ActivateSurface(kBrowserViewElementId), Do([&, ready_indicator_id]() {
-          auto* registry = browser()
-                               ->GetActiveTabInterface()
-                               ->GetTabFeatures()
-                               ->side_panel_registry();
+          auto* registry =
+              SidePanelRegistry::From(browser()->GetActiveTabInterface());
           registry->Deregister(
               SidePanelEntry::Key(SidePanelEntry::Id::kCustomizeChrome));
           registry->Register(std::make_unique<SidePanelEntry>(
@@ -160,10 +159,8 @@ IN_PROC_BROWSER_TEST_F(SidePanelInteractiveTest, SidePanelNotShownOnPwa) {
                   }),
                   second_tab_url),
       Do(([&]() {
-        auto* registry = browser()
-                             ->GetActiveTabInterface()
-                             ->GetTabFeatures()
-                             ->side_panel_registry();
+        auto* registry =
+            SidePanelRegistry::From(browser()->GetActiveTabInterface());
         registry->Register(std::make_unique<SidePanelEntry>(
             SidePanelEntry::Key(SidePanelEntry::Id::kCustomizeChrome),
             base::BindRepeating([](SidePanelEntryScope&) {
@@ -290,9 +287,7 @@ class PinnedSidePanelInteractiveTest : public InteractiveFeaturePromoTest {
       actions_model->UpdatePinnedState(kActionTabSearch, false);
     }
     views::test::WaitForAnimatingLayoutManager(
-        BrowserView::GetBrowserViewForBrowser(browser())
-            ->toolbar()
-            ->pinned_toolbar_actions_container());
+        GetPinnedToolbarActionsContainer());
   }
 
   auto OpenBookmarksSidePanel() {
@@ -313,9 +308,7 @@ class PinnedSidePanelInteractiveTest : public InteractiveFeaturePromoTest {
         [&]() {
           PinnedToolbarActionsContainer* const
               pinned_toolbar_actions_container =
-                  BrowserView::GetBrowserViewForBrowser(browser())
-                      ->toolbar()
-                      ->pinned_toolbar_actions_container();
+                  GetPinnedToolbarActionsContainer();
           return pinned_toolbar_actions_container->GetPinnedButtonFor(id) !=
                  nullptr;
         },
@@ -329,9 +322,12 @@ class PinnedSidePanelInteractiveTest : public InteractiveFeaturePromoTest {
   }
 
   PinnedToolbarActionsContainer* GetPinnedToolbarActionsContainer() {
-    return BrowserView::GetBrowserViewForBrowser(browser())
-        ->toolbar()
-        ->pinned_toolbar_actions_container();
+    CHECK(!features::IsWebUIPinnedToolbarActionsEnabled())
+        << "Test needs modification to support WebUIPinnedToolbarActions";
+    return static_cast<PinnedToolbarActionsContainer*>(
+        BrowserView::GetBrowserViewForBrowser(browser())
+            ->toolbar()
+            ->pinned_toolbar_actions());
   }
 
   auto OpenReadingModeSidePanel() {
@@ -403,10 +399,7 @@ IN_PROC_BROWSER_TEST_F(PinnedSidePanelInteractiveTest,
                        OpenCustomizeChromeSidePanel) {
   // Replace the contents of the CustomizeChrome side panel with an empty view
   // so it loads faster.
-  auto* registry = browser()
-                       ->GetActiveTabInterface()
-                       ->GetTabFeatures()
-                       ->side_panel_registry();
+  auto* registry = SidePanelRegistry::From(browser()->GetActiveTabInterface());
   registry->Deregister(
       SidePanelEntry::Key(SidePanelEntry::Id::kCustomizeChrome));
   registry->Register(std::make_unique<SidePanelEntry>(

@@ -7,7 +7,9 @@
 #import "base/check.h"
 #import "ios/chrome/browser/app_bar/ui/app_bar_constants.h"
 #import "ios/chrome/browser/scene/ui/scene_view.h"
+#import "ios/chrome/browser/scene/ui/scene_view_controller_delegate.h"
 #import "ios/chrome/browser/scene/ui/scene_view_delegate.h"
+#import "ios/chrome/browser/shared/public/commands/bwg_commands.h"
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/ui/util/layout_guide_names.h"
 #import "ios/chrome/browser/shared/ui/util/util_swift.h"
@@ -24,6 +26,8 @@
   NSArray<NSLayoutConstraint*>* _portraitConstraints;
   NSArray<NSLayoutConstraint*>* _landscapeLeftConstraints;
   NSArray<NSLayoutConstraint*>* _landscapeRightConstraints;
+  // The last fullscreen progress value received.
+  CGFloat _fullscreenProgress;
 }
 
 #pragma mark - UIViewController
@@ -36,6 +40,7 @@
         UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
   }
   self.view = view;
+  _fullscreenProgress = 1;
 }
 
 - (void)viewDidLoad {
@@ -135,7 +140,37 @@
   [self updateLayoutForAppBar];
 }
 
+#pragma mark - FullscreenUIElement
+
+- (void)updateForFullscreenProgress:(CGFloat)progress {
+  UIInterfaceOrientation orientation = [self currentOrientation];
+  if (orientation != UIInterfaceOrientationPortrait) {
+    return;
+  }
+  _fullscreenProgress = progress;
+  [self updateLayoutForAppBar];
+}
+
+#pragma mark - UIViewController
+
+- (void)dismissViewControllerAnimated:(BOOL)flag
+                           completion:(void (^)())completion {
+  __weak SceneViewController* weakSelf = self;
+  [super dismissViewControllerAnimated:flag
+                            completion:^() {
+                              if (completion) {
+                                completion();
+                              }
+                              [weakSelf showGeminiFloatyIfInvoked];
+                            }];
+}
+
 #pragma mark - Private
+
+// Returns the current orientation of the scene.
+- (UIInterfaceOrientation)currentOrientation {
+  return self.view.window.windowScene.effectiveGeometry.interfaceOrientation;
+}
 
 // Updates the layout to adapt to screen changes.
 - (void)updateLayoutForAppBar {
@@ -144,8 +179,7 @@
     return;
   }
 
-  UIInterfaceOrientation orientation =
-      windowScene.effectiveGeometry.interfaceOrientation;
+  UIInterfaceOrientation orientation = [self currentOrientation];
 
   if (!IsFullscreenRefactoringEnabled()) {
     CGRect frame = self.view.bounds;
@@ -159,14 +193,19 @@
         insets = UIEdgeInsetsMake(0, 0, 0, kAppBarHeight);
         break;
 
-      case UIInterfaceOrientationPortrait:
-        insets = UIEdgeInsetsMake(0, 0, kAppBarHeight, 0);
+      case UIInterfaceOrientationPortrait: {
+        CGFloat appBarHeight =
+            kAppBarHeightFullscreen -
+            _fullscreenProgress * (kAppBarHeightFullscreen - kAppBarHeight);
+        insets = UIEdgeInsetsMake(0, 0, appBarHeight, 0);
         break;
+      }
 
       default:
         break;
     }
     _appContentView.frame = UIEdgeInsetsInsetRect(frame, insets);
+    return;
   }
 
   [NSLayoutConstraint deactivateConstraints:_portraitConstraints];
@@ -191,6 +230,20 @@
   }
 
   [self.view layoutIfNeeded];
+}
+
+// Helper method for dismissal block when attempting to show the Gemini floaty
+// if invoked.
+- (void)showGeminiFloatyIfInvoked {
+  // Sheet swipe gesture triggers [dismissViewControllerAnimated:completion:].
+  // Check if the presented view was truly dismissed which can be implied by
+  // `presentedViewController` == nil or the scene is no longer active.
+  if (self.presentedViewController ||
+      self.view.window.windowScene.activationState !=
+          UISceneActivationStateForegroundActive) {
+    return;
+  }
+  [self.delegate sceneViewControllerShowGeminiFloatyIfInvoked:self];
 }
 
 @end

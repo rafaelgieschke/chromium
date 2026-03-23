@@ -10,12 +10,6 @@
 
 #import "components/webauthn/ios/passkey_types.h"
 
-class IOSPasswordManagerDriver;
-
-namespace password_manager {
-class WebAuthnCredentialsDelegate;
-}
-
 @protocol IOSPasskeyClientCommands;
 
 namespace webauthn {
@@ -32,6 +26,8 @@ class IOSPasskeyClient {
     RequestInfo(RequestInfo&& other);
     RequestInfo& operator=(RequestInfo&& other);
     ~RequestInfo();
+
+    bool operator==(const RequestInfo& other) const;
 
     // The web::WebFrame's identifier.
     std::string frame_id;
@@ -69,9 +65,6 @@ class IOSPasskeyClient {
   // enabled before passkey creation happens within the passkey model and
   // disabled after passkey creation is completed.
   virtual void AllowPasskeyCreationInfobar(bool allowed) = 0;
-
-  virtual password_manager::WebAuthnCredentialsDelegate*
-  GetWebAuthnCredentialsDelegateForDriver(IOSPasswordManagerDriver* driver) = 0;
 
  protected:
   IOSPasskeyClient() = default;

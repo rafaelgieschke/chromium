@@ -18,9 +18,8 @@ import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import {getCss} from './card.css.js';
 import {getHtml} from './card.html.js';
 import type {Skill} from './skill.mojom-webui.js';
-import {SkillSource} from './skill.mojom-webui.js';
+import {SkillsDialogType, SkillSource} from './skill.mojom-webui.js';
 import {SkillsManagementAction, SkillsManagementPage} from './skill_metrics.mojom-webui.js';
-import {SkillsDialogType} from './skills.mojom-webui.js';
 import {SkillsPageBrowserProxy} from './skills_page_browser_proxy.js';
 
 export enum CardType {
@@ -71,6 +70,7 @@ export class SkillCardElement extends CrLitElement {
     // Default to user created since these are added by the user via the UI.
     source: SkillSource.kUserCreated,
     description: '',
+    imageUrl: '',
     creationTime: {internalValue: 0n},
     lastUpdateTime: {internalValue: 0n},
   };

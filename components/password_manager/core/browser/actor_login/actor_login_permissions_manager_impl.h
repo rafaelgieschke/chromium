@@ -12,6 +12,7 @@
 #include "base/containers/flat_set.h"
 #include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "components/password_manager/core/browser/actor_login/actor_login_permissions_manager.h"
 #include "components/password_manager/core/browser/ui/saved_passwords_presenter.h"
@@ -29,6 +30,7 @@ class PasswordStoreInterface;
 }  // namespace password_manager
 
 namespace actor_login {
+class ActorLoginPermissionService;
 
 class ActorLoginPermissionsManagerImpl
     : public ActorLoginPermissionsManager,
@@ -36,6 +38,7 @@ class ActorLoginPermissionsManagerImpl
  public:
   ActorLoginPermissionsManagerImpl(
       affiliations::AffiliationService* affiliation_service,
+      ActorLoginPermissionService* actor_login_permission_service,
       scoped_refptr<password_manager::PasswordStoreInterface> profile_store,
       scoped_refptr<password_manager::PasswordStoreInterface> account_store);
   ~ActorLoginPermissionsManagerImpl() override;
@@ -44,17 +47,26 @@ class ActorLoginPermissionsManagerImpl
   void AddObserver(ActorLoginPermissionsManager::Observer* observer) override;
   void RemoveObserver(
       ActorLoginPermissionsManager::Observer* observer) override;
-  void RevokePermission(const std::string& signon_realm) override;
-  base::flat_set<password_manager::ActorLoginPermission> GetAllPermissions(
-      const syncer::SyncService* sync_service) override;
+  void RevokePermission(const std::string& signon_realm,
+                        const std::string& username) override;
+  void GetAllPermissions(const syncer::SyncService* sync_service,
+                         GetAllPermissionsResult callback) override;
 
  private:
   // SavedPasswordsPresenter::Observer:
   void OnSavedPasswordsChanged(
       const password_manager::PasswordStoreChangeList& changes) override;
 
+  void NotifyObservers();
+  void OnPermissionDeleted(bool success);
+
   password_manager::SavedPasswordsPresenter presenter_;
   base::ObserverList<ActorLoginPermissionsManager::Observer> observers_;
+  raw_ptr<ActorLoginPermissionService> actor_login_permission_service_ =
+      nullptr;
+
+  base::WeakPtrFactory<ActorLoginPermissionsManagerImpl> weak_ptr_factory_{
+      this};
 };
 
 }  // namespace actor_login

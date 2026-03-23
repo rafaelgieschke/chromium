@@ -14,6 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/types/optional_util.h"
+#include "components/accessibility_annotator/content/content_annotator/content_annotation_validator.h"
 #include "components/accessibility_annotator/content/content_annotator/content_classifier.h"
 #include "components/accessibility_annotator/content/content_annotator/content_classifier_types.h"
 #include "components/accessibility_annotator/core/accessibility_annotator_features.h"
@@ -53,16 +54,25 @@ std::unique_ptr<ContentAnnotatorService> ContentAnnotatorService::Create(
         page_content_extraction_service,
     optimization_guide::RemoteModelExecutor&
         optimization_guide_remote_model_executor,
-    page_content_annotations::PageEmbeddingsService& page_embeddings_service) {
+    page_content_annotations::PageEmbeddingsService& page_embeddings_service,
+    AccessibilityAnnotatorBackend& accessibility_annotator_backend,
+    passage_embeddings::Embedder* embedder,
+    passage_embeddings::EmbedderMetadataProvider* embedder_metadata_provider) {
   std::unique_ptr<ContentClassifier> content_classifier =
-      ContentClassifier::Create();
+      ContentClassifier::Create(embedder);
   if (!content_classifier) {
+    return nullptr;
+  }
+  std::unique_ptr<ContentAnnotationValidator> validator =
+      ContentAnnotationValidator::Create();
+  if (!validator) {
     return nullptr;
   }
   return base::WrapUnique(new ContentAnnotatorService(
       page_content_annotations_service, page_content_extraction_service,
       optimization_guide_remote_model_executor, page_embeddings_service,
-      std::move(content_classifier)));
+      accessibility_annotator_backend, embedder, embedder_metadata_provider,
+      std::move(content_classifier), std::move(validator)));
 }
 
 ContentAnnotatorService::ContentAnnotatorService(
@@ -73,20 +83,30 @@ ContentAnnotatorService::ContentAnnotatorService(
     optimization_guide::RemoteModelExecutor&
         optimization_guide_remote_model_executor,
     page_content_annotations::PageEmbeddingsService& page_embeddings_service,
-    std::unique_ptr<ContentClassifier> content_classifier)
+    AccessibilityAnnotatorBackend& accessibility_annotator_backend,
+    passage_embeddings::Embedder* embedder,
+    passage_embeddings::EmbedderMetadataProvider* embedder_metadata_provider,
+    std::unique_ptr<ContentClassifier> content_classifier,
+    std::unique_ptr<ContentAnnotationValidator> validator)
     : page_content_annotations_service_(page_content_annotations_service),
-      page_content_extraction_service_(page_content_extraction_service),
       optimization_guide_remote_model_executor_(
           optimization_guide_remote_model_executor),
       page_embeddings_service_(page_embeddings_service),
+      accessibility_annotator_backend_(accessibility_annotator_backend),
+      embedder_(embedder),
       join_entries_(kContentAnnotatorMaxPendingUrls.Get()),
-      content_classifier_(std::move(content_classifier)) {
+      content_classifier_(std::move(content_classifier)),
+      validator_(std::move(validator)) {
   CHECK(content_classifier_);
+  CHECK(validator_);
   page_content_annotations_service_->AddObserver(
       page_content_annotations::AnnotationType::kContentVisibility, this);
   page_content_extraction_service_observation_.Observe(
-      &page_content_extraction_service_.get());
+      &page_content_extraction_service);
   page_embeddings_service_observation_.Observe(&page_embeddings_service_.get());
+  if (embedder_metadata_provider) {
+    embedder_metadata_observation_.Observe(embedder_metadata_provider);
+  }
 }
 
 ContentAnnotatorService::~ContentAnnotatorService() {
@@ -138,6 +158,18 @@ page_content_annotations::PageEmbeddingsService::UsageMode
 ContentAnnotatorService::GetUsageMode() const {
   return page_content_annotations::PageEmbeddingsService::UsageMode::
       kContinuous;
+}
+
+void ContentAnnotatorService::EmbedderMetadataUpdated(
+    passage_embeddings::EmbedderMetadata metadata) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (embedder_metadata_.IsValid() || !metadata.IsValid()) {
+    // TODO(crbug.com/489566579): Handle runtime model changes.
+    return;
+  }
+  embedder_metadata_ = metadata;
+  content_classifier_->OnEmbedderModelChanged();
 }
 
 void ContentAnnotatorService::OnPageEmbeddingsAvailable(content::Page& page) {
@@ -195,7 +227,8 @@ void ContentAnnotatorService::MaybeAnnotate(CacheIterator it) {
   // finds relevant content.
   bool reached_annotation =
       (HasClassifierCategory(result.title_keyword_result) ||
-       HasClassifierCategory(result.url_match_result)) &&
+       HasClassifierCategory(result.url_match_result) ||
+       HasClassifierCategory(result.semantic_match_result)) &&
       PassesSafetyChecks(result);
   base::UmaHistogramBoolean("AccessibilityAnnotator.FullAnnotationReached",
                             reached_annotation);
@@ -205,13 +238,14 @@ void ContentAnnotatorService::MaybeAnnotate(CacheIterator it) {
     page_context.set_title(complete_data.page_title.value());
     *page_context.mutable_annotated_page_content() =
         complete_data.annotated_page_content->data;
-    GenerateAnnotations(std::move(page_context));
+    GenerateAnnotations(std::move(page_context), complete_data.url);
   }
-  // TODO(crbug.com/485675335): Process classification result with gateway flag
-  // to full annotation.
 }
+
 void ContentAnnotatorService::GenerateAnnotations(
-    optimization_guide::proto::PageContext page_context) {
+    optimization_guide::proto::PageContext page_context,
+    const GURL& url) {
+  std::string page_title = page_context.title();
   optimization_guide::proto::ContentAnnotationRequest request;
   *request.mutable_page_context() = std::move(page_context);
 
@@ -220,14 +254,21 @@ void ContentAnnotatorService::GenerateAnnotations(
       std::move(request),
       {.execution_timeout = kContentAnnotatorAnnotationTimeout.Get()},
       base::BindOnce(&ContentAnnotatorService::HandleModelExecutionResult,
-                     weak_ptr_factory_.GetWeakPtr()));
+                     weak_ptr_factory_.GetWeakPtr(), url,
+                     std::move(page_title)));
 }
 
 void ContentAnnotatorService::HandleModelExecutionResult(
+    const GURL& url,
+    std::string page_title,
     optimization_guide::OptimizationGuideModelExecutionResult result,
     std::unique_ptr<optimization_guide::ModelQualityLogEntry> log_entry) {
-  const std::optional<std::string> extracted_data =
-      base::OptionalFromExpected(result.response)
+  if (url.is_empty() || !url.is_valid()) {
+    return;
+  }
+
+  std::optional<std::string> extracted_data =
+      base::OptionalFromExpected(std::move(result.response))
           .transform([](const optimization_guide::proto::Any& any) {
             auto metadata = optimization_guide::ParsedAnyMetadata<
                 optimization_guide::proto::ContentAnnotationResponse>(any);
@@ -235,8 +276,14 @@ void ContentAnnotatorService::HandleModelExecutionResult(
           });
 
   if (extracted_data.has_value() && !extracted_data->empty()) {
-    // TODO(crbug.com/482383206): Handle model execution response.
-    DVLOG(1) << "Successfully extracted data: " << *extracted_data;
+    std::optional<std::string> data_to_cache =
+        validator_->IsValidatorEnabled()
+            ? validator_->Validate(std::move(*extracted_data))
+            : std::move(extracted_data);
+    if (data_to_cache) {
+      accessibility_annotator_backend_->SetContentAnnotationsCacheData(
+          url, std::move(page_title), std::move(*data_to_cache));
+    }
   }
 }
 

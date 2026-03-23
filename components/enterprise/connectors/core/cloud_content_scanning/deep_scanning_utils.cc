@@ -4,6 +4,7 @@
 
 #include "components/enterprise/connectors/core/cloud_content_scanning/deep_scanning_utils.h"
 
+#include "components/enterprise/connectors/core/cloud_content_scanning/binary_upload_request.h"
 #include "components/enterprise/connectors/core/common.h"
 
 namespace enterprise_connectors {
@@ -31,6 +32,16 @@ std::string MaybeGetUnscannedReason(ScanRequestUploadResult result) {
     case ScanRequestUploadResult::kFileEncrypted:
       return kFilePasswordProtectedUnscannedReason;
   }
+}
+
+bool ShouldAllowDeepScanOnLargeOrEncryptedFiles(
+    ScanRequestUploadResult result,
+    bool block_large_files,
+    bool block_password_protected_files) {
+  return (result == ScanRequestUploadResult::kFileTooLarge &&
+          !block_large_files) ||
+         (result == ScanRequestUploadResult::kFileEncrypted &&
+          !block_password_protected_files);
 }
 
 }  // namespace
@@ -62,8 +73,8 @@ void MaybeReportDeepScanningVerdict(
     reporting_event_router->OnUnscannedFileEvent(
         GURL(content_analysis_info->url()), content_analysis_info->tab_url(),
         source, destination, file_name, download_digest_sha256, mime_type,
-        trigger, unscanned_reason, content_transfer_method, content_size,
-        event_result);
+        trigger, response.request_token(), unscanned_reason,
+        content_transfer_method, content_size, event_result);
   }
 
   if (result != ScanRequestUploadResult::kSuccess) {
@@ -82,8 +93,8 @@ void MaybeReportDeepScanningVerdict(
       reporting_event_router->OnUnscannedFileEvent(
           GURL(content_analysis_info->url()), content_analysis_info->tab_url(),
           source, destination, file_name, download_digest_sha256, mime_type,
-          trigger, std::move(unscanned_reason), content_transfer_method,
-          content_size, event_result);
+          trigger, response.request_token(), std::move(unscanned_reason),
+          content_transfer_method, content_size, event_result);
     } else if (response_result.triggered_rules_size() > 0) {
       reporting_event_router->OnAnalysisConnectorResult(
           GURL(content_analysis_info->url()), content_analysis_info->tab_url(),
@@ -95,6 +106,49 @@ void MaybeReportDeepScanningVerdict(
           content_analysis_info->frame_url_chain(), event_result);
     }
   }
+}
+
+bool IsConsumerScanRequest(const BinaryUploadRequest& request) {
+  if (request.cloud_or_local_settings().is_local_analysis()) {
+    return false;
+  }
+
+  for (const std::string& tag : request.content_analysis_request().tags()) {
+    if (tag == "dlp") {
+      return false;
+    }
+  }
+  return request.device_token().empty();
+}
+
+bool IsResumableUpload(const BinaryUploadRequest& request) {
+  if (IsConsumerScanRequest(request) ||
+      !request.cloud_or_local_settings().is_cloud_analysis()) {
+    return false;
+  }
+  // Use the Resumable request protocol only for image pastes and
+  // non-paste requests.
+  return request.content_analysis_request().analysis_connector() !=
+             enterprise_connectors::AnalysisConnector::BULK_DATA_ENTRY ||
+         request.image_paste();
+}
+
+bool CloudMultipartResultIsFailure(ScanRequestUploadResult result) {
+  return result != ScanRequestUploadResult::kSuccess;
+}
+
+bool CloudResumableResultIsFailure(ScanRequestUploadResult result,
+                                   bool block_large_files,
+                                   bool block_password_protected_files) {
+  return result != ScanRequestUploadResult::kSuccess &&
+         !ShouldAllowDeepScanOnLargeOrEncryptedFiles(
+             result, block_large_files, block_password_protected_files);
+}
+
+bool LocalResultIsFailure(ScanRequestUploadResult result) {
+  return result != ScanRequestUploadResult::kSuccess &&
+         result != ScanRequestUploadResult::kFileTooLarge &&
+         result != ScanRequestUploadResult::kFileEncrypted;
 }
 
 }  // namespace enterprise_connectors

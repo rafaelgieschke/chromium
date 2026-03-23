@@ -10,6 +10,7 @@
 #include <optional>
 #include <vector>
 
+#include "android_webview/browser/prefetch/aw_prefetch_handle_wrapper.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/containers/circular_deque.h"
 #include "base/memory/raw_ref.h"
@@ -86,17 +87,6 @@ class AwPrefetchManager {
 
   void CancelPrefetch(JNIEnv* env, int32_t prefetch_key);
 
-  // Registers an external experiment (synthetic trial) in UMA for the current
-  // prefetch request. The experiment ID is derived from the Variations ID
-  // provided by the embedder.
-  //
-  // This is called during `StartPrefetchRequest()` to ensure the metrics state
-  // reflects the parameters of the most recent request. If no Variations ID is
-  // provided, any previously registered prefetch experiment will be cleared.
-  void SetOrClearExternalPrefetchExperiment(std::optional<int> variations_id);
-
-  bool GetIsPrefetchInCacheForTesting(JNIEnv* env, int32_t prefetch_key);
-
   // Updates Time-To-Live (TTL) for the prefetched content in seconds.
   void SetTtlInSec(JNIEnv* env, std::optional<int> ttl_in_sec) {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -112,10 +102,11 @@ class AwPrefetchManager {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
     int sanitized_max_prefetches =
-      max_prefetches.value_or(kDefaultMaxPrefetches);
+        max_prefetches.value_or(kDefaultMaxPrefetches);
 
     CHECK_GT(sanitized_max_prefetches, 0);
-    max_prefetches_ = std::min(sanitized_max_prefetches, kAbsoluteMaxPrefetches);
+    max_prefetches_ =
+        std::min(sanitized_max_prefetches, kAbsoluteMaxPrefetches);
   }
 
   // Returns the Time-to-Live (TTL) for prefetched content in seconds.
@@ -129,13 +120,13 @@ class AwPrefetchManager {
   // Returns the key associated with the prefetch handle inside of
   // `all_prefetches_map_`.
   int AddPrefetchHandle(
-      std::unique_ptr<content::PrefetchHandle> prefetch_handle) {
-    CHECK(prefetch_handle);
+      std::unique_ptr<AwPrefetchHandleWrapper> prefetch_handle_wrapper) {
+    CHECK(prefetch_handle_wrapper);
     CHECK(max_prefetches_ > 0u);
     CHECK(all_prefetches_map_.size() < max_prefetches_);
 
     const int32_t new_prefetch_key = GetNextPrefetchKey();
-    all_prefetches_map_[new_prefetch_key] = std::move(prefetch_handle);
+    all_prefetches_map_[new_prefetch_key] = std::move(prefetch_handle_wrapper);
     UpdateLastPrefetchKey(new_prefetch_key);
     return new_prefetch_key;
   }
@@ -151,16 +142,39 @@ class AwPrefetchManager {
 
   int GetLastPrefetchKeyForTesting() const { return last_prefetch_key_; }
 
+  bool GetIsPrefetchInCacheForTesting(JNIEnv* env, int32_t prefetch_key) const;
+
   base::android::ScopedJavaLocalRef<jobject> GetJavaPrefetchManager();
 
  private:
+  // Registers an external experiment (synthetic trial) in UMA for the current
+  // prefetch request. The experiment ID is derived from the Variations ID
+  // provided by the embedder.
+  //
+  // This is called during `StartPrefetchRequest()` to ensure the metrics state
+  // reflects the parameters of the most recent request. If no Variations ID is
+  // provided, any previously registered prefetch experiment will be cleared.
+  static void SetOrClearExternalPrefetchExperiment(
+      std::optional<int> variations_id);
+
+  bool IsPrefetchDuplicate(const GURL& url,
+                           const std::optional<net::HttpNoVarySearchData>&
+                               expected_no_vary_search) const;
+
+  int32_t GetNextPrefetchKey() const { return last_prefetch_key_ + 1; }
+
+  void UpdateLastPrefetchKey(int new_key) {
+    CHECK(new_key > last_prefetch_key_);
+    last_prefetch_key_ = new_key;
+  }
+
   raw_ref<content::BrowserContext> browser_context_;
 
   int ttl_in_sec_ = kDefaultTtlInSec;
 
   size_t max_prefetches_ = kDefaultMaxPrefetches;
 
-  std::map<int32_t, std::unique_ptr<content::PrefetchHandle>>
+  std::map<int32_t, std::unique_ptr<AwPrefetchHandleWrapper>>
       all_prefetches_map_;
 
   // Java object reference.
@@ -170,13 +184,6 @@ class AwPrefetchManager {
   // inside of `all_prefetches_map_` since `std::map` stores keys
   // in a sorted order.
   int32_t last_prefetch_key_ = -1;
-
-  int32_t GetNextPrefetchKey() const { return last_prefetch_key_ + 1; }
-
-  void UpdateLastPrefetchKey(int new_key) {
-    CHECK(new_key > last_prefetch_key_);
-    last_prefetch_key_ = new_key;
-  }
 };
 
 }  // namespace android_webview

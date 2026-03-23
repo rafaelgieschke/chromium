@@ -66,6 +66,8 @@ DEFINE_VARIATION_PARAM(
 DEFINE_VARIATION_PARAM(
     kIPHAdaptiveButtonInTopToolbarCustomizationReadAloudFeature,
     "IPH_AdaptiveButtonInTopToolbarCustomization_ReadAloud");
+DEFINE_VARIATION_PARAM(kIPHAdaptiveButtonInTopToolbarCustomizationGlicFeature,
+                       "IPH_AdaptiveButtonInTopToolbarCustomization_Glic");
 DEFINE_VARIATION_PARAM(
     kIPHAdaptiveButtonInTopToolbarCustomizationPageSummaryWebFeature,
     "IPH_AdaptiveButtonInTopToolbarCustomization_PageSummary_Web");
@@ -194,6 +196,8 @@ DEFINE_VARIATION_PARAM(kIPHTabSwitcherAddToGroup, "IPH_TabSwitcherAddToGroup");
 DEFINE_VARIATION_PARAM(kIPHTabSwitcherButtonFeature, "IPH_TabSwitcherButton");
 DEFINE_VARIATION_PARAM(kIPHTabSwitcherButtonSwitchIncognitoFeature,
                        "IPH_TabSwitcherButtonSwitchIncognito");
+DEFINE_VARIATION_PARAM(kIPHThreeDotMenuBackButton,
+                       "IPH_ThreeDotMenuBackButton");
 DEFINE_VARIATION_PARAM(kIPHTouchToSearchCalloutFeature,
                        "IPH_TouchToSearchCallout");
 DEFINE_VARIATION_PARAM(kIPHTranslateMenuButtonFeature,

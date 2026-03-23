@@ -13,6 +13,12 @@ namespace features {
 
 // Please keep features in alphabetical order.
 
+// When enabled, Android events will include more metadata about the incoming
+// events.
+BASE_FEATURE(kAccessibilityExpandEventMetadata,
+             "AccessibilityExpandEventMetadata",
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // When enabled, the full accessibility tree will be exposed for non-atomic
 // text fields, such as contenteditables.
 BASE_FEATURE(kAccessibilityExposeNonAtomicTextFieldChildren,
@@ -37,6 +43,16 @@ BASE_FEATURE(kAndroidDragDropOopif, base::FEATURE_ENABLED_BY_DEFAULT);
 // crbug.com/440381284
 BASE_FEATURE(kArabicIndicDigitInput, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif  // BUILDFLAG(IS_WIN)
+
+// If enabled, runs beforeunload handlers asynchronously when the user
+// hasn't interacted with the frame. (See: https://crbug.com/475716933)
+BASE_FEATURE(kAsyncBeforeUnload, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE_PARAM(base::TimeDelta,
+                   kAsyncBeforeUnloadTimeout,
+                   &kAsyncBeforeUnload,
+                   "AsyncBeforeUnloadTimeout",
+                   base::Milliseconds(500));
 
 // Synchronously continuing with navigation can lead to trying to start another
 // navigation synchronously while the first navigation is still being processed
@@ -110,13 +126,8 @@ BASE_FEATURE(kHoldbackDebugReasonStringRemoval,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 #if BUILDFLAG(IS_MAC)
-
-BASE_FEATURE(kBlockThirdPartyInProcessPlugins,
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 BASE_FEATURE(kCancelCompositionWhenWindowLosesFocus,
              base::FEATURE_ENABLED_BY_DEFAULT);
-
 #endif  // BUILDFLAG(IS_MAC)
 
 // When enabled, CDP method Page.captureScreenshot will increment
@@ -171,6 +182,19 @@ BASE_FEATURE(kDocumentIsolationPolicyWithoutSiteIsolation,
 
 // Enable document policy negotiation mechanism.
 BASE_FEATURE(kDocumentPolicyNegotiation, base::FEATURE_DISABLED_BY_DEFAULT);
+
+// When enabled, DumpWithoutCrashing() is called if a renderer process provides
+// invalid (non-allowlisted) headers in a navigation request.
+BASE_FEATURE(kDumpOnInvalidNavigationHeaders, base::FEATURE_ENABLED_BY_DEFAULT);
+
+// When enabled, DumpWithoutCrashing() is called if a renderer process provides
+// an Origin header on a navigation request that doesn't match the expected
+// origin.
+BASE_FEATURE(kDumpOnOriginHeaderMismatch, base::FEATURE_ENABLED_BY_DEFAULT);
+
+// When enabled, DumpWithoutCrashing() is called if a renderer process provides
+// an Origin header on a navigation request that shouldn't have one.
+BASE_FEATURE(kDumpOnUnexpectedOriginHeader, base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Requires documents embedded via <iframe>, etc, to explicitly opt-into the
 // embedding: https://github.com/mikewest/embedding-requires-opt-in.
@@ -450,6 +474,12 @@ BASE_FEATURE(kLocalNetworkAccessForFencedFrameNavigations,
 BASE_FEATURE(kLocalNetworkAccessForFencedFrameNavigationsWarningOnly,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
+// Enables enhanced security checks for direct sockets.
+// This includes checking local/loopback network policies and prompting
+// in unmanaged Isolated Web Apps (IWAs).
+BASE_FEATURE(kLocalNetworkAccessPromptDirectSockets,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 // When enabled, allows the ReusePrerenderingProcessForMainFrames feature
 // and the ProcessPerSiteUpToMainFrameThreshold feature to reuse processes
 // even when DevTools was ever attached.
@@ -643,7 +673,7 @@ BASE_FEATURE(kServiceWorkerSrcdocSupport, base::FEATURE_ENABLED_BY_DEFAULT);
 //
 // crbug.com/340949948 for more details.
 BASE_FEATURE(kServiceWorkerStaticRouterRaceRequestFix2,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // (crbug.com/1371756): When enabled, the static routing API starts
 // ServiceWorker when the routing result of a main resource request was network
@@ -664,10 +694,8 @@ BASE_FEATURE(kServiceWorkerSuppressTimeoutWhenPaymentWindowOpen,
 BASE_FEATURE(kServiceWorkerClientUrlIsCreationUrl,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
-// (crbug.com/454162508): Enabled feature will have ServiceWorker
-// WindowClient.Navigate() calls set the right initiator.
 BASE_FEATURE(kServiceWorkerWindowClientInitiator,
-             base::FEATURE_DISABLED_BY_DEFAULT);
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 // Enables skipping the early call to CommitPending when navigating away from a
 // crashed frame.

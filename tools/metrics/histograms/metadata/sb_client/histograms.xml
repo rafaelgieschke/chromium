@@ -85,7 +85,7 @@ chromium-metrics-reviews@google.com.
 
 <histogram name="SBClientDownload.Android.DownloadProtectionOutcome"
     enum="SBClientDownloadAndroidDownloadProtectionOutcome"
-    expires_after="2026-07-05">
+    expires_after="2026-09-13">
   <owner>chlily@chromium.org</owner>
   <owner>chrome-counter-abuse-alerts@google.com</owner>
   <summary>
@@ -139,7 +139,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="SBClientDownload.CheckDownloadStats"
-    enum="SBClientDownloadCheckDownloadStats" expires_after="2026-07-12">
+    enum="SBClientDownloadCheckDownloadStats" expires_after="2026-09-13">
 <!-- Note to owner: This histogram can be renewed 1 full year if it is still
 useful for Chirp alerts (go/crca-alerts). -->
 
@@ -410,7 +410,7 @@ useful for Chirp alerts (go/crca-alerts). -->
 </histogram>
 
 <histogram name="SBClientDownload.{Encryption}DeepScanEvent3"
-    enum="SBDeepScanEvent" expires_after="2026-06-28">
+    enum="SBDeepScanEvent" expires_after="2026-09-13">
   <owner>drubery@chromium.org</owner>
   <owner>chrome-counter-abuse-alerts@google.com</owner>
   <summary>
@@ -558,6 +558,29 @@ useful for Chirp alerts (go/crca-alerts). -->
     goes through async check tracker, which only happens if the Safe Browsing
     check is slow).
   </summary>
+</histogram>
+
+<histogram name="SBClientPhishing.ClientSideDetection.InterruptedByNavigation"
+    enum="ClientSideDetectionType" expires_after="2027-03-12">
+  <owner>andysjlim@chromium.org</owner>
+  <owner>chrome-counter-abuse-alerts@google.com</owner>
+  <summary>
+    Records the request type of an in-progress client-side detection process
+    that was interrupted by a new page navigation. The process is considered
+    in-progress from the completion of pre-classification until just prior to
+    sending a network request or the process is otherwise completed/cancelled.
+  </summary>
+</histogram>
+
+<histogram name="SBClientPhishing.ClientSideDetectionEvent{RequestType}"
+    enum="ClientSideDetectionEvent" expires_after="2027-03-12">
+  <owner>andysjlim@chromium.org</owner>
+  <owner>chrome-counter-abuse-alerts@google.com</owner>
+  <summary>
+    Records the event in Client Side Detection Host class. Record each time the
+    flow hits the event listed in ClientSideDetectionEvent.
+  </summary>
+  <token key="RequestType" variants="ClientSideDetectionRequestType"/>
 </histogram>
 
 <histogram name="SBClientPhishing.ClientSideDetectionTypeRequest"
@@ -733,7 +756,7 @@ useful for Chirp alerts (go/crca-alerts). -->
 
 <histogram
     name="SBClientPhishing.HighConfidenceAllowlistMatchOnServerVerdictPhishy{RequestType}"
-    enum="BooleanMatched" expires_after="2026-07-12">
+    enum="BooleanMatched" expires_after="2026-09-13">
   <owner>andysjlim@chromium.org</owner>
   <owner>chrome-counter-abuse-alerts@google.com</owner>
   <summary>
@@ -891,7 +914,7 @@ useful for Chirp alerts (go/crca-alerts). -->
 
 <histogram
     name="SBClientPhishing.IsIntelligentScanAvailableAtInquiryTime{IntelligentScanRequestType}"
-    enum="BooleanSuccess" expires_after="2026-07-12">
+    enum="BooleanSuccess" expires_after="2026-09-13">
   <owner>andysjlim@chromium.org</owner>
   <owner>chrome-counter-abuse-alerts@google.com</owner>
   <summary>
@@ -1002,7 +1025,7 @@ useful for Chirp alerts (go/crca-alerts). -->
 </histogram>
 
 <histogram name="SBClientPhishing.ModelDynamicUpdateSuccess"
-    enum="BooleanSuccess" expires_after="2026-07-12">
+    enum="BooleanSuccess" expires_after="2026-09-13">
 <!-- Note to owner: This histogram can be renewed 1 full year if it is still
 useful for Chirp alerts (go/crca-alerts). -->
 
@@ -1055,6 +1078,20 @@ useful for Chirp alerts (go/crca-alerts). -->
   <summary>
     Records whether the on-device model update is successful or not. This
     happens for Enhanced Safe Browsing enabled users.
+  </summary>
+</histogram>
+
+<histogram
+    name="SBClientPhishing.OnDeviceModelEligibilityReasonAtDownloadFailure"
+    enum="OptimizationGuideOnDeviceModelEligibilityReason"
+    expires_after="2027-03-18">
+  <owner>andysjlim@chromium.org</owner>
+  <owner>chrome-counter-abuse-alerts@google.com</owner>
+  <summary>
+    Records the OptimizationGuideOnDeviceModelEligibilityReason when the model
+    is not available at the time of download failure. This happens in the
+    intelligent scan delegate class when the model eligibility reason does not
+    match what we're looking for, thus the download fails.
   </summary>
 </histogram>
 
@@ -1208,7 +1245,7 @@ useful for Chirp alerts (go/crca-alerts). -->
 
 <histogram
     name="SBClientPhishing.OnDeviceModelStartModelDownloadFunctionRunTime.Android"
-    units="ms" expires_after="2026-07-09">
+    units="ms" expires_after="2026-09-13">
   <owner>xinghuilu@chromium.org</owner>
   <owner>chrome-counter-abuse-alerts@google.com</owner>
   <summary>
@@ -1278,7 +1315,7 @@ useful for Chirp alerts (go/crca-alerts). -->
 </histogram>
 
 <histogram name="SBClientPhishing.PhishingDetectorResult{RequestType}"
-    enum="ClientSidePhishingResult" expires_after="2026-07-12">
+    enum="ClientSidePhishingResult" expires_after="2026-09-13">
 <!-- Note to owner: This histogram can be renewed 1 full year if it is still
 useful for Chirp alerts (go/crca-alerts). -->
 
@@ -1414,7 +1451,7 @@ useful for Chirp alerts (go/crca-alerts). -->
 </histogram>
 
 <histogram name="SBClientPhishing.ServerModelDetectsPhishing{RequestType}"
-    enum="BooleanIsPhishing" expires_after="2026-07-12">
+    enum="BooleanIsPhishing" expires_after="2026-09-13">
 <!-- Note to owner: This histogram can be renewed 1 full year if it is still
 useful for Chirp alerts (go/crca-alerts). -->
 

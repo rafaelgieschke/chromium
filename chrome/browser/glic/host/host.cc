@@ -119,6 +119,7 @@ class EmptyInstanceDelegate : public Host::InstanceDelegate {
   }
   void OnWebClientCleared() override {}
   void PrepareForOpen() override {}
+  void OnUserInputSubmitted(mojom::WebClientMode mode) override {}
   void OnInteractionModeChange(mojom::WebClientMode new_mode) override {}
   GlicInstanceMetrics* instance_metrics() override { return nullptr; }
   GlicInstanceMetricsBackwardsCompatibility&
@@ -294,8 +295,8 @@ void Host::CreateContents(bool initially_hidden) {
   if (base::FeatureList::IsEnabled(features::kGlicWebContentsWarming)) {
     contents_ = glic_service().web_contents_warming_pool().TakeContainer();
   } else {
-    contents_ =
-        std::make_unique<WebUIContentsContainer>(profile_, initially_hidden);
+    contents_ = std::make_unique<WebUIContentsContainerImpl>(profile_,
+                                                             initially_hidden);
   }
   contents_->AttachToHost(this);
   glic::GlicProfileManager::GetInstance()->OnLoadingClientForService(
@@ -542,9 +543,9 @@ void Host::SetWebClient(GlicWebClientAccess* web_client) {
             // Unretained is safe because web_client is calling us.
             base::Unretained(web_client)));
   }
-#if !BUILDFLAG(IS_ANDROID)  // NEEDS_ANDROID_IMPL
   skills_manager().UpdateSkillPreviews(std::nullopt);
-#endif
+
+  observers_.Notify(&Observer::WebClientConnected);
 }
 
 void Host::WebClientInitializeFailed(GlicWebClientAccess* web_client) {
@@ -929,7 +930,7 @@ void HostManager::WebUIPageHandlerRemoved(GlicPageHandler* page_handler) {
   for (Host* host : GetAllHosts()) {
     if (host->page_handler() == page_handler) {
       host->WebUIPageHandlerRemoved(page_handler);
-      if (std::ranges::contains(instance_hosts, host)) {
+      if (!std::ranges::contains(instance_hosts, host)) {
         std::erase_if(tab_hosts_, [host](std::unique_ptr<Host>& h) {
           return h.get() == host;
         });

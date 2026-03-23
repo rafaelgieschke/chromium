@@ -943,7 +943,7 @@ TEST_F(AIPageContentAgentTest, ImageIsAdRelated) {
 
   auto& document = *helper_.LocalMainFrame()->GetFrame()->GetDocument();
   To<HTMLImageElement>(document.getElementById(AtomicString("ads")))
-      ->SetIsAdRelated();
+      ->SetIsAdRelated(AdProvenance{});
 
   GetAIPageContentWithActionableElements();
 
@@ -7448,7 +7448,8 @@ TEST_F(AIPageContentAgentTestTextEncoding, ImageCaptionCorrected) {
   img->setAttribute(html_names::kSrcAttr, AtomicString(kSmallImage));
 
   // Confirm that on the Blink side, we have a valid UTF-16 string.
-  EXPECT_EQ(DynamicTo<HTMLImageElement>(img)->AltText(), String(u"Hello"));
+  ASSERT_TRUE(IsA<HTMLImageElement>(*img));
+  EXPECT_EQ(To<HTMLImageElement>(*img).AltText(), String(u"Hello"));
 
   // The only way to get an invalid UTF-16 string into the element is via
   // Javascript, which isn't required to match surrogates. In this case, the

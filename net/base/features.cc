@@ -363,11 +363,6 @@ BASE_FEATURE(kDeviceBoundSessions, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 BASE_FEATURE(kPersistDeviceBoundSessions, base::FEATURE_ENABLED_BY_DEFAULT);
 BASE_FEATURE_PARAM(bool,
-                   kDeviceBoundSessionsRequireOriginTrialTokens,
-                   &kDeviceBoundSessions,
-                   "RequireOriginTrialTokens",
-                   false);
-BASE_FEATURE_PARAM(bool,
                    kDeviceBoundSessionsRefreshQuota,
                    &kDeviceBoundSessions,
                    "RefreshQuota",
@@ -413,6 +408,9 @@ BASE_FEATURE_PARAM(std::string,
                    "Value",
                    "");
 
+BASE_FEATURE(kDeviceBoundSessionsForSingleSignOn,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
 BASE_FEATURE(kSpdySessionForProxyAdditionalChecks,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
@@ -439,6 +437,9 @@ BASE_FEATURE(kNoVarySearchIgnoreUnrecognizedKeys,
              base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kEnforceOneRfc6962CtPolicy, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kCertificateTransparencyIgnoreOcspScts,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE(kDiskCacheBackendExperiment, base::FEATURE_DISABLED_BY_DEFAULT);
 constexpr base::FeatureParam<DiskCacheBackend>::Option
@@ -554,8 +555,6 @@ BASE_FEATURE(kHstsTopLevelNavigationsOnly, base::FEATURE_DISABLED_BY_DEFAULT);
 BASE_FEATURE(kHttpCacheMappedFileFlushWin, base::FEATURE_DISABLED_BY_DEFAULT);
 #endif
 
-// This feature flag is overridden by WebView. This cannot be removed until the
-// feature is launched on WebView (https://crbug.com/382394774).
 BASE_FEATURE(kHttpCacheNoVarySearch, base::FEATURE_ENABLED_BY_DEFAULT);
 
 BASE_FEATURE_PARAM(size_t,
@@ -783,5 +782,11 @@ BASE_FEATURE(kSQLitePersistentCookieStoreEarlyInit,
 
 const base::FeatureParam<bool> kSQLitePersistentCookieStoreEarlyInitCheckDisk{
     &kSQLitePersistentCookieStoreEarlyInit, "check_disk", true};
+
+BASE_FEATURE(kEnableErrorCodePropagationForPreconnect,
+             base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kPermitTcpSocketPoolConnectBackupJobs,
+             base::FEATURE_ENABLED_BY_DEFAULT);
 
 }  // namespace net::features

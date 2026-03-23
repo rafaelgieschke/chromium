@@ -21,6 +21,7 @@
 #include "chrome/browser/ui/views/bookmarks/saved_tab_groups/saved_tab_group_everything_menu.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/tab_search_bubble_host.h"
+#include "chrome/browser/ui/views/tabs/projects/projects_panel_utils.h"
 #include "chrome/browser/ui/views/tabs/shared/tab_strip_flat_edge_button.h"
 #include "chrome/browser/ui/webui/tab_search/tab_search_prefs.h"
 #include "chrome/common/pref_names.h"
@@ -53,8 +54,11 @@ DEFINE_CLASS_ELEMENT_IDENTIFIER_VALUE(TabStripComboButton,
 TabStripComboButton::TabStripComboButton(BrowserWindowInterface* browser)
     : browser_(browser),
       action_view_controller_(std::make_unique<views::ActionViewController>()) {
-  start_button_animation_.SetSlideDuration(kAnimationDuration);
-  end_button_animation_.SetSlideDuration(kAnimationDuration);
+  base::TimeDelta animation_duration =
+      gfx::Animation::ShouldRenderRichAnimation() ? kAnimationDuration
+                                                  : base::TimeDelta();
+  start_button_animation_.SetSlideDuration(animation_duration);
+  end_button_animation_.SetSlideDuration(animation_duration);
   SetProperty(views::kElementIdentifierKey, kTabStripComboButtonElementId);
   SetLayoutManager(std::make_unique<views::BoxLayout>(
       views::BoxLayout::Orientation::kHorizontal, gfx::Insets(),
@@ -62,7 +66,7 @@ TabStripComboButton::TabStripComboButton(BrowserWindowInterface* browser)
           LayoutConstant::kVerticalTabStripFlatEdgeButtonPadding)));
 
   std::unique_ptr<TabStripFlatEdgeButton> start_button;
-  if (tab_groups::IsProjectsPanelFeatureEnabled()) {
+  if (projects_panel::IsProjectsPanelVisibleForProfile(browser->GetProfile())) {
     start_button = CreateFlatEdgeButtonFor(
         kActionToggleProjectsPanel, kVerticalTabStripProjectsButtonElementId);
     projects_panel_button_subscription_ =
@@ -466,6 +470,9 @@ gfx::Size TabStripComboButton::GetPreferredSizeForOrientation(
     }
 
     gfx::Size child_size = child->GetPreferredSize();
+    if (child_size.width() == 0) {
+      continue;
+    }
 
     if (orientation == views::LayoutOrientation::kHorizontal) {
       if (has_visible_child) {

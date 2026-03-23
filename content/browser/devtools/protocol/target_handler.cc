@@ -201,6 +201,8 @@ class BrowserToPageConnector {
       connector_->AgentHostClosed(agent_host);
     }
 
+    bool MayAccessAllCookies() override { return true; }
+
     bool AllowUnsafeOperations() override {
       return permissions_.allow_unsafe_operations;
     }
@@ -605,6 +607,8 @@ class TargetHandler::Session : public DevToolsAgentHostClient {
     DCHECK(agent_host == agent_host_.get());
     Detach(true);
   }
+
+  bool MayAccessAllCookies() override { return true; }
 
   bool MayAttachToURL(const GURL& url, bool is_webui) override {
     return GetRootClient()->MayAttachToURL(url, is_webui);
@@ -1633,10 +1637,10 @@ void TargetHandler::AddWorkerThrottle(
     return;
   }
 
-  if (auto_attached_sessions_.count(agent_host)) {
-    if (auto_attached_sessions_[agent_host]->IsWaitingForDebuggerOnStart()) {
-      auto_attached_sessions_[agent_host]->SetWorkerThrottle(
-          std::move(throttle_handle));
+  if (auto it = auto_attached_sessions_.find(agent_host);
+      it != auto_attached_sessions_.end()) {
+    if (it->second->IsWaitingForDebuggerOnStart()) {
+      it->second->SetWorkerThrottle(std::move(throttle_handle));
     }
   }
 }

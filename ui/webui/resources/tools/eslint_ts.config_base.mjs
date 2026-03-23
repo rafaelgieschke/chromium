@@ -42,6 +42,7 @@ export const defaultConfig = [
       '@webui-eslint/lit-element-invalid-interface': 'error',
       '@webui-eslint/lit-element-structure': 'error',
       '@webui-eslint/lit-property-accessor': 'error',
+      '@webui-eslint/no-mixed-type-and-value-imports': 'error',
       '@webui-eslint/polymer-property-declare': 'error',
       '@webui-eslint/polymer-property-class-member': 'error',
     },
@@ -76,5 +77,40 @@ export const webComponentMissingDepsConfig = {
   },
   rules: {
     '@webui-eslint/web-component-missing-deps': 'error',
+  },
+};
+
+export const noChromeSendConfig = {
+  files: ['**/*.ts'],
+  rules: {
+    'no-restricted-properties': [
+      'error',
+      {
+        object: 'chrome',
+        property: 'send',
+        message: 'Use Mojo instead.',
+      },
+    ],
+    'no-restricted-imports': [
+      'error', {
+        paths: [
+          {
+            name: '//resources/js/cr.js',
+            message: 'Use Mojo instead.',
+          },
+          {
+            name: 'chrome://resources/js/cr.js',
+            message: 'Use Mojo instead.',
+          },
+        ],
+      },
+    ],
+  },
+};
+
+export const noUnnecessaryTypeConversionConfig = {
+  files: ['**/*.ts'],
+  rules: {
+    '@typescript-eslint/no-unnecessary-type-conversion': 'error',
   },
 };

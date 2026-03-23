@@ -790,13 +790,16 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Apps.AppList.GeminiSearchBoxIcon" enum="SearchBoxIconEvent"
-    expires_after="2026-03-01">
+    expires_after="2027-03-01">
   <owner>yawano@google.com</owner>
   <owner>assistive-eng@google.com</owner>
   <summary>
     Impression or click events for a Gemini search box icon. This metric was
     previously recorded as Assistant.NewEntryPoint.Eligibility and
     Assistant.NewEntryPoint.Launcher before M138.
+
+    Warning: this histogram was expired from 2026-03-01 to 2026-03-10; data may
+    be missing.
   </summary>
 </histogram>
 
@@ -1055,22 +1058,15 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
-<histogram name="Apps.AppList.Scoring.ScoreAboveBestMatchThreshold{Type}"
+<histogram
+    name="Apps.AppList.Scoring.ScoreAboveBestMatchThresholdWithoutKeywordRanking"
     enum="BooleanHit" expires_after="2027-03-01">
   <owner>chenjih@google.com</owner>
   <owner>chromeos-launcher-search@google.com</owner>
   <summary>
-    The number of the results above the BestMatch threshold with {Type} case.
-    Recorded once per result's score above the BestMatch threshold.
+    The number of the results above the BestMatch threshold without Keyword
+    Ranking. Recorded once per result's score above the BestMatch threshold.
   </summary>
-  <token key="Type">
-    <variant name="WithKeywordRanking"
-        summary="Count of results above BestMatch threshold with Keyword
-                 Ranking"/>
-    <variant name="WithoutKeywordRanking"
-        summary="Count of results above BestMatch threshold without Keyword
-                 Ranking"/>
-  </token>
 </histogram>
 
 <histogram
@@ -2281,7 +2277,7 @@ chromium-metrics-reviews@google.com.
 </histogram>
 
 <histogram name="Apps.CreateShortcuts.Linux.Result"
-    enum="WebAppCreateShortcutLinuxResult" expires_after="2026-07-12">
+    enum="WebAppCreateShortcutLinuxResult" expires_after="2026-09-13">
   <owner>phillis@chromium.org</owner>
   <owner>cmumford@chromium.org</owner>
   <summary>

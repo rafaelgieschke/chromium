@@ -44,7 +44,7 @@ std::optional<uint32_t> ConvertToHashInteger(std::string_view chars) {
     return std::nullopt;
   }
   for (auto c : chars) {
-    if (!IsASCIIHexDigit(c)) {
+    if (!IsAsciiHexDigit(c)) {
       return std::nullopt;
     }
   }
@@ -182,8 +182,9 @@ size_t BackgroundTracingHelper::GetIdSuffixPos(StringView string) {
   size_t cursor = string.length();
   while (cursor > 0) {
     char c = string[cursor - 1];
-    if (c < '0' || c > '9')
+    if (!IsAsciiDigit(c)) {
       break;
+    }
     --cursor;
   }
 

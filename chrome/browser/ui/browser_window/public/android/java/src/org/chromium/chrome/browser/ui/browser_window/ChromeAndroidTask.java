@@ -16,6 +16,7 @@ import org.chromium.chrome.browser.tabmodel.SupportedProfileType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.components.browser_ui.desktop_windowing.DesktopWindowStateManager;
 import org.chromium.ui.base.ActivityWindowAndroid;
+import org.chromium.ui.base.WindowResizePrecheckResult;
 
 import java.util.List;
 import java.util.function.Supplier;
@@ -58,6 +59,7 @@ public interface ChromeAndroidTask {
     final class ActivityScopedObjects {
         final ActivityWindowAndroid mActivityWindowAndroid;
         final TabModelSelector mTabModelSelector;
+        final @BrowserWindowType int mBrowserWindowType;
         final @SupportedProfileType int mSupportedProfileType;
         final @Nullable DesktopWindowStateManager mDesktopWindowStateManager;
         final @Nullable MultiInstanceManager mMultiInstanceManager;
@@ -65,11 +67,13 @@ public interface ChromeAndroidTask {
         public ActivityScopedObjects(
                 ActivityWindowAndroid activityWindowAndroid,
                 TabModelSelector tabModelSelector,
+                @BrowserWindowType int browserWindowType,
                 @SupportedProfileType int supportedProfileType,
                 @Nullable DesktopWindowStateManager desktopWindowStateManager,
                 @Nullable MultiInstanceManager multiInstanceManager) {
             mActivityWindowAndroid = activityWindowAndroid;
             mTabModelSelector = tabModelSelector;
+            mBrowserWindowType = browserWindowType;
             assert supportedProfileType != SupportedProfileType.UNSET;
             mSupportedProfileType = supportedProfileType;
             mDesktopWindowStateManager = desktopWindowStateManager;
@@ -145,14 +149,6 @@ public interface ChromeAndroidTask {
      * state, otherwise {@code null}.
      */
     @Nullable PendingTaskInfo getPendingTaskInfo();
-
-    /**
-     * Returns the browser window type of this {@link ChromeAndroidTask}.
-     *
-     * <p>The types are defined in the native {@code BrowserWindowInterface::Type} enum.
-     */
-    @BrowserWindowType
-    int getBrowserWindowType();
 
     /**
      * Adds an instance of {@link ActivityScopedObjects}.
@@ -333,6 +329,13 @@ public interface ChromeAndroidTask {
      * window.
      */
     void deactivate();
+
+    /**
+     * Determines whether the window can be resized. Returns WindowResizePrecheckResult.NONE if
+     * resizing is permitted, or a specific failure reason otherwise.
+     */
+    @WindowResizePrecheckResult
+    int canResize();
 
     /** Maximize this {@link ChromeAndroidTask}. */
     void maximize();

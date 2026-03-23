@@ -247,9 +247,6 @@ public final class ProductionSupportedFlagList {
                 AutofillFeatures.AUTOFILL_ADDRESS_IMPROVE_BUILDING_NUMBER_REGEX,
                 "Enables building number regex improvement."),
         Flag.baseFeature(
-                AutofillFeatures.AUTOFILL_AND_PASSWORDS_IN_SAME_SURFACE,
-                "Changes how password requests are passed to the embedder. Ideally a noop."),
-        Flag.baseFeature(
                 AutofillFeatures.AUTOFILL_BETTER_LOCAL_HEURISTIC_PLACEHOLDER_SUPPORT,
                 "Treats placeholders as a separate signal for Autofill local heuristics"),
         Flag.baseFeature(
@@ -378,6 +375,10 @@ public final class ProductionSupportedFlagList {
                 "If enabled, the missing merge modes will be re-enabled on nodes. To do that,"
                         + "MergeMode::kMergeChildrenAndReformatIfNeeded will be also added to all"
                         + "the nodes where required."),
+        Flag.baseFeature(
+                AutofillFeatures.AUTOFILL_ANDROID_FORM_DATA_COMPARE_FIELD_GLOBAL_ID,
+                "If enabled, form fields are retrieved by comparing FormFieldIds"
+                        + "instead of the set of attributes."),
         Flag.baseFeature(
                 AutofillFeatures.AUTOFILL_SUPPORT_PHONETIC_NAME_FOR_JP,
                 "When enabled, Autofill will support phonetic name for Japan."),
@@ -580,10 +581,6 @@ public final class ProductionSupportedFlagList {
                 UiAndroidFeatures.DEPRECATED_EXTERNAL_PICKER_FUNCTION,
                 "Deprecates old external file picker function."),
         Flag.baseFeature("ThreadGroupSemaphore"),
-        Flag.baseFeature(
-                ContentFeatures.QUEUE_NAVIGATIONS_WHILE_WAITING_FOR_COMMIT,
-                "If enabled, allows navigations to be queued when there is "
-                        + "an existing pending commit navigation in progress."),
         Flag.baseFeature(
                 AwFeatures.WEBVIEW_RENDER_DOCUMENT,
                 "If enabled, same-site navigations will change RenderFrameHosts"),
@@ -868,8 +865,6 @@ public final class ProductionSupportedFlagList {
         Flag.baseFeature(
                 AwFeatures.WEBVIEW_HYPERLINK_CONTEXT_MENU,
                 "Enables hyperlink context menu in WebView"),
-        Flag.baseFeature(
-                ContentFeatures.WEB_PERMISSIONS_API, "Enables navigator.permissions.query()"),
         Flag.baseFeature(
                 BlinkFeatures.DEFER_RENDERER_TASKS_AFTER_INPUT,
                 "If enabled, some renderer tasks will be deferred after discrete input events, e.g."
@@ -1192,7 +1187,7 @@ public final class ProductionSupportedFlagList {
                         + " as a task but defers it until the next step like "
                         + "NotifyHeadersReceived."),
         Flag.baseFeature(
-                "kNetworkQualityEstimatorAsyncNotifyHeadersReceived",
+                "NetworkQualityEstimatorAsyncNotifyHeadersReceived",
                 "If true, call NQE::NotifyHeadersReceived asynchronously or"
                         + " defer it until the next step like"
                         + " NotifyBytesRead, based on the parameter values."),
@@ -1232,9 +1227,9 @@ public final class ProductionSupportedFlagList {
                 ContentFeatures.ANDROID_PK_AUTOCORRECT_UNDERLINE,
                 "When enabled, physical keyboard autocorrect underline will display"),
         Flag.baseFeature(
-                ContentFeatures.ANDROID_SPELLING_UNDERLINE_IN_COMPOSITION_MODE,
-                "When enabled, misspelling / grammar underline could be shown when entering"
-                        + " composition mode"),
+                ContentFeatures.ANDROID_BLOCK_MISSPELLING_SUGGESTION_SPAN_IN_COMPOSITION_MODE,
+                "When enabled, misspelling suggestion span will be blocked from showing in"
+                        + " composition mode."),
         Flag.baseFeature(
                 BaseFeatures.PARTITION_ALLOC_FREE_WITH_SIZE,
                 "Enables PartitionAlloc with the optimization of sized deallocation"),
@@ -1256,11 +1251,6 @@ public final class ProductionSupportedFlagList {
                         + " collecting dumps"),
         Flag.baseFeature(
                 "VariationsStickyNoopTest", "No-op flag for testing sticky study activation."),
-        Flag.baseFeature(
-                "VariationsStickyPersistence",
-                "Controls how prefs are written and persisted for tracking sticky study activation."
-                    + " Note: The actual behavior is controlled by a feature param, but disabling"
-                    + " the feature will use the default param value (no special persistence)."),
         Flag.baseFeature(
                 BlinkFeatures.TEXT_SCALE_META_TAG,
                 "When enabled, <meta name=\"text-scale\" content=\"scale\"> takes effect"),
@@ -1310,7 +1300,6 @@ public final class ProductionSupportedFlagList {
         Flag.baseFeature(
                 "UseLockFreeX509Verification",
                 "Enables lock-free certificate verification codepath."),
-        Flag.baseFeature(CcFeatures.REPORT_UKM, "Validate performance of UKM reporting."),
         Flag.baseFeature(
                 AwFeatures.WEBVIEW_WEB_PERFORMANCE_METRICS_REPORTING,
                 "Enables Web Performance Metrics to be reported using"
@@ -1336,6 +1325,9 @@ public final class ProductionSupportedFlagList {
                 "When enabled, the PaymentRequest will use the URL loader from the renderer instead"
                         + " of the browser process."),
         Flag.baseFeature(
+                ContentFeatures.PREVIEW_HANDWRITING_GESTURE,
+                "When enabled, it allows users to see a preview of their handwriting gestures"),
+        Flag.baseFeature(
                 BlinkFeatures.UNTHROTTLE_ASYNC_TOUCH_MOVES,
                 "When enabled, touch move events to javascript handlers are unthrottled if "
                         + "they are sent as async to Renderer."),
@@ -1353,6 +1345,24 @@ public final class ProductionSupportedFlagList {
                 AwFeatures.WEBVIEW_SAVE_STATE_INCLUDE_HEADERS,
                 "When enabled, navigation headers will be saved and restored as part of saved state"
                         + " for WebView"),
+        Flag.baseFeature(
+                "ThrottleSendingCustomUserTimings",
+                "Throttle sending custom user timing events via performance.mark() from the"
+                        + " renderer to the browser process, to reduce the number of IPCs to record"
+                        + " page load metrics."),
+        Flag.baseFeature(
+                "ConsolidateMetricsServiceLocales",
+                "Consolidate the source of locale used by MetricsService."),
+        Flag.baseFeature(
+                AwFeatures.PRERENDER2_WARM_UP_COMPOSITOR_FOR_WEBVIEW,
+                "Requests the compositor warm-up for the WebView prerender triggers."),
+        Flag.baseFeature(
+                "UseDynamicBackingAllocations",
+                "Allows CompoundImageBacking to allocate backings during runtime if a compatible"
+                        + " backing to serve clients requested usage is not already present."),
+        Flag.baseFeature(
+                "DataUrlMimeTypeParameterPreservation",
+                "Preserve parameters in the MIME type of data: URLs."),
         // Add new commandline switches and features above. The final entry should have a
         // trailing comma for cleaner diffs.
     };

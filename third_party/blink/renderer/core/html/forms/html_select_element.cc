@@ -294,18 +294,19 @@ void HTMLSelectElement::setValueForBinding(const String& value) {
   String old_value = this->Value();
   bool was_autofilled = IsAutofilled();
   bool value_changed = old_value != value;
-  SetValue(value, false,
-           was_autofilled && !value_changed ? WebAutofillState::kAutofilled
-                                            : WebAutofillState::kNotFilled);
+  SelectOptionByValue(value, false,
+                      was_autofilled && !value_changed
+                          ? WebAutofillState::kAutofilled
+                          : WebAutofillState::kNotFilled);
   if (Page* page = GetDocument().GetPage(); page && value_changed) {
     page->GetChromeClient().JavaScriptChangedValue(*this, old_value,
                                                    was_autofilled);
   }
 }
 
-void HTMLSelectElement::SetValue(const String& value,
-                                 bool send_events,
-                                 WebAutofillState autofill_state) {
+void HTMLSelectElement::SelectOptionByValue(const String& value,
+                                            bool send_events,
+                                            WebAutofillState autofill_state) {
   HTMLOptionElement* option = nullptr;
   // Find the option with value() matching the given parameter and make it the
   // current selection.
@@ -316,6 +317,12 @@ void HTMLSelectElement::SetValue(const String& value,
     }
   }
 
+  SelectOptionByElement(option, send_events, autofill_state);
+}
+
+void HTMLSelectElement::SelectOptionByElement(HTMLOptionElement* option,
+                                              bool send_events,
+                                              WebAutofillState autofill_state) {
   HTMLOptionElement* previous_selected_option = SelectedOption();
   SetSuggestedOption(nullptr);
   SelectOptionFlags flags = kDeselectOtherOptionsFlag | kMakeOptionDirtyFlag;
@@ -330,7 +337,14 @@ void HTMLSelectElement::SetValue(const String& value,
 void HTMLSelectElement::SetAutofillValue(const String& value,
                                          WebAutofillState autofill_state) {
   auto interacted_state = interacted_state_;
-  SetValue(value, true, autofill_state);
+  SelectOptionByValue(value, true, autofill_state);
+  interacted_state_ = interacted_state;
+}
+
+void HTMLSelectElement::SetAutofillOption(HTMLOptionElement* option,
+                                          WebAutofillState autofill_state) {
+  auto interacted_state = interacted_state_;
+  SelectOptionByElement(option, true, autofill_state);
   interacted_state_ = interacted_state;
 }
 
@@ -352,6 +366,23 @@ void HTMLSelectElement::SetSuggestedValue(const String& value) {
   }
 
   SetSuggestedOption(nullptr);
+}
+
+void HTMLSelectElement::SetSuggestedOption(HTMLOptionElement* option) {
+  if (RuntimeEnabledFeatures::CanvasDrawElementEnabled() &&
+      IsInCanvasSubtree()) {
+    // Hide suggested values when under canvas, to prevent leaking this
+    // information to javascript.
+    option = nullptr;
+  }
+  if (suggested_option_ == option) {
+    return;
+  }
+  SetAutofillState(option ? WebAutofillState::kPreviewed
+                          : WebAutofillState::kNotFilled);
+  suggested_option_ = option;
+
+  select_type_->DidSetSuggestedOption(option);
 }
 
 bool HTMLSelectElement::IsPresentationAttribute(
@@ -805,22 +836,6 @@ int HTMLSelectElement::SelectedListIndex() const {
   return -1;
 }
 
-void HTMLSelectElement::SetSuggestedOption(HTMLOptionElement* option) {
-  if (RuntimeEnabledFeatures::CanvasDrawElementEnabled() &&
-      IsInCanvasSubtree()) {
-    // Hide suggested values when under canvas, to prevent leaking this
-    // information to javascript.
-    option = nullptr;
-  }
-  if (suggested_option_ == option)
-    return;
-  SetAutofillState(option ? WebAutofillState::kPreviewed
-                          : WebAutofillState::kNotFilled);
-  suggested_option_ = option;
-
-  select_type_->DidSetSuggestedOption(option);
-}
-
 void HTMLSelectElement::DidChangeIsCanvasOrInCanvasSubtree() {
   if (RuntimeEnabledFeatures::CanvasDrawElementEnabled() &&
       IsInCanvasSubtree()) {
@@ -1272,11 +1287,8 @@ void HTMLSelectElement::DefaultEventHandler(Event& event) {
     return;
   }
 
-  auto* keyboard_event = DynamicTo<KeyboardEvent>(event);
-  if (event.type() == event_type_names::kKeypress && keyboard_event) {
-    if (!keyboard_event->ctrlKey() && !keyboard_event->altKey() &&
-        !keyboard_event->metaKey() &&
-        unicode::IsPrintableChar(keyboard_event->charCode())) {
+  if (auto* keyboard_event = DynamicTo<KeyboardEvent>(event)) {
+    if (TypeAhead::ShouldHandleKeyboardEvent(*keyboard_event)) {
       TypeAheadFind(*keyboard_event);
       event.SetDefaultHandled();
       return;

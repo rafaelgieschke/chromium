@@ -1240,7 +1240,7 @@ void ServiceWorkerVersion::InitializeGlobalScope() {
 
   // If we have allocated the process we can tell the client to register
   // services.
-  if (embedded_worker()->process_id() != ChildProcessHost::kInvalidUniqueID) {
+  if (embedded_worker()->process_id()) {
     GetContentClient()
         ->browser()
         ->RegisterAssociatedInterfaceBindersForServiceWorker(
@@ -1248,7 +1248,8 @@ void ServiceWorkerVersion::InitializeGlobalScope() {
   }
 }
 
-bool ServiceWorkerVersion::IsControlleeProcessID(int process_id) const {
+bool ServiceWorkerVersion::IsControlleeProcessID(
+    ChildProcessId process_id) const {
   for (const auto& controllee : controllee_map_) {
     if (controllee.second && controllee.second->GetProcessId() == process_id) {
       return true;
@@ -1937,8 +1938,9 @@ void ServiceWorkerVersion::NavigateClient(const std::string& client_uuid,
   // possible to receive such requests since the renderer-side checks are
   // slightly different. For example, the view-source scheme will not be
   // filtered out by Blink.
+  // TODO(crbug.com/379869738) Remove GetUnsafeValue.
   if (!ChildProcessSecurityPolicyImpl::GetInstance()->CanRequestURL(
-          embedded_worker_->process_id(), url)) {
+          embedded_worker_->process_id().GetUnsafeValue(), url)) {
     std::move(callback).Run(
         false /* success */, nullptr /* client */,
         "The service worker is not allowed to access URL: " + url.spec());
@@ -2096,16 +2098,18 @@ void ServiceWorkerVersion::OpenWindow(
   // possible to receive such requests since the renderer-side checks are
   // slightly different. For example, the view-source scheme will not be
   // filtered out by Blink.
+  // TODO(crbug.com/379869738) Remove GetUnsafeValue.
   if (!ChildProcessSecurityPolicyImpl::GetInstance()->CanRequestURL(
-          embedded_worker_->process_id(), url)) {
+          embedded_worker_->process_id().GetUnsafeValue(), url)) {
     std::move(callback).Run(false /* success */, nullptr /* client */,
                             url.spec() + " cannot be opened.");
     return;
   }
 
+  // TODO(crbug.com/379869738) Remove GetUnsafeValue.
   service_worker_client_utils::OpenWindow(
       url, script_url_, key_, embedded_worker_->embedded_worker_id(),
-      embedded_worker_->process_id(), context_, type,
+      embedded_worker_->process_id().GetUnsafeValue(), context_, type,
       base::BindOnce(&OnOpenWindowFinished, std::move(callback)));
 
   NotifyWindowOpened(script_url_, url);
@@ -2469,6 +2473,7 @@ void ServiceWorkerVersion::StartWorkerInternal() {
   worker_host_ = std::make_unique<content::ServiceWorkerHost>(
       provider_info->host_remote.InitWithNewEndpointAndPassReceiver(), *this,
       context());
+  start_worker_token_ = worker_host_->token();
 
   auto params = blink::mojom::EmbeddedWorkerStartParams::New();
   params->service_worker_version_id = version_id_;
@@ -2993,6 +2998,8 @@ void ServiceWorkerVersion::OnStoppedInternal(
   for (auto& observer : observers_) {
     observer.OnRunningStateChanged(this);
   }
+
+  start_worker_token_.reset();
   if (should_restart) {
     StartWorkerInternal();
   } else if (!HasWorkInBrowser()) {
@@ -3144,7 +3151,7 @@ ServiceWorkerVersion::TakeComparedScriptInfo(const GURL& script_url) {
 }
 
 bool ServiceWorkerVersion::ShouldRequireForegroundPriority(
-    int worker_process_id) const {
+    ChildProcessId worker_process_id) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Currently FetchEvents are the only type of event we need to really process
@@ -3163,7 +3170,8 @@ bool ServiceWorkerVersion::ShouldRequireForegroundPriority(
   // service workers.  The impact of foreground service workers is further
   // limited by the automatic shutdown mechanism.
   for (const auto& controllee : controllee_map_) {
-    const int controllee_process_id = controllee.second->GetProcessId();
+    const ChildProcessId controllee_process_id =
+        controllee.second->GetProcessId();
     RenderProcessHost* render_host =
         RenderProcessHost::FromID(controllee_process_id);
 

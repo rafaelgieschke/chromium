@@ -1069,6 +1069,8 @@ void AXObject::SetCachedValuesNeedUpdate(
     bool cached_values_need_update,
     std::optional<TreeUpdateReason> reason) {
   cached_values_need_update_ = cached_values_need_update;
+  cached_values_dirty_reason_ =
+      cached_values_need_update ? reason : std::nullopt;
 #if AX_FAIL_FAST_BUILD()
   CHECK(ax_object_cache_);
   if (cached_values_need_update) {
@@ -1479,7 +1481,7 @@ void AXObject::SerializeHTMLTagAndClass(ui::AXNodeData* node_data) const {
 
   TruncateAndAddStringAttribute(node_data,
                                 ax::mojom::blink::StringAttribute::kHtmlTag,
-                                element->tagName().LowerASCII());
+                                element->tagName().ToAsciiLower());
 
   if (const AtomicString& class_name = element->GetClassAttribute()) {
     TruncateAndAddStringAttribute(
@@ -1507,7 +1509,7 @@ void AXObject::SerializeHTMLAttributesForSnapshot(
       // Attribute already in kHtmlId or kClassName.
       continue;
     }
-    std::string name = attr_name.LocalName().LowerASCII().Utf8();
+    std::string name = attr_name.LocalName().ToAsciiLower().Utf8();
     std::string value = attr.Value().Utf8();
     node_data->html_attributes.push_back(std::make_pair(name, value));
   }
@@ -2943,10 +2945,6 @@ bool AXObject::IsProgressIndicator() const {
   return false;
 }
 
-bool AXObject::IsAXRadioInput() const {
-  return false;
-}
-
 bool AXObject::IsSlider() const {
   return false;
 }
@@ -3220,10 +3218,6 @@ bool AXObject::IsImageMapLink() const {
   return false;
 }
 
-bool AXObject::IsMenu() const {
-  return RoleValue() == ax::mojom::blink::Role::kMenu;
-}
-
 bool AXObject::IsCheckable() const {
   switch (RoleValue()) {
     case ax::mojom::blink::Role::kCheckBox:
@@ -3340,14 +3334,6 @@ bool AXObject::IsNativeCheckboxInMixedState(const Node* node) {
   return input->ShouldAppearIndeterminate();
 }
 
-bool AXObject::IsMenuRelated() const {
-  return ui::IsMenuRelated(RoleValue());
-}
-
-bool AXObject::IsMeter() const {
-  return RoleValue() == ax::mojom::blink::Role::kMeter;
-}
-
 bool AXObject::IsNativeImage() const {
   return false;
 }
@@ -3418,10 +3404,6 @@ bool AXObject::IsRangeValueSupported() const {
   return ui::IsRangeValueSupported(RoleValue());
 }
 
-bool AXObject::IsScrollbar() const {
-  return RoleValue() == ax::mojom::blink::Role::kScrollBar;
-}
-
 bool AXObject::IsNativeSlider() const {
   return false;
 }
@@ -3432,10 +3414,6 @@ bool AXObject::IsSpinButton() const {
 
 bool AXObject::IsTabItem() const {
   return RoleValue() == ax::mojom::blink::Role::kTab;
-}
-
-bool AXObject::IsTabList() const {
-  return RoleValue() == ax::mojom::blink::Role::kTabList;
 }
 
 bool AXObject::IsTextField() const {
@@ -4345,11 +4323,9 @@ bool AXObject::ComputeIsIgnoredButIncludedInTree() {
     // the final offset because the associated tree position. In some cases
     // platform accessibility code will instead incorrectly emit a caret moved
     // event for the AXPosition which follows the input.
-    if (IsA<HTMLInputElement>(owner) &&
-        (DynamicTo<HTMLInputElement>(owner)->FormControlType() ==
-             FormControlType::kInputSearch ||
-         DynamicTo<HTMLInputElement>(owner)->FormControlType() ==
-             FormControlType::kInputNumber)) {
+    if (auto* input = DynamicTo<HTMLInputElement>(owner);
+        input && (input->FormControlType() == FormControlType::kInputSearch ||
+                  input->FormControlType() == FormControlType::kInputNumber)) {
       return false;
     }
   }
@@ -7939,7 +7915,7 @@ ax::mojom::blink::Role AXObject::FirstValidRoleInRoleString(
       value.SimplifyWhiteSpace().SplitSkippingEmpty(' ');
   for (const auto& child : role_vector) {
     ax::mojom::blink::Role role =
-        AriaRoleToInternalRole(AtomicString(child.LowerASCII()));
+        AriaRoleToInternalRole(AtomicString(child.ToAsciiLower()));
     if (role == ax::mojom::blink::Role::kUnknown ||
         (ignore_form_and_region && (role == ax::mojom::blink::Role::kForm ||
                                     role == ax::mojom::blink::Role::kRegion))) {
@@ -8328,8 +8304,11 @@ const AXObject* AXObject::LowestCommonAncestor(const AXObject& first,
 
 // Extra checks that only occur during serialization.
 void AXObject::PreSerializationConsistencyCheck() const{
-  SCOPED_CRASH_KEY_STRING256("AXObject", "Error",
-                             this->ToString().Utf8().c_str());
+  int reason_val = cached_values_dirty_reason_.has_value()
+                       ? static_cast<int>(cached_values_dirty_reason_.value())
+                       : -1;
+  SCOPED_CRASH_KEY_NUMBER("AXObject", "DirtyReason", reason_val);
+
   CHECK(!IsDetached()) << "Do not serialize detached nodes: " << this;
   CHECK(AXObjectCache().IsFrozen());
   CHECK(!NeedsToUpdateCachedValues()) << "Stale values on: " << this;
@@ -8362,7 +8341,7 @@ String AXObject::GetNodeString(Node* node) {
   }
 
   StringBuilder string_builder;
-  string_builder << "<" << element->tagName().LowerASCII();
+  string_builder << "<" << element->tagName().ToAsciiLower();
   // Cannot safely get @class from SVG elements.
   if (!element->IsSVGElement() &&
       element->FastHasAttribute(html_names::kClassAttr)) {

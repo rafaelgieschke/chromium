@@ -7,7 +7,7 @@
 namespace blink {
 
 void GridSizingTree::AddToPreorderTraversal(const BlockNode& grid_node) {
-  DCHECK(grid_node.IsGrid());
+  DCHECK(grid_node.IsGrid() || grid_node.IsGridLanes());
 
   const auto* grid_layout_box = grid_node.GetLayoutBox();
   DCHECK(!subgrid_index_lookup_map_.Contains(grid_layout_box));
@@ -17,22 +17,26 @@ void GridSizingTree::AddToPreorderTraversal(const BlockNode& grid_node) {
 }
 
 void GridSizingTree::SetSizingNodeData(const BlockNode& grid_node,
-                                       GridItems&& grid_items,
-                                       GridLayoutData&& layout_data) {
-  DCHECK(grid_node.IsGrid());
+                                       GridItems* grid_items,
+                                       GridLayoutData* layout_data,
+                                       GridItems* virtual_items) {
+  DCHECK(grid_node.IsGrid() || grid_node.IsGridLanes());
 
   const bool has_standalone_columns =
-      !layout_data.HasSubgriddedAxis(kForColumns);
-  const bool has_standalone_rows = !layout_data.HasSubgriddedAxis(kForRows);
+      !layout_data->HasSubgriddedAxis(kForColumns);
+  const bool has_standalone_rows = !layout_data->HasSubgriddedAxis(kForRows);
 
   const auto grid_node_index = LookupSubgridIndex(grid_node);
   auto child_subgrid_index = grid_node_index + 1;
   auto& tree_node = At(grid_node_index);
 
-  for (wtf_size_t current_item_index = 0; const auto& grid_item : grid_items) {
+  for (wtf_size_t current_item_index = 0; const auto& grid_item : *grid_items) {
     // If this grid item is a subgrid, we need to add its subtree size to this
     // grid's subtree size and move to the next `child_subgrid_index`.
-    if (grid_item.IsSubgrid()) {
+    //
+    // TODO(almaher): Remove the grid-lanes check once subgrid support is
+    // implemented for grid-lanes.
+    if (grid_item.IsSubgrid() && !grid_node.Style().IsDisplayGridLanesBox()) {
       DCHECK_EQ(child_subgrid_index, LookupSubgridIndex(grid_item.node));
       const auto subtree_size = SubtreeSize(child_subgrid_index);
       tree_node.subtree_size += subtree_size;
@@ -59,8 +63,9 @@ void GridSizingTree::SetSizingNodeData(const BlockNode& grid_node,
                                             subgridded_item_indices);
   }
 
-  tree_node.grid_items = std::move(grid_items);
-  tree_node.layout_data = std::move(layout_data);
+  tree_node.grid_items = grid_items;
+  tree_node.virtual_items = virtual_items;
+  tree_node.layout_data = layout_data;
   tree_node.writing_mode = grid_node.Style().GetWritingMode();
 }
 
@@ -73,7 +78,8 @@ const GridLayoutTree* GridSizingTree::FinalizeTree() const {
   for (const auto& grid_tree_node : tree_data_) {
     layout_tree_data.emplace_back(
         MakeGarbageCollected<GridLayoutTree::GridTreeNode>(
-            grid_tree_node.layout_data, grid_tree_node.subtree_size));
+            MakeGarbageCollected<GridLayoutData>(*grid_tree_node.layout_data),
+            grid_tree_node.subtree_size));
   }
 
   for (wtf_size_t i = tree_size; i; --i) {
@@ -106,7 +112,7 @@ SubgriddedItemData GridSizingTree::LookupSubgriddedItemData(
 
   const auto& subgrid_tree_node = At(parent_grid_index);
   return SubgriddedItemData(
-      subgrid_tree_node.grid_items.At(item_index_in_parent),
+      subgrid_tree_node.grid_items->At(item_index_in_parent),
       subgrid_tree_node.layout_data, subgrid_tree_node.writing_mode);
 }
 

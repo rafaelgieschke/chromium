@@ -15,6 +15,7 @@
 #include "base/task/thread_pool.h"
 #include "components/enterprise/connectors/core/cloud_content_scanning/binary_upload_request.h"
 #include "components/enterprise/connectors/core/cloud_content_scanning/binary_upload_service.h"
+#include "components/enterprise/connectors/core/cloud_content_scanning/file_opening_job.h"
 #include "components/enterprise/connectors/core/common.h"
 #include "components/enterprise/connectors/core/features.h"
 #include "components/enterprise/obfuscation/core/download_obfuscator.h"
@@ -33,6 +34,7 @@ namespace {
 
 constexpr size_t kReadFileChunkSize = 4096;
 constexpr size_t kMaxUploadSizeMetricsKB = 500 * 1024;
+constexpr uint64_t kMaxHashComputeSizeBytes = 25ull * 1024 * 1024 * 1024;
 
 #if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 bool IsZipFile(const base::FilePath::StringType& extension,
@@ -204,9 +206,13 @@ GetFileDataBlocking(
       return {enterprise_connectors::ScanRequestUploadResult::kUnknown,
               file_data};
     }
+  } else if (file_data.size > kMaxHashComputeSizeBytes) {
+    // When none of the above conditions are true and the file is very large,
+    // avoid excessive compute time by not computing the hash.
+    file_data.hash = "";
   } else {
-    // When all three conditions are false, set the function parameter reference
-    // to a callback that computes the hash.
+    // Otherwise, set the function parameter reference to a callback that
+    // computes the hash.
     output_compute_hash_callback = base::BindOnce(
         &ComputeHashBlocking, std::move(file), std::move(scoped_file_access));
   }
@@ -258,6 +264,11 @@ FileAnalysisRequestBase::~FileAnalysisRequestBase() {
   if (!hash_notify_callbacks_.empty()) {
     OnGotHash(std::string());
   }
+}
+
+void FileAnalysisRequestBase::set_file_opening_job(
+    scoped_refptr<safe_browsing::FileOpeningJob> file_opening_job) {
+  file_opening_job_ = std::move(file_opening_job);
 }
 
 void FileAnalysisRequestBase::GetRequestData(DataCallback callback) {
@@ -345,6 +356,7 @@ void FileAnalysisRequestBase::OnGotHash(std::string hash) {
     std::move(hash_notify_callbacks_.front()).Run(hash);
     hash_notify_callbacks_.pop_front();
   }
+  file_opening_job_.reset();
 }
 
 bool FileAnalysisRequestBase::HasMalwareRequest() const {
@@ -363,6 +375,7 @@ void FileAnalysisRequestBase::OnGotFileData(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   scoped_file_access_.reset();
+  file_opening_job_.reset();
   if (result_and_data.first != ScanRequestUploadResult::kSuccess) {
     CacheResultAndData(result_and_data.first,
                        std::move(result_and_data.second));

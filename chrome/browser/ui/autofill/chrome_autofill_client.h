@@ -249,7 +249,8 @@ class ChromeAutofillClient : public ContentAutofillClient {
       EntityImportPromptResultCallback prompt_result_callback) final;
   void CloseEntityImportBubble() final;
   void ShowAutofillAiLocalSaveNotification() final;
-  void ShowAutofillAiFailureNotification(std::u16string message) final;
+  void ShowAutofillAiSaveToWalletFailureNotification() final;
+  void ShowAutofillAiFetchFromWalletFailureNotification() final;
   void ShowEmailVerifiedToast() final;
 
   // TODO(crbug.com/407666146): Create a test API.
@@ -318,8 +319,7 @@ class ChromeAutofillClient : public ContentAutofillClient {
   // may be called for actors unrelated to the current tab. If an update is
   // related to the current tab.
   // TODO(crbug.com/469428128) Enable on android once crrev.com/c/7298488 lands.
-  void OnActorTaskStateChange(actor::TaskId task_id,
-                              actor::ActorTask::State state);
+  void OnActorTaskStateChange(actor::ActorTask& task);
 #endif  // !BUILDFLAG(IS_ANDROID)
 
   const raw_ptr<LogRouter> log_router_ =

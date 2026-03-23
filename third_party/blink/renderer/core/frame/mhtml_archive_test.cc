@@ -133,7 +133,7 @@ class MHTMLArchiveTest : public testing::Test {
       if (pos == kNotFound)
         continue;
       String key = line.substr(0, pos);
-      String value = line.Substring(pos + 2);
+      String value = line.substr(pos + 2);
       mhtml_headers.insert(key, value);
 
       line = next_line;
@@ -154,7 +154,7 @@ class MHTMLArchiveTest : public testing::Test {
                          bool validate) {
     // This boundary is as good as any other.  Plus it gets used in almost
     // all the examples in the MHTML spec - RFC 2557.
-    String boundary = String::FromUTF8("boundary-example");
+    String boundary = "boundary-example";
 
     MHTMLArchive::GenerateMHTMLHeader(boundary, url, title, mime_type,
                                       mhtml_date_, mhtml_data_);

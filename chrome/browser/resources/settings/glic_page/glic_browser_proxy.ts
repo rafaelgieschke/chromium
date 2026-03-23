@@ -9,7 +9,7 @@ import {sendWithPromise} from 'chrome://resources/js/cr.js';
  */
 export interface LoginPermission {
   signonRealm: string;
-  username?: string;
+  username: string;
   displayName: string;
   faviconUrl: string;
 }
@@ -30,7 +30,9 @@ export interface GlicBrowserProxy {
    * Revoke actor login permission for a given signonRealm.
    * @param signonRealm The signon realm for which to revoke the permission.
    */
-  revokeActorLoginPermission(signonRealm: string): void;
+  revokeActorLoginPermission(signonRealm: string, username: string): void;
+  getGlicSelectionShortcut(): Promise<string>;
+  setGlicSelectionShortcut(shortcut: string): Promise<void>;
 }
 
 export class GlicBrowserProxyImpl implements GlicBrowserProxy {
@@ -66,8 +68,16 @@ export class GlicBrowserProxyImpl implements GlicBrowserProxy {
     return sendWithPromise('getActorLoginPermissions');
   }
 
-  revokeActorLoginPermission(signonRealm: string) {
-    chrome.send('revokeActorLoginPermission', [signonRealm]);
+  revokeActorLoginPermission(signonRealm: string, username: string) {
+    chrome.send('revokeActorLoginPermission', [signonRealm, username]);
+  }
+
+  getGlicSelectionShortcut() {
+    return sendWithPromise('getGlicSelectionShortcut');
+  }
+
+  setGlicSelectionShortcut(shortcut: string) {
+    return sendWithPromise('setGlicSelectionShortcut', shortcut);
   }
 
   static getInstance(): GlicBrowserProxy {

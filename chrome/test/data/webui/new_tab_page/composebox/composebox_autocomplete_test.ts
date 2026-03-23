@@ -3,17 +3,17 @@
 // found in the LICENSE file.
 
 import {ComposeboxElement, VoiceSearchAction} from 'chrome://new-tab-page/lazy_load.js';
-import {$$} from 'chrome://new-tab-page/new_tab_page.js';
 import {InputType} from 'chrome://resources/cr_components/composebox/composebox_query.mojom-webui.js';
+import type {ComposeboxVoiceSearchElement} from 'chrome://resources/cr_components/composebox/composebox_voice_search.js';
 import {createAutocompleteResultForTesting, createSearchMatchForTesting} from 'chrome://resources/cr_components/searchbox/searchbox_browser_proxy.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
 import type {TabInfo} from 'chrome://resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
-import {eventToPromise, microtasksFinished} from 'chrome://webui-test/test_util.js';
+import {$$, eventToPromise, microtasksFinished} from 'chrome://webui-test/test_util.js';
 
 import {assertStyle} from '../test_support.js';
 
-import {ADD_FILE_CONTEXT_FN, ADD_TAB_CONTEXT_FN, areMatchesShowing, createComposeboxElement, FAKE_TOKEN_STRING, generateZeroId, getSubmitContainer, mockInputState, setupComposeboxTest} from './test_support.js';
+import {ADD_FILE_CONTEXT_FN, ADD_TAB_CONTEXT_FN, areMatchesShowing, createComposeboxElement, FAKE_TOKEN_STRING, generateZeroId, getSubmitContainer, MockInputState, setupComposeboxTest} from './test_support.js';
 
 enum Attributes {
   SELECTED = 'selected',
@@ -126,6 +126,7 @@ suite('NewTabPageComposeboxAutocompleteDropdownTest', () => {
       name: 'foo.jpg',
       status: 0,
       type: 'image/jpeg',
+      inputType: InputType.kLensFile,
       isDeletable: true,
       objectUrl: null,
       dataUrl: null,
@@ -139,6 +140,7 @@ suite('NewTabPageComposeboxAutocompleteDropdownTest', () => {
       name: 'foo2.jpg',
       status: 0,
       type: 'image/jpeg',
+      inputType: InputType.kLensFile,
       isDeletable: true,
       objectUrl: null,
       dataUrl: null,
@@ -224,6 +226,7 @@ suite('NewTabPageComposeboxAutocompleteDropdownTest', () => {
       name: 'foo.jpg',
       status: 0,
       type: 'image/jpeg',
+      inputType: InputType.kLensFile,
       isDeletable: true,
       objectUrl: null,
       dataUrl: null,
@@ -984,8 +987,8 @@ suite('NewTabPageComposeboxAutocompleteContextTest', () => {
       'autocomplete not requeried if file removed and autochip remains',
       async () => {
         const testInputState = {
-          ...mockInputState,
-          maxInstances: {
+          ...new MockInputState(),
+          maxInputsByType: {
             [InputType.kBrowserTab]: 1,
             [InputType.kLensImage]: 3,
             [InputType.kLensFile]: 1,
@@ -1036,6 +1039,7 @@ suite('NewTabPageComposeboxAutocompleteContextTest', () => {
           name: 'foo.jpg',
           status: 0,
           type: 'image/jpeg',
+          inputType: InputType.kLensFile,
           isDeletable: true,
           objectUrl: null,
           dataUrl: null,
@@ -1190,7 +1194,10 @@ suite('NewTabPageComposeboxAutocompleteVoiceSearchTest', () => {
     testProxy.searchboxHandler.reset();
 
     const voiceQuery = 'hello';
-    testProxy.element.$.voiceSearch.dispatchEvent(new CustomEvent(
+    const voiceSearchElement = $$<ComposeboxVoiceSearchElement>(
+        testProxy.element, 'cr-composebox-voice-search');
+    assertTrue(!!voiceSearchElement);
+    voiceSearchElement.dispatchEvent(new CustomEvent(
         'voice-search-final-result',
         {detail: voiceQuery, bubbles: true, composed: true}));
     await microtasksFinished();
@@ -1255,7 +1262,10 @@ suite('NewTabPageComposeboxAutocompleteVoiceSearchTest', () => {
         const voiceSearchActionPromise =
             eventToPromise('voice-search-action', testProxy.element);
         const voiceQuery = 'hello';
-        testProxy.element.$.voiceSearch.dispatchEvent(new CustomEvent(
+        const voiceSearchElement = $$<ComposeboxVoiceSearchElement>(
+            testProxy.element, 'cr-composebox-voice-search');
+        assertTrue(!!voiceSearchElement);
+        voiceSearchElement.dispatchEvent(new CustomEvent(
             'voice-search-final-result',
             {detail: voiceQuery, bubbles: true, composed: true}));
 

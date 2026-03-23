@@ -27,6 +27,10 @@ class OptimizationGuideKeyedService;
 class PrefService;
 class TemplateURLService;
 
+namespace signin {
+class IdentityManager;
+}
+
 namespace content {
 class WebContents;
 }  // namespace content
@@ -35,9 +39,9 @@ namespace predictors {
 class LoadingPredictor;
 }  // namespace predictors
 
-namespace tabs {
+namespace glic {
 enum class GlicNudgeActivity;
-}  // namespace tabs
+}  // namespace glic
 
 namespace contextual_cueing {
 
@@ -56,6 +60,7 @@ class ContextualCueingService
           page_content_extraction_service,
       OptimizationGuideKeyedService* optimization_guide_keyed_service,
       predictors::LoadingPredictor* loading_predictor,
+      signin::IdentityManager* identity_manager,
       PrefService* pref_service,
       TemplateURLService* template_url_service);
   ~ContextualCueingService() override;
@@ -68,7 +73,7 @@ class ContextualCueingService
   void OnNudgeActivity(content::WebContents* web_contents,
                        base::TimeTicks document_available_time,
                        bool is_dynamic,
-                       tabs::GlicNudgeActivity activity);
+                       glic::GlicNudgeActivity activity);
 
   // Should be called when the cueing UI is shown for the tab with `url`.
   void CueingNudgeShown(const GURL& url);
@@ -182,6 +187,8 @@ class ContextualCueingService
   raw_ptr<PrefService> pref_service_ = nullptr;
 
   raw_ptr<TemplateURLService> template_url_service_ = nullptr;
+
+  raw_ptr<signin::IdentityManager> identity_manager_ = nullptr;
 
   // Stores model execution url to save look up time.
   GURL mes_url_;

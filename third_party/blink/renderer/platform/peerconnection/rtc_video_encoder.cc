@@ -58,6 +58,7 @@
 #include "third_party/blink/renderer/platform/allow_discouraged_type.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/shared_gpu_context.h"
 #include "third_party/blink/renderer/platform/graphics/web_graphics_context_3d_video_frame_pool.h"
+#include "third_party/blink/renderer/platform/peerconnection/rtc_video_encoder_media_log.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/webrtc/convert_to_webrtc_video_frame_buffer.h"
 #include "third_party/blink/renderer/platform/webrtc/webrtc_video_frame_adapter.h"
@@ -353,15 +354,6 @@ namespace blink {
 
 namespace features {
 
-// Enabled-by-default, except for Android where SW encoder for H264 and AV1 are
-// not available. The existence of this flag remains only for testing purposes.
-BASE_FEATURE(kForceSoftwareForLowResolutions,
-#if !BUILDFLAG(IS_ANDROID)
-             base::FEATURE_ENABLED_BY_DEFAULT);
-#else
-             base::FEATURE_DISABLED_BY_DEFAULT);
-#endif
-
 // Avoids large latencies to build up by dropping frames when the number of
 // frames that are sent to a hardware video encoder reaches a certain limit.
 // See b/298660336 for details.
@@ -634,14 +626,10 @@ bool UseSoftwareForLowResolution(const webrtc::VideoCodecType codec,
   // situations where a codec like H264 is available in HW but not SW in which
   // case SW fallback would result in a change of codec, see
   // https://crbug.com/1469318.
+  // Note: This flag will be rolled and enabled everywhere since we now check
+  // for actual software code availability when determining if it's possible.
   if (!base::FeatureList::IsEnabled(
-          features::kForceSoftwareForLowResolutions)) {
-    return false;
-  }
-
-  // H.265 does not support SW fallback, so it is excluded from low resoloution
-  // fallback.
-  if (codec == webrtc::kVideoCodecH265) {
+          media::kForceSoftwareForRtcLowResolutions)) {
     return false;
   }
 
@@ -1033,6 +1021,8 @@ class RTCVideoEncoder::Impl : public media::VideoEncodeAccelerator::Client {
   // instead of SVC. Set only when simulcat config is emulated by SVC one.
   std::optional<webrtc::SimulcastToSvcConverter> simulcast_to_svc_converter_;
 
+  std::unique_ptr<media::MediaLog> media_log_;
+
   // They are bound to |gpu_task_runner_|, which is sequence checked by
   // |sequence_checker|.
   base::WeakPtr<Impl> weak_this_;
@@ -1115,8 +1105,13 @@ void RTCVideoEncoder::Impl::CreateAndInitializeVEA(
       /*is_hardware_encoder=*/true,
       ToSVCScalabilityMode(vea_config.spatial_layers,
                            vea_config.inter_layer_pred));
-  if (auto status = video_encoder_->Initialize(
-          vea_config, this, std::make_unique<media::NullMediaLog>());
+
+  if (!media_log_) {
+    media_log_ = std::make_unique<RTCVideoEncoderMediaLog>();
+  }
+
+  if (auto status =
+          video_encoder_->Initialize(vea_config, this, media_log_->Clone());
       !status.is_ok()) {
     NotifyErrorStatus(
         {media::EncoderStatus::Codes::kEncoderInitializationError,
@@ -2481,9 +2476,11 @@ RTCVideoEncoder::RTCVideoEncoder(
     bool is_constrained_h264,
     media::GpuVideoAcceleratorFactories* gpu_factories,
     scoped_refptr<media::MojoVideoEncoderMetricsProviderFactory>
-        encoder_metrics_provider_factory)
+        encoder_metrics_provider_factory,
+    bool is_software_fallback_available)
     : profile_(profile),
       is_constrained_h264_(is_constrained_h264),
+      is_software_fallback_available_(is_software_fallback_available),
       gpu_factories_(gpu_factories),
       encoder_metrics_provider_factory_(
           std::move(encoder_metrics_provider_factory)),
@@ -2695,7 +2692,8 @@ int32_t RTCVideoEncoder::InitEncode(
 
   codec_settings_ = converted_settings;
 
-  if (UseSoftwareForLowResolution(codec_settings_.codecType,
+  if (is_software_fallback_available_ &&
+      UseSoftwareForLowResolution(codec_settings_.codecType,
                                   codec_settings_.width,
                                   codec_settings_.height)) {
     return initialization_error_message;

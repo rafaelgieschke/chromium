@@ -379,6 +379,7 @@ component("base") {
     "memory/available_memory_monitor.cc",
     "memory/available_memory_monitor.h",
     "memory/free_deleter.h",
+    "memory/index_pointer.h",
     "memory/memory_pressure_level.h",
     "memory/memory_pressure_listener.cc",
     "memory/memory_pressure_listener.h",
@@ -442,6 +443,8 @@ component("base") {
     "memory_coordinator/memory_consumer_registry.cc",
     "memory_coordinator/memory_consumer_registry.h",
     "memory_coordinator/memory_consumer_registry_destruction_observer.h",
+    "memory_coordinator/memory_coordinator_features.cc",
+    "memory_coordinator/memory_coordinator_features.h",
     "memory_coordinator/traits.h",
     "memory_coordinator/utils.h",
     "message_loop/io_watcher.cc",
@@ -1140,6 +1143,7 @@ component("base") {
     "//base/numerics:base_numerics",
     "//base/third_party/icu",
     "//build:chromecast_buildflags",
+    "//build:robolectric_buildflags",
     "//third_party/abseil-cpp:absl",
   ]
 
@@ -1434,9 +1438,11 @@ component("base") {
       ":library_loader_jni($default_toolchain)",
       ":metrics_jni($default_toolchain)",
       ":tasks_minimal_jni($default_toolchain)",
-      "//build:robolectric_buildflags",
     ]
-    public_deps += [ "//third_party/jni_zero" ]
+    public_deps += [
+      ":uuid_jni($default_toolchain)",
+      "//third_party/jni_zero",
+    ]
   }  # is_android || is_robolectric
 
   # Chromeos.
@@ -4660,6 +4666,10 @@ if (is_android) {
     ]
   }
 
+  generate_jar_jni("uuid_jni") {
+    classes = [ "java/util/UUID.class" ]
+  }
+
   java_cpp_features("java_features_srcjar") {
     # External code should depend on ":base_java" instead.
     visibility = [ ":*" ]
@@ -5863,6 +5873,7 @@ if (is_android) {
   }
 
   robolectric_binary("base_junit_tests") {
+    enable_android_resources = false
     shared_libraries = [ ":libbase_junit_tests($robolectric_toolchain)" ]
     sources = [
       "android/junit/src/org/chromium/base/ApplicationStatusTest.java",

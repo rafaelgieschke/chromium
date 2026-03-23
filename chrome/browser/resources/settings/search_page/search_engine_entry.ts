@@ -146,8 +146,8 @@ export class SettingsSearchEngineEntryElement extends
     e.preventDefault();
     this.closePopupMenu_();
 
-    if (!this.engine.shouldConfirmDeletion) {
-      this.browserProxy_.removeSearchEngine(this.engine.modelIndex);
+    if (!this.engine.shouldConfirmRemoval) {
+      this.browserProxy_.removeSearchEngine(this.engine.id);
       return;
     }
 
@@ -192,20 +192,20 @@ export class SettingsSearchEngineEntryElement extends
   private onMakeDefaultClick_() {
     this.closePopupMenu_();
     this.browserProxy_.setDefaultSearchEngine(
-        this.engine.modelIndex, ChoiceMadeLocation.SEARCH_ENGINE_SETTINGS,
+        this.engine.id, ChoiceMadeLocation.SEARCH_ENGINE_SETTINGS,
         /*saveGuestChoice=*/ null);
   }
 
   private onActivateClick_() {
     this.closePopupMenu_();
     this.browserProxy_.setIsActiveSearchEngine(
-        this.engine.modelIndex, /*is_active=*/ true);
+        this.engine.id, /*is_active=*/ true);
   }
 
   private onDeactivateClick_() {
     this.closePopupMenu_();
     this.browserProxy_.setIsActiveSearchEngine(
-        this.engine.modelIndex, /*is_active=*/ false);
+        this.engine.id, /*is_active=*/ false);
   }
 
   private onDownloadedIconLoadError_() {

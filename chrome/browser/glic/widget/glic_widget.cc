@@ -49,7 +49,9 @@
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/win/hwnd_metrics.h"
 #include "ui/base/win/shell.h"
+#include "ui/display/win/screen_win.h"
 #include "ui/views/win/hwnd_util.h"
+#include "ui/views/window/native_frame_view.h"
 #endif
 
 #if BUILDFLAG(IS_LINUX)
@@ -58,8 +60,8 @@
 
 #if BUILDFLAG(IS_CHROMEOS)
 #include "ash/frame/frame_view_ash.h"
-#include "ash/wm/window_util.h"
 #include "chromeos/ui/base/window_properties.h"
+#include "chromeos/ui/wm/window_util.h"
 #endif
 
 namespace glic {
@@ -106,6 +108,42 @@ class GlicClientView : public views::ClientView {
   GlicView* glic_view() { return static_cast<GlicView*>(contents_view()); }
 };
 
+#if BUILDFLAG(IS_WIN)
+class GlicFrameViewWin : public views::NativeFrameView {
+ public:
+  explicit GlicFrameViewWin(views::Widget* widget)
+      : views::NativeFrameView(widget) {}
+
+  GlicFrameViewWin(const GlicFrameViewWin&) = delete;
+  GlicFrameViewWin& operator=(const GlicFrameViewWin&) = delete;
+
+  ~GlicFrameViewWin() override = default;
+
+  int NonClientHitTest(const gfx::Point& point) override {
+    if (!bounds().Contains(point)) {
+      return HTNOWHERE;
+    }
+
+    const int resize_border =
+        display::win::GetScreenWin()->GetSystemMetricsInDIP(SM_CXSIZEFRAME);
+    const bool can_resize = GetWidget()->widget_delegate()->CanResize();
+
+    // Same value as used in `BrowserFrameViewWin::NonClientHitTest()`.
+    constexpr int kResizeAreaCornerSize = 16;
+    const int frame_component = GetHTComponentForFrame(
+        point, gfx::Insets(resize_border),
+        kResizeAreaCornerSize - resize_border,
+        kResizeAreaCornerSize - resize_border, can_resize);
+    if (frame_component != HTNOWHERE) {
+      return frame_component;
+    }
+
+    return views::NativeFrameView::NonClientHitTest(point);
+  }
+};
+
+#endif  // BUILDFLAG(IS_WIN)
+
 class GlicWidgetDelegate : public views::WidgetDelegate {
  public:
   GlicWidgetDelegate() = default;
@@ -115,58 +153,57 @@ class GlicWidgetDelegate : public views::WidgetDelegate {
 
   ~GlicWidgetDelegate() override = default;
 
-  // views::WidgetDelegate:
+#if defined(USE_AURA)
   bool ShouldDescendIntoChildForEventHandling(
       gfx::NativeView child,
       const gfx::Point& location) override {
     if (base::FeatureList::IsEnabled(features::kGlicHandleDraggingNatively)) {
-      return !glic_view()->IsPointWithinDraggableRegion(location);
+      // GlicWidget should claim mouse events that fall within the draggable
+      // region.
+      if (glic_view()->IsPointWithinDraggableRegion(location)) {
+        return false;
+      }
+
+      // On ChromeOS, constrained dialogs (like print dialogs) are child widgets
+      // of GlicWidget. We want these dialogs to claim mouses events, however
+      // hit-test can return `HTNOWHERE` for portions of dialogs outside of
+      // GlicWidget bounds.
+      const int hit_test = GetWidget()->GetNonClientComponent(location);
+      return hit_test == HTCLIENT || hit_test == HTNOWHERE;
     }
 
     return true;
   }
+#endif  // defined(USE_AURA)
 
- private:
-  GlicView* glic_view() {
-    return static_cast<GlicView*>(GetWidget()->GetClientContentsView());
-  }
-};
-
-#if BUILDFLAG(IS_CHROMEOS)
-
-class GlicFrameViewChromeOS : public ash::FrameViewAsh {
- public:
-  explicit GlicFrameViewChromeOS(views::Widget* widget)
-      : ash::FrameViewAsh(widget) {}
-
-  GlicFrameViewChromeOS(const GlicFrameViewChromeOS&) = delete;
-  GlicFrameViewChromeOS& operator=(const GlicFrameViewChromeOS&) = delete;
-
-  ~GlicFrameViewChromeOS() override = default;
-
-  // ash::FrameViewAsh:
-  int NonClientHitTest(const gfx::Point& point) override {
-    // As part of this hit testing, we check if the point is within the inside
-    // resizable region of the window.
-    int component = ash::FrameViewAsh::NonClientHitTest(point);
-
-    // If point falls into the client area (i.e web-contents), check if it
-    // within the draggable regions of web-contents.
-    if (component == HTCLIENT &&
-        glic_view()->IsPointWithinDraggableRegion(point)) {
-      return HTCAPTION;
+  void OnWidgetInitialized() override {
+    if (!base::FeatureList::IsEnabled(features::kGlicUseNonClient)) {
+      return;
     }
 
-    return component;
+    GetWidget()
+        ->non_client_view()
+        ->frame_view()
+        ->set_non_client_hit_test_callback(base::BindRepeating(
+            &GlicWidgetDelegate::NonClientHitTest, base::Unretained(this)));
   }
 
  private:
-  GlicView* glic_view() {
+  // Additional hit test handling to support draggable regions.
+  std::optional<int> NonClientHitTest(const gfx::Point& point) const {
+    if (base::FeatureList::IsEnabled(features::kGlicHandleDraggingNatively)) {
+      if (glic_view()->IsPointWithinDraggableRegion(point)) {
+        return HTCAPTION;
+      }
+    }
+
+    return std::nullopt;
+  }
+
+  GlicView* glic_view() const {
     return static_cast<GlicView*>(GetWidget()->GetClientContentsView());
   }
 };
-
-#endif  // #if BUILDFLAG(IS_CHROMEOS)
 
 bool ShouldCreateNonClientView() {
   return base::FeatureList::IsEnabled(features::kGlicUseNonClient);
@@ -309,14 +346,16 @@ std::unique_ptr<views::WidgetDelegate> GlicWidget::CreateWidgetDelegate(
         return std::make_unique<GlicClientView>(widget, contents_view);
       }));
 
-#if BUILDFLAG(IS_CHROMEOS)
+#if BUILDFLAG(IS_WIN)
   if (base::FeatureList::IsEnabled(features::kGlicHandleDraggingNatively)) {
     delegate->SetFrameViewFactory(base::BindRepeating(
         [](views::Widget* widget) -> std::unique_ptr<views::FrameView> {
-          return std::make_unique<GlicFrameViewChromeOS>(widget);
+          return std::make_unique<GlicFrameViewWin>(widget);
         }));
   }
+#endif  // BUILDFLAG(IS_WIN)
 
+#if BUILDFLAG(IS_CHROMEOS)
   // TODO(b:458115863): Move ChromeOS specific code to platform specific
   // implementation. (Like GlicWidgetChromeOS?)
   delegate->RegisterWidgetInitializedCallback(base::BindOnce(
@@ -330,14 +369,13 @@ std::unique_ptr<views::WidgetDelegate> GlicWidget::CreateWidgetDelegate(
             gfx::ScaleToFlooredInsets(mouse_insets, kResizeInsetScaleForTouch);
 
         auto* frame_window = delegate->GetWidget()->GetNativeWindow();
-        ash::window_util::InstallResizeHandleWindowTargeterForWindow(
+        chromeos::wm::InstallResizeHandleWindowTargeterForWindow(
             frame_window,
             chromeos::ResizeBorderInsets{.for_mouse = mouse_insets,
                                          .for_touch = touch_insets});
       },
       base::Unretained(delegate.get())));
 #endif
-
   return delegate;
 }
 

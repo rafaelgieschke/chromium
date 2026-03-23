@@ -68,8 +68,6 @@ class MockTaskInfoDelegate : public TaskInfoDelegate {
 
   void SetAimUrl(const GURL& url) override { url_ = url; }
 
-  GURL GetAimUrl() override { return url_; }
-
   bool IsShownInTab() override { return is_shown_in_tab_; }
 
   void SetIsShownInTab(bool is_shown_in_tab) {
@@ -580,7 +578,6 @@ TEST_F(ContextualTasksUiTest, TaskDetailsUpdated) {
   EXPECT_EQ(delegate.GetTaskId(), task_id);
   EXPECT_EQ(delegate.GetThreadId(), thread_id);
   EXPECT_EQ(delegate.GetThreadTurnId(), turn_id);
-  EXPECT_EQ(delegate.GetAimUrl(), url);
 
   // Fake an updated turn
   GURL url2(kAiPageUrl);
@@ -597,7 +594,6 @@ TEST_F(ContextualTasksUiTest, TaskDetailsUpdated) {
   EXPECT_EQ(delegate.GetTaskId(), task_id);
   EXPECT_EQ(delegate.GetThreadId(), thread_id);
   EXPECT_EQ(delegate.GetThreadTurnId(), turn_id2);
-  EXPECT_EQ(delegate.GetAimUrl(), url2);
   observer.reset();
 }
 
@@ -877,6 +873,22 @@ TEST_F(ContextualTasksUiTest,
     handle->set_is_same_document(true);
     observer->DidFinishNavigation(handle.get());
   }
+}
+
+TEST_F(ContextualTasksUiTest, SetAimUrlWithoutThreadId) {
+  GURL query_url("https://www.google.com/search?udm=50&q=test");
+  testing::NiceMock<MockTaskInfoDelegate> delegate;
+  SetupMockDelegate(&delegate, std::nullopt, std::nullopt, std::nullopt);
+  auto observer = std::make_unique<ContextualTasksUI::FrameNavObserver>(
+      embedded_web_contents_.get(), service_for_nav_.get(),
+      contextual_tasks_service_.get(), &delegate);
+
+  // SetAimUrl() should be called even if mtid is missing since pre-prod server
+  // may not have it.
+  auto handle = CreateMockNavigationHandle(query_url);
+  handle->set_has_committed(true);
+  handle->set_is_same_document(false);
+  observer->DidFinishNavigation(handle.get());
 }
 
 }  // namespace contextual_tasks

@@ -36,8 +36,6 @@ class StackStringViewAllocator {
     return StringView(buffer);
   }
 
-  StringView CoerceOriginal(StringView string) { return string; }
-
  private:
   StringView::StackBackingStore& backing_store_;
 };
@@ -45,7 +43,7 @@ class StackStringViewAllocator {
 template <typename CharType1, typename CharType2>
 int CodeUnitCompareIgnoringAsciiCase(base::span<const CharType1> c1,
                                      base::span<const CharType2> c2) {
-  return CodeUnitCompare(c1, c2, [](auto c) { return ToASCIILower(c); });
+  return CodeUnitCompare(c1, c2, [](auto c) { return ToAsciiLower(c); });
 }
 
 }  // namespace
@@ -198,7 +196,7 @@ bool StringView::SubstringContainsOnlyWhitespaceOrEmpty(size_type from,
   DCHECK_LE(from, to);
   return VisitCharacters(StringView(*this, from, to - from), [](auto chars) {
     for (size_t i = 0; i < chars.size(); ++i) {
-      if (!IsASCIISpace(chars[i])) {
+      if (!IsAsciiSpace(chars[i])) {
         return false;
       }
     }
@@ -223,8 +221,8 @@ StringView::size_type StringView::rfind(UChar ch, size_type start) const {
   if (empty()) {
     return npos;
   }
-  return Is8Bit() ? blink::ReverseFind(Span8(), ch, start)
-                  : blink::ReverseFind(Span16(), ch, start);
+  return Is8Bit() ? internal::ReverseFind(Span8(), ch, start)
+                  : internal::ReverseFind(Span16(), ch, start);
 }
 
 StringView::size_type StringView::rfind(const StringView& value,
@@ -235,7 +233,7 @@ StringView::size_type StringView::rfind(const StringView& value,
   }
   return VisitCharacters(*this, [&](auto chars) {
     if (value_length == 1u) {
-      return blink::ReverseFind(chars, value[0], start);
+      return internal::ReverseFind(chars, value[0], start);
     }
     return VisitCharacters(value, [&](auto value_chars) {
       return internal::ReverseFind(chars, value_chars, start);
@@ -317,7 +315,7 @@ String StringView::EncodeForDebugging() const {
         builder.Append("\\\\");
         break;
       default:
-        if (IsASCIIPrintable(character)) {
+        if (IsAsciiPrintable(character)) {
           builder.Append(static_cast<char>(character));
         } else {
           // Print "\uXXXX" for control or non-ASCII characters.
@@ -371,8 +369,11 @@ bool EqualIgnoringAsciiCase(const StringView& a, const StringView& b) {
   });
 }
 
-StringView StringView::LowerASCIIMaybeUsingBuffer(
+StringView StringView::LowerAsciiMaybeUsingBuffer(
     StackBackingStore& buffer) const {
+  if (ContainsNoAsciiUpper()) {
+    return *this;
+  }
   return ConvertAsciiCase(*this, LowerConverter(),
                           StackStringViewAllocator(buffer));
 }
@@ -386,7 +387,7 @@ int CodeUnitCompareIgnoringAsciiCase(const StringView& a, const StringView& b) {
                     : CodeUnitCompareIgnoringAsciiCase(a.Span16(), b.Span16());
 }
 
-UChar32 StringView::CodepointAt(size_type i) const {
+UChar32 StringView::CodePointAt(size_type i) const {
   SECURITY_DCHECK(i < length());
   if (Is8Bit())
     return (*this)[i];

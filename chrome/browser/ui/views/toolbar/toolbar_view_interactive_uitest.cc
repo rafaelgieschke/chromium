@@ -21,6 +21,7 @@
 #include "chrome/browser/ui/browser_element_identifiers.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/tabs/features.h"
 #include "chrome/browser/ui/tabs/tab_menu_model.h"
 #include "chrome/browser/ui/view_ids.h"
@@ -454,7 +455,7 @@ IN_PROC_BROWSER_TEST_P(ToolbarViewTest,
   Profile* guest = g_browser_process->profile_manager()->GetProfileByPath(
       ProfileManager::GetGuestProfilePath());
   ASSERT_TRUE(guest);
-  Browser* target_browser = chrome::FindAnyBrowser(guest, true);
+  BrowserWindowInterface* target_browser = chrome::FindAnyBrowser(guest, true);
   ASSERT_TRUE(target_browser);
   ExtensionsToolbarDesktop* extensions_container =
       BrowserView::GetBrowserViewForBrowser(target_browser)
@@ -470,7 +471,14 @@ IN_PROC_BROWSER_TEST_P(ToolbarViewTest,
 // assigned so that the menu can be located by tests when it is shown.
 //
 // The back button is just one example for which the menu identifier is defined.
-IN_PROC_BROWSER_TEST_P(ToolbarViewTest, BackButtonMenu) {
+//
+// TODO: crbug.com/494279213 - Re-enable this test on Windows.
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_BackButtonMenu DISABLED_BackButtonMenu
+#else
+#define MAYBE_BackButtonMenu BackButtonMenu
+#endif
+IN_PROC_BROWSER_TEST_P(ToolbarViewTest, MAYBE_BackButtonMenu) {
   DEFINE_LOCAL_ELEMENT_IDENTIFIER_VALUE(kWebContentsId);
   ASSERT_TRUE(embedded_test_server()->Start());
   const GURL url1 = embedded_test_server()->GetURL("/title1.html");

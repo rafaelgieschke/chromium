@@ -16,27 +16,30 @@ namespace accessibility_annotator {
 AccessibilityQueryService::AccessibilityQueryService(
     std::unique_ptr<AutofillDataProvider> data_provider)
     : data_provider_(std::move(data_provider)),
-      classifier_(std::make_unique<QueryClassifier>()) {}
+      classifier_(CreateQueryClassifier()) {}
 
 AccessibilityQueryService::~AccessibilityQueryService() = default;
 
 void AccessibilityQueryService::Shutdown() {
   data_provider_.reset();
-  classifier_.reset();
 }
 
-std::vector<MemorySearchResult> AccessibilityQueryService::Query(
-    const std::u16string& query) {
+void AccessibilityQueryService::Query(
+    std::u16string_view query,
+    base::RepeatingCallback<void(std::vector<MemorySearchResult>)>
+        update_callback) {
   if (!data_provider_) {
-    return {};
+    update_callback.Run({});
+    return;
   }
 
-  QueryIntentType intent = classifier_->Classify(query);
+  QueryIntentType intent = classifier_.Run(query);
   if (intent == QueryIntentType::kUnknown) {
-    return {};
+    update_callback.Run({});
+    return;
   }
 
-  return data_provider_->RetrieveAll(intent);
+  update_callback.Run(data_provider_->RetrieveAll(intent));
 }
 
 }  // namespace accessibility_annotator

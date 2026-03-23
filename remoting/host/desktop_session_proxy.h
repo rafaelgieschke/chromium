@@ -158,7 +158,9 @@ class DesktopSessionProxy
       std::unique_ptr<protocol::ClipboardStub> client_clipboard);
 
   // API used to implement the SessionController interface.
-  void SetScreenResolution(const ScreenResolution& resolution);
+  void SetScreenResolution(const ScreenResolution& resolution,
+                           std::optional<webrtc::ScreenId> screen_id);
+  void SetVideoLayout(const protocol::VideoLayout& layout);
 
   // API used to implement the ActionExecutor interface.
   void ExecuteAction(const protocol::ActionRequest& request);
@@ -182,6 +184,8 @@ class DesktopSessionProxy
   void OnLocalMouseMoveDetected(
       const webrtc::DesktopVector& new_position) override;
   void OnLocalKeyboardInputDetected(int32_t usb_keycode) override;
+  void OnSecurityKeyConnection(
+      mojo::PendingReceiver<mojom::SecurityKeyForwarder> receiver) override;
 
   // mojom::DesktopSessionStateHandler implementation.
   void DisconnectSession(protocol::ErrorCode error,

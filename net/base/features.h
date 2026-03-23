@@ -432,17 +432,6 @@ NET_EXPORT BASE_DECLARE_FEATURE(kDeviceBoundSessions);
 // across restarts. This feature is only valid if `kDeviceBoundSessions` is
 // enabled.
 NET_EXPORT BASE_DECLARE_FEATURE(kPersistDeviceBoundSessions);
-// This feature will enable the Device Bound Session Credentials
-// protocol on all pages, ignoring the requirements for Origin Trial
-// headers. This is required because we cannot properly add the origin
-// trial header due to the circumstances outlined in
-// https://crbug.com/40860522. An EmbeddedTestServer cannot reliably be
-// started on one origin due to port randomization, an Origin Trial
-// cannot be generated dynamically, and a URLLoaderInterceptor will mock
-// the exact code we need to test.
-NET_EXPORT BASE_DECLARE_FEATURE_PARAM(
-    bool,
-    kDeviceBoundSessionsRequireOriginTrialTokens);
 // This feature enables the Device Bound Session Credentials refresh quota.
 // This behavior is expected by default; disabling it should only be for
 // testing purposes.
@@ -489,6 +478,11 @@ NET_EXPORT BASE_DECLARE_FEATURE_PARAM(
     std::string,
     kDeviceBoundSessionsForRestrictedSitesExperimentIdParam);
 
+// This feature will enable the browser to use Device Bound Session Credentials
+// for Single Sign On. This feature is only valid if `kDeviceBoundSessions` is
+// enabled.
+NET_EXPORT BASE_DECLARE_FEATURE(kDeviceBoundSessionsForSingleSignOn);
+
 // Enables more checks when creating a SpdySession for proxy. These checks are
 // already applied to non-proxy SpdySession creations.
 // TODO(crbug.com/343519247): Remove this once we are sure that these checks are
@@ -524,6 +518,10 @@ NET_EXPORT BASE_DECLARE_FEATURE(kNoVarySearchIgnoreUnrecognizedKeys);
 // Enables enforcement of One-RFC6962 policy for Certificate Transparency. When
 // disabled, Chrome does not distinguish between SCTs based on log type.
 NET_EXPORT BASE_DECLARE_FEATURE(kEnforceOneRfc6962CtPolicy);
+
+// If enabled, Signed Certificate Timestamps (SCTs) delivered via OCSP
+// responses are ignored.
+NET_EXPORT BASE_DECLARE_FEATURE(kCertificateTransparencyIgnoreOcspScts);
 
 // Finch experiment to select a disk cache backend.
 enum class DiskCacheBackend {
@@ -812,6 +810,13 @@ NET_EXPORT BASE_DECLARE_FEATURE(
 NET_EXPORT BASE_DECLARE_FEATURE(kSQLitePersistentCookieStoreEarlyInit);
 NET_EXPORT extern const base::FeatureParam<bool>
     kSQLitePersistentCookieStoreEarlyInitCheckDisk;
+
+// If enabled, the error code will be propagated for preconnect attempts.
+NET_EXPORT BASE_DECLARE_FEATURE(kEnableErrorCodePropagationForPreconnect);
+
+// If enabled, TransportClientSocketPool can retry stalled connections.
+// See crbug.com/481934003 to track efforts to disable this by default.
+NET_EXPORT BASE_DECLARE_FEATURE(kPermitTcpSocketPoolConnectBackupJobs);
 
 }  // namespace net::features
 

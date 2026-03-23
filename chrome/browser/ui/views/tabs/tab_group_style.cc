@@ -35,6 +35,7 @@ constexpr int kAttentionIndicatorWidth = 8;
 constexpr int kEmptyChipSize = 20;
 constexpr int kCornerRadius = 6;
 constexpr int kDetachedTabsCornerRadius = 100;
+constexpr int kDetachedTabsHorizontalInsets = 8;
 constexpr int kTabGroupOverlapAdjustment = 2;
 
 }  // namespace
@@ -95,8 +96,12 @@ gfx::Point TabGroupStyle::GetTitleChipOffset(
       GetLayoutConstant(LayoutConstant::kTabstripToolbarOverlap);
   if (base::FeatureList::IsEnabled(features::kDetachedTabs) &&
       text_height.has_value()) {
-    return gfx::Point(TabStyle::Get()->GetTabOverlap() - 2,
-                      GetLayoutConstant(LayoutConstant::kTabStripPadding));
+    return gfx::Point(
+        TabStyle::Get()->GetTabOverlap() - 2,
+        GetLayoutConstant(LayoutConstant::kTabStripPadding) +
+            (GetLayoutConstant(
+                 LayoutConstant::kDetachedTabGroupUnderlineBottomSpacing) /
+             2));
   }
   return gfx::Point(TabStyle::Get()->GetTabOverlap() - 2, total_space / 2);
 }
@@ -113,10 +118,9 @@ int TabGroupStyle::GetHighlightPathGeneratorCornerRadius(
 
 gfx::Insets TabGroupStyle::GetInsetsForHeaderChip() const {
   if (base::FeatureList::IsEnabled(features::kDetachedTabs)) {
-    return gfx::Insets::TLBR(0, kCornerRadius, 0, kCornerRadius);
+    return gfx::Insets::VH(0, kDetachedTabsHorizontalInsets);
   }
-  return gfx::Insets::TLBR(kHeaderChipVerticalInset, kCornerRadius,
-                           kHeaderChipVerticalInset, kCornerRadius);
+  return gfx::Insets::VH(kHeaderChipVerticalInset, kCornerRadius);
 }
 
 int TabGroupStyle::GetTitleAdjustmentToTabGroupHeaderDesiredWidth(
@@ -140,7 +144,10 @@ float TabGroupStyle::GetAttentionIndicatorWidth() const {
 
 float TabGroupStyle::GetDetachedChipHeight() const {
   return GetLayoutConstant(LayoutConstant::kTabHeight) -
-         GetLayoutConstant(LayoutConstant::kTabStripPadding);
+         GetLayoutConstant(LayoutConstant::kTabStripPadding) -
+         GetLayoutConstant(LayoutConstant::kTabstripToolbarOverlap) -
+         GetLayoutConstant(
+             LayoutConstant::kDetachedTabGroupUnderlineBottomSpacing);
 }
 
 int TabGroupStyle::GetChipCornerRadius() const {

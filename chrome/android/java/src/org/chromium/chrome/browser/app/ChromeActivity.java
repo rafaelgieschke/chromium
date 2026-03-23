@@ -135,12 +135,12 @@ import org.chromium.chrome.browser.keyboard_accessory.ManualFillingComponentSupp
 import org.chromium.chrome.browser.layouts.LayoutManagerAppUtils;
 import org.chromium.chrome.browser.media.FullscreenVideoPictureInPictureController;
 import org.chromium.chrome.browser.metrics.LaunchMetrics;
-import org.chromium.chrome.browser.metrics.LegacyTabStartupMetricsTracker;
 import org.chromium.chrome.browser.metrics.SimpleStartupForegroundSessionDetector;
 import org.chromium.chrome.browser.metrics.StartupMetricsTracker;
 import org.chromium.chrome.browser.metrics.UmaActivityObserver;
 import org.chromium.chrome.browser.modaldialog.TabModalLifetimeHandler;
 import org.chromium.chrome.browser.multiwindow.MultiInstanceManager;
+import org.chromium.chrome.browser.multiwindow.MultiInstanceManagerFactory;
 import org.chromium.chrome.browser.multiwindow.MultiWindowUtils;
 import org.chromium.chrome.browser.night_mode.SystemNightModeMonitor;
 import org.chromium.chrome.browser.night_mode.WebContentsDarkModeController;
@@ -195,7 +195,6 @@ import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.chrome.browser.task_manager.TaskManager;
 import org.chromium.chrome.browser.task_manager.TaskManagerFactory;
 import org.chromium.chrome.browser.theme.ThemeModuleUtils;
-import org.chromium.chrome.browser.tinker_tank.TinkerTankDelegate;
 import org.chromium.chrome.browser.toolbar.ControlContainer;
 import org.chromium.chrome.browser.toolbar.ToolbarManager;
 import org.chromium.chrome.browser.translate.TranslateBridge;
@@ -402,8 +401,6 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     /** Whether or not a PolicyChangeListener was added. */
     private boolean mDidAddPolicyChangeListener;
 
-    private LegacyTabStartupMetricsTracker mLegacyTabStartupMetricsTracker;
-
     private StartupMetricsTracker mStartupMetricsTracker;
 
     /** Whether or not the activity is in started state. */
@@ -472,8 +469,6 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     protected void onPreCreate() {
         // The startup metrics tracker should be created as early as possible in the Activity
         // lifetime.
-        mLegacyTabStartupMetricsTracker =
-                new LegacyTabStartupMetricsTracker(mActivityId, mTabModelSelectorSupplier);
         mStartupMetricsTracker =
                 new StartupMetricsTracker(
                         mTabModelSelectorSupplier, this::wasPersistentStateRestored);
@@ -484,6 +479,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         super.onPreCreate();
         initializeBackPressHandling();
         initializeThemeResourceWrapper();
+        MultiInstanceManagerFactory.initializeMultiInstanceOrchestrator();
     }
 
     @Override
@@ -751,10 +747,6 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         // Initialize the activity session tracker as early as possible so that
         // it can start background tasks.
         ChromeActivitySessionTracker.getInstance();
-    }
-
-    public LegacyTabStartupMetricsTracker getLegacyTabStartupMetricsTracker() {
-        return mLegacyTabStartupMetricsTracker;
     }
 
     public StartupMetricsTracker getStartupMetricsTracker() {
@@ -1092,13 +1084,14 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
                             new ChromeAndroidTask.ActivityScopedObjects(
                                     activityWindowAndroid,
                                     tabModelSelector,
+                                    browserWindowType,
                                     supportedProfileType,
                                     desktopWindowStateManager,
                                     multiInstanceManager),
                             pendingId);
 
             // 4. Add windowing features.
-            // TODO(crbug.com/475200706): Handle multiple profiles for mobile.
+            // TODO(crbug.com/491791326): Handle multiple profiles for mobile.
             Profile profile = tabModelSelector.getCurrentModel().getProfile();
             assert profile != null;
             chromeAndroidTask.addFeature(
@@ -1388,7 +1381,10 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
     private @Nullable ActorPictureInPictureController maybeCreateActorPipController() {
         if (mActorPipController == null && ChromeFeatureList.sGlic.isEnabled()) {
             mActorPipController =
-                    new ActorPictureInPictureController(this, () -> mTabModelProfileSupplier.get());
+                    new ActorPictureInPictureController(
+                            this,
+                            () -> mTabModelProfileSupplier.get(),
+                            () -> findViewById(android.R.id.content));
         }
         return mActorPipController;
     }
@@ -1506,10 +1502,6 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
 
     @CallSuper
     public void flushPersistentState() {
-        boolean flushSession =
-                ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
-                        ChromeFeatureList.UMA_SESSION_CORRECTNESS_FIXES, "flush_session", true);
-        if (flushSession) mUmaActivityObserver.flushUmaSession();
         ProfileManagerUtils.flushPersistentDataForAllProfiles();
     }
 
@@ -1833,6 +1825,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         SnackbarManager snackbarManager = mSnackbarManagerSupplier.get();
         if (snackbarManager != null) {
             SnackbarManagerProvider.detach(snackbarManager);
+            snackbarManager.destroy();
         }
 
         if (mBackPressManager != null) {
@@ -1904,11 +1897,6 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             browserControlsManager.destroy();
         }
         BrowserControlsManagerSupplier.destroy(mBrowserControlsManagerSupplier);
-
-        if (mLegacyTabStartupMetricsTracker != null) {
-            mLegacyTabStartupMetricsTracker.destroy();
-            mLegacyTabStartupMetricsTracker = null;
-        }
 
         if (mStartupMetricsTracker != null) {
             mStartupMetricsTracker.destroy();
@@ -2606,14 +2594,7 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
         }
         mBackPressManager.setIsGestureNavEnabledSupplier(
                 () -> UiUtils.isGestureNavigationMode(getWindow()));
-        final Runnable callbackForLegacyTabStartupMetricsTracker =
-                () -> {
-                    if (mLegacyTabStartupMetricsTracker != null) {
-                        mLegacyTabStartupMetricsTracker.onBackPressed();
-                    }
-                };
 
-        mBackPressManager.setOnBackPressedListener(callbackForLegacyTabStartupMetricsTracker);
         getOnBackPressedDispatcher().addCallback(this, mBackPressManager.getCallback());
         // TODO(crbug.com/40208738): consider move to RootUiCoordinator.
         mTextBubbleBackPressHandler = new TextBubbleBackPressHandler();
@@ -2763,17 +2744,17 @@ public abstract class ChromeActivity extends AsyncInitializationActivity
             return true;
         }
 
-        if (id == R.id.tinker_tank_menu_id) {
-            TinkerTankDelegate delegate = TinkerTankDelegate.create();
-            delegate.maybeShowBottomSheet(
-                    this,
-                    getProfileProviderSupplier().get().getOriginalProfile(),
-                    mRootUiCoordinator.getBottomSheetController(),
-                    getTabModelSelectorSupplier());
-        }
-
         // All the code below assumes currentTab is not null, so return early if it is null.
         if (currentTab == null) {
+            return false;
+        }
+
+        if (id == R.id.back_menu_id) {
+            if (currentTab.canGoBack()) {
+                currentTab.goBack();
+                RecordUserAction.record("MobileMenuBack");
+                return true;
+            }
             return false;
         }
 

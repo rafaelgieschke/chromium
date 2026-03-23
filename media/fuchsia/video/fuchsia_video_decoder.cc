@@ -39,8 +39,6 @@
 #include "media/fuchsia/common/stream_processor_helper.h"
 #include "media/mojo/mojom/fuchsia_media.mojom.h"
 #include "ui/gfx/buffer_types.h"
-#include "ui/gfx/client_native_pixmap_factory.h"
-#include "ui/ozone/public/client_native_pixmap_factory_ozone.h"
 
 namespace media {
 
@@ -120,10 +118,8 @@ class FuchsiaVideoDecoder::OutputMailbox {
       gfx::GpuMemoryBufferHandle gmb_handle,
       gfx::Size& size,
       viz::SharedImageFormat& format,
-      gfx::ClientNativePixmapFactory* pixmap_factory,
       const gfx::ColorSpace& color_space)
       : raster_context_provider_(raster_context_provider),
-        size_(size),
         weak_factory_(this) {
     gpu::SharedImageUsageSet usage = gpu::SHARED_IMAGE_USAGE_DISPLAY_READ |
                                      gpu::SHARED_IMAGE_USAGE_SCANOUT |
@@ -135,6 +131,7 @@ class FuchsiaVideoDecoder::OutputMailbox {
         raster_context_provider_->SharedImageInterface()->CreateSharedImage(
             {format, size, color_space, usage, "FuchsiaVideoDecoder"},
             std::move(gmb_handle));
+    CHECK(shared_image_);
 
     create_sync_token_ = raster_context_provider_->SharedImageInterface()
                              ->GenVerifiedSyncToken();
@@ -148,8 +145,7 @@ class FuchsiaVideoDecoder::OutputMailbox {
   }
 
   const gpu::Mailbox& mailbox() { return shared_image_->mailbox(); }
-
-  const gfx::Size& size() { return size_; }
+  gfx::Size size() { return shared_image_->size(); }
 
   // Create a new video frame that wraps the mailbox. |reuse_callback| will be
   // called when the mailbox can be reused.
@@ -217,8 +213,6 @@ class FuchsiaVideoDecoder::OutputMailbox {
 
   const scoped_refptr<viz::RasterContextProvider> raster_context_provider_;
 
-  gfx::Size size_;
-
   scoped_refptr<gpu::ClientSharedImage> shared_image_;
 
   gpu::SyncToken create_sync_token_;
@@ -240,9 +234,7 @@ FuchsiaVideoDecoder::FuchsiaVideoDecoder(
     : raster_context_provider_(raster_context_provider),
       media_codec_provider_(media_codec_provider),
       use_overlays_for_video_(allow_overlays),
-      sysmem_allocator_("CrFuchsiaVideoDecoder"),
-      client_native_pixmap_factory_(
-          ui::CreateClientNativePixmapFactoryOzone()) {
+      sysmem_allocator_("CrFuchsiaVideoDecoder") {
   DETACH_FROM_SEQUENCE(sequence_checker_);
   DCHECK(raster_context_provider_);
 }
@@ -388,11 +380,6 @@ int FuchsiaVideoDecoder::GetMaxDecodeRequests() const {
   return max_decoder_requests_;
 }
 
-void FuchsiaVideoDecoder::SetClientNativePixmapFactoryForTests(
-    std::unique_ptr<gfx::ClientNativePixmapFactory> factory) {
-  client_native_pixmap_factory_ = std::move(factory);
-}
-
 DecoderStatus FuchsiaVideoDecoder::InitializeSysmemBufferStream(
     bool is_encrypted,
     CdmContext* cdm_context,
@@ -496,29 +483,22 @@ void FuchsiaVideoDecoder::OnStreamProcessorAllocateOutputBuffers(
   constraints.set_min_buffer_count_for_shared_slack(kMaxUsedOutputBuffers -
                                                     kOutputBuffersForCamping);
 
-  for (size_t pixel_format_index = 0;
-       pixel_format_index < std::size(kSupportedPixelFormats);
-       ++pixel_format_index) {
+  for (const auto& pixel_format : kSupportedPixelFormats) {
     auto& image_constraints =
         constraints.mutable_image_format_constraints()->emplace_back();
-    image_constraints.set_pixel_format(
-        UNSAFE_TODO(kSupportedPixelFormats[pixel_format_index]));
+    image_constraints.set_pixel_format(pixel_format);
     image_constraints.set_pixel_format_modifier(
         fuchsia::images2::PixelFormatModifier::LINEAR);
 
-    for (size_t i = 0; i < std::size(kSupportedColorSpaces); ++i) {
-      image_constraints.mutable_color_spaces()->emplace_back(
-          UNSAFE_TODO(kSupportedColorSpaces[i]));
+    for (const auto& color_space : kSupportedColorSpaces) {
+      image_constraints.mutable_color_spaces()->emplace_back(color_space);
     }
   }
 
   auto min_buffer_size = GetMinBufferSize();
   if (min_buffer_size) {
-    for (size_t pixel_format_index = 0;
-         pixel_format_index < std::size(kSupportedPixelFormats);
-         ++pixel_format_index) {
-      auto& image_constraints = constraints.mutable_image_format_constraints()->at(
-          pixel_format_index);
+    for (auto& image_constraints :
+         *constraints.mutable_image_format_constraints()) {
       image_constraints.set_required_max_size(fuchsia::math::SizeU{
           static_cast<uint32_t>(min_buffer_size->width()),
           static_cast<uint32_t>(min_buffer_size->height())});
@@ -607,8 +587,7 @@ void FuchsiaVideoDecoder::OnStreamProcessorOutputPacket(
     output_mailboxes_[buffer_index] = new OutputMailbox(
         raster_context_provider_,
         gfx::GpuMemoryBufferHandle(std::move(native_pixmap_handle)), coded_size,
-        si_format, client_native_pixmap_factory_.get(),
-        current_config_.color_space_info().ToGfxColorSpace());
+        si_format, current_config_.color_space_info().ToGfxColorSpace());
   } else {
     raster_context_provider_->SharedImageInterface()->UpdateSharedImage(
         gpu::SyncToken(), output_mailboxes_[buffer_index]->mailbox());

@@ -8,11 +8,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/send_tab_to_self_sync_service_factory.h"
 #include "chrome/browser/ui/actions/chrome_action_id.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_list.h"
-#include "chrome/browser/ui/browser_navigator.h"
-#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_features.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/profile_browser_collection.h"
@@ -55,7 +50,8 @@ void SendTabToSelfToolbarIconController::DisplayNewEntries(
   // If the active browser matches `profile_`, show the toolbar icon.
   // Otherwise, we will store this entry and wait to show on the next active
   // appropriate browser.
-  auto* browser = chrome::FindLastActiveWithProfile(profile_);
+  BrowserWindowInterface* const browser =
+      ProfileBrowserCollection::GetForProfile(profile_)->GetLastActiveBrowser();
   if (browser && browser->IsActive() && CanShowOnBrowser(browser)) {
     ShowToolbarButton(*new_entry, browser);
     return;
@@ -77,7 +73,7 @@ void SendTabToSelfToolbarIconController::StorePendingEntry(
       new_entry_pending_notification->GetSharedTime(),
       new_entry_pending_notification->GetDeviceName(),
       new_entry_pending_notification->GetTargetDeviceSyncCacheGuid(),
-      PageContext());
+      new_entry_pending_notification->GetPageContext());
   // Prevent adding the observer several times. This might happen when the
   // window is inactive and this method is called more than once (i.e. the
   // server sends multiple entry batches).
@@ -123,11 +119,11 @@ void SendTabToSelfToolbarIconController::ShowToolbarButton(
   CHECK(controller);
 
   controller->ShowActionEphemerallyInToolbar(kActionSendTabToSelf, true);
-  auto* button = controller->GetButtonFor(kActionSendTabToSelf);
-  CHECK(button);
+  auto anchor = controller->GetBubbleAnchor(kActionSendTabToSelf);
+  CHECK(!std::holds_alternative<std::nullptr_t>(anchor));
   browser->GetFeatures()
       .send_tab_to_self_toolbar_bubble_controller()
-      ->ShowBubble(entry, button);
+      ->ShowBubble(entry, anchor);
 
   send_tab_to_self::RecordNotificationShown();
 }

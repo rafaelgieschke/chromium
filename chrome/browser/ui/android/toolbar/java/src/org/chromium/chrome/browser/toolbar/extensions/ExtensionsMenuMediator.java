@@ -106,6 +106,11 @@ class ExtensionsMenuMediator implements Destroyable, ExtensionsMenuBridge.Observ
                 /* dismissRunnable= */ null);
     }
 
+    /** Called when the reload page button is clicked. */
+    public void onReloadPageButtonClicked() {
+        mMenuBridge.onReloadPageButtonClicked();
+    }
+
     /** Destroys the mediator. */
     @Override
     public void destroy() {
@@ -123,7 +128,8 @@ class ExtensionsMenuMediator implements Destroyable, ExtensionsMenuBridge.Observ
         // to fetch and update the UI correctly, as their effects differ on the site permissions
         // page and they will need to have different JNI observers.
         if (isMainPageVisible()) {
-            updateSiteSettingsToggle();
+            int optionalSection = mMenuBridge.getOptionalSection();
+            mMenuPropertyModel.set(ExtensionsMenuProperties.OPTIONAL_SECTION_TYPE, optionalSection);
             updateMenuEntries();
             return;
         }
@@ -175,8 +181,7 @@ class ExtensionsMenuMediator implements Destroyable, ExtensionsMenuBridge.Observ
 
         // Update the menu item model.
         ListItem item = mActionModels.get(oldIndex);
-        item.model.set(ExtensionsMenuItemProperties.TITLE, entry.actionButton.text);
-        item.model.set(ExtensionsMenuItemProperties.ICON, entry.actionButton.icon);
+        updateMenuItem(item.model, entry);
 
         // Update position if the index changed.
         if (oldIndex != newIndex) {
@@ -212,8 +217,6 @@ class ExtensionsMenuMediator implements Destroyable, ExtensionsMenuBridge.Observ
         PropertyModel model =
                 new PropertyModel.Builder(ExtensionsMenuItemProperties.ALL_KEYS)
                         .with(ExtensionsMenuItemProperties.EXTENSION_ID, entry.id)
-                        .with(ExtensionsMenuItemProperties.TITLE, entry.actionButton.text)
-                        .with(ExtensionsMenuItemProperties.ICON, entry.actionButton.icon)
                         .with(
                                 ExtensionsMenuItemProperties.CONTEXT_MENU_BUTTON_ON_CLICK,
                                 (view) ->
@@ -221,7 +224,12 @@ class ExtensionsMenuMediator implements Destroyable, ExtensionsMenuBridge.Observ
                         .with(
                                 ExtensionsMenuItemProperties.CONTEXT_MENU_BUTTON_ICON,
                                 contextMenuIcon)
+                        .with(
+                                ExtensionsMenuItemProperties.SITE_ACCESS_TOGGLE_ON_CLICK,
+                                (buttonView, isOn) ->
+                                        mMenuBridge.onExtensionToggleSelected(entry.id, isOn))
                         .build();
+        updateMenuItem(model, entry);
         return new ListItem(0, model);
     }
 
@@ -233,8 +241,46 @@ class ExtensionsMenuMediator implements Destroyable, ExtensionsMenuBridge.Observ
     }
 
     /**
-     * Pulls the list of menu entries from native and updates the action models list. Also updates
-     * the zero state visibility.
+     * Updates the host access requests list in the PropertyModel only if the host access requests
+     * section is currently visible to the user.
+     */
+    private void updateHostAccessRequests() {
+        int currentSection = mMenuPropertyModel.get(ExtensionsMenuProperties.OPTIONAL_SECTION_TYPE);
+        if (currentSection == ExtensionsMenuTypes.OptionalSectionType.HOST_ACCESS_REQUESTS) {
+            mMenuPropertyModel.set(
+                    ExtensionsMenuProperties.HOST_ACCESS_REQUESTS,
+                    mMenuBridge.getHostAccessRequests());
+        }
+    }
+
+    /** Updates the itemModel for an extension menu entry according to the given state. */
+    private void updateMenuItem(
+            PropertyModel itemModel, ExtensionsMenuTypes.MenuEntryState itemState) {
+        itemModel.set(ExtensionsMenuItemProperties.TITLE, itemState.actionButton.text);
+        itemModel.set(ExtensionsMenuItemProperties.ICON, itemState.actionButton.icon);
+        itemModel.set(
+                ExtensionsMenuItemProperties.SITE_ACCESS_TOGGLE_CHECKED,
+                itemState.siteAccessToggle.isOn);
+        itemModel.set(
+                ExtensionsMenuItemProperties.SITE_ACCESS_TOGGLE_STATUS,
+                itemState.siteAccessToggle.status);
+        itemModel.set(
+                ExtensionsMenuItemProperties.SITE_ACCESS_TOGGLE_TOOLTIP,
+                itemState.siteAccessToggle.tooltipText);
+        itemModel.set(
+                ExtensionsMenuItemProperties.SITE_PERMISSIONS_BUTTON_ACCESSIBLE_NAME,
+                itemState.sitePermissionsButton.accessibleName);
+        itemModel.set(
+                ExtensionsMenuItemProperties.SITE_PERMISSIONS_BUTTON_STATUS,
+                itemState.sitePermissionsButton.status);
+        itemModel.set(
+                ExtensionsMenuItemProperties.SITE_PERMISSIONS_BUTTON_TEXT,
+                itemState.sitePermissionsButton.text);
+    }
+
+    /**
+     * Resets the menu items by pulling the list of menu entries from native and updating the action
+     * models list. Also updates the zero state visibility.
      */
     private void updateMenuEntries() {
         mActionModels.clear();
@@ -251,6 +297,40 @@ class ExtensionsMenuMediator implements Destroyable, ExtensionsMenuBridge.Observ
     private void updateZeroState() {
         boolean isZeroState = mActionModels.size() == 0;
         mMenuPropertyModel.set(ExtensionsMenuProperties.IS_ZERO_STATE, isZeroState);
+        if (isZeroState) {
+            // If we are in zero state, hide the site settings toggle to keep the empty state clean.
+            mMenuPropertyModel.set(ExtensionsMenuProperties.SITE_SETTINGS_TOGGLE_VISIBLE, false);
+            // We also hide the discover extensions button in the main page, as there is already an
+            // open web store button present in the zero state view.
+            mMenuPropertyModel.set(ExtensionsMenuProperties.DISCOVER_EXTENSIONS_VISIBLE, false);
+        } else {
+            mMenuPropertyModel.set(ExtensionsMenuProperties.DISCOVER_EXTENSIONS_VISIBLE, true);
+            updateSiteSettingsToggle();
+        }
+    }
+
+    /** Called when a host access request has been added. */
+    @Override
+    public void onHostAccessRequestAdded(String extensionId) {
+        updateHostAccessRequests();
+    }
+
+    /** Called when a host access request has been updated. */
+    @Override
+    public void onHostAccessRequestUpdated(String extensionId) {
+        updateHostAccessRequests();
+    }
+
+    /** Called when a host access request has been removed. */
+    @Override
+    public void onHostAccessRequestRemoved(String extensionId) {
+        updateHostAccessRequests();
+    }
+
+    /** Called when all host access requests have been cleared. */
+    @Override
+    public void onHostAccessRequestsCleared() {
+        updateHostAccessRequests();
     }
 
     /** Updates the site settings toggle. */

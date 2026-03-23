@@ -16,6 +16,7 @@
 #include "base/functional/bind.h"
 #include "base/functional/callback_helpers.h"
 #include "base/types/optional_util.h"
+#include "components/accessibility_annotator/core/data_models/entity_converter.h"
 #include "components/sync/model/entity_change.h"
 #include "components/sync/model/in_memory_metadata_change_list.h"
 #include "components/sync/model/metadata_batch.h"
@@ -57,7 +58,7 @@ AccessibilityAnnotationSyncBridge::ApplyIncrementalSyncChanges(
     std::unique_ptr<syncer::MetadataChangeList> metadata_change_list,
     syncer::EntityChangeList entity_changes) {
   std::unique_ptr<syncer::DataTypeStore::WriteBatch> batch =
-      data_type_store_->CreateWriteBatch();
+      data_type_store_->CreateWriteBatch(std::move(metadata_change_list));
 
   for (const std::unique_ptr<syncer::EntityChange>& change : entity_changes) {
     const sync_pb::EntitySpecifics& entity_specifics = change->data().specifics;
@@ -79,7 +80,6 @@ AccessibilityAnnotationSyncBridge::ApplyIncrementalSyncChanges(
         break;
     }
   }
-  batch->TakeMetadataChangesFrom(std::move(metadata_change_list));
   data_type_store_->CommitWriteBatch(
       std::move(batch),
       base::BindOnce(&AccessibilityAnnotationSyncBridge::OnDataTypeStoreCommit,
@@ -128,9 +128,23 @@ void AccessibilityAnnotationSyncBridge::ApplyDisableSyncChanges(
   weak_ptr_factory_.InvalidateWeakPtrs();
 }
 
+sync_pb::EntitySpecifics
+AccessibilityAnnotationSyncBridge::TrimAllSupportedFieldsFromRemoteSpecifics(
+    const sync_pb::EntitySpecifics& entity_specifics) const {
+  // Clears all fields by default to avoid the memory and I/O overhead of an
+  // additional copy of the data.
+  return sync_pb::EntitySpecifics();
+}
+
 bool AccessibilityAnnotationSyncBridge::IsEntityDataValid(
     const syncer::EntityData& entity_data) const {
   return !entity_data.specifics.accessibility_annotation().id().empty();
+}
+
+bool AccessibilityAnnotationSyncBridge::SupportsIncrementalUpdates() const {
+  // TODO(crbug.com/483214801): Re-enable incremental updates before the rollout
+  // starts.
+  return false;
 }
 
 std::optional<sync_pb::AccessibilityAnnotationSpecifics>
@@ -142,6 +156,19 @@ std::vector<sync_pb::AccessibilityAnnotationSpecifics>
 AccessibilityAnnotationSyncBridge::GetAllAnnotations() const {
   return base::ToVector(annotation_entries_,
                         [](const auto& p) { return p.second; });
+}
+
+std::vector<sync_pb::AccessibilityAnnotationSpecifics>
+AccessibilityAnnotationSyncBridge::GetAnnotationsByTypes(
+    EntityTypeEnumSet types) const {
+  std::vector<sync_pb::AccessibilityAnnotationSpecifics> annotations;
+  for (const auto& [unused_id, specifics] : annotation_entries_) {
+    std::optional<EntityType> type = GetEntityTypeFromSpecifics(specifics);
+    if (type.has_value() && types.Has(*type)) {
+      annotations.push_back(specifics);
+    }
+  }
+  return annotations;
 }
 
 void AccessibilityAnnotationSyncBridge::OnDataTypeStoreCreated(

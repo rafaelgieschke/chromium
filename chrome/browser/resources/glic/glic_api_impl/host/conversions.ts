@@ -225,6 +225,8 @@ export function tabDataToClient(
     isTabContentCaptured,
     isActiveInWindow,
     isWindowActive,
+    lightweightPageFeatures:
+        tabData.lightweightPageFeatures?.map(feature => enumToClient(feature)),
   };
 }
 
@@ -307,6 +309,7 @@ export function conversationInfoToClient(
         new TextDecoder().decode(
             new Uint8Array(conversationInfo.clientData.data)) :
         undefined,
+    turnId: optionalToClient(conversationInfo.turnId),
   };
 }
 
@@ -319,6 +322,7 @@ export function conversationInfoFromClient(conversationInfo: ConversationInfo):
       data: Array.from(new TextEncoder().encode(conversationInfo.clientData)),
     } :
                                               null,
+    turnId: optionalFromClient(conversationInfo.turnId),
   };
 }
 
@@ -726,6 +730,18 @@ export function additionalContextPartToClient(
       return {
         region: {
           rect: regionMojo.rect,
+        },
+      };
+    }
+  } else if (part.pendingRegion) {
+    const regionMojo = part.pendingRegion.region;
+    if (regionMojo) {
+      return {
+        pendingRegion: {
+          id: part.pendingRegion.id,
+          region: {
+            rect: regionMojo.rect,
+          },
         },
       };
     }

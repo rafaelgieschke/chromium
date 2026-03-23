@@ -4,43 +4,79 @@
 
 package org.chromium.chrome.browser.tab_bottom_sheet;
 
+import android.view.MotionEvent;
+
 import org.chromium.build.annotations.NullMarked;
+import org.chromium.components.browser_ui.bottomsheet.BottomSheetController.SheetState;
 import org.chromium.ui.modelutil.PropertyModel;
 
 /** Mediator for tab bottom sheet */
 @NullMarked
 public class TabBottomSheetMediator {
+    private final TouchArbitrator mTouchArbitrator;
     private final PropertyModel mModel;
-    private final CoBrowseViews mCoBrowseViews;
+    private final float mFullheightRatio;
 
-    public TabBottomSheetMediator(PropertyModel model, CoBrowseViews coBrowseViews) {
+    private @SheetState int mCurrentSheetState = SheetState.HIDDEN;
+
+    public TabBottomSheetMediator(PropertyModel model) {
         mModel = model;
-        mCoBrowseViews = coBrowseViews;
+        mTouchArbitrator = new TouchArbitrator();
+        // Setting statically right now, can be modified later to be set dynamically based on device
+        // type.
+        mFullheightRatio = 0.7f;
     }
 
-    void onSheetOffsetChanged(float totalHeight) {
-        // Set the ThinWebView to its full height when the sheet is opened. This stops it
-        // from resizing when we change the height of the webUi container.
-        if (mModel.get(TabBottomSheetProperties.THIN_WEB_VIEW_HEIGHT) == null) {
-            mModel.set(
-                    TabBottomSheetProperties.THIN_WEB_VIEW_HEIGHT,
-                    mCoBrowseViews.getThinWebViewHeight());
-        }
+    void onSheetStateChanged(@SheetState int state) {
+        mCurrentSheetState = state;
+    }
 
-        float fuseboxHeight = mCoBrowseViews.getFuseboxHeight();
-        float toolbarHeight = mCoBrowseViews.getToolbarHeight();
+    /**
+     * Sets the sheets height to 70% of the bottom sheet container height. If the bottom sheet had
+     * never been called before, BottomSheetController.getContainerHeight() returns 0. To avoid this
+     * we set the height after the sheet has been initialized. TODO(crbug.com/486916366): Temporary
+     * fix until bottom sheet resizing is implemented.
+     */
+    void setMaxSheetHeight(int maxSheetHeight) {
+        mModel.set(
+                TabBottomSheetProperties.SHEET_HEIGHT,
+                Math.round(maxSheetHeight * mFullheightRatio));
+    }
 
-        int webUiHeight = (int) (totalHeight - fuseboxHeight - toolbarHeight);
-        if (webUiHeight < 0) {
-            webUiHeight = 0;
-        }
-        mModel.set(TabBottomSheetProperties.WEB_UI_CONTAINER_HEIGHT, webUiHeight);
+    /** Returns the touch handler for the WebUI container. */
+    TabBottomSheetWebUiContainer.TouchHandler getWebUiTouchHandler() {
+        return mTouchArbitrator;
+    }
 
-        float thinWebViewHeight = mCoBrowseViews.getThinWebViewHeight();
-        int thinWebViewInsetBottom = (int) (thinWebViewHeight - totalHeight);
-        if (thinWebViewInsetBottom < 0) {
-            thinWebViewInsetBottom = 0;
+    private boolean isShowing() {
+        return mCurrentSheetState != SheetState.HIDDEN;
+    }
+
+    /** Inner class that arbitrates between scrolling the content and dragging the bottom sheet. */
+    private class TouchArbitrator implements TabBottomSheetWebUiContainer.TouchHandler {
+        @Override
+        public boolean handleTouchEvent(TabBottomSheetWebUiContainer v, MotionEvent e) {
+            if (!isShowing()) return false;
+
+            // Minimal implementation for Stage 1: Always allow intercept by parent if not
+            // specifically handled.
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                v.getParent().requestDisallowInterceptTouchEvent(true);
+            }
+            return false;
         }
-        mModel.set(TabBottomSheetProperties.THIN_WEB_VIEW_INSET_BOTTOM, thinWebViewInsetBottom);
+    }
+
+    @SheetState
+    int getSheetStateForTesting() {
+        return mCurrentSheetState;
+    }
+
+    PropertyModel getModelForTesting() {
+        return mModel;
+    }
+
+    float getFullHeightRatioForTesting() {
+        return mFullheightRatio;
     }
 }

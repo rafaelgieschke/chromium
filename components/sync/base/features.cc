@@ -21,12 +21,6 @@ BASE_FEATURE(kSyncAccountSettings,
              IS_AUTOFILL_AI_PLATFORM ? base::FEATURE_ENABLED_BY_DEFAULT
                                      : base::FEATURE_DISABLED_BY_DEFAULT);
 
-BASE_FEATURE(kSyncAutofillLoyaltyCard, base::FEATURE_ENABLED_BY_DEFAULT);
-
-// Enabled by default, intended as a kill switch.
-BASE_FEATURE(kSyncMakeAutofillValuableNonEncryptable,
-             base::FEATURE_ENABLED_BY_DEFAULT);
-
 BASE_FEATURE(kSyncAutofillValuableMetadata,
              IS_AUTOFILL_AI_PLATFORM ? base::FEATURE_ENABLED_BY_DEFAULT
                                      : base::FEATURE_DISABLED_BY_DEFAULT);
@@ -94,6 +88,11 @@ BASE_FEATURE(kReplaceSyncPromosWithSignInPromos,
              base::FEATURE_DISABLED_BY_DEFAULT
 #endif
 );
+
+bool IsReplaceSyncPromosWithSignInPromosEnabled() {
+  return base::FeatureList::IsEnabled(kReplaceSyncPromosWithSignInPromos);
+}
+
 BASE_FEATURE_PARAM(bool,
                    kExplicitSigninForExtensions,
                    &kReplaceSyncPromosWithSignInPromos,
@@ -215,5 +214,8 @@ BASE_FEATURE(kSyncDeviceInfoUseWallClockTimer,
              base::FEATURE_DISABLED_BY_DEFAULT);
 
 BASE_FEATURE(kSyncValidateAccessToken, base::FEATURE_DISABLED_BY_DEFAULT);
+
+BASE_FEATURE(kSyncInvalidationsBypassScheduler,
+             base::FEATURE_DISABLED_BY_DEFAULT);
 
 }  // namespace syncer

@@ -65,6 +65,7 @@
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
 #include "third_party/blink/renderer/platform/heap/collection_support/heap_linked_hash_set.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/loader/fetch/ad_tagging_utils.h"
 #include "third_party/blink/renderer/platform/region_capture_crop_id.h"
 #include "third_party/blink/renderer/platform/restriction_target_id.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
@@ -79,6 +80,10 @@ class QuadF;
 class RectF;
 class Vector2dF;
 }  // namespace gfx
+
+namespace viz {
+enum class TrackedElementFeature;
+}  // namespace viz
 
 namespace blink {
 
@@ -993,18 +998,24 @@ class CORE_EXPORT Element : public ContainerNode {
   // Otherwise, returns a nullptr.
   const RegionCaptureCropId* GetRegionCaptureCropId() const;
 
-  // Associates the element with a TrackedElementRect, which is the object
+  // Associates the element with a TrackedElementSubRect, which is the object
   // internally backing a TrackedElement.
-  // This method may be called at most once. The ID must be non-null.
-  void SetTrackedElementRect(std::unique_ptr<TrackedElementRect> rect);
+  // This method may be called at most once per feature.
+  void SetTrackedElementSubRect(viz::TrackedElementFeature feature,
+                                const TrackedElementSubRect& rect);
 
-  // If SetTrackedElementRect(id) was previously called on `this`,
-  // returns the non-empty `id` which it previously provided.
-  // Otherwise, returns a nullptr.
-  const TrackedElementRect* GetTrackedElementRect() const;
+  // If SetTrackedElementSubRect() was previously called on `this` for
+  // `feature`, returns the rect which it previously provided. Otherwise,
+  // returns a nullptr.
+  const TrackedElementSubRect* GetTrackedElementSubRect(
+      viz::TrackedElementFeature feature) const;
 
-  // Clears the TrackedElementRect associated with the element.
-  void ClearTrackedElementRect();
+  // Clears the TrackedElementSubRect associated with the element for `feature`.
+  void ClearTrackedElementSubRect(viz::TrackedElementFeature feature);
+
+  // Returns a map that contains all the TrackedElementSubRects set on `this`.
+  // Returns a nullptr if no TrackedElementSubRects were set.
+  const TrackedElementSubRects* GetTrackedElementSubRects() const;
 
   // Associates the element with a RestrictionTargetId, which is the object
   // internally backing a RestrictionTarget.
@@ -1033,7 +1044,7 @@ class CORE_EXPORT Element : public ContainerNode {
                                    const AtomicString& adopted_stylesheets,
                                    const AtomicString& reference_target,
                                    const bool waiting_for_scoped_registry,
-                                   const Vector<AtomicString>& markers);
+                                   const AtomicString& marker);
 
   ShadowRoot& CreateUserAgentShadowRoot(
       SlotAssignmentMode = SlotAssignmentMode::kNamed);
@@ -1044,7 +1055,7 @@ class CORE_EXPORT Element : public ContainerNode {
                                        bool serializable,
                                        bool clonable,
                                        const AtomicString& reference_target,
-                                       const Vector<AtomicString>& markers);
+                                       const AtomicString& marker);
   // This version is for testing only, and allows easy attachment of a shadow
   // root, specifying only the type and none of the other arguments.
   ShadowRoot& AttachShadowRootForTesting(ShadowRootMode type);
@@ -1652,11 +1663,12 @@ class CORE_EXPORT Element : public ContainerNode {
   // Returns the list of part names, creating it if it doesn't exist.
   DOMTokenList& part();
 
-  // Returns the list of marker names if it has ever been created.
-  DOMTokenList* GetMarker() const;
-  // IDL method.
-  // Returns the list of marker names, creating it if it doesn't exist.
-  DOMTokenList& marker();
+  const AtomicString& marker() const {
+    return FastGetAttribute(html_names::kMarkerAttr);
+  }
+  void setMarker(const AtomicString& marker) {
+    setAttribute(html_names::kMarkerAttr, marker);
+  }
 
   bool HasPartNamesMap() const;
   const NamesMap* PartNamesMap() const;
@@ -1762,10 +1774,13 @@ class CORE_EXPORT Element : public ContainerNode {
   // `SetIsAdRelated()` should not be called on it directly.
 
   // Marks this element as being ad-related.
-  void SetIsAdRelated();
+  void SetIsAdRelated(AdProvenance ad_provenance);
 
   // Returns true if the element is considered ad-related.
   virtual bool IsAdRelated() const;
+
+  // Returns the AdProvenance if the element is ad-related.
+  virtual std::optional<AdProvenance> GetAdProvenance() const;
 
   // Returns true if a paint-time ad highlight should be drawn.
   // This is the authoritative check for painters, encapsulating:
@@ -2341,6 +2356,7 @@ class CORE_EXPORT Element : public ContainerNode {
   void AttachSucceedingPseudoElements(AttachContext& context) {
     AttachPseudoElement(kPseudoIdInterestHint, context);
     AttachPseudoElement(kPseudoIdPickerIcon, context);
+    AttachPseudoElement(kPseudoIdExpandIcon, context);
     AttachPseudoElement(kPseudoIdAfter, context);
     AttachDocumentElementSucceedingPseudoElements(context);
     AttachPseudoElement(kPseudoIdBackdrop, context);
@@ -2378,6 +2394,7 @@ class CORE_EXPORT Element : public ContainerNode {
   void DetachSucceedingPseudoElements(bool performing_reattach) {
     DetachPseudoElement(kPseudoIdInterestHint, performing_reattach);
     DetachPseudoElement(kPseudoIdPickerIcon, performing_reattach);
+    DetachPseudoElement(kPseudoIdExpandIcon, performing_reattach);
     DetachPseudoElement(kPseudoIdAfter, performing_reattach);
     DetachPseudoElement(kPseudoIdScrollButtonBlockStart, performing_reattach);
     DetachPseudoElement(kPseudoIdScrollButtonInlineStart, performing_reattach);
@@ -2404,7 +2421,7 @@ class CORE_EXPORT Element : public ContainerNode {
   ShadowRoot& CreateAndAttachShadowRoot(
       ShadowRootMode,
       SlotAssignmentMode = SlotAssignmentMode::kNamed,
-      const Vector<AtomicString>& markers = Vector<AtomicString>());
+      const AtomicString& marker = g_null_atom);
 
   virtual void DidAddUserAgentShadowRoot(ShadowRoot&) {}
   virtual bool AlwaysCreateUserAgentShadowRoot() const { return false; }

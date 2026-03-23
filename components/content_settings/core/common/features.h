@@ -26,12 +26,6 @@ namespace features {
 COMPONENT_EXPORT(CONTENT_SETTINGS_FEATURES)
 BASE_DECLARE_FEATURE(kSafetyCheckUnusedSitePermissions);
 
-// When enabled, allowlisted website settings are considered for Safety Check,
-// in addition to content settings that are included by default.
-COMPONENT_EXPORT(CONTENT_SETTINGS_FEATURES)
-BASE_DECLARE_FEATURE(
-    kSafetyCheckUnusedSitePermissionsForSupportedChooserPermissions);
-
 // Lets the HostContentSettingsMap actively monitor when content settings expire
 // and delete them instantly. This also notifies observers that will, in turn,
 // terminate access to capabilities gated on those settings right away.
@@ -99,12 +93,6 @@ extern const base::FeatureParam<base::TimeDelta>
 // Move activity indicators to the left-hand side of Omnibox.
 COMPONENT_EXPORT(CONTENT_SETTINGS_FEATURES)
 BASE_DECLARE_FEATURE(kLeftHandSideActivityIndicators);
-
-#if BUILDFLAG(IS_CHROMEOS)
-// Shows warnings if camera, microphone or geolocation is blocked in the OS.
-COMPONENT_EXPORT(CONTENT_SETTINGS_FEATURES)
-BASE_DECLARE_FEATURE(kCrosSystemLevelPermissionBlockedWarnings);
-#endif
 
 // Feature to enable redesigned tracking protection UX + prefs for 3PCD.
 COMPONENT_EXPORT(CONTENT_SETTINGS_FEATURES)
@@ -233,17 +221,6 @@ extern const base::FeatureParam<bool>
 
 COMPONENT_EXPORT(CONTENT_SETTINGS_FEATURES)
 extern const char kUseTestMetadataName[];
-
-// TODO(crbug.com/415223384):
-// `document.requestStorageAccess` is racy when permission has been overridden
-// (e.g. via `test_driver.set_permission`). This is because the RFHI in the
-// browser process may not be aware that the renderer has requested (and gotten)
-// permission by the time StorageAccessHandle tries to bind mojo endpoints.
-// This is used in the virtual test suite `force-allow-storage-access` to ensure
-// no WPTs go stale while we wait on the less temporary fix in the task
-// linked above.
-COMPONENT_EXPORT(CONTENT_SETTINGS_FEATURES)
-BASE_DECLARE_FEATURE(kForceAllowStorageAccess);
 
 }  // namespace features
 }  // namespace content_settings

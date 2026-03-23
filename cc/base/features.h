@@ -15,7 +15,6 @@
 namespace features {
 
 CC_BASE_EXPORT BASE_DECLARE_FEATURE(kComputeRasterTranslateForExternalScale);
-CC_BASE_EXPORT BASE_DECLARE_FEATURE(kSynchronizedScrolling);
 
 // When enabled, the scheduler will allow deferring impl invalidation frames
 // for N frames (default 1) to reduce contention with main frames, allowing
@@ -249,35 +248,6 @@ CC_BASE_EXPORT BASE_DECLARE_FEATURE_PARAM(
     double,
     kScrollJankV4MetricFlingContinuityThreshold);
 
-// Whether the scroll jank V4 metric should handle non-damaging inputs. See
-// `ScrollJankV4Frame::ScrollDamage` for the definition of non-damaging inputs
-// and frames.
-//
-// When disabled, `ScrollJankV4Processor` will ignore non-damaging inputs
-// (legacy behavior similar to the scroll jank v1 metric). See
-// `ScrollJankV4FrameStage::CalculateStages()` for more details.
-//
-// When enabled, `ScrollJankV4Processor` will reconstruct a timeline of
-// non-damaging and damaging frames for the purposes of evaluating scroll jank.
-// See `ScrollJankV4Frame::CalculateTimeline()` for more details.
-CC_BASE_EXPORT BASE_DECLARE_FEATURE(
-    kHandleNonDamagingInputsInScrollJankV4Metric);
-
-// `ScrollJankV4HistogramEmitter`'s histogram emission policy with regards to
-// non-damaging frames and scrolls.
-//
-// `kEmitForAllScrolls`: all frames in ALL scrolls (regardless of damage, even
-// if the scroll is completely non-damaging) count towards the UMA histograms.
-//
-// `kEmitForDamagingScrolls`: all frames in DAMAGING scrolls (containing at
-// least one damaging frame) count towards the UMA histograms. Jank identified
-// in frames in a non-damaging scroll (containing only non-damaging frames)
-// won't be reported in the UMA histograms.
-CC_BASE_EXPORT extern const base::FeatureParam<std::string>
-    kHistogramEmissionPolicy;
-CC_BASE_EXPORT extern const char kEmitForAllScrolls[];
-CC_BASE_EXPORT extern const char kEmitForDamagingScrolls[];
-
 // When disabled, the scroll jank V4 metric orders scroll starts, updates and
 // ends within a single frame based on their
 // `EventMetrics::DispatchStage::kGenerated` timestamps. When enabled, it orders
@@ -303,9 +273,6 @@ CC_BASE_EXPORT BASE_DECLARE_FEATURE(kUnlockDuringGpuImageOperations);
 // the scheduler.
 CC_BASE_EXPORT BASE_DECLARE_FEATURE(kMainIdleBypassScheduler);
 
-// When enabled, UKM will be reported for compositor frames.
-CC_BASE_EXPORT BASE_DECLARE_FEATURE(kReportUkm);
-
 CC_BASE_EXPORT BASE_DECLARE_FEATURE(kBrowserControlsSmoothScroll);
 
 // When enabled, browser controls height changed that does not request animation
@@ -319,6 +286,11 @@ CC_BASE_EXPORT BASE_DECLARE_FEATURE(kWebviewSchedulerStateMachine);
 // When enabled, the browser controls will snap to their fully shown or hidden
 // positions on scroll instead of moving exactly by the scroll delta.
 CC_BASE_EXPORT BASE_DECLARE_FEATURE(kBrowserControlsScrollSnapAnimation);
+
+// When enabled, selection handle visibility checks use the full selection edge
+// instead of a point sample near edge_end. This is a kill switch for
+// crbug.com/451833352.
+CC_BASE_EXPORT BASE_DECLARE_FEATURE(kSelectionEdgeVisibilityUsesFullEdge);
 
 }  // namespace features
 

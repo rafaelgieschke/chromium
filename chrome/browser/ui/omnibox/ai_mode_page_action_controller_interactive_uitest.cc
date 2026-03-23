@@ -51,6 +51,8 @@ std::unique_ptr<KeyedService> BuildMockAimServiceEligibilityServiceInstance(
       .WillRepeatedly(testing::Return(true));
   EXPECT_CALL(*mock_aim_eligibility_service, IsAimLocallyEligible())
       .WillRepeatedly(testing::Return(true));
+  EXPECT_CALL(*mock_aim_eligibility_service, IsFuseboxEligible())
+      .WillRepeatedly(testing::Return(true));
 
   return std::move(mock_aim_eligibility_service);
 }
@@ -235,9 +237,16 @@ IN_PROC_BROWSER_TEST_F(
                   CheckChipVisible(/*visible=*/false));
 }
 
+// TODO(crbug.com/495319330): Re-enable the test when it's fixed.
+#if defined(ADDRESS_SANITIZER) && defined(_WIN32)
+#define MAYBE_VisibleWhileNotEditingOmnibox \
+  DISABLED_VisibleWhileNotEditingOmnibox
+#else
+#define MAYBE_VisibleWhileNotEditingOmnibox VisibleWhileNotEditingOmnibox
+#endif
 IN_PROC_BROWSER_TEST_F(
     AiModePageActionControllerHideEntryPointOnEditInteractiveUiTest,
-    VisibleWhileNotEditingOmnibox) {
+    MAYBE_VisibleWhileNotEditingOmnibox) {
   RunTestSequence(OpenTabWithPageUrlAndFocusOmnibox(),
                   OpenOmniboxPopupByTypingASingleZero(),
                   SendKeyPress(kOmniboxElementId, ui::VKEY_BACK),

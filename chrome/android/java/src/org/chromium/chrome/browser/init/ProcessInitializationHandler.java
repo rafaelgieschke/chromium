@@ -48,7 +48,6 @@ import org.chromium.chrome.browser.AppHooks;
 import org.chromium.chrome.browser.BrowserExitReasonTracker;
 import org.chromium.chrome.browser.ChromeActivitySessionTracker;
 import org.chromium.chrome.browser.ChromeStrictMode;
-import org.chromium.chrome.browser.DefaultBrowserInfo;
 import org.chromium.chrome.browser.DeferredStartupHandler;
 import org.chromium.chrome.browser.DevToolsServer;
 import org.chromium.chrome.browser.FileProviderHelper;
@@ -155,7 +154,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Handles the initialization dependences of the browser process. This is meant to handle the
+ * Handles the initialization dependencies of the browser process. This is meant to handle the
  * initialization that is not tied to any particular Activity, and the logic that should only be
  * triggered a single time for the lifetime of the browser process.
  */
@@ -638,8 +637,6 @@ public class ProcessInitializationHandler {
                     initAsyncDiskTask();
 
                     StorageSystem.recordStorageType();
-
-                    DefaultBrowserInfo.initBrowserFetcher();
 
                     AfterStartupTaskUtils.setStartupComplete();
 

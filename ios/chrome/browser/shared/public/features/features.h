@@ -159,33 +159,8 @@ BASE_DECLARE_FEATURE(kLensOverlayCustomBottomSheet);
 // Feature flag to check headers for lens searches.
 BASE_DECLARE_FEATURE(kLensSearchHeadersCheckEnabled);
 
-// Variations of MIA NTP entrypoint.
-extern const char kNTPMIAEntrypointParam[];
-extern const char kNTPMIAEntrypointParamOmniboxContainedSingleButton[];
-extern const char kNTPMIAEntrypointParamOmniboxContainedInline[];
-extern const char kNTPMIAEntrypointParamOmniboxContainedEnlargedFakebox[];
-extern const char kNTPMIAEntrypointParamEnlargedFakeboxNoIncognito[];
-extern const char kNTPMIAEntrypointParamAIMInQuickActions[];
-
-// Feature flag to change the MIA entrypoint in NTP. Applies to en-US locales
-// only.
-BASE_DECLARE_FEATURE(kNTPMIAEntrypoint);
-// Like above, but applies regardless of client's locale.
-BASE_DECLARE_FEATURE(kNTPMIAEntrypointAllLocales);
-
 // Used to gate the immersive SRP in the Composebox.
 BASE_DECLARE_FEATURE(kComposeboxImmersiveSRP);
-
-// Variations of Composebox tab picker.
-extern const char kComposeboxTabPickerVariationParam[];
-extern const char kComposeboxTabPickerVariationParamCachedAPC[];
-extern const char kComposeboxTabPickerVariationParamOnFlightAPC[];
-
-// Feature flag for the tab picker in the Composebox.
-BASE_DECLARE_FEATURE(kComposeboxTabPickerVariation);
-
-// Returns true is we should use cached APCs in the Composebox.
-bool IsComposeboxTabPickerCachedAPCEnabled();
 
 // Variations of Composebox.
 extern const char kComposeboxParam[];
@@ -881,18 +856,13 @@ BASE_DECLARE_FEATURE(kIOSWebContextMenuNewTitle);
 // Returns true if the IOSWebContextMenuNewTitle feature is enabled.
 bool IsIOSWebContextMenuNewTitleEnabled();
 
-// Enables the CloseOtherTabs feature.
-BASE_DECLARE_FEATURE(kCloseOtherTabs);
-
-// Returns true if the CloseOtherTabs feature is enabled.
-bool IsCloseOtherTabsEnabled();
-
 // Feature flag to enable the Assistant Container.
 BASE_DECLARE_FEATURE(kAssistantContainer);
 
 // Variations for the Assistant Container feature.
 extern const char kAssistantContainerParam[];
 extern const char kAssistantContainerParamDebug[];
+extern const char kAssistantContainerMediumDetentPercentParam[];
 
 // Returns true if the Assistant Container is enabled.
 bool IsAssistantContainerEnabled();
@@ -900,6 +870,10 @@ bool IsAssistantContainerEnabled();
 // Returns true if debug elements (like detents) should be added to the
 // Assistant Container.
 bool ShouldShowAssistantContainerDebugElements();
+
+// Returns the experimental percentage for the Assistant medium detent height.
+// Returns 0 if no experimental percentage is selected.
+NSInteger GetAssistantMediumDetentPercentage();
 
 // Enables the ComposeboxIpad feature.
 BASE_DECLARE_FEATURE(kComposeboxIpad);
@@ -994,5 +968,36 @@ BASE_DECLARE_FEATURE(kAskAboutThisPage);
 
 // Returns true if the AskAboutThisPage feature is enabled.
 bool IsAskAboutThisPageEnabled();
+
+// Enables the PageToolsFeatureUnavailability feature.
+BASE_DECLARE_FEATURE(kPageToolsFeatureUnavailability);
+
+// Returns true if the PageToolsFeatureUnavailability feature is enabled.
+bool IsPageToolsFeatureUnavailabilityEnabled();
+
+// Feature flag to guard against snapshot updates in the grid mediator during
+// batch operations.
+BASE_DECLARE_FEATURE(kGridMediatorSnapshotUpdateBatchGuard);
+
+// Whether the grid mediator snapshot update batch guard is enabled.
+bool IsGridMediatorSnapshotUpdateBatchGuardEnabled();
+
+// Enables the AssistantSidePanel feature.
+BASE_DECLARE_FEATURE(kAssistantSidePanel);
+
+// Returns true if the AssistantSidePanel feature is enabled.
+bool IsAssistantSidePanelEnabled();
+
+// Enables the YourSavedInfoSettingsPageIos feature.
+BASE_DECLARE_FEATURE(kYourSavedInfoSettingsPageIos);
+
+// Returns true if the YourSavedInfoSettingsPageIos feature is enabled.
+bool IsYourSavedInfoSettingsPageIosEnabled();
+
+// Enables the OpenEditGroupViewByTappingTitle feature.
+BASE_DECLARE_FEATURE(kOpenEditGroupViewByTappingTitle);
+
+// Returns true if the OpenEditGroupViewByTappingTitle feature is enabled.
+bool IsOpenEditGroupViewByTappingTitleEnabled();
 
 #endif  // IOS_CHROME_BROWSER_SHARED_PUBLIC_FEATURES_FEATURES_H_

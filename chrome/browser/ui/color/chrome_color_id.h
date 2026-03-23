@@ -541,8 +541,9 @@
   E_CPONLY(kColorProfilesReauthDialogBorder) \
   /* Projects Panel colors. */ \
   E_CPONLY(kColorProjectsPanelBackground) \
-  E_CPONLY(kColorProjectsPanelButtonIcon) \
+  E_CPONLY(kColorProjectsPanelButtonDisabledIcon) \
   E_CPONLY(kColorProjectsPanelButtonHoverBackground) \
+  E_CPONLY(kColorProjectsPanelButtonIcon) \
   E_CPONLY(kColorProjectsPanelListsSeparator) \
   E_CPONLY(kColorProjectsPanelNoTabGroupsText) \
   E_CPONLY(kColorProjectsPanelTabGroupsDragPlaceholder) \
@@ -874,6 +875,7 @@
   E_CPONLY(kColorHoverCardTabAlertAudioPlayingIcon) \
   /* Tab colors. */ \
   E_CPONLY(kColorTabBackgroundActiveFrameActive) \
+  E_CPONLY(kColorDetachedTabBackgroundActiveFrameActive) \
   E_CPONLY(kColorTabBackgroundActiveFrameInactive) \
   E_CPONLY(kColorTabBackgroundInactiveFrameActive) \
   E_CPONLY(kColorTabBackgroundInactiveFrameInactive) \

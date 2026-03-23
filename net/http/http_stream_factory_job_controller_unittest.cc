@@ -333,11 +333,11 @@ class HttpStreamFactoryJobControllerTestBase : public TestWithTaskEnvironment {
  public:
   explicit HttpStreamFactoryJobControllerTestBase(
       bool happy_eyeballs_v3_enabled,
-      std::vector<base::test::FeatureRef> enabled_features = {})
+      std::vector<base::test::FeatureRef> enabled_features = {},
+      std::vector<base::test::FeatureRef> disabled_features = {})
       : TestWithTaskEnvironment(
             base::test::TaskEnvironment::TimeSource::MOCK_TIME),
         happy_eyeballs_v3_enabled_(happy_eyeballs_v3_enabled) {
-    std::vector<base::test::FeatureRef> disabled_features;
     if (happy_eyeballs_v3_enabled_) {
       enabled_features.emplace_back(features::kHappyEyeballsV3);
     } else {
@@ -691,7 +691,7 @@ TEST_P(HttpStreamFactoryJobControllerDualPathTest, PreconnectSyncOk) {
   } else {
     TransportClientSocketPool* socket_pool =
         reinterpret_cast<TransportClientSocketPool*>(session_->GetSocketPool(
-            HttpNetworkSession::NORMAL_SOCKET_POOL, ProxyChain::Direct()));
+            HttpNetworkSession::SocketPoolType::kNormal, ProxyChain::Direct()));
     EXPECT_EQ(socket_pool->IdleSocketCount(), 1u);
   }
 }
@@ -717,7 +717,7 @@ TEST_P(HttpStreamFactoryJobControllerDualPathTest, PreconnectAsyncOk) {
   } else {
     TransportClientSocketPool* socket_pool =
         reinterpret_cast<TransportClientSocketPool*>(session_->GetSocketPool(
-            HttpNetworkSession::NORMAL_SOCKET_POOL, ProxyChain::Direct()));
+            HttpNetworkSession::SocketPoolType::kNormal, ProxyChain::Direct()));
     EXPECT_EQ(socket_pool->IdleSocketCount(), 1u);
   }
 }
@@ -787,7 +787,7 @@ TEST_P(HttpStreamFactoryJobControllerDualPathTest,
                                      /*disable_cert_network_fetches=*/false);
   TransportClientSocketPool* socket_pool =
       reinterpret_cast<TransportClientSocketPool*>(session_->GetSocketPool(
-          HttpNetworkSession::NORMAL_SOCKET_POOL, ProxyChain::Direct()));
+          HttpNetworkSession::SocketPoolType::kNormal, ProxyChain::Direct()));
   EXPECT_FALSE(socket_pool->HasGroupForTesting(group_id));
 
   // There should be a QUIC session.
@@ -837,7 +837,7 @@ TEST_P(HttpStreamFactoryJobControllerDualPathTest,
                                      /*disable_cert_network_fetches=*/false);
   TransportClientSocketPool* socket_pool =
       reinterpret_cast<TransportClientSocketPool*>(session_->GetSocketPool(
-          HttpNetworkSession::NORMAL_SOCKET_POOL, ProxyChain::Direct()));
+          HttpNetworkSession::SocketPoolType::kNormal, ProxyChain::Direct()));
   EXPECT_FALSE(socket_pool->HasGroupForTesting(group_id));
 
   // There should be a QUIC session.
@@ -895,7 +895,7 @@ TEST_P(HttpStreamFactoryJobControllerDualPathTest,
                                      /*disable_cert_network_fetches=*/false);
   TransportClientSocketPool* socket_pool =
       reinterpret_cast<TransportClientSocketPool*>(session_->GetSocketPool(
-          HttpNetworkSession::NORMAL_SOCKET_POOL, ProxyChain::Direct()));
+          HttpNetworkSession::SocketPoolType::kNormal, ProxyChain::Direct()));
   EXPECT_FALSE(socket_pool->HasGroupForTesting(group_id));
 
   // There should be a QUIC session.
@@ -1497,7 +1497,7 @@ TEST_P(JobControllerReconsiderProxyAfterErrorHttpProxyTest, Test) {
     // so the next loop iteration creates a new socket instead of reusing the
     // idle one.
     auto* socket_pool = session_->GetSocketPool(
-        HttpNetworkSession::NORMAL_SOCKET_POOL, ProxyChain::Direct());
+        HttpNetworkSession::SocketPoolType::kNormal, ProxyChain::Direct());
     EXPECT_EQ(1, socket_pool->IdleSocketCount());
     socket_pool->CloseIdleSockets("Close socket reason");
   }
@@ -1705,7 +1705,7 @@ TEST_P(JobControllerReconsiderProxyAfterErrorHttpsProxyTest, Test) {
     // so the next loop iteration creates a new socket instead of reusing the
     // idle one.
     auto* socket_pool = session_->GetSocketPool(
-        HttpNetworkSession::NORMAL_SOCKET_POOL, ProxyChain::Direct());
+        HttpNetworkSession::SocketPoolType::kNormal, ProxyChain::Direct());
     EXPECT_EQ(1, socket_pool->IdleSocketCount());
     socket_pool->CloseIdleSockets("Close socket reason");
   }
@@ -1886,7 +1886,7 @@ TEST_P(JobControllerReconsiderProxyAfterErrorHttpsProxyTest,
     // so the next loop iteration creates a new socket instead of reusing the
     // idle one.
     auto* socket_pool = session_->GetSocketPool(
-        HttpNetworkSession::NORMAL_SOCKET_POOL, ProxyChain::Direct());
+        HttpNetworkSession::SocketPoolType::kNormal, ProxyChain::Direct());
     EXPECT_EQ(socket_pool->IdleSocketCount(), 1);
     socket_pool->CloseIdleSockets("Close socket reason");
   }
@@ -2125,8 +2125,9 @@ TEST_P(JobControllerReconsiderProxyAfterErrorFirstNestedHttpsProxyTest, Test) {
     // The idle socket should have been added back to the socket pool. Close it,
     // so the next loop iteration creates a new socket instead of reusing the
     // idle one.
-    auto* socket_pool = session_->GetSocketPool(
-        HttpNetworkSession::NORMAL_SOCKET_POOL, kDirectIpProtectionProxyChain);
+    auto* socket_pool =
+        session_->GetSocketPool(HttpNetworkSession::SocketPoolType::kNormal,
+                                kDirectIpProtectionProxyChain);
     EXPECT_EQ(1, socket_pool->IdleSocketCount());
     socket_pool->CloseIdleSockets("Close socket reason");
   }
@@ -2367,8 +2368,9 @@ TEST_P(JobControllerReconsiderProxyAfterErrorSecondNestedHttpsProxyTest, Test) {
     // The idle socket should have been added back to the socket pool. Close it,
     // so the next loop iteration creates a new socket instead of reusing the
     // idle one.
-    auto* socket_pool = session_->GetSocketPool(
-        HttpNetworkSession::NORMAL_SOCKET_POOL, kDirectIpProtectionProxyChain);
+    auto* socket_pool =
+        session_->GetSocketPool(HttpNetworkSession::SocketPoolType::kNormal,
+                                kDirectIpProtectionProxyChain);
     EXPECT_EQ(1, socket_pool->IdleSocketCount());
     socket_pool->CloseIdleSockets("Close socket reason");
   }
@@ -2623,7 +2625,7 @@ TEST_P(JobControllerReconsiderProxyAfterErrorSocks5ProxyTest, Test) {
     // so the next loop iteration creates a new socket instead of reusing the
     // idle one.
     auto* socket_pool = session_->GetSocketPool(
-        HttpNetworkSession::NORMAL_SOCKET_POOL, ProxyChain::Direct());
+        HttpNetworkSession::SocketPoolType::kNormal, ProxyChain::Direct());
     EXPECT_EQ(1, socket_pool->IdleSocketCount());
     socket_pool->CloseIdleSockets("Close socket reason");
   }
@@ -5224,7 +5226,7 @@ TEST_F(JobControllerLimitMultipleH2Requests,
   }
   TransportClientSocketPool* socket_pool =
       reinterpret_cast<TransportClientSocketPool*>(session_->GetSocketPool(
-          HttpNetworkSession::NORMAL_SOCKET_POOL, ProxyChain::Direct()));
+          HttpNetworkSession::SocketPoolType::kNormal, ProxyChain::Direct()));
   ClientSocketPool::GroupId group_id0(
       url::SchemeHostPort(request_info.url), request_info.privacy_mode,
       NetworkAnonymizationKey(), SecureDnsPolicy::kAllow,
@@ -5925,11 +5927,12 @@ TEST_F(HttpStreamFactoryJobControllerTest, QuicHostAllowlist) {
 class HttpStreamFactoryJobControllerDnsHttpsAlpnTest
     : public HttpStreamFactoryJobControllerTestBase {
  protected:
-  explicit HttpStreamFactoryJobControllerDnsHttpsAlpnTest(
-      std::vector<base::test::FeatureRef> enabled_features = {})
+  explicit HttpStreamFactoryJobControllerDnsHttpsAlpnTest()
       : HttpStreamFactoryJobControllerTestBase(
             /*happy_eyeballs_v3_enabled=*/false,
-            std::move(enabled_features)) {}
+            /*enabled_features=*/{},
+            /*disabled_features=*/
+            {features::kPermitTcpSocketPoolConnectBackupJobs}) {}
 
   void SetUp() override { SkipCreatingJobController(); }
 

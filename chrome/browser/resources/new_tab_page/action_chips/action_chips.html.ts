@@ -3,7 +3,8 @@
 // found in the LICENSE file.
 import {html, nothing} from '//resources/lit/v3_0/lit.rollup.js';
 
-import {type ActionChip, IconType} from '../action_chips.mojom-webui.js';
+import {IconType} from '../action_chips.mojom-webui.js';
+import type {ActionChip} from '../action_chips.mojom-webui.js';
 
 import {type ActionChipsElement} from './action_chips.js';
 
@@ -15,7 +16,10 @@ export function getHtml(this: ActionChipsElement) {
     ${
       this.actionChips_.length ?
       html`
-      <div class="action-chips-container">
+      <div class="action-chips-container"
+        @contextmenu="${this.showBackground && this.showSimplifiedUI_ &&
+            this.disablementContextMenuEnabled_ ?
+            this.onContextmenu_ : nothing}">
       ${
           this.actionChips_.map(
               (chip: ActionChip, index: number) => html`
@@ -24,7 +28,9 @@ export function getHtml(this: ActionChipsElement) {
             class="action-chip"
             data-index="${index}"
             title="${this.getChipTitle_(chip)}"
-            @click="${this.onClick_}">
+            @click="${this.onClick_}"
+            @contextmenu="${this.disablementContextMenuEnabled_ ?
+                this.onContextmenu_ : nothing}">
             <div class="action-chip-icon-container ${
                     this.getAdditionalIconClasses_(chip)}">
               ${
@@ -57,6 +63,11 @@ export function getHtml(this: ActionChipsElement) {
       </div>
       ` : nothing}
   </div>
+  <cr-action-menu id="actionMenu">
+    <button class="dropdown-item" @click="${this.onDisableSuggestionClick_}">
+      $i18n{disableSuggestion}
+    </button>
+  </cr-action-menu>
   <!--_html_template_end_-->`;
   // clang-format on
 }

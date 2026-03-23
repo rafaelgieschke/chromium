@@ -57,12 +57,9 @@
 #include "chrome/browser/ui/send_tab_to_self/send_tab_to_self_bubble.h"
 #include "chrome/browser/ui/tab_ui_helper.h"
 #include "chrome/browser/ui/tabs/features.h"
-#include "chrome/browser/ui/tabs/organization/metrics.h"
-#include "chrome/browser/ui/tabs/organization/tab_organization_service.h"
-#include "chrome/browser/ui/tabs/organization/tab_organization_service_factory.h"
-#include "chrome/browser/ui/tabs/organization/tab_organization_session.h"
 #include "chrome/browser/ui/tabs/split_tab_metrics.h"
 #include "chrome/browser/ui/tabs/tab_change_type.h"
+#include "chrome/browser/ui/tabs/tab_close_types_data.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
 #include "chrome/browser/ui/tabs/tab_group_desktop.h"
 #include "chrome/browser/ui/tabs/tab_group_model.h"
@@ -118,6 +115,7 @@
 #include "ui/base/models/list_selection_model.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/gfx/range/range.h"
+
 using base::UserMetricsAction;
 using content::WebContents;
 
@@ -305,6 +303,16 @@ void TabStripModel::SetFocusedGroup(
 
   auto old_focused_group = focused_group_;
   focused_group_ = group;
+
+  if (old_focused_group.has_value() && old_focused_group != group &&
+      features::kTabGroupsFocusingAutoClose.Get()) {
+    TabGroup* const group_to_close =
+        group_model_->GetTabGroup(old_focused_group.value());
+    if (group_to_close && !group_to_close->IsGroupClosing()) {
+      CloseAllTabsInGroup(old_focused_group.value());
+    }
+  }
+
   for (auto& observer : observers_) {
     observer.OnTabGroupFocusChanged(focused_group_, old_focused_group);
   }
@@ -992,7 +1000,7 @@ void TabStripModel::SendDetachWebContentsNotifications(
   }
 
   for (auto& dt : notifications->detached_tab) {
-    if (dt->remove_reason == TabRemovedReason::kDeleted) {
+    if (TabRemoveReasonUtils::WillDeleteWebContents(dt->remove_reason)) {
       // This destroys the WebContents, which will also send
       // WebContentsDestroyed notifications.
       dt->tab.reset();
@@ -2452,9 +2460,6 @@ bool TabStripModel::IsContextMenuCommandEnabled(
              delegate()->CanMoveTabsToWindow(indices);
     }
 
-    case CommandOrganizeTabs:
-      return true;
-
     case CommandGlicShareLimit:
       return false;
     case CommandGlicStartShare:
@@ -2836,21 +2841,6 @@ void TabStripModel::ExecuteContextMenuCommand(int context_index,
       } else {
         std::move(callback).Run();
       }
-      break;
-    }
-
-    case CommandOrganizeTabs: {
-      base::UmaHistogramCounts1000(
-          "Tab.ContextMenu.OrganizeTabs.SelectedTabsCount",
-          selection_model_.size());
-      base::RecordAction(UserMetricsAction("TabContextMenu_OrganizeTabs"));
-      const Browser* const browser =
-          chrome::FindBrowserWithTab(GetWebContentsAt(context_index));
-      TabOrganizationService* const service =
-          TabOrganizationServiceFactory::GetForProfile(profile_);
-      CHECK(service);
-
-      service->RestartSessionAndShowUI(browser, GetTabAtIndex(context_index));
       break;
     }
 
@@ -3241,9 +3231,6 @@ bool TabStripModel::ContextMenuCommandToBrowserCommand(int cmd_id,
       break;
     case CommandCloseTab:
       *browser_cmd = IDC_CLOSE_TAB;
-      break;
-    case CommandOrganizeTabs:
-      *browser_cmd = IDC_ORGANIZE_TABS;
       break;
     default:
       *browser_cmd = 0;
@@ -3818,15 +3805,20 @@ bool TabStripModel::CloseWebContentses(
     }
 
     if (RunUnloadListenerBeforeClosing(closing_contents)) {
+      TabCloseTypesData::CreateForWebContents(closing_contents, close_types);
       closed_all = false;
       continue;
     }
 
     bool create_historical_tab =
         close_types & TabCloseTypes::CLOSE_CREATE_HISTORICAL_TAB;
-    auto dt = DetachTabImpl(original_indices[i], current_index,
-                            create_historical_tab, TabRemovedReason::kDeleted,
-                            tabs::TabInterface::DetachReason::kDelete);
+
+    auto dt =
+        DetachTabImpl(original_indices[i], current_index, create_historical_tab,
+                      close_types & TabCloseTypes::CLOSE_EXPAND_SIDE_PANEL
+                          ? TabRemovedReason::kDeletedAndExpandSidePanel
+                          : TabRemovedReason::kDeleted,
+                      tabs::TabInterface::DetachReason::kDelete);
     detached_tab.push_back(std::move(dt));
   }
 

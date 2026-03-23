@@ -34,6 +34,7 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "cc/base/switches.h"
+#include "components/language/core/browser/locale_util.h"
 #include "components/metrics/android_metrics_provider.h"
 #include "components/metrics/call_stacks/call_stack_profile_metrics_provider.h"
 #include "components/metrics/content/content_stability_metrics_provider.h"
@@ -45,6 +46,7 @@
 #include "components/metrics/drive_metrics_provider.h"
 #include "components/metrics/entropy_state_provider.h"
 #include "components/metrics/file_metrics_provider.h"
+#include "components/metrics/metrics_features.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_service.h"
 #include "components/metrics/metrics_state_manager.h"
@@ -360,6 +362,11 @@ void AwMetricsServiceClient::MaybeStartMetrics() {
   }
 }
 
+PrefService* AwMetricsServiceClient::GetPrefService() const {
+  CHECK(init_finished_);
+  return pref_service_;
+}
+
 void AwMetricsServiceClient::RegisterMetricsProvidersAndInitState() {
   CHECK(metrics::SubprocessMetricsProvider::GetInstance());
 
@@ -383,7 +390,7 @@ void AwMetricsServiceClient::RegisterMetricsProvidersAndInitState() {
       std::make_unique<metrics::AndroidMetricsProvider>());
   metrics_service_->RegisterMetricsProvider(
       std::make_unique<metrics::DriveMetricsProvider>(
-          base::DIR_ANDROID_APP_DATA));
+          base::DIR_ANDROID_APP_DATA, pref_service_));
   metrics_service_->RegisterMetricsProvider(
       std::make_unique<metrics::GPUMetricsProvider>());
   metrics_service_->RegisterMetricsProvider(
@@ -465,6 +472,10 @@ int32_t AwMetricsServiceClient::GetProduct() {
 }
 
 std::string AwMetricsServiceClient::GetApplicationLocale() {
+  if (base::FeatureList::IsEnabled(
+          metrics::features::kConsolidateMetricsServiceLocales)) {
+    return language::GetApplicationLocale(pref_service_);
+  }
   return base::i18n::GetConfiguredLocale();
 }
 

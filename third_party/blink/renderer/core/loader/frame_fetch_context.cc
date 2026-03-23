@@ -461,12 +461,6 @@ void FrameFetchContext::PrepareRequest(
     document_loader_->GetServiceWorkerNetworkProvider()->WillSendRequest(
         webreq);
   }
-
-  request.SetAllowsDeviceBoundSessionRegistration(
-      RuntimeEnabledFeatures::DeviceBoundSessionCredentialsEnabled(
-          GetExecutionContext()) ||
-      RuntimeEnabledFeatures::DeviceBoundSessionCredentials2Enabled(
-          GetExecutionContext()));
 }
 
 // TODO(crbug.com/422626353): Consider consolidating the initiator info
@@ -820,9 +814,11 @@ void FrameFetchContext::AddClientHintsIfNecessary(
     }
   }
 
+  bool save_data_enabled = GetNetworkStateNotifier().SaveDataEnabled();
+  probe::ApplyDataSaverOverride(Probe(), save_data_enabled);
   if (ShouldSendClientHint(*policy, resource_origin, is_1p_origin,
                            WebClientHintsType::kSaveData, hints_preferences) &&
-      GetNetworkStateNotifier().SaveDataEnabled()) {
+      save_data_enabled) {
     request.SetHttpHeaderField(http_names::kSaveData, http_names::kOn);
   }
 

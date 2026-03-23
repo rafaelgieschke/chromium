@@ -84,7 +84,6 @@
 #include "chrome/browser/ui/webui/ash/login/tpm_error_screen_handler.h"
 #include "chrome/browser/ui/webui/ash/login/update_required_screen_handler.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/ash/components/cryptohome/cryptohome_parameters.h"
 #include "chromeos/ash/components/dbus/session_manager/session_manager_client.h"
@@ -359,12 +358,15 @@ ExistingUserController* ExistingUserController::current_controller() {
 
 ExistingUserController::ExistingUserController(
     PrefService* local_state,
-    const ApplicationLocaleStorage* application_locale_storage)
+    const ApplicationLocaleStorage* application_locale_storage,
+    scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory)
     : local_state_(CHECK_DEREF(local_state)),
       application_locale_storage_(CHECK_DEREF(application_locale_storage)),
+      shared_url_loader_factory_(std::move(shared_url_loader_factory)),
       cros_settings_(CrosSettings::Get()),
       network_state_helper_(new login::NetworkStateHelper),
       pin_salt_storage_(std::make_unique<quick_unlock::PinSaltStorage>()) {
+  CHECK(shared_url_loader_factory_);
   HttpAuthDialog::AddObserver(this);
 
   enable_system_httpauth_ = HttpAuthDialog::Enable();
@@ -405,6 +407,7 @@ ExistingUserController::ExistingUserController(
     // for now because first session is very short and it will be a auto sign
     // out in 90s if idle.
     demo_login_controller_ = std::make_unique<ash::DemoLoginController>(
+        &local_state_.get(),
         base::BindRepeating(&ExistingUserController::ConfigureAutoLogin,
                             base::Unretained(this)));
   }
@@ -1659,7 +1662,7 @@ void ExistingUserController::DoCompleteLogin(
   if (!user_context.GetAuthCode().empty()) {
     oauth2_token_initializer_ = std::make_unique<OAuth2TokenInitializer>();
     oauth2_token_initializer_->Start(
-        user_context,
+        shared_url_loader_factory_, user_context,
         base::BindOnce(&ExistingUserController::OnOAuth2TokensFetched,
                        weak_factory_.GetWeakPtr()));
     return;

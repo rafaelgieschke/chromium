@@ -46,6 +46,7 @@
 #import "ios/chrome/browser/enterprise/connectors/reporting/ios_reporting_event_router_factory.h"
 #import "ios/chrome/browser/flags/chrome_switches.h"
 #import "ios/chrome/browser/https_upgrades/model/https_upgrade_service_factory.h"
+#import "ios/chrome/browser/intelligence/actuation/model/tools/actuation_target_java_script_feature.h"
 #import "ios/chrome/browser/intelligence/actuation/model/tools/click_tool_java_script_feature.h"
 #import "ios/chrome/browser/intelligence/features/features.h"
 #import "ios/chrome/browser/intelligence/proto_wrappers/page_context_extractor_java_script_feature.h"
@@ -447,6 +448,7 @@ std::vector<web::JavaScriptFeature*> ChromeWebClient::GetJavaScriptFeatures(
   features.push_back(PageContextExtractorJavaScriptFeature::GetInstance());
 
   if (base::FeatureList::IsEnabled(kActuationTools)) {
+    features.push_back(ActuationTargetJavaScriptFeature::GetInstance());
     features.push_back(ClickToolJavaScriptFeature::GetInstance());
   }
 
@@ -675,7 +677,7 @@ web::JSErrorReportLoggingLevel ChromeWebClient::GetJSErrorReportLoggingLevel(
   ProfileIOS* profile = ProfileIOS::FromBrowserState(browser_state);
   UrlKeyedDataCollectionConsentHelperIOS* consent_helper =
       UrlKeyedDataCollectionConsentHelperFactoryIOS::GetForProfile(profile);
-  if (consent_helper->IsEnabled()) {
+  if (consent_helper && consent_helper->IsEnabled()) {
     return web::JSErrorReportLoggingLevel::FULL;
   }
 

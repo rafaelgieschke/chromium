@@ -7,19 +7,21 @@ import 'chrome://contextual-tasks/app.js';
 import type {ContextualTasksAppElement} from 'chrome://contextual-tasks/app.js';
 import {BrowserProxyImpl} from 'chrome://contextual-tasks/contextual_tasks_browser_proxy.js';
 import type {ComposeboxFile} from 'chrome://resources/cr_components/composebox/common.js';
-import {PageCallbackRouter as ComposeboxPageCallbackRouter, PageHandlerRemote as ComposeboxPageHandlerRemote} from 'chrome://resources/cr_components/composebox/composebox.mojom-webui.js';
+import {LensOverlayDismissalSource, PageCallbackRouter as ComposeboxPageCallbackRouter, PageHandlerRemote as ComposeboxPageHandlerRemote} from 'chrome://resources/cr_components/composebox/composebox.mojom-webui.js';
 import {ComposeboxProxyImpl} from 'chrome://resources/cr_components/composebox/composebox_proxy.js';
-import {ContextUploadStatus} from 'chrome://resources/cr_components/composebox/composebox_query.mojom-webui.js';
+import {ContextUploadStatus, InputType, ToolMode} from 'chrome://resources/cr_components/composebox/composebox_query.mojom-webui.js';
 import {createAutocompleteMatch, createAutocompleteResultForTesting} from 'chrome://resources/cr_components/searchbox/searchbox_browser_proxy.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
-import {PageCallbackRouter as SearchboxPageCallbackRouter, PageHandlerRemote as SearchboxPageHandlerRemote, type PageRemote as SearchboxPageRemote} from 'chrome://resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
+import {PageCallbackRouter as SearchboxPageCallbackRouter, PageHandlerRemote as SearchboxPageHandlerRemote} from 'chrome://resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
+import type {PageRemote as SearchboxPageRemote} from 'chrome://resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
 import {assertEquals, assertFalse, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {MockInputState} from 'chrome://webui-test/cr_components/searchbox/searchbox_test_utils.js';
 import {MockTimer} from 'chrome://webui-test/mock_timer.js';
 import {TestMock} from 'chrome://webui-test/test_mock.js';
-import {isVisible, microtasksFinished} from 'chrome://webui-test/test_util.js';
+import {$$, isVisible, microtasksFinished} from 'chrome://webui-test/test_util.js';
 
 import {TestContextualTasksBrowserProxy} from './test_contextual_tasks_browser_proxy.js';
-import {assertStyle, deleteLastFile, FAKE_TOKEN_STRING, FAKE_TOKEN_STRING_2, getSubmitButton, getSubmitContainer, mockInputState, setupAutocompleteResults, simulateUserInput, uploadFileAndVerify} from './test_utils.js';
+import {assertStyle, deleteLastFile, FAKE_TOKEN_STRING, FAKE_TOKEN_STRING_2, fixtureUrl, getSubmitButton, getSubmitContainer, setupAutocompleteResults, simulateUserInput, uploadFileAndVerify} from './test_utils.js';
 
 function pressEnter(element: HTMLElement) {
   element.dispatchEvent(new KeyboardEvent('keydown', {
@@ -38,6 +40,13 @@ suite('ContextualTasksComposeboxTest', () => {
   let searchboxCallbackRouterRemote: SearchboxPageRemote;
   let mockTimer: MockTimer;
 
+  async function setActiveTool(tool: ToolMode) {
+    searchboxCallbackRouterRemote.onInputStateChanged({
+      ...new MockInputState(),
+      activeTool: tool,
+    });
+    await microtasksFinished();
+  }
   class MockResizeObserver {
     static instances: MockResizeObserver[] = [];
 
@@ -88,9 +97,10 @@ suite('ContextualTasksComposeboxTest', () => {
       composeboxHintTextAskAboutThisTab: 'Ask about this tab',
       composeboxHintTextAskAboutThisImage: 'Ask about this image',
       composeboxHintTextAskAboutThisDoc: 'Ask about this doc',
+      forcedEmbeddedPageHost: '',
     });
 
-    testProxy = new TestContextualTasksBrowserProxy('https://google.com');
+    testProxy = new TestContextualTasksBrowserProxy(fixtureUrl);
     BrowserProxyImpl.setInstance(testProxy);
 
     mockComposeboxPageHandler = TestMock.fromClass(ComposeboxPageHandlerRemote);
@@ -125,12 +135,49 @@ suite('ContextualTasksComposeboxTest', () => {
         MockResizeObserver.instances.length >= 1,
         'There should be at least one ResizeObserver instance.');
 
-    searchboxCallbackRouterRemote.onInputStateChanged(mockInputState);
+    searchboxCallbackRouterRemote.onInputStateChanged(new MockInputState());
     await microtasksFinished();
   });
 
   teardown(() => {
     mockTimer.uninstall();
+  });
+
+  test('closes Lens overlay when image uploads are disabled', async () => {
+    const disabledState = {
+      ...new MockInputState(),
+      disabledInputTypes: [InputType.kLensImage],
+    };
+
+    const innerComposebox = contextualTasksApp.$.composebox.$.composebox;
+    innerComposebox.dispatchEvent(new CustomEvent('input-state-changed', {
+      detail: {inputState: disabledState},
+      bubbles: true,
+      composed: true,
+    }));
+
+    await microtasksFinished();
+
+    assertEquals(
+        1, mockComposeboxPageHandler.getCallCount('closeLensOverlayFromWebUI'));
+    assertEquals(
+        LensOverlayDismissalSource.kContextualTasksImageUploadsDisabled,
+        mockComposeboxPageHandler.getArgs('closeLensOverlayFromWebUI')[0]);
+  });
+
+  test('lens button is disabled when image uploads are disabled', async () => {
+    const disabledState = {
+      ...new MockInputState(),
+      disabledInputTypes: [InputType.kLensImage],
+    };
+
+    searchboxCallbackRouterRemote.onInputStateChanged(disabledState);
+    await searchboxCallbackRouterRemote.$.flushForTesting();
+    await contextualTasksApp.$.composebox.updateComplete;
+    await composebox.updateComplete;
+    await microtasksFinished();
+
+    assertTrue(composebox.lensButtonDisabled);
   });
 
   test(
@@ -228,7 +275,7 @@ suite('ContextualTasksComposeboxTest', () => {
       microtasksFinished(),
     ]);
 
-    assertEquals(0, composebox.files_.size);
+    assertEquals(0, composebox.files.size);
 
     const submitButton: HTMLButtonElement|null = getSubmitButton(composebox);
     assertTrue(!!submitButton, 'Submit button should exist');
@@ -256,7 +303,7 @@ suite('ContextualTasksComposeboxTest', () => {
             token1, new File(['foo'], 'foo.jpg', {type: 'image/jpeg'}),
             composebox, mockSearchboxPageHandler);
 
-        const currentFiles = composebox.files_;
+        const currentFiles = composebox.files;
         currentFiles.forEach((file: ComposeboxFile) => {
           file.isDeletable = false;
         });
@@ -319,7 +366,7 @@ suite('ContextualTasksComposeboxTest', () => {
         await composebox.updateComplete;
         await microtasksFinished();
 
-        const currentFiles2 = composebox.files_;
+        const currentFiles2 = composebox.files;
         currentFiles2.forEach((file: ComposeboxFile) => {
           file.isDeletable = false;
         });
@@ -449,7 +496,7 @@ suite('ContextualTasksComposeboxTest', () => {
   test('TooltipVisibilityUpdatesOnResize', () => {
     mockTimer.install();
     const composeboxElement = contextualTasksApp.$.composebox;
-    const tooltip = composeboxElement.$.onboardingTooltip;
+    const tooltip = contextualTasksApp.$.onboardingTooltip;
 
     // Force show tooltip
     loadTimeData.overrideValues({
@@ -457,8 +504,8 @@ suite('ContextualTasksComposeboxTest', () => {
       isOnboardingTooltipDismissCountBelowCap: true,
       composeboxShowOnboardingTooltipSessionImpressionCap: 10,
     });
-    composeboxElement.numberOfTimesTooltipShownForTesting = 0;
-    composeboxElement.userDismissedTooltipForTesting = false;
+    contextualTasksApp.numberOfTimesTooltipShownForTesting = 0;
+    contextualTasksApp.userDismissedTooltipForTesting = false;
 
     // Simulate active tab chip token presence
     const innerComposebox = composeboxElement.$.composebox;
@@ -466,8 +513,8 @@ suite('ContextualTasksComposeboxTest', () => {
     innerComposebox.getAutomaticActiveTabChipElement = () =>
         document.createElement('div');
 
-    composeboxElement.updateTooltipVisibilityForTesting();
-    assertTrue(tooltip.shouldShow);
+    contextualTasksApp.updateTooltipVisibilityForTesting();
+    assertTrue(tooltip!.shouldShow);
 
     // Resize event
     const resizeEvent = new CustomEvent('composebox-resize', {
@@ -479,7 +526,7 @@ suite('ContextualTasksComposeboxTest', () => {
 
     // Tooltip should still be shown and position updated (implicitly via resize
     // observer or logic)
-    assertTrue(tooltip.shouldShow);
+    assertTrue(tooltip!.shouldShow);
   });
 
   test('TooltipResizeObserverCoexistsWithResizeObserver', () => {
@@ -489,7 +536,7 @@ suite('ContextualTasksComposeboxTest', () => {
 
     // Initially, only resizeObserver_ should exist.
     assertTrue(!!composeboxElement.resizeObserverForTesting);
-    assertFalse(!!composeboxElement.tooltipResizeObserverForTesting);
+    assertFalse(!!contextualTasksApp.tooltipResizeObserverForTesting);
 
     // Force show tooltip.
     loadTimeData.overrideValues({
@@ -497,19 +544,19 @@ suite('ContextualTasksComposeboxTest', () => {
       isOnboardingTooltipDismissCountBelowCap: true,
       composeboxShowOnboardingTooltipSessionImpressionCap: 10,
     });
-    composeboxElement.numberOfTimesTooltipShownForTesting = 0;
-    composeboxElement.userDismissedTooltipForTesting = false;
+    contextualTasksApp.numberOfTimesTooltipShownForTesting = 0;
+    contextualTasksApp.userDismissedTooltipForTesting = false;
 
     // Simulate active tab chip token presence to trigger tooltip.
     innerComposebox.getHasAutomaticActiveTabChipToken = () => true;
     innerComposebox.getAutomaticActiveTabChipElement = () =>
         document.createElement('div');
 
-    composeboxElement.updateTooltipVisibilityForTesting();
+    contextualTasksApp.updateTooltipVisibilityForTesting();
 
     // Now both observers should exist.
     assertTrue(!!composeboxElement.resizeObserverForTesting);
-    assertTrue(!!composeboxElement.tooltipResizeObserverForTesting);
+    assertTrue(!!contextualTasksApp.tooltipResizeObserverForTesting);
 
     // Verify resizeObserver_ still works.
     Object.defineProperty(innerComposebox, 'offsetHeight', {
@@ -528,7 +575,7 @@ suite('ContextualTasksComposeboxTest', () => {
   test('TooltipImpressionIncrementsAfterDelay', () => {
     mockTimer.install();
     const composeboxElement = contextualTasksApp.$.composebox;
-    const tooltip = composeboxElement.$.onboardingTooltip;
+    const tooltip = contextualTasksApp.$.onboardingTooltip;
 
     // Force show tooltip with delay.
     loadTimeData.overrideValues({
@@ -537,8 +584,8 @@ suite('ContextualTasksComposeboxTest', () => {
       composeboxShowOnboardingTooltipSessionImpressionCap: 10,
       composeboxShowOnboardingTooltipImpressionDelay: 3000,
     });
-    composeboxElement.numberOfTimesTooltipShownForTesting = 0;
-    composeboxElement.userDismissedTooltipForTesting = false;
+    contextualTasksApp.numberOfTimesTooltipShownForTesting = 0;
+    contextualTasksApp.userDismissedTooltipForTesting = false;
 
     const innerComposebox = composeboxElement.$.composebox;
     innerComposebox.getHasAutomaticActiveTabChipToken = () => true;
@@ -546,19 +593,61 @@ suite('ContextualTasksComposeboxTest', () => {
         document.createElement('div');
 
     // Trigger update.
-    composeboxElement.updateTooltipVisibilityForTesting();
-    assertTrue(tooltip.shouldShow);
+    contextualTasksApp.updateTooltipVisibilityForTesting();
+    assertTrue(tooltip!.shouldShow);
 
     // Should not have incremented yet.
-    assertEquals(0, composeboxElement.numberOfTimesTooltipShownForTesting);
+    assertEquals(0, contextualTasksApp.numberOfTimesTooltipShownForTesting);
 
     // Tick almost to the end.
     mockTimer.tick(2999);
-    assertEquals(0, composeboxElement.numberOfTimesTooltipShownForTesting);
+    assertEquals(0, contextualTasksApp.numberOfTimesTooltipShownForTesting);
 
     // Tick past the delay.
     mockTimer.tick(1);
-    assertEquals(1, composeboxElement.numberOfTimesTooltipShownForTesting);
+    assertEquals(1, contextualTasksApp.numberOfTimesTooltipShownForTesting);
+  });
+
+  test('ToolChipVisibilityBasedOnInputState', async () => {
+    const innerComposebox = contextualTasksApp.$.composebox.$.composebox;
+
+    const getChip = () => {
+      const toolChip = $$(innerComposebox, 'cr-composebox-tool-chip');
+      return toolChip ? $$(toolChip, '#toolEnabledButton') : null;
+    };
+
+    // Initial state: No tool active.
+    await setActiveTool(ToolMode.kUnspecified);
+
+    assertFalse(isVisible(getChip()));
+
+    // Activate Deep Search.
+    await setActiveTool(ToolMode.kDeepSearch);
+
+    assertTrue(isVisible(getChip()), 'Deep search does not exist');
+    assertTrue(
+        getChip()!.textContent.includes('Deep Search'),
+        'Deep search is not the text');
+
+    // Activate Image Gen (nanoBananaChip).
+    await setActiveTool(ToolMode.kImageGen);
+
+    assertTrue(isVisible(getChip()), 'Create images does not exist');
+    assertTrue(
+        getChip()!.textContent.includes('Create images'),
+        'Create images is not the text');
+
+    // Activate Canvas.
+    await setActiveTool(ToolMode.kCanvas);
+
+    assertTrue(isVisible(getChip()), 'Canvas does not exist');
+    assertTrue(
+        getChip()!.textContent.includes('Canvas'), 'Canvas is not the text');
+
+    // Back to Unspecified.
+    await setActiveTool(ToolMode.kUnspecified);
+
+    assertFalse(isVisible(getChip()), 'Tool chip still visible');
   });
 
   test('EnterKeyAfterSubmitDoesNotAddNewLine', async () => {
@@ -799,6 +888,63 @@ suite('ContextualTasksComposeboxTest', () => {
     assertFalse(isImage);
   });
 
+  test('composebox is hidden until isZeroState is not undefined', async () => {
+    // Clear the body and reset the mock to test a fresh instance.
+    document.body.innerHTML = window.trustedTypes!.emptyHTML;
+    mockSearchboxPageHandler.reset();
+    mockSearchboxPageHandler.setResultFor('getInputState', Promise.resolve({
+      state: {
+        allowedModels: [],
+        allowedTools: [],
+        allowedInputTypes: [],
+        activeModel: 0,
+        activeTool: 0,
+        disabledModels: [],
+        disabledTools: [],
+        disabledInputTypes: [],
+      },
+    }));
+
+    const app = document.createElement('contextual-tasks-app');
+    document.body.appendChild(app);
+
+    await app.updateComplete;
+    await microtasksFinished();
+
+    // Since connectedCallback immediately resolves the isZeroState promise
+    // and sets it to false, we force it back to undefined here to test the
+    // initial rendering state.
+    app.setIsZeroStateForTesting(undefined as unknown as boolean);
+    app.requestUpdate();
+    await app.updateComplete;
+    await microtasksFinished();
+
+    const composeboxWrapper = app.$.composebox;
+    assertTrue(
+        composeboxWrapper.hasAttribute('hidden'),
+        'Composebox should be hidden when isZeroState is undefined');
+
+    // Mock 'isZeroState_' updating value from parent to true.
+    testProxy.callbackRouterRemote.onZeroStateChange(true);
+    await testProxy.callbackRouterRemote.$.flushForTesting();
+    await app.updateComplete;
+    await microtasksFinished();
+
+    assertFalse(
+        composeboxWrapper.hasAttribute('hidden'),
+        'Composebox should be visible when isZeroState is true');
+
+    // Mock 'isZeroState_' updating value from parent to false.
+    testProxy.callbackRouterRemote.onZeroStateChange(false);
+    await testProxy.callbackRouterRemote.$.flushForTesting();
+    await app.updateComplete;
+    await microtasksFinished();
+
+    assertFalse(
+        composeboxWrapper.hasAttribute('hidden'),
+        'Composebox should be visible when isZeroState is false');
+  });
+
   test('queries autocomplete on load when isZeroState is true', async () => {
     // Clear the body and reset the mock to test a fresh instance.
     document.body.innerHTML = window.trustedTypes!.emptyHTML;
@@ -838,68 +984,6 @@ suite('ContextualTasksComposeboxTest', () => {
 
     assertEquals(1, mockSearchboxPageHandler.getCallCount('queryAutocomplete'));
   });
-
-  test(
-      'lens button visibility depends on whether DeepSearch is selected in nextbox',
-      async () => {
-        // The wrapper.
-        const contextualComposebox = contextualTasksApp.$.composebox;
-        // The cr-components composebox in the wrapper.
-        const innerComposebox = composebox;
-
-        // Ensure we are in side panel mode
-        testProxy.handler.setIsShownInTab(false);
-
-        testProxy.callbackRouterRemote.onSidePanelStateChanged();
-
-        await testProxy.callbackRouterRemote.$.flushForTesting();
-        await contextualComposebox.updateComplete;
-        await innerComposebox.updateComplete;
-        await microtasksFinished();
-
-        const getLensIcon = () =>
-            innerComposebox.shadowRoot.querySelector('#lensIcon');
-
-        assertTrue(
-            isVisible(getLensIcon()),
-            'Lens button should be visible initially');
-        assertTrue(
-            innerComposebox.showLensButton,
-            'Child showLensButton should be true initially');
-
-        // Enable Deep Search
-        innerComposebox.dispatchEvent(
-            new CustomEvent('active-tool-mode-changed', {
-              bubbles: true,
-              composed: true,
-              detail: {value: 1},
-            }));
-
-        await microtasksFinished();
-        await contextualComposebox.updateComplete;
-        await innerComposebox.updateComplete;
-
-        // Check the effect
-        assertEquals(
-            null, getLensIcon(),
-            'Lens button should be hidden when Deep Search is active');
-
-        // Disable Deep Search
-        innerComposebox.dispatchEvent(
-            new CustomEvent('active-tool-mode-changed', {
-              bubbles: true,
-              composed: true,
-              detail: {value: 0},
-            }));
-
-        await microtasksFinished();
-        await contextualComposebox.updateComplete;
-        await innerComposebox.updateComplete;
-
-        // Check the effect
-        assertTrue(
-            isVisible(getLensIcon()), 'Lens button should be visible again');
-      });
 
   test(
       'does not query autocomplete on load when isZeroState is false',
@@ -1064,5 +1148,92 @@ suite('ContextualTasksComposeboxTest', () => {
     await microtasksFinished();
     await innerComposebox.updateComplete;
     assertEquals('', innerComposebox.getInputText());
+  });
+
+  test('OfflineStatusReconsideredOnReload', async () => {
+    // 1. Initial state: Online.
+    Object.defineProperty(window.navigator, 'onLine', {
+      get: () => true,
+      configurable: true,
+    });
+
+    const threadFrame = contextualTasksApp.$.threadFrame;
+    const composebox = contextualTasksApp.$.composebox;
+
+    // Simulate a load to initialize state.
+    const loadStartEventOnline = new CustomEvent('loadstart') as any;
+    loadStartEventOnline.isTopLevel = true;
+    loadStartEventOnline.url = fixtureUrl;
+    threadFrame.dispatchEvent(loadStartEventOnline);
+
+    await microtasksFinished();
+    await contextualTasksApp.updateComplete;
+
+    assertFalse(
+        contextualTasksApp.isLoadErrorForTesting, 'Should be online initially');
+    assertTrue(isVisible(composebox), 'Composebox should be visible initially');
+    assertEquals(mockSearchboxPageHandler.getCallCount('queryAutocomplete'), 1);
+
+    // 2. Go offline.
+    Object.defineProperty(window.navigator, 'onLine', {
+      get: () => false,
+      configurable: true,
+    });
+
+    // Verify it's still visible because no reload happened yet.
+    assertFalse(
+        contextualTasksApp.isLoadErrorForTesting,
+        'isLoadError_ should still be false before reload');
+    assertTrue(
+        isVisible(composebox),
+        'Composebox should still be visible before reload');
+
+    // 3. Simulate reload while offline.
+    const loadStartEventOffline = new CustomEvent('loadstart') as any;
+    loadStartEventOffline.isTopLevel = true;
+    loadStartEventOffline.url = fixtureUrl;
+    threadFrame.dispatchEvent(loadStartEventOffline);
+
+    await microtasksFinished();
+    await contextualTasksApp.updateComplete;
+
+    assertTrue(
+        contextualTasksApp.isLoadErrorForTesting,
+        'Should be error after reload');
+    assertFalse(
+        isVisible(composebox),
+        'Composebox should be hidden when in error state');
+
+    // 4. Go back online.
+    Object.defineProperty(window.navigator, 'onLine', {
+      get: () => true,
+      configurable: true,
+    });
+
+    // Verify it's still hidden because no reload happened yet.
+    assertTrue(
+        contextualTasksApp.isLoadErrorForTesting,
+        'isLoadError_ should still be true before reload');
+    assertFalse(
+        isVisible(composebox),
+        'Composebox should still be hidden before reload');
+
+    // 5. Simulate reload while online.
+    testProxy.callbackRouterRemote.onZeroStateChange(true);
+    const loadStartEventBackOnline = new CustomEvent('loadstart') as any;
+    loadStartEventBackOnline.isTopLevel = true;
+    loadStartEventBackOnline.url = fixtureUrl;
+    threadFrame.dispatchEvent(loadStartEventBackOnline);
+
+    await microtasksFinished();
+    await contextualTasksApp.updateComplete;
+
+    assertFalse(
+        contextualTasksApp.isLoadErrorForTesting,
+        'Should be online after reload');
+    assertTrue(
+        isVisible(composebox), 'Composebox should be visible after reload');
+
+    await microtasksFinished();
   });
 });

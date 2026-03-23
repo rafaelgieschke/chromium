@@ -107,7 +107,9 @@ class CanvasResourceProviderTest : public Test {
 
     gpu::SharedImageCapabilities shared_image_caps;
     shared_image_caps.supports_scanout_shared_images = true;
+#if BUILDFLAG(IS_WIN)
     shared_image_caps.shared_image_swap_chain = true;
+#endif
     test_context_provider_->SharedImageInterface()->SetCapabilities(
         shared_image_caps);
 
@@ -158,9 +160,11 @@ TEST_F(CanvasResourceProviderTest, BeginExternalWrite) {
 
   // The same ClientSharedImage should be returned from sequential calls to
   // BeginExternalWrite().
-  auto client_si = provider->BeginExternalWrite(sync_token);
+  auto client_si = provider->BeginExternalWrite(sync_token,
+                                                /*is_overwrite=*/false);
   provider->EndExternalWrite(sync_token);
-  auto client_si_from_second_call = provider->BeginExternalWrite(sync_token);
+  auto client_si_from_second_call =
+      provider->BeginExternalWrite(sync_token, /*is_overwrite=*/false);
   EXPECT_EQ(client_si_from_second_call, client_si);
 }
 

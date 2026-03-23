@@ -56,6 +56,7 @@
 #include "net/dns/dns_config.h"
 #include "net/dns/dns_http_attempt.h"
 #include "net/dns/dns_names_util.h"
+#include "net/dns/dns_platform_attempt_factory.h"
 #include "net/dns/dns_query.h"
 #include "net/dns/dns_response.h"
 #include "net/dns/dns_response_result_extractor.h"
@@ -122,7 +123,6 @@ void ConstructDnsHTTPAttempt(base::WeakPtr<ResolveContext> resolve_context,
                              const OptRecordRdata* opt_rdata,
                              std::vector<std::unique_ptr<DnsAttempt>>* attempts,
                              URLRequestContext* url_request_context,
-                             const IsolationInfo& isolation_info,
                              RequestPriority request_priority,
                              bool is_probe) {
   DCHECK(url_request_context);
@@ -144,8 +144,7 @@ void ConstructDnsHTTPAttempt(base::WeakPtr<ResolveContext> resolve_context,
   attempts->push_back(std::make_unique<DnsHTTPAttempt>(
       std::move(resolve_context), session, doh_server_index, std::move(query),
       doh_server.server_template(), gurl_without_parameters,
-      doh_server.use_post(), url_request_context, isolation_info,
-      request_priority, is_probe));
+      doh_server.use_post(), url_request_context, request_priority, is_probe));
 }
 
 // ----------------------------------------------------------------------------
@@ -276,8 +275,7 @@ class DnsOverHttpsProbeRunner : public DnsProbeRunner {
         context_->GetWeakPtr(), session_.get(), doh_server_index,
         formatted_probe_qname_, dns_protocol::kTypeA, /*opt_rdata=*/nullptr,
         &probe_stats->probe_attempts, context_->url_request_context(),
-        context_->isolation_info(), RequestPriority::DEFAULT_PRIORITY,
-        /*is_probe=*/true);
+        RequestPriority::DEFAULT_PRIORITY, /*is_probe=*/true);
 
     DnsAttempt* probe_attempt = probe_stats->probe_attempts.back().get();
     probe_attempt->Start(base::BindOnce(
@@ -568,6 +566,8 @@ class DnsTransactionImpl final : public DnsTransaction {
       case DnsTransactionFactory::AttemptMode::kClassic:
         DCHECK_GT(config.nameservers.size(), 0u);
         return MakeClassicDnsAttempt();
+      case DnsTransactionFactory::AttemptMode::kPlatform:
+        return MakePlatformAttempt();
       default:
         NOTREACHED();
     }
@@ -649,7 +649,6 @@ class DnsTransactionImpl final : public DnsTransaction {
                             doh_server_index, qnames_.front(), qtype_,
                             opt_rdata_, &attempts_,
                             resolve_context_->url_request_context(),
-                            resolve_context_->isolation_info(),
                             request_priority_, /*is_probe=*/false);
     ++attempts_count_;
     DnsAttempt* attempt = attempts_.back().get();
@@ -754,6 +753,9 @@ class DnsTransactionImpl final : public DnsTransaction {
       case DnsTransactionFactory::AttemptMode::kClassic:
         dns_server_iterator_ = resolve_context_->GetClassicDnsIterator(
             session_->config(), session_.get());
+        break;
+      case DnsTransactionFactory::AttemptMode::kPlatform:
+        dns_server_iterator_ = std::make_unique<OneShotDnsServerIterator>();
         break;
       default:
         NOTREACHED();
@@ -957,6 +959,11 @@ class DnsTransactionImpl final : public DnsTransaction {
       case DnsTransactionFactory::AttemptMode::kClassic:
         timeout = resolve_context_->ClassicTransactionTimeout(session_.get());
         break;
+      case DnsTransactionFactory::AttemptMode::kPlatform:
+        // TODO(crbug.com/493024959): Consider whether this should be changed to
+        // a platform specific value.
+        timeout = features::kDnsMinTransactionTimeout.Get();
+        break;
       default:
         NOTREACHED();
     }
@@ -969,6 +976,31 @@ class DnsTransactionImpl final : public DnsTransaction {
     if (callback_.is_null())
       return;
     DoCallback(AttemptResult(ERR_DNS_TIMED_OUT, nullptr));
+  }
+
+  AttemptResult MakePlatformAttempt() {
+    const size_t attempt_number = attempts_.size();
+
+    attempts_.push_back(
+        resolve_context_->url_request_context()
+            ->dns_platform_attempt_factory()
+            ->CreateDnsPlatformAttempt(
+                dns_server_iterator_->GetNextAttemptIndex(), qnames_.front(),
+                qtype_, resolve_context_->GetTargetNetwork(), net_log_));
+
+    ++attempts_count_;
+
+    DnsAttempt* attempt = attempts_.back().get();
+    int rv = attempt->Start(base::BindOnce(
+        &DnsTransactionImpl::OnAttemptComplete, base::Unretained(this),
+        attempt_number, /*record_rtt=*/false, base::TimeTicks::Now()));
+    if (rv == ERR_IO_PENDING) {
+      // TODO(crbug.com/493024959): Consider whether this should be changed to
+      // a platform specific value.
+      timer_.Start(FROM_HERE, features::kDnsMinTransactionTimeout.Get(), this,
+                   &DnsTransactionImpl::OnFallbackPeriodExpired);
+    }
+    return AttemptResult(rv, attempt);
   }
 
   scoped_refptr<DnsSession> session_;

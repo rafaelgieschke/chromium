@@ -85,6 +85,8 @@ BASE_DECLARE_FEATURE(kNtpTabGroupsModuleZeroState);
 BASE_DECLARE_FEATURE(kNtpFeatureOptimizationModuleRemoval);
 BASE_DECLARE_FEATURE(kNtpFeatureOptimizationShortcutsRemoval);
 BASE_DECLARE_FEATURE(kNtpFeatureOptimizationDismissModulesRemoval);
+BASE_DECLARE_FEATURE(kNtpAnimatedDoodles);
+BASE_DECLARE_FEATURE(kNtpDoodleMurals);
 
 // Parameter for controlling the luminosity difference for NTP elements on light
 // backgrounds.
@@ -279,6 +281,10 @@ extern const base::FeatureParam<bool> kNtpNextShowSimplificationUIParam;
 // Parameter determining if the Action Chips on the NTP should display the
 // dismissal UI.
 extern const base::FeatureParam<bool> kNtpNextShowDismissalUIParam;
+
+// Parameter determining if right-clicking an action chip should display the
+// disablement context menu.
+extern const base::FeatureParam<bool> kNtpNextDisablementContextMenuParam;
 
 // Parameter determining if the tab upload should be delayed when tab context is
 // added from an action chip.

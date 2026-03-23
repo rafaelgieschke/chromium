@@ -113,8 +113,10 @@ static_library("devtools") {
     "//chrome/browser/search",
     "//chrome/browser/search_engines",
     "//chrome/browser/sync",
+    "//chrome/browser/tpcd/metadata",
     "//chrome/browser/ui/autofill",
     "//chrome/browser/ui/dialogs",
+    "//chrome/browser/ui/select_file_policy",
 
     # To prevent circular GN dependencies, this target does not depend on
     # //chrome/browser:browser, even though it has a real build dependency on

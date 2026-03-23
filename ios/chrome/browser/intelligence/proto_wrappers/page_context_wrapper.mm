@@ -80,6 +80,9 @@ constexpr const char kChildrenFramesDictKey[] = "children";
 // The key for the PageInteractionInfo of the main frame.
 constexpr const char kPageInteractionInfoDictKey[] = "pageInteractionInfo";
 
+// The key for the ViewportGeometry of the main frame.
+constexpr const char kViewportGeometryDictKey[] = "viewportGeometry";
+
 // The key for the links of the frame in the JavaScript object. The value is
 // an array of objects.
 constexpr const char kFrameLinksDictKey[] = "links";
@@ -404,7 +407,8 @@ result.links = linksArray;
 // calls.
 - (void)populateAsyncFields:(base::TimeDelta)timeout {
   CHECK_GE(_asyncTasksToComplete, 0);
-  _pageContextMetrics = [[PageContextWrapperMetrics alloc] init];
+  _pageContextMetrics = [[PageContextWrapperMetrics alloc]
+      initWithAPCConfigVariant:_config->GetApcConfigVariant()];
 
   if (!_webState || _asyncTasksToComplete == 0) {
     [self asyncWorkCompletedForPageContext];
@@ -580,6 +584,17 @@ result.links = linksArray;
   if (_config->use_refactored_extractor()) {
     // Use the new way for extracting context.
 
+    // Autofill information is only needed when extracting detailed annotated
+    // page content. It is not needed when extracting inner text.
+    // TODO(crbug.com/493904351): Add kill switch by using autofill config bit.
+    if (_shouldGetAnnotatedPageContent) {
+      optimization_guide::proto::AutofillInformation* autofillInformation =
+          _rootAPCNode->mutable_profile_information()
+              ->mutable_autofill_information();
+      CHECK(_webState);
+      PopulateAutofillInformation(_webState.get(), autofillInformation);
+    }
+
     // Callback to aggregate values from the JS execution.
     auto callback = [](PageContextWrapper* weakWrapper,
                        base::RepeatingClosure barrier, BOOL isMainFrame,
@@ -613,7 +628,9 @@ result.links = linksArray;
       extractor_feature->ExtractPageContext(
           mainFrame, _config->graft_cross_origin_frame_content(),
           _config->use_rich_extraction(),
-          _config->use_rich_extraction_with_actionable(), nonce, js_timeout,
+          _config->use_rich_extraction_with_actionable(),
+          _config->extract_paid_content(),
+          _config->attempt_paid_content_json_fixing(), nonce, js_timeout,
           base::BindOnce(
               callback, weakSelf, annotatedPageContentBarrier,
               /*isMainFrame=*/YES, mainFrame->GetSecurityOrigin(),
@@ -637,7 +654,9 @@ result.links = linksArray;
       extractor_feature->ExtractPageContext(
           webFrame, _config->graft_cross_origin_frame_content(),
           _config->use_rich_extraction(),
-          _config->use_rich_extraction_with_actionable(), nonce, js_timeout,
+          _config->use_rich_extraction_with_actionable(),
+          _config->extract_paid_content(),
+          _config->attempt_paid_content_json_fixing(), nonce, js_timeout,
           base::BindOnce(
               callback, weakSelf, annotatedPageContentBarrier,
               /*isMainFrame=*/NO, webFrame->GetSecurityOrigin(),
@@ -951,6 +970,12 @@ result.links = linksArray;
           *pageInteractionInfoValue,
           _rootAPCNode->mutable_page_interaction_info());
     }
+
+    if (const base::DictValue* viewportGeometryValue =
+            value.FindDict(kViewportGeometryDictKey)) {
+      PopulateViewportGeometryNode(*viewportGeometryValue,
+                                   _rootAPCNode->mutable_viewport_geometry());
+    }
   }
 }
 
@@ -1166,11 +1191,14 @@ result.links = linksArray;
   }
 
   if (_shouldGetAnnotatedPageContent) {
+    size_t sizeInBytes = _rootAPCNode->ByteSizeLong();
+
     _pageContext->set_allocated_annotated_page_content(_rootAPCNode.release());
 
     [_pageContextMetrics
         executionFinishedForTask:PageContextTask::kAnnotatedPageContent
             withCompletionStatus:PageContextCompletionStatus::kSuccess];
+    [_pageContextMetrics logAnnotatedPageContentSize:sizeInBytes];
   }
 }
 

@@ -13,8 +13,8 @@
 #include "base/metrics/user_metrics_action.h"
 #include "base/notimplemented.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/glic/browser_ui/tab_underline_controller.h"
 #include "chrome/browser/glic/browser_ui/tab_underline_view.h"
-#include "chrome/browser/glic/browser_ui/tab_underline_view_controller_impl.h"
 #include "chrome/browser/glic/public/glic_enabling.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/browser.h"
@@ -54,8 +54,10 @@
 #include "ui/accessibility/ax_enums.mojom-shared.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/base/models/list_selection_model.h"
 #include "ui/base/theme_provider.h"
 #include "ui/events/keycodes/keyboard_codes.h"
+#include "ui/events/types/event_type.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
@@ -160,7 +162,8 @@ VerticalTabView::VerticalTabView(TabCollectionNode* collection_node)
     glic_tab_underline_view_ = AddChildView(
         views::Builder<glic::TabUnderlineView>(
             glic::TabUnderlineView::Factory::Create(
-                std::make_unique<glic::TabUnderlineViewControllerImpl>(),
+                std::make_unique<glic::TabUnderlineController>(
+                    tab->GetHandle()),
                 browser_window->GetBrowserForMigrationOnly(), tab->GetHandle()))
             .Build());
     glic_tab_underline_view_->SetOrientation(
@@ -178,7 +181,7 @@ VerticalTabView::VerticalTabView(TabCollectionNode* collection_node)
                      /*expand=*/false),
       TabChildConfig(alert_indicator_, kIconDesignWidth, kDefaultPadding,
                      /*align_leading=*/false,
-                     /*expand=*/false),
+                     /*expand=*/false, /*decorate_on_collapse=*/true),
       TabChildConfig(icon_, kIconDesignWidth, kHorizontalInset,
                      /*align_leading=*/true,
                      /*expand=*/false),
@@ -343,8 +346,6 @@ bool VerticalTabView::OnKeyPressed(const ui::KeyEvent& event) {
     }
   }
 
-  RequestFocus();
-
   return true;
 }
 
@@ -367,6 +368,10 @@ bool VerticalTabView::OnMousePressed(const ui::MouseEvent& event) {
   RecordMousePressedInTab();
   UpdateHoverCard(nullptr, TabSlotController::HoverCardUpdateType::kEvent);
 
+  // Capture the selection model before selection changes.
+  const ui::ListSelectionModel original_selection_model =
+      controller->GetSelectionModel();
+
   if (event.IsOnlyLeftMouseButton() ||
       (event.IsOnlyRightMouseButton() && event.flags() & ui::EF_FROM_TOUCH)) {
     if (event.IsShiftDown() && IsSelectionModifierDown(event)) {
@@ -385,7 +390,8 @@ bool VerticalTabView::OnMousePressed(const ui::MouseEvent& event) {
     // Potentially start the drag for the mouse press.
     // Follow-up mouse-movement events will update the drag controller and
     // eventually kick off the drag-loop.
-    controller->GetDragHandler().InitializeDrag(*collection_node_, event);
+    controller->GetDragHandler().InitializeDrag(
+        *collection_node_, original_selection_model, event);
   }
   return true;
 }
@@ -419,7 +425,11 @@ void VerticalTabView::OnMouseMoved(const ui::MouseEvent& event) {
   if (split_) {
     return;
   }
-
+  // Windows synthesizes mouse move events if the user does a touch drag.
+  // Don't set the hover state for those events.
+  if (event.flags() & ui::EF_FROM_TOUCH) {
+    return;
+  }
   // Linux enter/leave events are sometimes flaky, so we don't want to "miss"
   // an enter event and fail to hover the tab.
   UpdateHovered(true);
@@ -431,6 +441,11 @@ void VerticalTabView::OnMouseEntered(const ui::MouseEvent& event) {
 
   // Hover state is handled by the parent if it is split.
   if (split_) {
+    return;
+  }
+  // Windows synthesizes mouse events if the user does a touch drag.
+  // Don't set the hover state for those events.
+  if (event.flags() & ui::EF_FROM_TOUCH) {
     return;
   }
 
@@ -464,15 +479,46 @@ void VerticalTabView::OnGestureEvent(ui::GestureEvent* event) {
   CHECK(collection_node_);
   UpdateHoverCard(nullptr, TabSlotController::HoverCardUpdateType::kEvent);
 
+  auto* controller = collection_node_->GetController();
+  CHECK(controller);
+
+  const ui::ListSelectionModel original_selection_model =
+      collection_node_->GetController()->GetSelectionModel();
+
   switch (event->type()) {
     case ui::EventType::kGestureTapDown: {
-      auto* controller = collection_node_->GetController();
-      CHECK(controller);
-      // TAP_DOWN is only dispatched for the first touch point.
-      CHECK_EQ(1, event->details().touch_points());
+      // Handle TapDown to receive subsequent events like LongPress or Tap.
+      // We don't call InitializeDrag here to allow scrolling.
+      event->SetHandled();
+      break;
+    }
+
+    case ui::EventType::kGestureTap: {
+      // Short press release. Select the tab.
       if (!selected_) {
         controller->SelectTab(GetTabInterface(), GetGestureDetail(*event));
       }
+      event->SetHandled();
+      break;
+    }
+
+    case ui::EventType::kGestureLongPress: {
+      // Long press detected. Initialize dragging.
+      if (!selected_) {
+        // Ensure the tab is selected before dragging starts to avoid crashes.
+        controller->SelectTab(GetTabInterface(), GetGestureDetail(*event));
+      }
+      controller->GetDragHandler().InitializeDrag(
+          *collection_node_, original_selection_model, *event);
+      event->SetHandled();
+      break;
+    }
+
+    case ui::EventType::kGestureLongTap: {
+      // Show context menu on release after long press.
+      controller->ShowContextMenuForNode(collection_node_, this,
+                                         event->location(),
+                                         ui::mojom::MenuSourceType::kTouch);
       event->SetHandled();
       break;
     }
@@ -688,12 +734,10 @@ VerticalTabView::CalculateChildVisibilities() const {
 
   if (pinned_) {
     child_visibility_map[close_button_] = false;
-  } else if (active_) {
-    child_visibility_map[close_button_] = true;
   } else if (collapsed_) {
-    child_visibility_map[close_button_] = false;
+    child_visibility_map[close_button_] = active_ && hovered_;
   } else {
-    child_visibility_map[close_button_] = hovered_;
+    child_visibility_map[close_button_] = active_ || hovered_;
   }
 
   return child_visibility_map;
@@ -741,6 +785,10 @@ views::ProposedLayout VerticalTabView::CalculateProposedLayout(
       }
 
       placed_children += 1;
+    } else if (child.decorate_on_collapse) {
+      layouts.child_layouts.emplace_back(
+          child.view.get(), child_visibility_map[child.view],
+          gfx::Rect(width / 2, height / 2, 0, 0));
     } else {
       layouts.child_layouts.emplace_back(
           child.view.get(), child_visibility_map[child.view],
@@ -757,9 +805,15 @@ bool VerticalTabView::GetHitTestMask(SkPath* mask) const {
 }
 
 bool VerticalTabView::ShouldEnableMuteToggle(int required_width) {
-  // TODO(crbug.com/454686636): Determine if there is enough space to activate
-  // the tab in collapsed, pinned, or split states.
-  return true;
+  if (active_) {
+    return true;
+  }
+
+  if (!alert_indicator_->GetVisible()) {
+    return false;
+  }
+
+  return alert_indicator_->x() >= required_width;
 }
 
 void VerticalTabView::ToggleTabAudioMute() {
@@ -803,16 +857,12 @@ void VerticalTabView::ShowContextMenuForViewImpl(
   }
 }
 
-bool VerticalTabView::IsActive() const {
-  return active_;
+bool VerticalTabView::NeedsToShowThumbnail() const {
+  return !IsActive();
 }
 
-bool VerticalTabView::IsValid() const {
+bool VerticalTabView::IsValidHoverCardTarget() const {
   return collection_node_ && !IsDragging();
-}
-
-const tabs::TabData& VerticalTabView::data() const {
-  return tab_data_;
 }
 
 views::BubbleBorder::Arrow VerticalTabView::GetAnchorPosition() const {
@@ -925,7 +975,7 @@ void VerticalTabView::UpdateTabData(tabs::TabInterface* tab) {
   UpdateTitle();
 
   alert_indicator_->TransitionToAlertState(tab_data_.alert_state);
-  alert_indicator_->UpdateEnabledForMuteToggle();
+  SetHoverCardDataFrom(tab_data_);
 }
 
 void VerticalTabView::UpdateTitle() {

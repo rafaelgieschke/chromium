@@ -443,8 +443,8 @@ ShouldShowHistorySyncOptinResult ShouldShowHistorySyncOptinScreen(
   }
 
   syncer::UserSelectableTypeSet required_types(
-      {syncer::UserSelectableType::kHistory, syncer::UserSelectableType::kTabs,
-       syncer::UserSelectableType::kSavedTabGroups});
+      {syncer::UserSelectableType::kHistory,
+       syncer::UserSelectableType::kTabs});
   syncer::SyncService* sync_service =
       SyncServiceFactory::GetForProfile(&profile);
   if (!IsSyncingUserSelectableTypesAllowedByPolicy(sync_service,
@@ -488,6 +488,7 @@ bool IsValidAccessPointForHistoryOptinScreen(
     case signin_metrics::AccessPoint::kPasswordBubble:
     case signin_metrics::AccessPoint::kAddressBubble:
     case signin_metrics::AccessPoint::kSearchAIModeBubble:
+    case signin_metrics::AccessPoint::kIosAppBar:
       return false;
     case signin_metrics::AccessPoint::kStartPage:
     case signin_metrics::AccessPoint::kMenu:

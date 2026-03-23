@@ -769,13 +769,15 @@ class TabStripModel {
     CommandRemoveFromGroup,
     CommandMoveToExistingWindow,
     CommandMoveTabsToNewWindow,
-    CommandOrganizeTabs,
     CommandCopyURL,
     CommandGoBack,
     CommandCloseAllTabs,
     CommandToggleVertical,
+    // TODO(b/489122337): Remove deprecated command.
     CommandGlicShareLimit,
+    // TODO(b/489122337): Remove deprecated command.
     CommandGlicStartShare,
+    // TODO(b/489122337): Remove deprecated command.
     CommandGlicStopShare,
     CommandGlicShare,
     CommandGlicCreateNewChat,

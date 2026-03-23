@@ -149,6 +149,7 @@
 #include "third_party/blink/renderer/core/dom/slot_assignment.h"
 #include "third_party/blink/renderer/core/dom/space_split_string.h"
 #include "third_party/blink/renderer/core/dom/text.h"
+#include "third_party/blink/renderer/core/dom/user_action_element_traversal.h"
 #include "third_party/blink/renderer/core/dom/whitespace_attacher.h"
 #include "third_party/blink/renderer/core/editing/commands/undo_stack.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
@@ -418,7 +419,7 @@ bool IsRootEditableElementWithCounting(const Element& element) {
   }
   auto user_modify = style->UsedUserModify();
   AtomicString ce_value =
-      element.FastGetAttribute(html_names::kContenteditableAttr).LowerASCII();
+      element.FastGetAttribute(html_names::kContenteditableAttr).ToAsciiLower();
   if (ce_value.IsNull() || ce_value == keywords::kFalse) {
     if (user_modify == EUserModify::kReadWritePlaintextOnly) {
       UseCounter::Count(doc, WebFeature::kPlainTextEditingEffective);
@@ -850,8 +851,12 @@ bool Element::WasLastFocusFromUserGestureInternal() const {
 
 const HeapVector<Member<Node>> Element::ReadingFlowChildren() const {
   HeapVector<Member<Node>> children;
+  bool is_non_container_slot =
+      RuntimeEnabledFeatures::ReadingFlowWithSlotsEnabled()
+          ? (IsA<HTMLSlotElement>(this) && !IsReadingFlowContainer())
+          : false;
   const Element* layout_parent =
-      HasDisplayContentsStyle()
+      HasDisplayContentsStyle() || is_non_container_slot
           ? LayoutTreeBuilderTraversal::LayoutParentElement(*this)
           : this;
   if (!layout_parent || !layout_parent->IsReadingFlowContainer()) {
@@ -865,7 +870,16 @@ const HeapVector<Member<Node>> Element::ReadingFlowChildren() const {
     // direct child of this. Loop the parents and only add the node if its
     // FlatTreeTraversal::ParentElement is this element.
     while (reading_flow_item) {
-      auto* parent = FlatTreeTraversal::ParentElement(*reading_flow_item);
+      Node* flat_parent_anchor = reading_flow_item;
+      if (RuntimeEnabledFeatures::ReadingFlowWithSlotsEnabled()) {
+        if (!is_non_container_slot && !reading_flow_item->IsPseudoElement()) {
+          auto* assigned_slot = reading_flow_item->AssignedSlot();
+          if (assigned_slot && !assigned_slot->IsReadingFlowContainer()) {
+            flat_parent_anchor = assigned_slot;
+          }
+        }
+      }
+      auto* parent = FlatTreeTraversal::ParentElement(*flat_parent_anchor);
       if (parent == this) {
         if (visited_children.insert(reading_flow_item).is_new_entry) {
           children.push_back(reading_flow_item);
@@ -1116,9 +1130,7 @@ Node* Element::Clone(Document& factory,
       if (RuntimeEnabledFeatures::ScopedCustomElementRegistryEnabled()) {
         // 6.2 Let shadowRootRegistry be node's shadow root's custom element
         // registry
-        if (auto* node_registry = shadow_root->customElementRegistry()) {
-          shadow_root_registry = node_registry;
-        }
+        shadow_root_registry = shadow_root->customElementRegistry();
         // 6.3 If shadowRootRegistry is a global custom element registry, then
         // set shadowRootRegistry to document's effective global custom element
         // registry
@@ -1840,7 +1852,7 @@ bool Element::IsDialogInTopLayer() {
 // foo was opened with `foo.showPopover()` (no invoker specified), then this
 // function will return nullptr.
 HTMLElement* Element::GetOpenPopoverTarget() const {
-  if (!IsFocusable() || !IsInTreeScope()) {
+  if (!IsInTreeScope()) {
     return nullptr;
   }
   InvokerData* data = GetInvokerData();
@@ -2147,7 +2159,7 @@ const AtomicString& Element::getAttribute(const QualifiedName& name) const {
 
 AtomicString Element::LowercaseIfNecessary(AtomicString name) const {
   return IsHTMLElement() && IsA<HTMLDocument>(GetDocument())
-             ? AtomicString::LowerASCII(std::move(name))
+             ? AtomicString::ToAsciiLower(std::move(name))
              : std::move(name);
 }
 
@@ -2923,8 +2935,19 @@ ScriptPromise<ScrollResult> Element::scrollBy(ScriptState* script_state,
 ScriptPromise<ScrollResult> Element::scrollBy(
     ScriptState* script_state,
     const ScrollToOptions* scroll_to_options) {
+  ScriptPromiseResolver<ScrollResult>* resolver = nullptr;
+  if (script_state &&
+      RuntimeEnabledFeatures::ProgrammaticScrollPromiseEnabled()) {
+    resolver =
+        MakeGarbageCollected<ScriptPromiseResolver<ScrollResult>>(script_state);
+  }
+  auto scoped_resolver =
+      std::make_unique<ScopedScrollPromiseResolver>(resolver);
+  ScriptPromise<ScrollResult> promise =
+      resolver ? resolver->Promise() : EmptyPromise();
+
   if (!InActiveDocument()) {
-    return CreateScrollResolvedPromise(script_state);
+    return promise;
   }
 
   // TODO(crbug.com/1499981): This should be removed once synchronized scrolling
@@ -2936,22 +2959,13 @@ ScriptPromise<ScrollResult> Element::scrollBy(
   GetDocument().UpdateStyleAndLayoutForNode(this,
                                             DocumentUpdateReason::kJavaScript);
 
-  ScriptPromiseResolver<ScrollResult>* resolver = nullptr;
-  if (script_state &&
-      RuntimeEnabledFeatures::ProgrammaticScrollPromiseEnabled()) {
-    resolver =
-        MakeGarbageCollected<ScriptPromiseResolver<ScrollResult>>(script_state);
-  }
-  auto scoped_resolver =
-      std::make_unique<ScopedScrollPromiseResolver>(resolver);
-
   if (GetDocument().ScrollingElementNoLayout() == this) {
     ScrollFrameBy(scroll_to_options, std::move(scoped_resolver));
   } else {
     ScrollLayoutBoxBy(scroll_to_options, std::move(scoped_resolver));
   }
 
-  return resolver ? resolver->Promise() : EmptyPromise();
+  return promise;
 }
 
 ScriptPromise<ScrollResult> Element::scrollTo(ScriptState* script_state,
@@ -3775,7 +3789,7 @@ void Element::AttributeChanged(const AttributeModificationParams& params) {
     AtomicString lowercase_id;
     if (GetDocument().InQuirksMode() &&
         !params.new_value.ContainsNoAsciiUpper()) {
-      lowercase_id = params.new_value.LowerASCII();
+      lowercase_id = params.new_value.ToAsciiLower();
     }
     const AtomicString& new_id = lowercase_id ? lowercase_id : params.new_value;
     if (new_id != GetElementData()->IdForStyleResolution()) {
@@ -3814,8 +3828,6 @@ void Element::AttributeChanged(const AttributeModificationParams& params) {
   } else if (name == html_names::kPartAttr) {
     part().DidUpdateAttributeValue(params.old_value, params.new_value);
     GetDocument().GetStyleEngine().PartChangedForElement(*this);
-  } else if (name == html_names::kMarkerAttr) {
-    marker().DidUpdateAttributeValue(params.old_value, params.new_value);
   } else if (name == html_names::kExportpartsAttr) {
     data_ = EnsureRareData().SetPartNamesMap(params.new_value);
     GetDocument().GetStyleEngine().ExportpartsChangedForElement(*this);
@@ -3864,6 +3876,10 @@ void Element::AttributeChanged(const AttributeModificationParams& params) {
       // figure out which elements are contained by it without doing a subtree
       // recalc.
       SetNeedsStyleRecalc(kSubtreeStyleChange,
+                          StyleChangeReasonForTracing::FromAttribute(name));
+    } else {
+      // Handle types of overscroll changes.
+      SetNeedsStyleRecalc(kLocalStyleChange,
                           StyleChangeReasonForTracing::FromAttribute(name));
     }
   } else if (IsStyledElement()) {
@@ -4028,7 +4044,7 @@ bool Element::IsExcludedAttribute(
       qname.LocalName().ContainsNoAsciiUpper()) {
     return false;
   }
-  const QualifiedName lower_local_qname(qname.LocalName().LowerASCII());
+  const QualifiedName lower_local_qname(qname.LocalName().ToAsciiLower());
   return lower_local_qname.IsDefinedName();
 }
 
@@ -4144,7 +4160,7 @@ AtomicString Element::LocalNameForSelectorMatching() const {
   if (IsHTMLElement() || !IsA<HTMLDocument>(GetDocument())) {
     return localName();
   }
-  return localName().LowerASCII();
+  return localName().ToAsciiLower();
 }
 
 const AtomicString& Element::LocateNamespacePrefix(
@@ -4199,6 +4215,11 @@ Node::InsertionNotificationRequest Element::InsertedInto(
   auto* parent = ParentOrShadowHostElement();
   if (parent && parent->IsCanvasOrInCanvasSubtree()) {
     SetIsCanvasOrInCanvasSubtree(true);
+  } else if (!parent && insertion_point.IsDocumentNode()) {
+    auto* owner = GetDocument().LocalOwner();
+    if (owner && owner->IsCanvasOrInCanvasSubtree()) {
+      SetIsCanvasOrInCanvasSubtree(true);
+    }
   }
 
   if (!insertion_point.IsInTreeScope()) {
@@ -4331,8 +4352,8 @@ void Element::MovedFrom(ContainerNode& old_parent) {
   Element* old_parent_element = &To<Element>(old_parent);
   if (focused_element && old_parent.HasFocusWithin() &&
       contains(focused_element) && old_parent != *new_parent_element) {
-    Element* common_ancestor = To<Element>(NodeTraversal::CommonAncestor(
-        *old_parent_element, *new_parent_element));
+    Element* common_ancestor = To<Element>(old_parent_element->CommonAncestor(
+        *new_parent_element, UserActionElementParent));
 
     // The "focus within" flag is set separately on each ancestor, and affects
     // the :focus-within CSS property. We set it to the right value here because
@@ -5152,40 +5173,50 @@ void Element::RecalcStyle(const StyleRecalcChange change,
     layout_sibling_recalc_context.size_container =
         local_style_recalc_context.size_container;
   }
+
+  // As an optimization, we can skip most UpdatePseudoElement() calls
+  // (and similar) if the ComputedStyle doesn't have any pseudo-element styles
+  // and there are no existing pseudo-elements to be updated.
+  const bool need_to_check_pseudos =
+      child_change.TraversePseudoElements(*this) &&
+      ((RareData() && RareData()->HasAnyPseudos()) ||
+       (GetComputedStyle() && GetComputedStyle()->HasAnyPseudoElementStyles()));
+
   if (child_change.TraversePseudoElements(*this)) {
+    // Backdrop handling depends on feature flags.
+    // TODO: When the OverlayProperty feature flag is removed,
+    // this can probably be moved inside the if.
     UpdateBackdropPseudoElement(child_change, child_recalc_context);
+
+    // ::marker ignores the ComputedStyle bits and checks IsDisplayListItem().
     UpdatePseudoElement(kPseudoIdMarker, child_change, child_recalc_context);
+
+    // Scroll markers have special rules for the document element.
     UpdatePseudoElement(kPseudoIdScrollMarkerGroupBefore, child_change,
                         layout_sibling_recalc_context);
-    UpdatePseudoElement(kPseudoIdScrollButtonBlockStart, child_change,
-                        layout_sibling_recalc_context);
-    UpdatePseudoElement(kPseudoIdScrollButtonInlineStart, child_change,
-                        layout_sibling_recalc_context);
-    UpdatePseudoElement(kPseudoIdScrollButtonInlineEnd, child_change,
-                        layout_sibling_recalc_context);
-    UpdatePseudoElement(kPseudoIdScrollButtonBlockEnd, child_change,
-                        layout_sibling_recalc_context);
-    UpdatePseudoElement(kPseudoIdScrollMarker, child_change,
-                        child_recalc_context);
-    UpdateColumnPseudoElements(child_change, child_recalc_context);
 
-    if (IsA<HTMLMenuItemElement>(this)) {
-      UpdatePseudoElement(kPseudoIdCheckMark, child_change,
+    if (need_to_check_pseudos) {
+      UpdatePseudoElement(kPseudoIdScrollButtonBlockStart, child_change,
+                          layout_sibling_recalc_context);
+      UpdatePseudoElement(kPseudoIdScrollButtonInlineStart, child_change,
+                          layout_sibling_recalc_context);
+      UpdatePseudoElement(kPseudoIdScrollButtonInlineEnd, child_change,
+                          layout_sibling_recalc_context);
+      UpdatePseudoElement(kPseudoIdScrollButtonBlockEnd, child_change,
+                          layout_sibling_recalc_context);
+      UpdatePseudoElement(kPseudoIdScrollMarker, child_change,
                           child_recalc_context);
-    }
+      UpdateColumnPseudoElements(child_change, child_recalc_context);
 
-    if (DynamicTo<HTMLOptionElement>(this)) {
-      UpdatePseudoElement(kPseudoIdCheckMark, child_change,
-                          child_recalc_context);
-    }
+      if (IsA<HTMLMenuItemElement>(this) || IsA<HTMLOptionElement>(this) ||
+          (IsA<HTMLInputElement>(this) &&
+           RuntimeEnabledFeatures::AppearanceBaseEnabled())) {
+        UpdatePseudoElement(kPseudoIdCheckMark, child_change,
+                            child_recalc_context);
+      }
 
-    if (DynamicTo<HTMLInputElement>(this) &&
-        RuntimeEnabledFeatures::AppearanceBaseEnabled()) {
-      UpdatePseudoElement(kPseudoIdCheckMark, child_change,
-                          child_recalc_context);
+      UpdatePseudoElement(kPseudoIdBefore, child_change, child_recalc_context);
     }
-
-    UpdatePseudoElement(kPseudoIdBefore, child_change, child_recalc_context);
   }
 
   if (child_change.TraverseChildren(*this)) {
@@ -5204,50 +5235,65 @@ void Element::RecalcStyle(const StyleRecalcChange change,
   }
 
   if (child_change.TraversePseudoElements(*this)) {
-    UpdatePseudoElement(kPseudoIdAfter, child_change, child_recalc_context);
-
-    if (IsA<HTMLSelectElement>(this)) {
-      UpdatePseudoElement(kPseudoIdPickerIcon, child_change,
-                          child_recalc_context);
-    }
-
-    if (RuntimeEnabledFeatures::HTMLInterestForInterestHintPseudoEnabled(
-            GetExecutionContext())) {
-      UpdatePseudoElement(kPseudoIdInterestHint, child_change,
-                          child_recalc_context);
-    }
-
+    // Scroll markers have special rules for the document element.
     UpdatePseudoElement(kPseudoIdScrollMarkerGroupAfter, child_change,
                         layout_sibling_recalc_context);
 
-    // If we are re-attaching us or any of our descendants, we need to attach
-    // the descendants before we know if this element generates a ::first-letter
-    // and which element the ::first-letter inherits style from.
-    //
-    // If style recalc was suppressed for this element, it means it's a size
-    // query container, and child_change.ReattachLayoutTree() comes from the
-    // skipped style recalc. In that case we haven't updated the style, and we
-    // will not update the ::first-letter style in the originating element's
-    // AttachLayoutTree().
-    if (child_change.ReattachLayoutTree() && !change.IsSuppressed()) {
-      // Make sure we reach this element during reattachment. There are cases
-      // where we compute and store the styles for a subtree but stop attaching
-      // layout objects at an element that does not allow child boxes. Marking
-      // dirty for re-attachment means we AttachLayoutTree() will still traverse
-      // down to all elements with a ComputedStyle which clears the
-      // NeedsStyleRecalc() flag.
-      if (PseudoElement* first_letter =
-              GetPseudoElement(kPseudoIdFirstLetter)) {
-        first_letter->SetNeedsReattachLayoutTree();
-      }
-    } else if (!ChildNeedsReattachLayoutTree()) {
-      UpdateFirstLetterPseudoElement(StyleUpdatePhase::kRecalc,
-                                     child_recalc_context);
-    }
-
+    // ::overscroll-area-parent ignores the ComputedStyle bits and checks
+    // GetOverscrollContainer().
     UpdatePseudoElement(kPseudoIdOverscrollAreaParent, child_change,
                         child_recalc_context);
+
+    // View transitions ignore the ComputedStyle bits and check
+    // ViewTransitionUtils::GetTransition(*this).
     UpdateTransitionPseudoElements(child_change, child_recalc_context);
+
+    if (need_to_check_pseudos) {
+      UpdatePseudoElement(kPseudoIdAfter, child_change, child_recalc_context);
+      if (IsA<HTMLSelectElement>(this)) {
+        UpdatePseudoElement(kPseudoIdPickerIcon, child_change,
+                            child_recalc_context);
+      }
+
+      if (auto* menuitem = DynamicTo<HTMLMenuItemElement>(this)) {
+        if (menuitem->ShouldHaveExpandIcon()) {
+          UpdatePseudoElement(kPseudoIdExpandIcon, child_change,
+                              child_recalc_context);
+        }
+      }
+
+      if (RuntimeEnabledFeatures::HTMLInterestForInterestHintPseudoEnabled(
+              GetExecutionContext())) {
+        UpdatePseudoElement(kPseudoIdInterestHint, child_change,
+                            child_recalc_context);
+      }
+
+      // If we are re-attaching us or any of our descendants, we need to attach
+      // the descendants before we know if this element generates a
+      // ::first-letter and which element the ::first-letter inherits style
+      // from.
+      //
+      // If style recalc was suppressed for this element, it means it's a size
+      // query container, and child_change.ReattachLayoutTree() comes from the
+      // skipped style recalc. In that case we haven't updated the style, and we
+      // will not update the ::first-letter style in the originating element's
+      // AttachLayoutTree().
+      if (child_change.ReattachLayoutTree() && !change.IsSuppressed()) {
+        // Make sure we reach this element during reattachment. There are cases
+        // where we compute and store the styles for a subtree but stop
+        // attaching layout objects at an element that does not allow child
+        // boxes. Marking dirty for re-attachment means we AttachLayoutTree()
+        // will still traverse down to all elements with a ComputedStyle which
+        // clears the NeedsStyleRecalc() flag.
+        if (PseudoElement* first_letter =
+                GetPseudoElement(kPseudoIdFirstLetter)) {
+          first_letter->SetNeedsReattachLayoutTree();
+        }
+      } else if (!ChildNeedsReattachLayoutTree()) {
+        UpdateFirstLetterPseudoElement(StyleUpdatePhase::kRecalc,
+                                       child_recalc_context);
+      }
+    }
   }
 
   ClearChildNeedsStyleRecalc();
@@ -5693,9 +5739,7 @@ StyleRecalcChange Element::RecalcOwnStyle(
     if (IsPseudoElement() && new_style->MayUseImplicitAnchor()) {
       UseCounter::Count(GetDocument(),
                         WebFeature::kCSSPseudoElementUsesImplicitAnchor);
-      if (RuntimeEnabledFeatures::OriginatingElementIsImplicitAnchorEnabled()) {
-        parentElement()->SetMayBeImplicitAnchor();
-      }
+      parentElement()->SetMayBeImplicitAnchor();
     }
   }
 
@@ -5883,6 +5927,7 @@ void Element::RebuildLayoutTree(WhitespaceAttacher& whitespace_attacher) {
     RebuildTransitionLayoutTree(*child_attacher);
     RebuildOverscrollAreaLayoutTree(*child_attacher);
     RebuildPseudoElementLayoutTree(kPseudoIdAfter, *child_attacher);
+    RebuildPseudoElementLayoutTree(kPseudoIdExpandIcon, *child_attacher);
     RebuildPseudoElementLayoutTree(kPseudoIdPickerIcon, *child_attacher);
     RebuildPseudoElementLayoutTree(kPseudoIdInterestHint, *child_attacher);
     if (GetShadowRoot()) {
@@ -6473,10 +6518,9 @@ void Element::UpdateAncestorWithDirAuto(UpdateAncestorTraversal traversal) {
   }
 }
 
-ShadowRoot& Element::CreateAndAttachShadowRoot(
-    ShadowRootMode type,
-    SlotAssignmentMode mode,
-    const Vector<AtomicString>& markers) {
+ShadowRoot& Element::CreateAndAttachShadowRoot(ShadowRootMode type,
+                                               SlotAssignmentMode mode,
+                                               const AtomicString& marker) {
 #if DCHECK_IS_ON()
   NestingLevelIncrementer slot_assignment_recalc_forbidden_scope(
       GetDocument().SlotAssignmentRecalcForbiddenRecursionDepth());
@@ -6488,7 +6532,7 @@ ShadowRoot& Element::CreateAndAttachShadowRoot(
   DCHECK(!GetShadowRoot());
 
   auto* shadow_root =
-      MakeGarbageCollected<ShadowRoot>(GetDocument(), type, mode, markers);
+      MakeGarbageCollected<ShadowRoot>(GetDocument(), type, mode, marker);
 
   if (InActiveDocument()) {
     // We need to call child.RemovedFromFlatTree() before setting a shadow
@@ -7128,11 +7172,12 @@ const RegionCaptureCropId* Element::GetRegionCaptureCropId() const {
   return nullptr;
 }
 
-void Element::SetTrackedElementRect(std::unique_ptr<TrackedElementRect> rect) {
+void Element::SetTrackedElementSubRect(viz::TrackedElementFeature feature,
+                                       const TrackedElementSubRect& rect) {
   ElementRareDataVector& rare_data = EnsureRareData();
-  CHECK(!rare_data.GetTrackedElementRect());
+  CHECK(!rare_data.GetTrackedElementSubRect(feature));
 
-  data_ = rare_data.SetTrackedElementRect(std::move(rect));
+  data_ = rare_data.SetTrackedElementSubRect(feature, rect);
 
   // If a LayoutObject does not yet exist, this full paint invalidation
   // will occur automatically after it is created.
@@ -7145,16 +7190,17 @@ void Element::SetTrackedElementRect(std::unique_ptr<TrackedElementRect> rect) {
   }
 }
 
-const TrackedElementRect* Element::GetTrackedElementRect() const {
+const TrackedElementSubRect* Element::GetTrackedElementSubRect(
+    viz::TrackedElementFeature feature) const {
   if (const ElementRareDataVector* data = RareData()) {
-    return data->GetTrackedElementRect();
+    return data->GetTrackedElementSubRect(feature);
   }
   return nullptr;
 }
 
-void Element::ClearTrackedElementRect() {
+void Element::ClearTrackedElementSubRect(viz::TrackedElementFeature feature) {
   if (ElementRareDataVector* data = RareData()) {
-    data->ClearTrackedElementRect();
+    data->ClearTrackedElementSubRect(feature);
   }
 
   // If a LayoutObject does not yet exist, this full paint invalidation
@@ -7166,6 +7212,13 @@ void Element::ClearTrackedElementRect() {
       layout_inline->UpdateShouldCreateBoxFragment();
     }
   }
+}
+
+const TrackedElementSubRects* Element::GetTrackedElementSubRects() const {
+  if (const ElementRareDataVector* data = RareData()) {
+    return data->GetTrackedElementSubRects();
+  }
+  return nullptr;
 }
 
 void Element::SetRestrictionTargetId(std::unique_ptr<RestrictionTargetId> id) {
@@ -7253,13 +7306,11 @@ CustomElementDefinition* Element::GetCustomElementDefinition() const {
 }
 
 CustomElementRegistry* Element::customElementRegistry() const {
-  if (!RuntimeEnabledFeatures::ScopedCustomElementRegistryEnabled()) {
-    return nullptr;
-  }
   // If scoped registry is not exercised at all in the document,
   // we can avoid the rare data lookup and just return the tree scope's
   // registry.
-  if (GetDocument().ScopedCustomElementRegistryUsed()) {
+  if (RuntimeEnabledFeatures::ScopedCustomElementRegistryEnabled() &&
+      GetDocument().ScopedCustomElementRegistryUsed()) {
     if (const ElementRareDataVector* data = RareData()) {
       if (data->HasCustomElementRegistrySet()) {
         return data->GetCustomElementRegistry();
@@ -7354,7 +7405,7 @@ const char* Element::ErrorMessageForAttachShadow(
   // IsValidName() is not cheap.
   if (IsCustomElement() &&
       (CustomElement::IsValidName(localName()) || !IsValue().IsNull())) {
-    auto* registry = GetTreeScope().customElementRegistry();
+    auto* registry = customElementRegistry();
     auto* definition =
         registry ? registry->DefinitionForName(IsValue().IsNull() ? localName()
                                                                   : IsValue())
@@ -7417,14 +7468,10 @@ ShadowRoot* Element::attachShadow(const ShadowRootInit* shadow_root_init_dict,
           ? AtomicString(shadow_root_init_dict->referenceTarget())
           : g_null_atom;
 
-  Vector<AtomicString> marker_list;
+  AtomicString marker = g_null_atom;
   if (shadow_root_init_dict->hasMarker()) {
     CHECK(RuntimeEnabledFeatures::DocumentPatchingEnabled());
-    const auto& marker_from_dict = shadow_root_init_dict->marker();
-    marker_list.ReserveInitialCapacity(marker_from_dict.size());
-    for (const auto& marker_string : marker_from_dict) {
-      marker_list.push_back(AtomicString(marker_string));
-    }
+    marker = AtomicString(shadow_root_init_dict->marker());
   }
 
   // 1. Let registry be this's custom element registry.
@@ -7480,7 +7527,7 @@ ShadowRoot* Element::attachShadow(const ShadowRootInit* shadow_root_init_dict,
 
   ShadowRoot& shadow_root = AttachShadowRootInternal(
       mode, focus_delegation, slot_assignment, registry, serializable, clonable,
-      reference_target, marker_list);
+      reference_target, marker);
 
   // Ensure that the returned shadow root is not marked as declarative so that
   // attachShadow() calls after the first one do not succeed for a shadow host
@@ -7499,7 +7546,7 @@ bool Element::AttachDeclarativeShadowRoot(
     const AtomicString& adopted_stylesheets,
     const AtomicString& reference_target,
     const bool waiting_for_scoped_registry,
-    const Vector<AtomicString>& markers) {
+    const AtomicString& marker) {
   // 12. Run attach a shadow root with shadow host equal to declarative shadow
   // host element, mode equal to declarative shadow mode, and delegates focus
   // equal to declarative shadow delegates focus. If an exception was thrown by
@@ -7529,7 +7576,7 @@ bool Element::AttachDeclarativeShadowRoot(
 
   ShadowRoot& shadow_root = AttachShadowRootInternal(
       mode, focus_delegation, slot_assignment, registry, serializable, clonable,
-      reference_target, markers);
+      reference_target, marker);
   // 10.8.5. Set declarative shadow host element's shadow host's "is declarative
   // shadow root" property to true.
   shadow_root.SetIsDeclarativeShadowRoot(true);
@@ -7553,7 +7600,7 @@ ShadowRoot& Element::CreateUserAgentShadowRoot(SlotAssignmentMode mode) {
   DCHECK(!GetShadowRoot());
   GetDocument().SetContainsShadowRoot();
   return CreateAndAttachShadowRoot(ShadowRootMode::kUserAgent, mode,
-                                   Vector<AtomicString>());
+                                   g_null_atom);
 }
 
 ShadowRoot& Element::AttachShadowRootInternal(
@@ -7564,7 +7611,7 @@ ShadowRoot& Element::AttachShadowRootInternal(
     bool serializable,
     bool clonable,
     const AtomicString& reference_target,
-    const Vector<AtomicString>& markers) {
+    const AtomicString& marker) {
   // SVG <use> is a special case for using this API to create a closed shadow
   // root.
   DCHECK(CanAttachShadowRoot() || IsA<SVGUseElement>(*this));
@@ -7589,7 +7636,7 @@ ShadowRoot& Element::AttachShadowRootInternal(
   // 5. Let shadow be a new shadow root whose node document is this’s node
   // document, host is this, and mode is init’s mode.
   ShadowRoot& shadow_root =
-      CreateAndAttachShadowRoot(type, slot_assignment_mode, markers);
+      CreateAndAttachShadowRoot(type, slot_assignment_mode, marker);
   // 6. Set shadow’s delegates focus to init’s delegatesFocus.
   shadow_root.SetDelegatesFocus(focus_delegation ==
                                 FocusDelegation::kDelegateFocus);
@@ -7625,7 +7672,7 @@ ShadowRoot& Element::AttachShadowRootForTesting(ShadowRootMode type) {
                                   /*serializable*/ false,
                                   /*clonable*/ false,
                                   /*reference_target*/ g_null_atom,
-                                  /*markers*/ Vector<AtomicString>());
+                                  /*marker*/ g_null_atom);
 }
 
 ShadowRoot* Element::OpenShadowRoot() const {
@@ -8766,7 +8813,7 @@ void Element::SetHasFocusWithinUpToAncestor(bool has_focus_within,
   bool reached_ancestor = false;
   for (Element* element = this;
        element && (need_snap_container_search || !reached_ancestor);
-       element = FlatTreeTraversal::ParentElement(*element)) {
+       element = UserActionElementTraversal::Next(*element)) {
     if (!reached_ancestor && element != ancestor) {
       element->SetHasFocusWithin(has_focus_within);
       element->FocusWithinStateChanged();
@@ -8844,12 +8891,13 @@ bool Element::ActivateDisplayLockIfNeeded(DisplayLockActivationReason reason) {
   return activated;
 }
 
-void Element::SetIsAdRelated() {
+void Element::SetIsAdRelated(AdProvenance ad_provenance) {
   DCHECK(!IsA<HTMLFrameOwnerElement>(this));
 
-  UnpackAndRefresh(EnsureRareData().EnsureDisplayAdElementMonitor(this));
+  UnpackAndRefresh(
+      EnsureRareData().EnsureDisplayAdElementMonitor(this, ad_provenance));
 
-  probe::UpdateAdRelatedState(*this, /*is_ad_related=*/true);
+  probe::UpdateAdRelatedState(*this, std::move(ad_provenance));
 }
 
 bool Element::IsAdRelated() const {
@@ -8857,6 +8905,16 @@ bool Element::IsAdRelated() const {
     return data->GetDisplayAdElementMonitor();
   }
   return false;
+}
+
+std::optional<AdProvenance> Element::GetAdProvenance() const {
+  if (const ElementRareDataVector* data = RareData()) {
+    if (const DisplayAdElementMonitor* monitor =
+            data->GetDisplayAdElementMonitor()) {
+      return monitor->GetAdProvenance();
+    }
+  }
+  return std::nullopt;
 }
 
 bool Element::ShouldHighlightAd() const {
@@ -9200,13 +9258,11 @@ CustomElementRegistry* CustomElementRegistryForInnerHTML(Element* element) {
   // Use null registry to create fragment if the context element is a
   // template element as the container of the document fragment will be a
   // document fragment without browsing context.
-  auto* template_element = DynamicTo<HTMLTemplateElement>(*element);
-  CustomElementRegistry* registry =
-      element->GetDocument().customElementRegistry();
-  if (RuntimeEnabledFeatures::ScopedCustomElementRegistryEnabled()) {
-    registry = template_element ? nullptr : element->customElementRegistry();
+  if (RuntimeEnabledFeatures::ScopedCustomElementRegistryEnabled() &&
+      IsA<HTMLTemplateElement>(element)) {
+    return nullptr;
   }
-  return registry;
+  return element->customElementRegistry();
 }
 }  // namespace
 
@@ -9291,18 +9347,15 @@ void Element::SetOuterHTMLInternal(const String& html,
   Node* prev = previousSibling();
   Node* next = nextSibling();
 
-  DocumentFragment* fragment = ParseHTMLFragment(
-      html,
-      {
-          .interface_name = trusted_types_names::kElement,
-          .property_name = trusted_types_names::kOuterHTML,
-          .context_element = parent,
-          .registry =
-              RuntimeEnabledFeatures::ScopedCustomElementRegistryEnabled()
-                  ? customElementRegistry()
-                  : GetDocument().customElementRegistry(),
-      },
-      FragmentParserOptions(), exception_state);
+  DocumentFragment* fragment =
+      ParseHTMLFragment(html,
+                        {
+                            .interface_name = trusted_types_names::kElement,
+                            .property_name = trusted_types_names::kOuterHTML,
+                            .context_element = parent,
+                            .registry = customElementRegistry(),
+                        },
+                        FragmentParserOptions(), exception_state);
 
   if (!fragment) {
     return;
@@ -9571,10 +9624,7 @@ void Element::InsertAdjacentHTMLInternal(const String& where,
               .interface_name = trusted_types_names::kElement,
               .property_name = trusted_types_names::kInsertAdjacentHTML,
               .context_element = context_element,
-              .registry =
-                  RuntimeEnabledFeatures::ScopedCustomElementRegistryEnabled()
-                      ? customElementRegistry()
-                      : GetDocument().customElementRegistry(),
+              .registry = customElementRegistry(),
           },
           FragmentParserOptions(), exception_state)) {
     InsertAdjacent(where, fragment, exception_state);
@@ -10073,7 +10123,14 @@ bool Element::ShouldStoreComputedStyle(const ComputedStyle& style) const {
 
 bool Element::IsInCanvasSubtree() const {
   auto* parent = ParentOrShadowHostElement();
-  return parent && parent->IsCanvasOrInCanvasSubtree();
+  if (parent) {
+    return parent->IsCanvasOrInCanvasSubtree();
+  }
+  if (!isConnected()) {
+    return false;
+  }
+  auto* owner = GetDocument().LocalOwner();
+  return owner && owner->IsCanvasOrInCanvasSubtree();
 }
 
 AtomicString Element::ComputeInheritedLanguage() const {
@@ -10439,9 +10496,7 @@ bool Element::SetAssociatedPseudoElement(
   if (pseudo_style->MayUseImplicitAnchor()) {
     UseCounter::Count(GetDocument(),
                       WebFeature::kCSSPseudoElementUsesImplicitAnchor);
-    if (RuntimeEnabledFeatures::OriginatingElementIsImplicitAnchorEnabled()) {
-      SetMayBeImplicitAnchor();
-    }
+    SetMayBeImplicitAnchor();
   }
 
   // Since we just styled a new pseudo element, we have to inform its potential
@@ -10731,8 +10786,8 @@ const ComputedStyle* Element::StyleForPseudoElement(
 
   const bool is_before_or_after_like =
       pseudo_id == kPseudoIdCheckMark || pseudo_id == kPseudoIdBefore ||
-      pseudo_id == kPseudoIdAfter || pseudo_id == kPseudoIdPickerIcon ||
-      pseudo_id == kPseudoIdInterestHint;
+      pseudo_id == kPseudoIdAfter || pseudo_id == kPseudoIdExpandIcon ||
+      pseudo_id == kPseudoIdPickerIcon || pseudo_id == kPseudoIdInterestHint;
 
   if (is_before_or_after_like) {
     DCHECK(request.parent_override);
@@ -12197,26 +12252,6 @@ DOMTokenList& Element::part() {
   return *part;
 }
 
-DOMTokenList* Element::GetMarker() const {
-  if (!RuntimeEnabledFeatures::DocumentPatchingEnabled()) {
-    return nullptr;
-  }
-  if (const ElementRareDataVector* data = RareData()) {
-    return data->GetMarker();
-  }
-  return nullptr;
-}
-
-DOMTokenList& Element::marker() {
-  ElementRareDataVector& rare_data = EnsureRareData();
-  DOMTokenList* marker = rare_data.GetMarker();
-  if (!marker) {
-    marker = MakeGarbageCollected<DOMTokenList>(*this, html_names::kMarkerAttr);
-    data_ = rare_data.SetMarker(marker);
-  }
-  return *marker;
-}
-
 bool Element::HasPartNamesMap() const {
   const NamesMap* names_map = PartNamesMap();
   return names_map && names_map->size() > 0;
@@ -12472,16 +12507,20 @@ void Element::ScheduleInterestChangesIfNeeded(InterestSource source) {
           upstream_invoker->GetInvokerData()->GetInterestState() !=
               InterestState::kNoInterest));
   if (source == InterestSource::kHover || source == InterestSource::kFocus) {
+    bool suppress_focus_interest = false;
     if (invoker_data) [[unlikely]] {
       invoker_data->CancelInterestLostTask();
+      suppress_focus_interest = source == InterestSource::kFocus &&
+                                invoker_data->SuppressNextFocusInterest();
+      invoker_data->SetSuppressNextFocusInterest(false);
     }
     for (Member<Element> upstream : AllSourceInterestInvokers(*this)) {
       upstream->GetInvokerData()->CancelInterestLostTask();
     }
     if (auto* target = InterestForElement();
-        target && (!invoker_data || invoker_data->GetInterestState() ==
-                                        InterestState::kNoInterest))
-        [[unlikely]] {
+        target && !suppress_focus_interest &&
+        (!invoker_data || invoker_data->GetInterestState() ==
+                              InterestState::kNoInterest)) [[unlikely]] {
       // This is an interest invoker that doesn't already have interest, and was
       // just hovered or focused. Schedule an InterestGained task.
       ScheduleInterestGainedTask();
@@ -13190,7 +13229,7 @@ Attr* Element::setAttributeNode(Attr* attr_node,
   }
 
   if (!IsHTMLElement() && IsA<HTMLDocument>(attr_node->GetDocument()) &&
-      attr_node->name() != attr_node->name().LowerASCII()) {
+      attr_node->name() != attr_node->name().ToAsciiLower()) {
     UseCounter::Count(
         GetDocument(),
         WebFeature::
@@ -13355,6 +13394,7 @@ Element* Element::ImplicitAnchorElement() const {
       case kPseudoIdCheckMark:
       case kPseudoIdBefore:
       case kPseudoIdAfter:
+      case kPseudoIdExpandIcon:
       case kPseudoIdPickerIcon:
       case kPseudoIdInterestHint:
       case kPseudoIdBackdrop:
@@ -13366,12 +13406,7 @@ Element* Element::ImplicitAnchorElement() const {
       case kPseudoIdScrollButtonInlineEnd:
       case kPseudoIdScrollButtonBlockEnd:
       case kPseudoIdOverscrollAreaParent:
-        if (RuntimeEnabledFeatures::
-                OriginatingElementIsImplicitAnchorEnabled()) {
-          return parentElement();
-        }
-        return pseudo_element->UltimateOriginatingElement()
-            .ImplicitAnchorElement();
+        return parentElement();
       default:
         return nullptr;
     }
@@ -13507,7 +13542,7 @@ void Element::setHTMLUnsafe(const V8UnionStringOrTrustedHTML* html,
 void Element::setHTMLUnsafe(const V8UnionStringOrTrustedHTML* html,
                             TrustedParserOptions* options,
                             ExceptionState& exception_state) {
-  CHECK(RuntimeEnabledFeatures::DocumentPatchingEnabled());
+  CHECK(RuntimeEnabledFeatures::TrustedTypesCreateParserOptionsEnabled());
   UseCounter::Count(GetDocument(), WebFeature::kHTMLUnsafeMethods);
   SetInnerHTMLInternal(
       CheckTrustedTypes(html, trusted_types_names::kSetHTMLUnsafe,

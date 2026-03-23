@@ -143,13 +143,11 @@ class ExecutionEngine : public ToolDelegate {
 
   // If there is an ongoing tool request, treat it as having failed with the
   // given reason.
-  void FailCurrentTool(mojom::ActionResultCode reason);
+  void FailCurrentTool(mojom::ActionResultCode reason) override;
 
   // Performs the given tool actions and invokes the callback when completed.
   using ActCallback =
-      base::OnceCallback<void(mojom::ActionResultPtr,
-                              std::optional<size_t>,
-                              std::vector<ActionResultWithLatencyInfo>)>;
+      base::OnceCallback<void(std::vector<ActionResultWithLatencyInfo>)>;
   void Act(std::vector<std::unique_ptr<ToolRequest>>&& actions,
            ActCallback callback);
 
@@ -182,6 +180,8 @@ class ExecutionEngine : public ToolDelegate {
       AutofillSuggestionSelectedCallback callback) override;
   void InterruptFromTool() override;
   void UninterruptFromTool() override;
+  void EnqueueFollowupAction(std::unique_ptr<ToolRequest> action) override;
+  base::WeakPtr<ToolDelegate> GetAsWeakPtrForCurrentActions() override;
 
   void AddWritableMainframeOrigins(
       const absl::flat_hash_set<url::Origin>& added_writable_mainframe_origins);
@@ -284,6 +284,10 @@ class ExecutionEngine : public ToolDelegate {
   // Returns the next action that will be started when ExecuteNextAction is
   // reached.
   const ToolRequest& GetNextAction() const;
+
+  // Maps an index in `action_sequence_` to an index in `action_results_` by
+  // counting how many original (non-follow-up) actions preceded it.
+  size_t GetResultIndexForAction(size_t action_index) const;
 
   // Processes the affiliation service results for the given `source_origin`.
   // and saves it into `affiliated_origin_map_`.

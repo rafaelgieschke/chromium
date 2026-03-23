@@ -167,17 +167,6 @@ chromium-metrics-reviews@google.com.
   </summary>
 </histogram>
 
-<histogram name="Windows.HighResolutionTimerUsage" units="%"
-    expires_after="2026-02-22">
-  <owner>olivierli@chromium.org</owner>
-  <owner>catan-team@chromium.org</owner>
-  <summary>
-    Percentage of elapsed time the high resolution timer is activated. The usage
-    is reported by each of Chrome processes individually (without aggregation)
-    and logged every 10 minutes.
-  </summary>
-</histogram>
-
 <histogram name="Windows.HypervPresent" enum="BooleanEnabled"
     expires_after="2025-06-01">
   <owner>rkc@chromium.org</owner>
@@ -428,6 +417,16 @@ chromium-metrics-reviews@google.com.
   <summary>
     Whether virtualization has been enabled in the system firmware. Logged
     shortly after startup. This metric will only be logged on Windows 10+.
+  </summary>
+</histogram>
+
+<histogram name="Windows.ReplaceFileResult" enum="ReplaceFileResult"
+    expires_after="2027-03-02">
+  <owner>grt@chromium.org</owner>
+  <owner>tingshao@microsoft.com</owner>
+  <summary>
+    The result of a call to base::ReplaceFile. Logged every time when
+    base::ReplaceFile is called.
   </summary>
 </histogram>
 

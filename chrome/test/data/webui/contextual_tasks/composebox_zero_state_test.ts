@@ -14,14 +14,16 @@ import {ContextUploadStatus, ToolMode as ComposeboxToolMode} from 'chrome://reso
 import {WindowProxy} from 'chrome://resources/cr_components/composebox/window_proxy.js';
 import {GlowAnimationState} from 'chrome://resources/cr_components/search/constants.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.js';
-import {PageCallbackRouter as SearchboxPageCallbackRouter, PageHandlerRemote as SearchboxPageHandlerRemote, type PageRemote as SearchboxPageRemote} from 'chrome://resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
+import {PageCallbackRouter as SearchboxPageCallbackRouter, PageHandlerRemote as SearchboxPageHandlerRemote} from 'chrome://resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
+import type {PageRemote as SearchboxPageRemote} from 'chrome://resources/mojo/components/omnibox/browser/searchbox.mojom-webui.js';
 import {assertEquals, assertFalse, assertNotEquals, assertTrue} from 'chrome://webui-test/chai_assert.js';
+import {MockInputState} from 'chrome://webui-test/cr_components/searchbox/searchbox_test_utils.js';
 import {MockTimer} from 'chrome://webui-test/mock_timer.js';
 import {TestMock} from 'chrome://webui-test/test_mock.js';
 import {microtasksFinished} from 'chrome://webui-test/test_util.js';
 
 import {TestContextualTasksBrowserProxy} from './test_contextual_tasks_browser_proxy.js';
-import {ADD_FILE_CONTEXT_FN, assertStyle, FAKE_TOKEN_STRING, getSubmitButton, getSubmitContainer, installMock, mockInputState, setupAutocompleteResults, simulateUserInput, uploadFileAndVerify} from './test_utils.js';
+import {ADD_FILE_CONTEXT_FN, assertStyle, FAKE_TOKEN_STRING, fixtureUrl, getSubmitButton, getSubmitContainer, installMock, setupAutocompleteResults, simulateUserInput, uploadFileAndVerify} from './test_utils.js';
 
 function disableAnimationsRecursively(element: Element) {
   const noAnimation = document.createElement('style');
@@ -66,6 +68,14 @@ suite('ContextualTasksComposeboxZeroStateTest', () => {
   let windowProxy: TestMock<WindowProxy>;
   let mockTimer: MockTimer;
 
+  async function setActiveTool(tool: ComposeboxToolMode) {
+    searchboxCallbackRouterRemote.onInputStateChanged({
+      ...new MockInputState(),
+      activeTool: tool,
+    });
+    await microtasksFinished();
+  }
+
   setup(async () => {
     const win = window as any;
 
@@ -91,9 +101,10 @@ suite('ContextualTasksComposeboxZeroStateTest', () => {
       composeboxShowZps: true,
       enableBasicModeZOrder: true,
       composeboxShowContextMenu: true,
+      forcedEmbeddedPageHost: '',
     });
 
-    testProxy = new TestContextualTasksBrowserProxy('https://google.com');
+    testProxy = new TestContextualTasksBrowserProxy(fixtureUrl);
     BrowserProxyImpl.setInstance(testProxy);
 
     mockComposeboxPageHandler = TestMock.fromClass(ComposeboxPageHandlerRemote);
@@ -127,7 +138,7 @@ suite('ContextualTasksComposeboxZeroStateTest', () => {
       removeEventListener: () => {},
     });
 
-    searchboxCallbackRouterRemote.onInputStateChanged(mockInputState);
+    searchboxCallbackRouterRemote.onInputStateChanged(new MockInputState());
     await microtasksFinished();
   });
 
@@ -460,7 +471,7 @@ suite('ContextualTasksComposeboxZeroStateTest', () => {
   test('TooltipImpressionTimerResetsOnHide', () => {
     mockTimer.install();
     const composeboxElement = contextualTasksApp.$.composebox;
-    const tooltip = composeboxElement.$.onboardingTooltip;
+    const tooltip = contextualTasksApp.$.onboardingTooltip;
 
     loadTimeData.overrideValues({
       showOnboardingTooltip: true,
@@ -468,8 +479,8 @@ suite('ContextualTasksComposeboxZeroStateTest', () => {
       composeboxShowOnboardingTooltipSessionImpressionCap: 10,
       composeboxShowOnboardingTooltipImpressionDelay: 3000,
     });
-    composeboxElement.numberOfTimesTooltipShownForTesting = 0;
-    composeboxElement.userDismissedTooltipForTesting = false;
+    contextualTasksApp.numberOfTimesTooltipShownForTesting = 0;
+    contextualTasksApp.userDismissedTooltipForTesting = false;
 
     const innerComposebox = composeboxElement.$.composebox;
     // Mock existence of chip.
@@ -478,22 +489,22 @@ suite('ContextualTasksComposeboxZeroStateTest', () => {
         document.createElement('div');
 
     // Show tooltip.
-    composeboxElement.updateTooltipVisibilityForTesting();
-    assertTrue(tooltip.shouldShow);
+    contextualTasksApp.updateTooltipVisibilityForTesting();
+    assertTrue(tooltip!.shouldShow);
 
     // Advance time partially.
     mockTimer.tick(1000);
-    assertEquals(0, composeboxElement.numberOfTimesTooltipShownForTesting);
+    assertEquals(0, contextualTasksApp.numberOfTimesTooltipShownForTesting);
 
     // Hide tooltip (e.g. chip disappears).
     innerComposebox.getHasAutomaticActiveTabChipToken = () => false;
-    composeboxElement.updateTooltipVisibilityForTesting();
-    assertFalse(tooltip.shouldShow);
+    contextualTasksApp.updateTooltipVisibilityForTesting();
+    assertFalse(tooltip!.shouldShow);
 
     // Advance past original deadline.
     mockTimer.tick(5000);
     // Should NOT have incremented because timer was cleared.
-    assertEquals(0, composeboxElement.numberOfTimesTooltipShownForTesting);
+    assertEquals(0, contextualTasksApp.numberOfTimesTooltipShownForTesting);
   });
 
   test(
@@ -711,7 +722,7 @@ suite('ContextualTasksComposeboxZeroStateTest', () => {
         await composebox.updateComplete;
         await microtasksFinished();
 
-        assertEquals(0, composebox.files_.size);
+        assertEquals(0, composebox.files.size);
 
         // Should be no longer `EXPANDING` after successful upload and submit
         // click.
@@ -720,80 +731,50 @@ suite('ContextualTasksComposeboxZeroStateTest', () => {
       });
 
 
-  test('deep search: thread change resets input', async () => {
-    composebox.onToolClickForTesting(ComposeboxToolMode.kDeepSearch);
 
-    await composebox.updateComplete;
-    await microtasksFinished();
+  interface ToolModeInfo {
+    toolMode: ComposeboxToolMode;
+    text: string;
+  }
 
-    let deepSearchChip = composebox.shadowRoot.querySelector('#deepSearchChip');
-
-    assertTrue(!!deepSearchChip, 'Deep search chip should be present');
-
-    testProxy.callbackRouterRemote.onZeroStateChange(/*isZeroState=*/ true);
-    await testProxy.callbackRouterRemote.$.flushForTesting();
-
-    await composebox.updateComplete;
-    await microtasksFinished();
-
-    deepSearchChip = composebox.shadowRoot.querySelector('#deepSearchChip');
-    assertFalse(!!composebox.input_, 'Input value should be cleared');
-    assertTrue(
-        composebox.fileUploadsComplete, 'File uploads should be complete');
-    assertFalse(
-        !!composebox.getResultForTesting(),
-        'Autocomplete result should be cleared');
-  });
-
-  test('image gen: thread change resets input', async () => {
-    composebox.onToolClickForTesting(ComposeboxToolMode.kImageGen);
-
-    await composebox.updateComplete;
-    await microtasksFinished();
-
-    let imageGenChip = composebox.shadowRoot.querySelector('#nanoBananaChip');
-
-    assertTrue(!!imageGenChip, 'Image gen chip should be present');
-
-    testProxy.callbackRouterRemote.onZeroStateChange(/*isZeroState=*/ true);
-    await testProxy.callbackRouterRemote.$.flushForTesting();
+  [{
+    toolMode: ComposeboxToolMode.kDeepSearch,
+    text: 'Deep Search',
+  },
+   {
+     toolMode: ComposeboxToolMode.kImageGen,
+     text: 'Create Images',
+   },
+   {
+     toolMode: ComposeboxToolMode.kCanvas,
+     text: 'Canvas',
+   }].forEach((toolModeInfo: ToolModeInfo) => {
+    test(toolModeInfo.text + ': thread change resets input', async () => {
+      await setActiveTool(toolModeInfo.toolMode);
 
 
-    await composebox.updateComplete;
-    await microtasksFinished();
+      await composebox.updateComplete;
+      await microtasksFinished();
 
-    imageGenChip = composebox.shadowRoot.querySelector('#nanoBananaChip');
-    assertFalse(!!composebox.input_, 'Input value should be cleared');
-    assertTrue(
-        composebox.fileUploadsComplete, 'File uploads should be complete');
-    assertFalse(
-        !!composebox.getResultForTesting(),
-        'Autocomplete result should be cleared');
-  });
+      let toolChip =
+          composebox.shadowRoot.querySelector('cr-composebox-tool-chip');
 
-  test('canvas: thread change resets input', async () => {
-    composebox.onToolClickForTesting(ComposeboxToolMode.kCanvas);
+      assertTrue(!!toolChip, toolModeInfo.text + ' chip should be present');
 
-    await composebox.updateComplete;
-    await microtasksFinished();
+      testProxy.callbackRouterRemote.onZeroStateChange(/*isZeroState=*/ true);
+      await testProxy.callbackRouterRemote.$.flushForTesting();
 
-    let canvasChip = composebox.shadowRoot.querySelector('#canvasChip');
+      await composebox.updateComplete;
+      await microtasksFinished();
 
-    assertTrue(!!canvasChip, 'Canvas chip should be present');
-
-    testProxy.callbackRouterRemote.onZeroStateChange(/*isZeroState=*/ true);
-    await testProxy.callbackRouterRemote.$.flushForTesting();
-
-    await composebox.updateComplete;
-    await microtasksFinished();
-
-    canvasChip = composebox.shadowRoot.querySelector('#canvasChip');
-    assertFalse(!!composebox.input_, 'Input value should be cleared');
-    assertTrue(
-        composebox.fileUploadsComplete, 'File uploads should be complete');
-    assertFalse(
-        !!composebox.getResultForTesting(),
-        'Autocomplete result should be cleared');
+      toolChip = composebox.shadowRoot.querySelector('cr-composebox-tool-chip');
+      assertFalse(!!composebox.input, 'Input value should be cleared');
+      assertTrue(
+          composebox.fileUploadsComplete, 'File uploads should be complete');
+      assertFalse(
+          !!composebox.getResultForTesting(),
+          'Autocomplete result should be cleared');
+    });
   });
 
   test('Multiple files updates zero state placeholder', async () => {
@@ -882,4 +863,91 @@ suite('ContextualTasksComposeboxZeroStateTest', () => {
     // File hint should take precedence over overlay hint.
     assertEquals('Ask about this image', innerComposebox.$.input.placeholder);
   });
+
+  test('Arrow in zero state is ignored in full tab', async () => {
+    testProxy.callbackRouterRemote.onZeroStateChange(true);
+    testProxy.handler.setIsShownInTab(true);
+
+    testProxy.callbackRouterRemote.onSidePanelStateChanged();
+    await microtasksFinished();
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'ArrowDown',
+      cancelable: true,
+      bubbles: true,
+      composed: true,
+    });
+
+    composebox.dispatchEvent(event);
+    await microtasksFinished();
+
+    // DropdownNeeded by default is supposed to be false, so arrow
+    // keys should be ignored.
+    assertEquals(
+        composebox.input, '',
+        'Input should not change since arrow down does not select suggestion');
+    assertEquals(
+        composebox.selectedMatchIndex_, -1,
+        'No suggestion should be selected on arrow down in zero state full tab');
+    const event2 = new KeyboardEvent('keydown', {
+      key: 'ArrowUp',
+      cancelable: true,
+      bubbles: true,
+      composed: true,
+    });
+
+    composebox.dispatchEvent(event2);
+    await microtasksFinished();
+
+    assertEquals(
+        composebox.input, '',
+        'Input should not change since arrow up does not select suggestion');
+    assertEquals(
+        composebox.selectedMatchIndex_, -1,
+        'No suggestion should be selected on arrow up in zero state full tab');
+  });
+
+  test('Arrow in zero state is ignored in side panel', async () => {
+    testProxy.callbackRouterRemote.onZeroStateChange(true);
+    testProxy.handler.setIsShownInTab(false);  // side panel
+
+    testProxy.callbackRouterRemote.onSidePanelStateChanged();
+    await microtasksFinished();
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'ArrowDown',
+      cancelable: true,
+      bubbles: true,
+      composed: true,
+    });
+
+    composebox.dispatchEvent(event);
+    await microtasksFinished();
+
+    // DropdownNeeded by default is supposed to be false, so arrow
+    // keys should be ignored.
+    assertEquals(
+        composebox.input, '',
+        'Input should not change since arrow down does not select suggestion');
+    assertEquals(
+        composebox.selectedMatchIndex_, -1,
+        'No suggestion should be selected on arrow down in zero state full tab');
+    const event2 = new KeyboardEvent('keydown', {
+      key: 'ArrowUp',
+      cancelable: true,
+      bubbles: true,
+      composed: true,
+    });
+
+    composebox.dispatchEvent(event2);
+    await microtasksFinished();
+
+    assertEquals(
+        composebox.input, '',
+        'Input should not change since arrow up does not select suggestion');
+    assertEquals(
+        composebox.selectedMatchIndex_, -1,
+        'No suggestion should be selected on arrow up in zero state full tab');
+  });
+
 });

@@ -48,6 +48,7 @@
 #include "components/autofill/core/browser/foundations/autofill_driver.h"
 #include "components/autofill/core/browser/foundations/browser_autofill_manager.h"
 #include "components/autofill/core/browser/integrators/autofill_ai/autofill_ai_manager.h"
+#include "components/autofill/core/browser/integrators/autofill_ai/metrics/autofill_ai_metrics.h"
 #include "components/autofill/core/browser/integrators/compose/autofill_compose_delegate.h"
 #include "components/autofill/core/browser/integrators/identity_credential/identity_credential_delegate.h"
 #include "components/autofill/core/browser/integrators/one_time_tokens/otp_suggestion.h"
@@ -367,8 +368,7 @@ void AutofillExternalDelegate::AttemptToDisplayAutofillSuggestions(
     shown_suggestion_types_.push_back(suggestion.type);
   }
 
-  if (suggestions.empty() &&
-      trigger_source != AutofillSuggestionTriggerSource::kAtMemory) {
+  if (suggestions.empty() && !IsAtMemoryTriggerSource(trigger_source)) {
     OnAutofillAvailabilityEvent(
         mojom::AutofillSuggestionAvailability::kNoSuggestions);
     // No suggestions, any popup currently showing is obsolete.
@@ -408,8 +408,9 @@ void AutofillExternalDelegate::AttemptToDisplayAutofillSuggestions(
   const bool are_caret_bounds_valid =
       caret_bounds_ != gfx::Rect() &&
       query_field_.bounds().Contains(gfx::RectF(caret_bounds_));
+  const bool is_at_memory = IsAtMemoryTriggerSource(trigger_source_);
   const bool should_use_caret_bounds =
-      show_proactive_nudge_at_caret && are_caret_bounds_valid;
+      (show_proactive_nudge_at_caret || is_at_memory) && are_caret_bounds_valid;
 
   const PopupAnchorType default_anchor_type =
 #if BUILDFLAG(IS_ANDROID)
@@ -514,8 +515,9 @@ void AutofillExternalDelegate::OnSuggestionsShown(
                                CreateUpdateSuggestionsCallback());
 }
 
-void AutofillExternalDelegate::OnSuggestionsHidden() {
-  manager_->OnSuggestionsHidden();
+void AutofillExternalDelegate::OnSuggestionsHidden(
+    SuggestionHidingReason reason) {
+  manager_->OnSuggestionsHidden(reason);
 }
 
 void AutofillExternalDelegate::DidSelectSuggestion(
@@ -874,7 +876,15 @@ void AutofillExternalDelegate::DidAcceptSuggestion(
     case SuggestionType::kBnplFootnote:
       NOTREACHED();  // Should be handled elsewhere.
   }
-  // Note that some suggestion types return early.
+
+  if (suggestion.type == SuggestionType::kBnplEntry &&
+      base::FeatureList::IsEnabled(
+          features::kAutofillEnablePayNowPayLaterTabs)) {
+    // Return early to prevent the popup from hiding. Popup will instead be
+    // closed by `BnplManager`.
+    return;
+  }
+
   manager_->client().HideAutofillSuggestions(
       SuggestionHidingReason::kAcceptSuggestion);
 }
@@ -992,12 +1002,28 @@ void AutofillExternalDelegate::DidEndTextFieldEditing() {
       SuggestionHidingReason::kEndEditing);
 }
 
+void AutofillExternalDelegate::OnPayLaterTabOpened() {
+  manager_->GetPaymentsBnplManager()->OnUserDecisionToUseBnpl(
+      std::nullopt, base::BindOnce(
+                        [](base::WeakPtr<AutofillExternalDelegate> delegate,
+                           const CreditCard& card) {
+                          if (delegate) {
+                            delegate->manager_->FillOrPreviewForm(
+                                mojom::ActionPersistence::kFill,
+                                delegate->query_form_,
+                                delegate->query_field_.global_id(), &card,
+                                AutofillTriggerSource::kPopup);
+                          }
+                        },
+                        GetWeakPtr()));
+}
+
 void AutofillExternalDelegate::ClearPreviewedForm() {
   manager_->driver().RendererShouldClearPreviewedForm();
 }
 
 FillingProduct AutofillExternalDelegate::GetMainFillingProduct() const {
-  if (trigger_source_ == AutofillSuggestionTriggerSource::kAtMemory) {
+  if (IsAtMemoryTriggerSource(trigger_source_)) {
     return FillingProduct::kAtMemory;
   }
   bool has_plus_address_suggestion = false;
@@ -1020,10 +1046,11 @@ base::WeakPtr<AutofillExternalDelegate> AutofillExternalDelegate::GetWeakPtr() {
   return weak_ptr_factory_.GetWeakPtr();
 }
 
-void AutofillExternalDelegate::OnCreditCardScanned(const CreditCard& card) {
+void AutofillExternalDelegate::OnCreditCardFetched(
+    AutofillTriggerSource trigger_source,
+    const CreditCard& card) {
   manager_->FillOrPreviewForm(mojom::ActionPersistence::kFill, query_form_,
-                              query_field_.global_id(), &card,
-                              AutofillTriggerSource::kScanCreditCard);
+                              query_field_.global_id(), &card, trigger_source);
 }
 
 void AutofillExternalDelegate::PreviewAddressFieldByFieldFillingSuggestion(
@@ -1302,17 +1329,9 @@ void AutofillExternalDelegate::DidAcceptPaymentsSuggestion(
       CHECK(save_and_fill_manager);
 
       save_and_fill_manager->OnDidAcceptCreditCardSaveAndFillSuggestion(
-          base::BindOnce(
-              [](base::WeakPtr<AutofillExternalDelegate> delegate,
-                 const CreditCard& card) {
-                if (delegate) {
-                  delegate->manager_->FillOrPreviewForm(
-                      mojom::ActionPersistence::kFill, delegate->query_form_,
-                      delegate->query_field_.global_id(), &card,
-                      AutofillTriggerSource::kCreditCardSaveAndFill);
-                }
-              },
-              GetWeakPtr()));
+          base::BindOnce(&AutofillExternalDelegate::OnCreditCardFetched,
+                         GetWeakPtr(),
+                         AutofillTriggerSource::kCreditCardSaveAndFill));
 
       manager_->GetCreditCardFormEventLogger()
           .OnDidAcceptSaveAndFillSuggestion();
@@ -1320,28 +1339,25 @@ void AutofillExternalDelegate::DidAcceptPaymentsSuggestion(
     }
     case SuggestionType::kScanCreditCard:
       manager_->client().GetPaymentsAutofillClient()->ScanCreditCard(
-          base::BindOnce(&AutofillExternalDelegate::OnCreditCardScanned,
-                         GetWeakPtr()));
+          base::BindOnce(&AutofillExternalDelegate::OnCreditCardFetched,
+                         GetWeakPtr(), AutofillTriggerSource::kScanCreditCard));
       break;
     case SuggestionType::kBnplEntry: {
       payments::BnplManager* bnpl_manager = manager_->GetPaymentsBnplManager();
       CHECK(bnpl_manager);
 
-      bnpl_manager->OnDidAcceptBnplSuggestion(
-          /*final_checkout_amount=*/suggestion
-              .GetPayload<Suggestion::PaymentsPayload>()
-              .extracted_amount_in_micros,
-          base::BindOnce(
-              [](base::WeakPtr<AutofillExternalDelegate> delegate,
-                 const CreditCard& card) {
-                if (delegate) {
-                  delegate->manager_->FillOrPreviewForm(
-                      mojom::ActionPersistence::kFill, delegate->query_form_,
-                      delegate->query_field_.global_id(), &card,
-                      AutofillTriggerSource::kPopup);
-                }
-              },
-              GetWeakPtr()));
+      if (base::FeatureList::IsEnabled(
+              features::kAutofillEnablePayNowPayLaterTabs)) {
+        bnpl_manager->OnIssuerAccepted(
+            /*issuer=*/suggestion.GetPayload<Suggestion::BnplIssuer>().value());
+      } else {
+        bnpl_manager->OnUserDecisionToUseBnpl(
+            /*final_checkout_amount=*/suggestion
+                .GetPayload<Suggestion::PaymentsPayload>()
+                .extracted_amount_in_micros,
+            base::BindOnce(&AutofillExternalDelegate::OnCreditCardFetched,
+                           GetWeakPtr(), AutofillTriggerSource::kPopup));
+      }
       break;
     }
     default:
@@ -1403,10 +1419,10 @@ void AutofillExternalDelegate::FillAutofillAiFormAndHidePopup(
             if (entity) {
               manager->FillOrPreviewForm(mojom::ActionPersistence::kFill, form,
                                          field_id, &*entity, trigger_source);
-            } else {
-              manager->client().ShowAutofillAiFailureNotification(
-                  l10n_util::GetStringUTF16(
-                      IDS_AUTOFILL_AI_WALLET_FETCH_FAILURE_NOTIFICATION));
+            } else if (base::FeatureList::IsEnabled(
+                           features::kAutofillAiWalletPrivatePasses)) {
+              manager->client()
+                  .ShowAutofillAiFetchFromWalletFailureNotification();
             }
           },
           manager_->GetBrowserAutofillManagerWeakPtr(), query_form_,
@@ -1466,11 +1482,13 @@ void AutofillExternalDelegate::FillAutofillAiFormAndHidePopup(
         // BUILDFLAG(IS_IOS)
   base::OnceCallback<std::optional<EntityInstance>(bool)>
       convert_auth_response = base::BindOnce(
-          [](EntityInstance masked_entity, bool auth_succeeded) {
+          [](const FieldTypeSet& ai_field_types, EntityInstance masked_entity,
+             bool auth_succeeded) {
+            LogReauthToFillResultPerFieldType(ai_field_types, auth_succeeded);
             return auth_succeeded ? std::move(masked_entity)
                                   : std::optional<EntityInstance>();
           },
-          *entity);
+          autofill_field->Type().GetAutofillAiTypes(), *entity);
   MaybeAuthenticateBeforeFilling(
       message, "Autofill.Ai.ReauthToFill",
       std::move(convert_auth_response).Then(std::move(fill_and_hide)));

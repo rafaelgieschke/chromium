@@ -22,7 +22,6 @@
 #import "ios/chrome/browser/shared/public/features/features.h"
 #import "ios/chrome/browser/shared/public/features/system_flags.h"
 #import "ios/chrome/browser/shared/ui/symbols/symbols.h"
-#import "ios/chrome/browser/shared/ui/util/dynamic_type_util.h"
 #import "ios/chrome/browser/shared/ui/util/rtl_geometry.h"
 #import "ios/chrome/common/ui/util/ui_util.h"
 #import "ui/base/device_form_factor.h"
@@ -399,7 +398,7 @@ void TriggerHapticFeedbackForNotification(UINotificationFeedbackType type) {
 NSAttributedString* TextForTabCount(int count, CGFloat font_size) {
   NSString* string;
   if (count <= 0) {
-    string = @"";
+    string = IsChromeNextIaEnabled() ? @"0" : @"";
   } else if (count > 99) {
     string = @":)";
   } else {

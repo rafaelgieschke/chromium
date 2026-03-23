@@ -16,6 +16,7 @@
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/test/test_future.h"
 #include "base/threading/platform_thread.h"
 #include "build/build_config.h"
 #include "net/base/completion_once_callback.h"
@@ -110,20 +111,22 @@ class TransportClientSocketPoolTestBase : public WithTaskEnvironment,
  protected:
   // Constructor that allows mocking of the time.
   explicit TransportClientSocketPoolTestBase(bool use_happy_eyeballs_v2)
-      : connect_backup_jobs_enabled_(
-            TransportClientSocketPool::set_connect_backup_jobs_enabled(true)),
-        group_id_(url::SchemeHostPort(url::kHttpScheme, "www.google.com", 80),
+      : group_id_(url::SchemeHostPort(url::kHttpScheme, "www.google.com", 80),
                   PrivacyMode::PRIVACY_MODE_DISABLED,
                   NetworkAnonymizationKey(),
                   SecureDnsPolicy::kAllow,
                   /*disable_cert_network_fetches=*/false),
         params_(ClientSocketPool::SocketParams::CreateForHttpForTesting()),
         client_socket_factory_(NetLog::Get()) {
+    std::vector<base::test::FeatureRef> enabled_features(
+        {features::kPermitTcpSocketPoolConnectBackupJobs});
+    std::vector<base::test::FeatureRef> disabled_features;
     if (use_happy_eyeballs_v2) {
-      scoped_feature_list_.InitAndEnableFeature(features::kHappyEyeballsV2);
+      enabled_features.emplace_back(features::kHappyEyeballsV2);
     } else {
-      scoped_feature_list_.InitAndDisableFeature(features::kHappyEyeballsV2);
+      disabled_features.emplace_back(features::kHappyEyeballsV2);
     }
+    scoped_feature_list_.InitWithFeatures(enabled_features, disabled_features);
     std::unique_ptr<MockCertVerifier> cert_verifier =
         std::make_unique<MockCertVerifier>();
     cert_verifier->set_default_result(OK);
@@ -165,11 +168,6 @@ class TransportClientSocketPoolTestBase : public WithTaskEnvironment,
         common_connect_job_params_for_real_sockets_.get());
   }
 
-  ~TransportClientSocketPoolTestBase() override {
-    TransportClientSocketPool::set_connect_backup_jobs_enabled(
-        connect_backup_jobs_enabled_);
-  }
-
   int StartRequest(const std::string& host_name,
                    RequestPriority priority,
                    TransportClientSocketPool* non_default_pool = nullptr) {
@@ -201,8 +199,6 @@ class TransportClientSocketPoolTestBase : public WithTaskEnvironment,
   size_t completion_count() const { return test_base_.completion_count(); }
 
   base::test::ScopedFeatureList scoped_feature_list_;
-
-  bool connect_backup_jobs_enabled_;
 
   // |group_id_| and |params_| correspond to the same group.
   const ClientSocketPool::GroupId group_id_;
@@ -967,8 +963,9 @@ TEST_P(TransportClientSocketPoolTest, CancelActiveRequestWithPendingRequests) {
 
   // Now, kMaxSocketsPerGroup requests should be active.  Let's cancel them.
   ASSERT_LE(kMaxSocketsPerGroup, static_cast<int>(requests()->size()));
-  for (int i = 0; i < kMaxSocketsPerGroup; i++)
+  for (int i = 0; i < kMaxSocketsPerGroup; i++) {
     (*requests())[i]->handle()->Reset();
+  }
 
   // Let's wait for the rest to complete now.
   for (size_t i = kMaxSocketsPerGroup; i < requests()->size(); ++i) {
@@ -988,12 +985,14 @@ TEST_P(TransportClientSocketPoolTest, FailingActiveRequestWithPendingRequests) {
   ASSERT_LE(kNumRequests, kMaxSockets);  // Otherwise the test will hang.
 
   // Queue up all the requests
-  for (int i = 0; i < kNumRequests; i++)
+  for (int i = 0; i < kNumRequests; i++) {
     EXPECT_THAT(StartRequest("a", kDefaultPriority), IsError(ERR_IO_PENDING));
+  }
 
-  for (int i = 0; i < kNumRequests; i++)
+  for (int i = 0; i < kNumRequests; i++) {
     EXPECT_THAT((*requests())[i]->WaitForResult(),
                 IsError(ERR_CONNECTION_FAILED));
+  }
 }
 
 TEST_P(TransportClientSocketPoolTest, IdleSocketLoadTiming) {
@@ -2284,6 +2283,125 @@ TEST_P(TransportClientSocketPoolTest,
       }),
       base::BindLambdaForTesting([&]() { return pool.SocketsInUse(); }));
   ReleaseAllConnections(ClientSocketPoolTest::NO_KEEP_ALIVE);
+}
+
+TEST_P(TransportClientSocketPoolTest,
+       ErrorCodePropagationForPreconnect_Enabled) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(
+      features::kEnableErrorCodePropagationForPreconnect);
+
+  client_socket_factory_.set_default_client_socket_type(
+      MockTransportClientSocketFactory::Type::kPendingFailing);
+
+  base::test::TestFuture<bool, std::unique_ptr<ClientSocketHandle>> result;
+
+  int rv = pool_->RequestSockets(group_id_, params_, std::nullopt, 1,
+                                 result.GetCallback(), NetLogWithSource());
+  EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
+
+  EXPECT_FALSE(result.Get<bool>());
+  EXPECT_FALSE(result.Get<std::unique_ptr<ClientSocketHandle>>());
+}
+
+TEST_P(TransportClientSocketPoolTest,
+       ErrorCodePropagationForPreconnect_Enabled_MultipleFail) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(
+      features::kEnableErrorCodePropagationForPreconnect);
+
+  client_socket_factory_.set_default_client_socket_type(
+      MockTransportClientSocketFactory::Type::kPendingFailing);
+
+  base::test::TestFuture<bool, std::unique_ptr<ClientSocketHandle>> result;
+
+  int rv = pool_->RequestSockets(group_id_, params_, std::nullopt, 2,
+                                 result.GetCallback(), NetLogWithSource());
+  EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
+
+  EXPECT_FALSE(result.Get<bool>());
+  EXPECT_FALSE(result.Get<std::unique_ptr<ClientSocketHandle>>());
+}
+
+TEST_P(TransportClientSocketPoolTest,
+       ErrorCodePropagationForPreconnect_Enabled_MultipleSuccess) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(
+      features::kEnableErrorCodePropagationForPreconnect);
+
+  client_socket_factory_.set_default_client_socket_type(
+      MockTransportClientSocketFactory::Type::kPending);
+
+  base::test::TestFuture<bool, std::unique_ptr<ClientSocketHandle>> result;
+
+  int rv = pool_->RequestSockets(group_id_, params_, std::nullopt, 2,
+                                 result.GetCallback(), NetLogWithSource());
+  EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
+
+  EXPECT_TRUE(result.Get<bool>());
+  EXPECT_TRUE(result.Get<std::unique_ptr<ClientSocketHandle>>());
+  EXPECT_TRUE(
+      result.Get<std::unique_ptr<ClientSocketHandle>>()->is_initialized());
+}
+
+TEST_P(
+    TransportClientSocketPoolTest,
+    ErrorCodePropagationForPreconnect_Enabled_PreconnectSocketUsedByActualRequest) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(
+      features::kEnableErrorCodePropagationForPreconnect);
+
+  client_socket_factory_.set_default_client_socket_type(
+      MockTransportClientSocketFactory::Type::kPending);
+
+  base::test::TestFuture<bool, std::unique_ptr<ClientSocketHandle>> result;
+
+  int rv = pool_->RequestSockets(group_id_, params_, std::nullopt, 1,
+                                 result.GetCallback(), NetLogWithSource());
+  EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
+
+  TestCompletionCallback callback;
+  ClientSocketHandle actual_request_handle;
+  rv = actual_request_handle.Init(
+      group_id_, params_, std::nullopt /* proxy_annotation_tag */, LOW,
+      SocketTag(), ClientSocketPool::RespectLimits::ENABLED,
+      callback.callback(), ClientSocketPool::ProxyAuthCallback(), pool_.get(),
+      NetLogWithSource());
+  EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
+
+  EXPECT_THAT(callback.WaitForResult(), IsOk());
+  EXPECT_TRUE(actual_request_handle.is_initialized());
+
+  EXPECT_TRUE(result.Get<bool>());
+  EXPECT_FALSE(result.Get<std::unique_ptr<ClientSocketHandle>>());
+}
+
+TEST_P(TransportClientSocketPoolTest,
+       ErrorCodePropagationForPreconnect_Enabled_MixedResult) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(
+      features::kEnableErrorCodePropagationForPreconnect);
+
+  MockTransportClientSocketFactory::Rule rules[] = {
+      // First socket fails.
+      MockTransportClientSocketFactory::Rule(
+          MockTransportClientSocketFactory::Type::kPendingFailing),
+      // Second socket succeeds.
+      MockTransportClientSocketFactory::Rule(
+          MockTransportClientSocketFactory::Type::kPending),
+  };
+  client_socket_factory_.SetRules(rules);
+
+  base::test::TestFuture<bool, std::unique_ptr<ClientSocketHandle>> result;
+
+  int rv = pool_->RequestSockets(group_id_, params_, std::nullopt, 2,
+                                 result.GetCallback(), NetLogWithSource());
+  EXPECT_THAT(rv, IsError(ERR_IO_PENDING));
+
+  EXPECT_TRUE(result.Get<bool>());
+  EXPECT_TRUE(result.Get<std::unique_ptr<ClientSocketHandle>>());
+  EXPECT_TRUE(
+      result.Get<std::unique_ptr<ClientSocketHandle>>()->is_initialized());
 }
 
 // Test that SocketTag passed into TransportClientSocketPool is applied to

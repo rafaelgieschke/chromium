@@ -7,8 +7,7 @@
 
 #include "build/build_config.h"
 
-namespace metrics {
-namespace prefs {
+namespace metrics::prefs {
 
 // Alphabetical list of preference names specific to the metrics
 // component.
@@ -130,6 +129,13 @@ inline constexpr char kUsePostFREFixSamplingTrial[] =
 // (NOTE: If within //chrome, use
 // ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled()).
 
+// Integer pref representing the current level of metrics reporting.
+// The value is an integer corresponding to metrics::MetricsReportingLevel.
+// This is part of a new feature being developed to restructure metrics privacy
+// settings.
+inline constexpr char kMetricsReportingLevel[] =
+    "user_experience_metrics.reporting_level";
+
 // Boolean that specifies whether or not crash reporting and metrics reporting
 // are sent over the network for analysis.
 inline constexpr char kMetricsReportingEnabled[] =
@@ -148,6 +154,12 @@ inline constexpr char kMetricsLastSeenPrefix[] =
 // Array of the number of samples in the memory mapped file.
 inline constexpr char kMetricsFileMetricsMetadata[] =
     "user_experience_metrics.file_metrics_metadata";
+
+// Drive metrics for SSD/HDD status reporting as fallbacks.
+inline constexpr char kMetricsAppDriveHasSeekPenalty[] =
+    "user_experience_metrics.app_drive_has_seek_penalty";
+inline constexpr char kMetricsUserDataDriveHasSeekPenalty[] =
+    "user_experience_metrics.user_data_drive_has_seek_penalty";
 
 // Preferences for cloned installs.
 
@@ -248,10 +260,6 @@ inline constexpr char kStabilitySystemCrashCount[] =
 
 // For measuring data use for throttling UMA log uploads on cellular.
 
-// Dictionary for measuring cellular data used by UKM service during last 7
-// days.
-inline constexpr char kUkmCellDataUse[] =
-    "user_experience_metrics.ukm_cell_datause";
 // Dictionary for measuring cellular data used by UMA service during last 7
 // days.
 inline constexpr char kUmaCellDataUse[] =
@@ -268,7 +276,6 @@ inline constexpr char kUserCellDataUse[] =
 // of a crash.
 inline constexpr char kMetricsCurrentUserId[] = "metrics.current_user_id";
 
-}  // namespace prefs
-}  // namespace metrics
+}  // namespace metrics::prefs
 
 #endif  // COMPONENTS_METRICS_METRICS_PREF_NAMES_H_

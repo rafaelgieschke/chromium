@@ -26,7 +26,7 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/accessibility_annotator/accessibility_query_service_factory.h"
-#include "chrome/browser/autofill/account_setting_service_factory.h"
+#include "chrome/browser/account_settings/account_setting_service_factory.h"
 #include "chrome/browser/autofill/address_normalizer_factory.h"
 #include "chrome/browser/autofill/android/save_update_address_profile_prompt_mode.h"
 #include "chrome/browser/autofill/autocomplete_history_manager_factory.h"
@@ -81,6 +81,7 @@
 #include "chrome/common/channel_info.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/common/webui_url_constants.h"
+#include "components/account_settings/account_setting_service.h"
 #include "components/application_locale_storage/application_locale_storage.h"
 #include "components/autofill/content/browser/content_autofill_driver.h"
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
@@ -111,7 +112,6 @@
 #include "components/autofill/core/browser/suggestions/suggestion_type.h"
 #include "components/autofill/core/browser/ui/payments/card_unmask_otp_input_dialog_controller_impl.h"
 #include "components/autofill/core/browser/ui/popup_open_enums.h"
-#include "components/autofill/core/browser/webdata/account_settings/account_setting_service.h"
 #include "components/autofill/core/common/autofill_debug_features.h"
 #include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_payments_features.h"
@@ -835,8 +835,6 @@ void ChromeAutofillClient::ShowAutofillSettings(
         chrome::ShowSettingsSubPage(browser, chrome::kPaymentsSubPage);
         return;
       case SuggestionType::kManageLoyaltyCard:
-        CHECK(base::FeatureList::IsEnabled(
-            features::kAutofillEnableLoyaltyCardsFilling));
         static constexpr std::string_view kValuableManagementUrl =
             "https://wallet.google.com/"
             "wallet?p=loyalty&utm_source=chrome&utm_medium=redirect&utm_"
@@ -1102,7 +1100,7 @@ bool ChromeAutofillClient::IsAutocompleteEnabled() const {
 }
 
 bool ChromeAutofillClient::IsWalletPublicPassStorageEnabled() const {
-  AccountSettingService* setting_service =
+  account_settings::AccountSettingService* setting_service =
       AccountSettingServiceFactory::GetForBrowserContext(GetProfile());
   return setting_service &&
          setting_service->IsWalletPrivacyContextualSurfacingEnabled();
@@ -1328,7 +1326,7 @@ void ChromeAutofillClient::ShowAutofillSuggestionsImpl(
                             open_args.text_direction,
                             web_contents()->GetNativeView(),
                             open_args.anchor_type, open_args.show_tabbed_popup),
-      open_args.form_control_ax_id);
+      open_args.form_control_ax_id, open_args.trigger_source);
 
   suggestion_controller_->Show(
       session_id, open_args.suggestions, open_args.trigger_source,
@@ -1477,12 +1475,19 @@ void ChromeAutofillClient::ShowAutofillAiLocalSaveNotification() {
 #endif  // !BUILDFLAG(IS_ANDROID)
 }
 
-void ChromeAutofillClient::ShowAutofillAiFailureNotification(
-    std::u16string message) {
+void ChromeAutofillClient::ShowAutofillAiSaveToWalletFailureNotification() {
 #if !BUILDFLAG(IS_ANDROID)
   if (ToastController* toast_controller = GetToastController()) {
-    ToastParams params(ToastId::kAutofillAiWalletErrorMessage);
-    params.body_string_override = std::move(message);
+    ToastParams params(ToastId::kAutofillAiSaveToWalletErrorMessage);
+    toast_controller->MaybeShowToast(std::move(params));
+  }
+#endif  // !BUILDFLAG(IS_ANDROID)
+}
+
+void ChromeAutofillClient::ShowAutofillAiFetchFromWalletFailureNotification() {
+#if !BUILDFLAG(IS_ANDROID)
+  if (ToastController* toast_controller = GetToastController()) {
+    ToastParams params(ToastId::kAutofillAiFetchFromWalletErrorMessage);
     toast_controller->MaybeShowToast(std::move(params));
   }
 #endif  // !BUILDFLAG(IS_ANDROID)
@@ -1504,9 +1509,10 @@ ToastController* ChromeAutofillClient::GetToastController() {
 }
 
 #if !BUILDFLAG(IS_ANDROID)
-void ChromeAutofillClient::OnActorTaskStateChange(
-    actor::TaskId task_id,
-    actor::ActorTask::State state) {
+void ChromeAutofillClient::OnActorTaskStateChange(actor::ActorTask& task) {
+  const actor::TaskId task_id = task.id();
+  const actor::ActorTask::State state = task.GetState();
+
   if (active_actor_task_ && *active_actor_task_ != task_id) {
     // The update is for an actor that isn't working on the current tab.
     return;
@@ -1520,23 +1526,8 @@ void ChromeAutofillClient::OnActorTaskStateChange(
     return;
   }
 
-  const actor::ActorTask* task =
-      actor::ActorKeyedService::Get(GetProfile())->GetTask(task_id);
-  // Since the callbacks are asynchronous and can be executed in any order. It
-  // may happen that the update notification is issued for a task that already
-  // finished.
-  if (!task) {
-    // Given the early return earlier in the function, it is guaranteed that if
-    // the `active_actor_task_` is set, its value is the same as `task_id`.
-    // Since fetching the `ActorTask` for `task_id` did not return any valid
-    // object and the `task_id`s are unique, the `ActorTask` that was active on
-    // this tab must have finished by now.
-    active_actor_task_.reset();
-    return;
-  }
-
   const tabs::TabInterface* tab_interface = GetTabInterface();
-  if (tab_interface && !task->HasTab(tab_interface->GetHandle())) {
+  if (tab_interface && !task.HasTab(tab_interface->GetHandle())) {
     // The status update is for an actor that isn't interacting with this tab.
     // The value of `is_actor_mode_` shouldn't be updated.
     return;

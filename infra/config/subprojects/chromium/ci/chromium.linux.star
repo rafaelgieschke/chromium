@@ -579,10 +579,16 @@ ci.thin_tester(
                     shards = 20,
                 ),
             ),
+            "content_browsertests": targets.mixin(
+                ci_only = True,
+            ),
             "not_site_per_process_blink_web_tests": targets.mixin(
                 args = [
                     "--additional-env-var=LLVM_PROFILE_FILE=${ISOLATED_OUTDIR}/profraw/default-%2m.profraw",
                 ],
+            ),
+            "not_site_per_process_blink_wpt_tests": targets.mixin(
+                ci_only = True,
             ),
             "telemetry_perf_unittests": targets.mixin(
                 args = [

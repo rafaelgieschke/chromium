@@ -3526,6 +3526,41 @@ class LayerTreeHostTestStartPageScaleAnimation : public LayerTreeHostTest {
 // Single thread proxy does not support impl-side page scale changes.
 MULTI_THREAD_TEST_F(LayerTreeHostTestStartPageScaleAnimation);
 
+class LayerTreeHostTestSetPageScaleFactorAndLimits : public LayerTreeHostTest {
+ protected:
+  void BeginTest() override {
+    const LayerTreeHost* host = layer_tree_host();
+
+    // Case 1: page_scale_factor <= 0, min_page_scale_factor <= 0
+    layer_tree_host()->SetPageScaleFactorAndLimits(0.f, 0.f, 2.f);
+    EXPECT_EQ(1.f, host->pending_commit_state()->page_scale_factor);
+    EXPECT_EQ(1.f, host->pending_commit_state()->min_page_scale_factor);
+    EXPECT_EQ(2.f, host->pending_commit_state()->max_page_scale_factor);
+
+    // Case 2: page_scale_factor > 0, min_page_scale_factor <= 0
+    layer_tree_host()->SetPageScaleFactorAndLimits(1.5f, -1.f, 2.f);
+    EXPECT_EQ(1.5f, host->pending_commit_state()->page_scale_factor);
+    EXPECT_EQ(1.5f, host->pending_commit_state()->min_page_scale_factor);
+    EXPECT_EQ(2.f, host->pending_commit_state()->max_page_scale_factor);
+
+    // Case 3: valid parameters
+    layer_tree_host()->SetPageScaleFactorAndLimits(0.8f, 0.5f, 2.f);
+    EXPECT_EQ(0.8f, host->pending_commit_state()->page_scale_factor);
+    EXPECT_EQ(0.5f, host->pending_commit_state()->min_page_scale_factor);
+    EXPECT_EQ(2.f, host->pending_commit_state()->max_page_scale_factor);
+
+    // Case 4: page_scale_factor <= 0, min_page_scale_factor > 0
+    layer_tree_host()->SetPageScaleFactorAndLimits(0.f, 0.5f, 2.f);
+    EXPECT_EQ(1.f, host->pending_commit_state()->page_scale_factor);
+    EXPECT_EQ(0.5f, host->pending_commit_state()->min_page_scale_factor);
+    EXPECT_EQ(2.f, host->pending_commit_state()->max_page_scale_factor);
+
+    EndTest();
+  }
+};
+
+SINGLE_THREAD_TEST_F(LayerTreeHostTestSetPageScaleFactorAndLimits);
+
 class ViewportDeltasAppliedDuringPinch : public LayerTreeHostTest,
                                          public ScrollCallbacks {
  protected:
@@ -7134,8 +7169,11 @@ class LayerTreeHostTestBeginMainFrameTimeIsAlsoImplTime
     impl_frame_args_.push_back(args);
 
     will_begin_impl_frame_count_++;
-    if (will_begin_impl_frame_count_ < 10)
+    if (will_begin_impl_frame_count_ < 10) {
       PostSetNeedsCommitToMainThread();
+    } else {
+      EndTest();
+    }
   }
 
   void BeginMainFrame(const viz::BeginFrameArgs& args) override {
@@ -7160,15 +7198,12 @@ class LayerTreeHostTestBeginMainFrameTimeIsAlsoImplTime
 // http://crbug.com/537621
 SINGLE_THREAD_TEST_F(LayerTreeHostTestBeginMainFrameTimeIsAlsoImplTime);
 
-// Tests the flag for kMainIdleBypassScheduler works as expected, pausing
-// the main frame until the next begin_frame time.
+// Tests that pausing the main frame until the next begin_frame time.
 class LayerTreeHostTestBypassSchedulerPauseUntil : public LayerTreeHostTest {
  public:
   LayerTreeHostTestBypassSchedulerPauseUntil() = default;
 
   void BeginTest() override {
-    scoped_feature_list_.InitAndEnableFeature(
-        features::kMainIdleBypassScheduler);
     // Send a main frame to kick off the test.
     PostSetNeedsCommitToMainThread();
     // We expect that Main will go idle until the frame interval is over.
@@ -7190,22 +7225,18 @@ class LayerTreeHostTestBypassSchedulerPauseUntil : public LayerTreeHostTest {
   }
 
  protected:
-  base::test::ScopedFeatureList scoped_feature_list_;
   viz::BeginFrameArgs begin_frame_args;
 };
 
 MULTI_THREAD_TEST_F(LayerTreeHostTestBypassSchedulerPauseUntil);
 
-// Tests the flag for kMainIdleBypassScheduler works as expected, where
-// pausing and hiding the renderer in the middle of the frame lifecycle
-// causes the main thread to receive the idle signal.
+// Tests that pausing and hiding the renderer in the middle of the frame
+// lifecycle causes the main thread to receive the idle signal.
 class LayerTreeHostTestBypassSchedulerPauseSoon : public LayerTreeHostTest {
  public:
   LayerTreeHostTestBypassSchedulerPauseSoon() = default;
 
   void BeginTest() override {
-    scoped_feature_list_.InitAndEnableFeature(
-        features::kMainIdleBypassScheduler);
     // Send a main frame to kick off the test.
     PostSetNeedsCommitToMainThread();
   }
@@ -7226,7 +7257,6 @@ class LayerTreeHostTestBypassSchedulerPauseSoon : public LayerTreeHostTest {
   void BeginMainFrameNotExpectedSoon() override { EndTest(); }
 
  protected:
-  base::test::ScopedFeatureList scoped_feature_list_;
   std::unique_ptr<ScopedPauseRendering> scoped_pause_rendering_;
 };
 
@@ -10205,6 +10235,166 @@ class LayerTreeHostTestWithHelper : public LayerTreeHostTest {
   FakeContentLayerClient client_;
 };
 
+class LayerTreeHostTestCommitPropertySnapshot : public LayerTreeHostTest {
+ public:
+  void InitializeSettings(LayerTreeSettings* settings) override {
+    LayerTreeHostTest::InitializeSettings(settings);
+    settings->use_layer_lists = true;
+  }
+
+  void BeginTest() override {
+    TransformTree& tree =
+        layer_tree_host()->property_trees()->transform_tree_mutable();
+    node_id_ = tree.Insert(TransformNode(), kRootPropertyNodeId);
+    TransformNode* node = tree.Node(node_id_);
+    node->local = gfx::Transform::MakeScale(2.f);
+    node->origin = gfx::Point3F(3, 4, 5);
+    node->needs_local_transform_update = true;
+    node->SetTransformChanged(DamageReason::kUntracked);
+    tree.set_needs_update(true);
+    layer_tree_host()->property_trees()->set_changed(true);
+
+    PostSetNeedsCommitToMainThread();
+  }
+
+  void WillCommit(const CommitState& commit_state) override {
+    // Property trees are snapshotted just prior to this, so there should be
+    // both main thread and CommitState versions of the node.
+    TransformTree& main_tree =
+        layer_tree_host()->property_trees()->transform_tree_mutable();
+    TransformNode* main_node = main_tree.Node(node_id_);
+    const TransformTree& commit_tree =
+        commit_state.property_trees.transform_tree();
+    const TransformNode* commit_node = commit_tree.Node(node_id_);
+
+    switch (layer_tree_host()->SourceFrameNumber()) {
+      case 0u:
+        // draw_property_utils::UpdatePropertyTrees should have cleared this.
+        EXPECT_FALSE(main_tree.needs_update());
+
+        // Change tracking should have been reset on main property trees.
+        EXPECT_FALSE(layer_tree_host()->property_trees()->changed());
+        EXPECT_FALSE(main_node->transform_changed());
+
+        // draw_property_utils::UpdatePropertyTrees should have cleared this
+        // prior to the snapshot.
+        EXPECT_FALSE(commit_tree.needs_update());
+
+        // Change tracking on CommitState property trees should be intact.
+        EXPECT_TRUE(commit_state.property_trees.changed());
+        EXPECT_TRUE(commit_node->transform_changed());
+
+        // Modifications to the main property trees should not affect
+        // CommitState.
+        main_node->local = gfx::Transform::MakeScale(3.f);
+        main_node->origin = gfx::Point3F(6, 7, 8);
+        main_node->needs_local_transform_update = true;
+        main_node->SetTransformChanged(DamageReason::kUntracked);
+        main_tree.set_needs_update(true);
+        layer_tree_host()->property_trees()->set_changed(true);
+        EXPECT_EQ(commit_node->local, gfx::Transform::MakeScale(2.f));
+        EXPECT_EQ(commit_node->origin, gfx::Point3F(3, 4, 5));
+        break;
+      case 1u:
+        // Change tracking should have been reset on main property trees.
+        EXPECT_FALSE(layer_tree_host()->property_trees()->changed());
+        EXPECT_FALSE(main_node->transform_changed());
+
+        // Commit PropertyTrees *have* been changed.
+        EXPECT_TRUE(commit_state.property_trees.changed());
+        EXPECT_TRUE(commit_node->transform_changed());
+
+        // Modifications from prior commits should persist.
+        EXPECT_EQ(main_node->local, gfx::Transform::MakeScale(3.f));
+        EXPECT_EQ(main_node->origin, gfx::Point3F(6, 7, 8));
+        EXPECT_EQ(commit_node->local, gfx::Transform::MakeScale(3.f));
+        EXPECT_EQ(commit_node->origin, gfx::Point3F(6, 7, 8));
+        break;
+      case 2u:
+        // Change tracking should have been reset on main property trees.
+        EXPECT_FALSE(layer_tree_host()->property_trees()->changed());
+        EXPECT_FALSE(main_node->transform_changed());
+
+        // No changes since last commit.
+        EXPECT_FALSE(commit_state.property_trees.changed());
+        EXPECT_FALSE(commit_node->transform_changed());
+
+        // Modifications from prior commits should persist.
+        EXPECT_EQ(main_node->local, gfx::Transform::MakeScale(3.f));
+        EXPECT_EQ(main_node->origin, gfx::Point3F(6, 7, 8));
+        EXPECT_EQ(commit_node->local, gfx::Transform::MakeScale(3.f));
+        EXPECT_EQ(commit_node->origin, gfx::Point3F(6, 7, 8));
+        break;
+      default:
+        ASSERT_TRUE(false);
+    }
+  }
+
+  void CommitCompleteOnThread(LayerTreeHostImpl* host_impl) override {
+    const TransformTree& tree =
+        host_impl->sync_tree()->property_trees()->transform_tree();
+    const TransformNode* node = tree.Node(node_id_);
+    switch (commit_count_++) {
+      case 0u:
+        // Modifications to main property trees after WillCommit should not show
+        // up in pending tree.
+        EXPECT_EQ(node->local, gfx::Transform::MakeScale(2.f));
+        EXPECT_EQ(node->origin, gfx::Point3F(3, 4, 5));
+        PostSetNeedsCommitToMainThread();
+        break;
+      case 1u:
+        // Modifications to main property trees should appear now.
+        EXPECT_EQ(node->local, gfx::Transform::MakeScale(3.f));
+        EXPECT_EQ(node->origin, gfx::Point3F(6, 7, 8));
+        PostSetNeedsCommitToMainThread();
+        break;
+      case 2u:
+        EXPECT_EQ(node->local, gfx::Transform::MakeScale(3.f));
+        EXPECT_EQ(node->origin, gfx::Point3F(6, 7, 8));
+        break;
+      default:
+        ASSERT_TRUE(false);
+    }
+  }
+
+  void DidCommit() override {
+    // Modifications to main property trees after WillCommit should persist.
+    TransformTree& tree =
+        layer_tree_host()->property_trees()->transform_tree_mutable();
+    TransformNode* node = tree.Node(node_id_);
+    EXPECT_EQ(node->local, gfx::Transform::MakeScale(3.f));
+    EXPECT_EQ(node->origin, gfx::Point3F(6, 7, 8));
+
+    // Change tracking should be up-to-date
+    switch (layer_tree_host()->SourceFrameNumber()) {
+      case 1u:
+        EXPECT_TRUE(layer_tree_host()->property_trees()->changed());
+        EXPECT_TRUE(tree.needs_update());
+        EXPECT_TRUE(node->transform_changed());
+        break;
+      case 2u:
+        EXPECT_FALSE(layer_tree_host()->property_trees()->changed());
+        EXPECT_FALSE(tree.needs_update());
+        EXPECT_FALSE(node->transform_changed());
+        break;
+      case 3u:
+        EXPECT_FALSE(layer_tree_host()->property_trees()->changed());
+        EXPECT_FALSE(tree.needs_update());
+        EXPECT_FALSE(node->transform_changed());
+        EndTest();
+        break;
+      default:
+        ASSERT_TRUE(false);
+    }
+  }
+
+ private:
+  int node_id_ = kInvalidPropertyNodeId;
+  unsigned commit_count_ = 0u;
+};
+
+SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestCommitPropertySnapshot);
+
 class LayerTreeHostTestHideLayerAndSubtree
     : public LayerTreeHostTestWithHelper {
  public:
@@ -11793,7 +11983,7 @@ class LayerTreeHostTestTextureLayerOffscreenScroll : public LayerTreeTest {
 // This macro registers the test to be run.
 SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestTextureLayerOffscreenScroll);
 
-class LayerTreeHostTestTrackedElementBounds
+class LayerTreeHostTestTrackedElementRects
     : public LayerTreeHostTest,
       public RenderFrameMetadataObserver {
  public:
@@ -11825,8 +12015,10 @@ class LayerTreeHostTestTrackedElementBounds
 
   const base::Token kId1 = base::Token(1, 2);
   const base::Token kId2 = base::Token(2, 3);
+  const viz::TrackedElementFeature kFeature =
+      static_cast<viz::TrackedElementFeature>(1);
 
-  LayerTreeHostTestTrackedElementBounds() { SetUseLayerLists(); }
+  LayerTreeHostTestTrackedElementRects() { SetUseLayerLists(); }
 
   void SetupTree() override {
     SetInitialRootBounds(gfx::Size(50, 50));
@@ -11841,9 +12033,11 @@ class LayerTreeHostTestTrackedElementBounds
     child_a_->SetIsDrawable(true);
     CopyProperties(root_, child_a_.get());
     CreateEffectNode(child_a_.get());
-    TrackedElementBounds trackedElementBound1;
-    trackedElementBound1[kId1] = {gfx::Rect(0, 0, 50, 50)};
-    child_a_->SetTrackedElementBounds(trackedElementBound1);
+    std::vector<viz::TrackedElementRect> rect_data_list1 = {
+        viz::TrackedElementRect(kId1, gfx::Rect(0, 0, 50, 50))};
+    viz::TrackedElementRects trackedElementRects1 = {
+        {kFeature, std::move(rect_data_list1)}};
+    child_a_->SetTrackedElementRects(trackedElementRects1);
     root_->AddChild(child_a_);
 
     child_b_ = Layer::Create();
@@ -11851,9 +12045,11 @@ class LayerTreeHostTestTrackedElementBounds
     child_b_->SetIsDrawable(true);
     CopyProperties(root_, child_b_.get());
     CreateEffectNode(child_b_.get());
-    TrackedElementBounds trackedElementBound2;
-    trackedElementBound2[kId2] = {gfx::Rect(0, 0, 10, 20)};
-    child_b_->SetTrackedElementBounds(trackedElementBound2);
+    std::vector<viz::TrackedElementRect> rect_data_list2 = {
+        viz::TrackedElementRect(kId2, gfx::Rect(0, 0, 10, 20))};
+    viz::TrackedElementRects trackedElementRects2 = {
+        {kFeature, std::move(rect_data_list2)}};
+    child_b_->SetTrackedElementRects(trackedElementRects2);
     root_->AddChild(child_b_);
   }
 
@@ -11865,10 +12061,17 @@ class LayerTreeHostTestTrackedElementBounds
     PostSetNeedsCommitToMainThread();
   }
 
-  void ExpectBoundsOnThread(const TrackedElementBounds& actual_bounds) {
-    EXPECT_EQ(actual_bounds.size(), 2u);
-    EXPECT_EQ(actual_bounds.at(kId1).visible_bounds, gfx::Rect(0, 0, 30, 20));
-    EXPECT_EQ(actual_bounds.at(kId2).visible_bounds, gfx::Rect(0, 0, 10, 5));
+  void ExpectRectsOnThread(const viz::TrackedElementRects& actual_rects) {
+    EXPECT_EQ(actual_rects.size(), 1u);
+    ASSERT_TRUE(actual_rects.contains(kFeature));
+    const auto& element_list = actual_rects.at(kFeature);
+    base::flat_map<viz::TrackedElementId, viz::TrackedElementRect> element_map;
+    for (const auto& tracked_element_rect : element_list) {
+      element_map.insert({tracked_element_rect.id, tracked_element_rect});
+    }
+    EXPECT_EQ(element_map.size(), 2u);
+    EXPECT_EQ(element_map.at(kId1).visible_bounds, gfx::Rect(0, 0, 30, 20));
+    EXPECT_EQ(element_map.at(kId2).visible_bounds, gfx::Rect(0, 0, 10, 5));
     EndTest();
   }
 
@@ -11878,13 +12081,13 @@ class LayerTreeHostTestTrackedElementBounds
       const RenderFrameMetadata& render_frame_metadata,
       viz::CompositorFrameMetadata* compositor_frame_metadata,
       bool force_send) override {
-    ExpectBoundsOnThread(render_frame_metadata.tracked_element_bounds);
+    ExpectRectsOnThread(render_frame_metadata.tracked_element_rects);
   }
 #if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
   void DidEndScroll() override {}
 #endif
 };
-SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestTrackedElementBounds);
+SINGLE_AND_MULTI_THREAD_TEST_F(LayerTreeHostTestTrackedElementRects);
 
 }  // namespace
 }  // namespace cc

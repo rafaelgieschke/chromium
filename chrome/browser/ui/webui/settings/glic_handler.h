@@ -70,6 +70,13 @@ class GlicHandler : public SettingsPageUIHandler,
   // Handles requests to revoke an actor login permission.
   void HandleRevokeActorLoginPermission(const base::ListValue& args);
 
+  // Sends to the settings page the last saved shortcut.
+  void HandleGetGlicSelectionShortcut(const base::ListValue& args);
+
+  // Updates the registered glic selection hotkey with the one provided in
+  // `args`.
+  void HandleSetGlicSelectionShortcut(const base::ListValue& args);
+
   // Notifies the client whether glic is disallowed by their administrator,
   // either on request or because it changed.
   void FireOnGlicDisallowedByAdminChanged();
@@ -77,8 +84,16 @@ class GlicHandler : public SettingsPageUIHandler,
   // Callback for when the ActorKeyedService notifies of a capability change.
   void OnWebActuationCapabilityChanged(bool can_act_on_web);
 
-  // Returns a list of the actor login permissions.
-  base::ListValue GetPermissionsList();
+  // Requests a list of the actor login permissions asynchronously.
+  void RequestPermissionsList(
+      base::OnceCallback<void(base::ListValue)> callback);
+
+  // Called when actor login permissions change.
+  void NotifyPermissionsChanged(base::ListValue permissions_list);
+
+  // Called to resolve the JavaScript callback for getActorLoginPermissions.
+  void OnGetActorLoginPermissions(std::string callback_id_str,
+                                  base::ListValue permissions_list);
 
   // Used to listen to changes in web actuation capability status.
   base::CallbackListSubscription web_actuation_subscription_;
@@ -92,6 +107,8 @@ class GlicHandler : public SettingsPageUIHandler,
   base::ScopedObservation<actor_login::ActorLoginPermissionsManager,
                           actor_login::ActorLoginPermissionsManager::Observer>
       observation_{this};
+
+  base::WeakPtrFactory<GlicHandler> weak_ptr_factory_{this};
 };
 
 }  // namespace settings

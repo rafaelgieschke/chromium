@@ -499,7 +499,6 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
                 this,
                 getIntentDataProvider(),
                 getSplashControllerSupplier(),
-                getLegacyTabStartupMetricsTracker(),
                 getStartupMetricsTracker(),
                 this::getSavedInstanceState,
                 getWebappDeferredStartupWithStorageHandler(),
@@ -1717,14 +1716,20 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
     @Nullable
     @BrowserWindowType
     Integer getSupportedBrowserWindowType() {
-        final boolean customTabsEnabled =
+        final boolean browserWindowInterfaceEnabled =
                 ChromeFeatureList.sEnableBrowserWindowInterfaceForCustomTabActivity.isEnabled();
         // Progressive web apps.
-        if (customTabsEnabled && mIntentDataProvider.getActivityType() == ActivityType.WEBAPP) {
+        if (browserWindowInterfaceEnabled
+                && mIntentDataProvider.getActivityType() == ActivityType.WEBAPP) {
             return BrowserWindowType.APP;
         }
         @CustomTabsUiType int type = mIntentDataProvider.getUiType();
         switch (type) {
+            case CustomTabsUiType.DEFAULT:
+                if (browserWindowInterfaceEnabled) {
+                    return BrowserWindowType.CUSTOM_TAB;
+                }
+                break;
             // Popups.
             case CustomTabsUiType.POPUP:
                 return BrowserWindowType.POPUP;
@@ -1732,7 +1737,7 @@ public abstract class BaseCustomTabActivity extends ChromeActivity {
             case CustomTabsUiType.MINIMAL_UI_WEBAPP:
             /* Fallthrough */
             case CustomTabsUiType.TRUSTED_WEB_ACTIVITY:
-                return customTabsEnabled ? BrowserWindowType.APP : null;
+                return browserWindowInterfaceEnabled ? BrowserWindowType.APP : null;
             default:
                 break;
         }
